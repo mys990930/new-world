@@ -35,13 +35,14 @@
 
 - EcsInputSnapshot
 - PlayerCommandBuffer
+- MoveWorldIntent
 - WorldTime
 - SimClock
 - ActiveSimRegion
 - PendingSimulationResults
 - SimulationControlState
 - WeatherState
-- ChunkStates (visible, loading, meshing, dirty_mesh, save_pending)
+- ChunkStates (interest, visible, loading, meshing, dirty_mesh, save_pending)
 - PendingJobResults
 - CameraState
 - SelectionState
@@ -62,6 +63,7 @@
 #### Event/Command
 
 - MoveScreenCommand
+- MoveWorldIntent
 - PrimaryActionCommand / BlockPlaceRequest
 - RotateCameraRequest
 - CameraRecenterRequest
@@ -77,16 +79,22 @@
     - Q/E → 카메라 90도 회전 요청
     - Y → 카메라 리센터 요청
 - 플레이어/엔티티 상태 갱신
+    - `MoveScreen`을 camera 회전 상태 기준으로 `MoveWorldIntent`로 변환
     - 이동
     - 속도/행동 갱신
     - AI 상태 전이
+- 카메라 상태 갱신
+    - 플레이어 이동 방향 기반 slow tracking
+    - 진행 방향 쪽 시야 bias 유지
+    - 정지 시 천천히 recenter
+    - `Y` 또는 좌/우클릭 상호작용 시 빠른 recenter
 - 월드 상호작용 요청 처리
     - 블록 파괴 요청 생성/소비
     - world.apply_edit(…) 호출
     - dirty 청크 표시
-- visible chunk 계산
-    - 플레이어 위치 기반 필요 청크 산출
-        - or 카메라 위치 기반 필요 청크 산출
+- interest / visible chunk 계산
+    - 플레이어 기준 interest chunk 산출
+    - 카메라 기준 visible chunk 산출
 - 플레이어 주변/관심 범위 기반 시뮬레이션 활성 영역 산출
     - sim result 반영 후 dirty chunk, save reuqest, remesh request 생성
 - jobs 결과 반영
@@ -141,20 +149,15 @@ NOT:
 - mod.rs: public facade, re-export
 - runtime.rs: EcsRuntime, bevy_ecs World/Schedule 소유, resource 초기화, pre/update/post/fixed 실행 진입점
 - input.rs: EcsInputSnapshot, frame 입력 resource, 화면 기준 입력을 gameplay command 후보로 해석하는 시스템
-- command.rs: PlayerCommand 및 ECS 내부 command/request buffer 정의, app/network와 맞닿는 안정적인 DTO 경계
+- command.rs: PlayerCommand, MoveWorldIntent, ECS 내부 command/request buffer 정의, app/network와 맞닿는 안정적인 DTO 경계
 - player.rs: Player/Transform/Velocity 등 플레이어 중심 component와 이동/행동 상태 전이
-- camera.rs: CameraState, 4방향 쿼터뷰 회전, 느슨한 추적, 리센터 상태와 규칙
+- camera.rs: CameraState, 4방향 쿼터뷰 회전, slow tracking, 진행 방향 bias, 리센터 상태와 규칙
 - selection.rs: SelectionState/InteractionTarget, 가림 처리 기반 타겟 판정, hover 기반 앞/뒤 전환, 배치 프리뷰 상태
-- chunk.rs: ChunkStates, visible/interest chunk 계산, dirty/load/mesh/save 메타 상태 전이
+- chunk.rs: ChunkStates, player 기준 interest / camera 기준 visible 계산, dirty/load/mesh/save 메타 상태 전이
 - jobs.rs: PendingJobResults 반영, ECS 측 후속 jobs/world/renderer 요청 생성 규칙
 - fixed.rs: ActiveSimRegion, SimulationControlState, fixed tick용 simulation 요청/결과 흐름
 
 ### 현재 구현 메모
 
 - 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
-- 이동 기준은 화면 기준이며, `Q/E`는 90도 회전, `Y`는 카메라 리센터로 해석한다
-
-### 현재 구현 메모
-
-- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
-- 이동 기준은 화면 기준이며, `Q/E`는 90도 회전, `Y`는 카메라 리센터로 해석한다
+- `MoveScreen -> MoveWorldIntent`, camera slow tracking, interest/visible chunk 분리는 아직 문서만 먼저 고정된 상태다

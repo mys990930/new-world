@@ -68,6 +68,7 @@
 - player.rs의 위치/범위를 읽는다
 - command.rs의 상호작용/배치 command를 소비한다
 - world가 query 결과를 제공하고 renderer가 preview/occlusion 표현을 담당할 수 있다
+- 상호작용 시 camera.rs가 빠른 recenter를 선택할 수 있도록 signal을 줄 수 있다
 
 ## 메모
 

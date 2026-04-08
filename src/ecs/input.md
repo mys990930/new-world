@@ -34,6 +34,7 @@
 ## 상태 전이 규칙
 
 - `move_screen_x / move_screen_y`는 화면 기준 이동 의도를 나타낸다
+- 이 값은 카메라 이동이 아니라 플레이어 이동 의도를 뜻한다
 - `primary_just_pressed`는 기본 행위 command 후보를 만든다
 - `secondary_just_pressed`는 블록 배치 command 후보를 만든다
 - `rotate_camera`는 `Q/E`에 의해 `-1 / +1 / 0`으로 표현된다
@@ -50,6 +51,7 @@
 
 - ECS input은 raw OS 이벤트가 아니라 app이 정규화한 frame snapshot만 다룬다
 - 이동 기준은 항상 화면 기준이다
+- 입력 단계에서는 camera follow 위치를 직접 계산하지 않는다
 - input 모듈은 command 후보를 만들 수는 있어도 world를 직접 수정하지 않는다
 - input 모듈은 카메라 실제 위치 계산이나 타겟 판정을 직접 수행하지 않는다
 
