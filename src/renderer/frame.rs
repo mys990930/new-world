@@ -205,32 +205,49 @@ impl Renderer {
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
-            if let Some((edge_vertices, edge_indices)) = build_cube_edge_mesh(frame.cube_instances) {
-                let edge_vertex_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_edge_vertex_buffer"),
-                            contents: cast_slice(&edge_vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                let edge_index_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_edge_index_buffer"),
-                            contents: cast_slice(&edge_indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
+        }
 
-                render_pass.set_pipeline(&backend.cube_edge_pipeline);
-                render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
-                render_pass
-                    .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
-                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
-            }
+        if let Some((edge_vertices, edge_indices)) = build_cube_edge_mesh(frame.cube_instances) {
+            let edge_vertex_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_edge_vertex_buffer"),
+                        contents: cast_slice(&edge_vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            let edge_index_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_edge_index_buffer"),
+                        contents: cast_slice(&edge_indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
+            let mut edge_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("renderer_edge_overlay_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            edge_pass.set_pipeline(&backend.cube_edge_pipeline);
+            edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+            edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
+            edge_pass.set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            edge_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
+            stats.draw_call_count = stats.draw_call_count.saturating_add(1);
         }
 
         backend.queue.submit(Some(encoder.finish()));

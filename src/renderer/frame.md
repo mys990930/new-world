@@ -38,8 +38,9 @@
 4. surface texture를 acquire한다.
 5. camera uniform buffer를 업데이트한다.
 6. `cube_instances`를 face-tinted cube mesh로 확장한다.
-7. render pass에서 clear 후 cube fill을 그리고, 이어서 edge overlay를 그린다.
-8. submit / present 한다.
+7. 첫 render pass에서 clear 후 cube fill을 그린다.
+8. 두 번째 render pass에서 color를 load하고 edge overlay를 화면 위에 덮어그린다.
+9. submit / present 한다.
 
 ## 불변식
 
