@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::{IntoScheduleConfigs, Resource, Schedule, World};
 
 use super::camera::{apply_camera_commands_system, clear_camera_impulses_system, CameraState};
+use super::chunk::ChunkStates;
 use super::command::{
     clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
 };
@@ -26,6 +27,7 @@ impl EcsRuntime {
         world.insert_resource(MoveWorldIntent::default());
         world.insert_resource(CameraState::default());
         world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(ChunkStates::default());
 
         let mut pre_update = Schedule::default();
         pre_update.add_systems((clear_player_command_buffer_system, clear_camera_impulses_system));

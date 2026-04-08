@@ -85,10 +85,10 @@ NOT:
 
 ### Current Implementation Notes
 
-- The current vertical slice renders a single player cube through the minimal dynamic object path.
-- The player cube now uses a white base color plus a fixed directional light, with optional edge overlay and an orthographic quarter-view camera.
-- The player cube path uses depth test/write so the cube reads as a solid volume.
-- The chunk upload path is still CPU-side bookkeeping only; real chunk drawing comes later.
+- The current vertical slice renders a generated chunk plane plus a player cube through the minimal chunk-upload path and dynamic-cube path.
+- The player cube uses a white base color plus a fixed directional light, with a thin dark ground shadow slab and an orthographic quarter-view camera.
+- Both chunk meshes and dynamic cubes use depth test/write so the plane/cube layering reads as solid volume.
+- The renderer now caches CPU chunk mesh payloads and builds GPU vertex/index buffers when a live backend exists.
 
 ### Submodules
 

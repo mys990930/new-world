@@ -7,32 +7,27 @@
 
 ## 소유 데이터
 
-### PendingJobResults
-- 아직 ECS에 반영되지 않은 job 결과 모음
-
-### 후속 요청 staging 상태
-- 다음 frame에서 제출할 load/mesh/save/sim job 요청 목록
+### `ChunkStates`와의 연동 규칙
+- generate-requested / mesh-requested 중복 방지
+- loaded / render-ready 반영 규칙
 
 ## 입력
 
 - `JobResult` queue
 - chunk 메타 상태
-- simulation 결과
-- world dirty 정보
+- `WorldCore`
 
 ## 출력
 
 - 갱신된 ECS meta state
-- world 반영용 요청
 - jobs 재제출용 request
-- renderer 업로드용 후속 요청
 
 ## 상태 전이 규칙
 
 - job 결과는 명시적으로 수거되기 전까지 보존된다
 - 반영 순서는 deterministic해야 한다
 - 같은 프레임에서 결과 반영과 후속 요청 생성의 순서는 고정되어야 한다
-- chunk load/mesh/save 결과는 chunk meta state와 모순되지 않게 적용되어야 한다
+- generate/mesh 결과는 chunk meta state와 모순되지 않게 적용되어야 한다
 
 ## 불변식
 
@@ -55,4 +50,5 @@
 
 ## 메모
 
-- 결과 반영 phase를 post_update 뒤에 둘지 별도 apply phase를 둘지는 이후 조정 가능하다
+- 현재 최소 구현에서 ECS는 player가 서 있는 청크 하나에 대해 `GenerateChunk -> BuildChunkMesh` 요청만 만든다
+- 실제 `world.insert_chunk(...)`와 `renderer.apply_upload(...)`는 app가 수행하고, ECS는 요청/결과에 맞는 chunk meta만 갱신한다

@@ -94,12 +94,18 @@ impl Renderer {
         let submitted_chunk_count = frame
             .visible_chunks
             .iter()
-            .filter(|coord| self.world.chunk_meshes.contains_key(coord))
+            .filter(|coord| {
+                self.world
+                    .chunk_meshes
+                    .get(coord)
+                    .and_then(|mesh| mesh.buffers.as_ref())
+                    .is_some()
+            })
             .count();
         let submitted_chunk_count = u32::try_from(submitted_chunk_count).unwrap_or(u32::MAX);
 
         stats.submitted_chunk_count = submitted_chunk_count;
-        stats.draw_call_count = submitted_chunk_count;
+        stats.draw_call_count = 0;
 
         let Some(backend) = self.backend.as_mut() else {
             self.last_stats = stats;
@@ -180,6 +186,23 @@ impl Renderer {
             render_pass.set_pipeline(&backend.cube_pipeline);
             render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &backend.light_bind_group, &[]);
+
+            for coord in frame.visible_chunks {
+                let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
+                    continue;
+                };
+                let Some(buffers) = chunk_mesh.buffers.as_ref() else {
+                    continue;
+                };
+
+                render_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(
+                    buffers.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                render_pass.draw_indexed(0..chunk_mesh.index_count, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
 
             if let Some((vertices, indices)) = build_cube_mesh(frame.cube_instances) {
                 let vertex_buffer =

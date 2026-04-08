@@ -22,13 +22,13 @@
 
 - `Platform` state
 - `EcsRuntime` state
-- Future `JobResult` and world dirty state
+- `world::CpuMesh` and chunk coord
 
 ## Outputs
 
 - `EcsInputSnapshot`
 - `AppRenderFrameData`
-- Future `RenderUploadRequest`
+- `RenderUploadRequest`
 
 ## Boundary Rules
 
@@ -55,9 +55,10 @@
 
 ## Notes
 
-- The current vertical slice uses two active bridge paths:
+- The current vertical slice uses three active bridge paths:
   - `platform -> EcsInputSnapshot`
   - `ecs -> AppRenderFrameData`
+- `world/jobs -> RenderUploadRequest`
 - `AppRenderFrameData` currently carries `camera`, `visible_chunks`, and `cube_instances`
-- The local player body-center transform is translated into a single white `RenderCubeInstance`
+- The local player body-center transform is translated into a white `RenderCubeInstance` plus a thin dark ground shadow slab
 - The current prototype uses an explicit 45-degree downward quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose

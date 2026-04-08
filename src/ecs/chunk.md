@@ -9,11 +9,10 @@
 
 ### ChunkStates
 - currently interesting chunk set
-- currently visible chunk set
-- loading chunk set
-- meshing chunk set
-- dirty mesh set
-- save pending set
+- loaded chunk set
+- generate-requested chunk set
+- mesh-requested chunk set
+- render-ready chunk set
 
 ### 보조 상태
 - load/mesh/save 요청 억제용 중복 방지 상태
@@ -28,11 +27,10 @@
 
 ## 출력
 
-- `InterestChunks`
-- `VisibleChunks`
-- `ChunkLoadRequested`
-- `ChunkMeshRequested`
-- `ChunkSaveRequested`
+- `ChunkStates.interest`
+- `ChunkStates.render_ready`
+- `GenerateChunk` request
+- `BuildChunkMesh` request
 - renderer / jobs / fixed가 참고할 chunk 메타 상태
 
 ## 상태 전이 규칙
@@ -40,9 +38,9 @@
 - 플레이어 기준 interest 범위에 들어온 청크는 load 또는 generate 후보가 된다
 - 카메라 기준 visible 범위는 renderer와 occlusion 판단에 사용된다
 - interest와 visible은 서로 다른 집합일 수 있다
-- 이미 로딩 중인 청크에 대해 중복 load 요청을 만들지 않는다
-- dirty chunk는 meshing 후보가 되며, 필요한 이웃 조건을 만족할 때 mesh 요청을 만든다
-- save pending 상태는 저장 완료 전까지 유지될 수 있다
+- 이미 generate 요청 중인 청크에 대해 중복 generate 요청을 만들지 않는다
+- loaded지만 아직 render-ready가 아닌 청크는 meshing 후보가 된다
+- meshing 요청 중인 청크에 대해 중복 mesh 요청을 만들지 않는다
 
 ## 불변식
 
@@ -67,5 +65,5 @@
 
 ## 메모
 
-- 초기 구현에서는 visible과 interest를 같은 값으로 시작할 수는 있지만, 리소스 경계는 처음부터 분리해 두는 편이 좋다
-- 나중에 LOD나 distant chunk 표현이 생기면 세분화가 필요하다
+- 현재 최소 구현은 local player가 위치한 청크 하나만 interest 대상으로 잡는다
+- 현재 `visible_chunks()`는 `render_ready` 집합을 그대로 반환하고, 더 넓은 카메라 기반 가시 범위는 이후 단계에서 확장한다

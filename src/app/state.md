@@ -11,6 +11,8 @@
 - `config`
 - `platform`
 - `ecs`
+- `world`
+- `jobs`
 - `renderer`
 - `timing`
 
@@ -56,4 +58,4 @@
 
 ## 메모
 
-- 현재 최소 구현은 `Platform`, `EcsRuntime`, `Renderer`, `AppConfig`, `AppTimingState`를 실소유한다.
+- 현재 최소 구현은 `Platform`, `EcsRuntime`, `WorldCore`, `JobSystem`, `Renderer`, `AppConfig`, `AppTimingState`를 실소유한다.

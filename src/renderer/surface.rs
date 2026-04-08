@@ -205,6 +205,8 @@ impl Renderer {
         self.pipelines.handle_surface_reconfigured(&self.surface);
         self.camera.handle_resize(size.width, size.height);
         self.backend = Some(block_on(create_backend(window, &self.config, &self.surface))?);
+        self.rebuild_chunk_mesh_buffers()
+            .map_err(|error| RenderInitError::Backend(format!("chunk mesh rebuild failed: {error:?}")))?;
         Ok(())
     }
 

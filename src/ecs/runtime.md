@@ -42,10 +42,12 @@
   - `MoveWorldIntent`
   - `CameraState`
   - `LocalPlayerEntity`
+  - `ChunkStates`
 - 현재 frame update 순서는:
   - pre: command buffer clear, camera one-shot impulse clear
   - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영
 - app bridge는 runtime helper를 통해 현재 `CameraState`와 local player `Transform`을 읽어 renderer DTO를 만든다
+- app frame은 runtime helper를 통해 현재 player 기준 chunk interest와 visible chunk 목록도 읽는다
 
 ## 공개 인터페이스
 
@@ -65,6 +67,9 @@ EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
 EcsRuntime::move_world_intent() -> MoveWorldIntent
 EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
+EcsRuntime::plan_chunk_job_requests(world: &WorldCore) -> Vec<JobRequest>
+EcsRuntime::apply_job_result(result: &JobResult)
+EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 ```
 
 ## 의존성
@@ -74,6 +79,8 @@ EcsRuntime::local_player_transform() -> Option<Transform>
 - `command.rs`
 - `camera.rs`
 - `player.rs`
+- `chunk.rs`
+- `jobs.rs`
 
 ## 불변식
 
@@ -99,3 +106,4 @@ EcsRuntime::local_player_transform() -> Option<Transform>
 ## 메모
 
 - 현재 `fixed_update`는 문서상 슬롯만 있고 gameplay 내용은 아직 비어 있다
+- 현재 chunk/job 관련 흐름은 player가 서 있는 청크 하나를 deterministic interest 대상으로 삼는 최소 vertical slice다

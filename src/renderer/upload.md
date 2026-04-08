@@ -26,13 +26,15 @@
 - `MeshVertex` uses `#[repr(C)]` plus `Pod`/`Zeroable` so it can be written directly to GPU buffers
 - `MeshVertex::vertex_buffer_layout()` is the shared baseline layout for the player-cube pipeline and future chunk pipelines
 - `MeshVertex` currently carries `position`, `color`, and `normal`
-- The chunk upload path is still metadata/cache bookkeeping only
+- `RenderUploadRequest::UpsertChunkMesh` validates the CPU mesh and stores enough data to rebuild GPU buffers after live surface attach
+- If there is no live backend yet, the renderer may cache the CPU mesh first and build GPU buffers later
 
 ## Related Modules
 
 - `frame.rs`
 - `state.rs`
+- `surface.rs`
 
 ## Notes
 
-- The first on-screen geometry path still comes from `RenderCubeInstance`-based dynamic cube drawing.
+- The current vertical slice uses `RenderUploadRequest` to move generated chunk plane meshes into the renderer cache before `frame.rs` draws them.

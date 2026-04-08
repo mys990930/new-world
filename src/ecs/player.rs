@@ -82,7 +82,7 @@ pub(crate) fn spawn_default_player(world: &mut World) -> Entity {
         .spawn((
             Player,
             Transform {
-                translation: [0.0, 0.5, 0.0],
+                translation: [8.0, 1.5, 8.0],
             },
             Velocity::default(),
         ))

@@ -1,3 +1,6 @@
+use bytemuck::cast_slice;
+use wgpu::util::DeviceExt;
+
 use bytemuck::{Pod, Zeroable};
 
 use super::Renderer;
@@ -45,17 +48,23 @@ impl MeshVertex {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct GpuChunkMesh {
     pub vertex_count: u32,
     pub index_count: u32,
     pub triangle_count: u32,
     pub bounds: Option<RenderBounds>,
     pub upload_generation: u64,
+    pub(crate) cpu_mesh: CpuMesh,
+    pub(crate) buffers: Option<ChunkMeshBuffers>,
 }
 
 impl GpuChunkMesh {
-    fn from_cpu_mesh(mesh: CpuMesh, upload_generation: u64) -> Result<Self, RenderUploadError> {
+    fn from_cpu_mesh(
+        mesh: CpuMesh,
+        upload_generation: u64,
+        device: Option<&wgpu::Device>,
+    ) -> Result<Self, RenderUploadError> {
         if mesh.vertices.is_empty() {
             return Err(RenderUploadError::EmptyVertexBuffer);
         }
@@ -77,6 +86,7 @@ impl GpuChunkMesh {
             u32::try_from(mesh.vertices.len()).map_err(|_| RenderUploadError::VertexCountOverflow)?;
         let index_count =
             u32::try_from(mesh.indices.len()).map_err(|_| RenderUploadError::IndexCountOverflow)?;
+        let buffers = device.map(|device| create_chunk_mesh_buffers(device, &mesh)).transpose()?;
 
         Ok(Self {
             vertex_count,
@@ -84,8 +94,16 @@ impl GpuChunkMesh {
             triangle_count: index_count / 3,
             bounds: mesh.bounds,
             upload_generation,
+            cpu_mesh: mesh,
+            buffers,
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChunkMeshBuffers {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +126,8 @@ impl Renderer {
         match request {
             RenderUploadRequest::UpsertChunkMesh { coord, mesh } => {
                 let next_generation = self.world.generation.saturating_add(1);
-                let gpu_mesh = GpuChunkMesh::from_cpu_mesh(mesh, next_generation)?;
+                let gpu_mesh =
+                    GpuChunkMesh::from_cpu_mesh(mesh, next_generation, self.backend_device())?;
                 self.world.chunk_meshes.insert(coord, gpu_mesh);
                 self.world.generation = next_generation;
                 self.world.uploaded_this_frame = self.world.uploaded_this_frame.saturating_add(1);
@@ -127,6 +146,52 @@ impl Renderer {
             self.world.removed_this_frame = self.world.removed_this_frame.saturating_add(1);
         }
     }
+
+    pub(crate) fn rebuild_chunk_mesh_buffers(&mut self) -> Result<(), RenderUploadError> {
+        let Some(device) = self.backend_device().cloned() else {
+            return Ok(());
+        };
+
+        for mesh in self.world.chunk_meshes.values_mut() {
+            mesh.buffers = Some(create_chunk_mesh_buffers(&device, &mesh.cpu_mesh)?);
+        }
+
+        Ok(())
+    }
+
+    fn backend_device(&self) -> Option<&wgpu::Device> {
+        self.backend.as_ref().map(|backend| &backend.device)
+    }
+}
+
+fn create_chunk_mesh_buffers(
+    device: &wgpu::Device,
+    mesh: &CpuMesh,
+) -> Result<ChunkMeshBuffers, RenderUploadError> {
+    for index in &mesh.indices {
+        if *index as usize >= mesh.vertices.len() {
+            return Err(RenderUploadError::IndexOutOfRange {
+                index: *index,
+                vertex_count: mesh.vertices.len(),
+            });
+        }
+    }
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("renderer_chunk_vertex_buffer"),
+        contents: cast_slice(&mesh.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("renderer_chunk_index_buffer"),
+        contents: cast_slice(&mesh.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+
+    Ok(ChunkMeshBuffers {
+        vertex_buffer,
+        index_buffer,
+    })
 }
 
 #[cfg(test)]

@@ -49,7 +49,7 @@ impl Renderer {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct RenderWorld {
     pub(crate) chunk_meshes: HashMap<ChunkCoord, GpuChunkMesh>,
     pub(crate) uploaded_this_frame: u32,

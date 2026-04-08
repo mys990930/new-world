@@ -2,7 +2,7 @@ pub const CHUNK_EDGE: usize = 16;
 pub const CHUNK_EDGE_I32: i32 = CHUNK_EDGE as i32;
 pub const CHUNK_VOLUME: usize = CHUNK_EDGE * CHUNK_EDGE * CHUNK_EDGE;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ChunkCoord(pub i32, pub i32, pub i32);
 
 impl ChunkCoord {

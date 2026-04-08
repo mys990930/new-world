@@ -8,6 +8,8 @@
 
 - platform snapshot을 ECS 입력으로 bridge
 - ECS pre/update/post 실행
+- jobs 완료 결과 수거와 world/renderer 반영
+- ECS chunk interest를 바탕으로 jobs 요청 제출
 - discrete command 로그 확인
 - render bridge 결과로 renderer 호출
 
@@ -26,6 +28,8 @@
 ## 출력
 
 - 갱신된 ECS world/resource state
+- 갱신된 world chunk state
+- 갱신된 renderer chunk mesh cache
 - discrete gameplay command 로그
 - renderer frame render 시도
 
@@ -35,8 +39,12 @@
 2. `ecs.run_pre_update()`
 3. `ecs.run_update()`
 4. `ecs.run_post_update()`
-5. discrete command를 drain해서 필요 시 로그 확인
-6. `bridge_ecs_to_render_frame()` 결과를 `renderer.render(...)`에 전달
+5. 이전에 완료된 jobs 결과를 수거해서 ECS/world/renderer에 반영한다
+6. ECS chunk meta를 바탕으로 다음 jobs 요청을 만든다
+7. jobs에 요청을 제출한다
+8. 다시 완료된 jobs 결과를 수거해 같은 frame에 반영 가능한 범위까지 반영한다
+9. discrete command를 drain해서 필요 시 로그 확인
+10. `bridge_ecs_to_render_frame()` 결과를 `renderer.render(...)`에 전달
 
 ## 불변식
 
@@ -53,5 +61,5 @@
 
 ## 메모
 
-- 현재 render bridge는 quarter-view camera와 local player 큐브 한 개를 렌더 입력으로 만든다.
-- visible chunk 목록은 아직 비어 있고, chunk draw/upload 경로는 이후 단계에서 확장한다.
+- 현재 최소 구현은 플레이어가 위치한 청크 하나를 interest 대상으로 삼아 `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` 경로를 순차적으로 연결한다.
+- render bridge는 quarter-view camera, render-ready visible chunk coord 목록, local player 큐브, 그리고 얇은 ground shadow slab을 렌더 입력으로 만든다.

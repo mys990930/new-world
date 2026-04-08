@@ -3,12 +3,15 @@ use winit::keyboard::KeyCode;
 use super::GameApp;
 use crate::ecs::EcsInputSnapshot;
 use crate::renderer::{
-    ChunkCoord, RenderCameraState, RenderCubeInstance, RenderProjectionMode, RenderViewBasis,
+    ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
+    RenderCameraState, RenderCubeInstance, RenderProjectionMode, RenderUploadRequest,
+    RenderViewBasis,
 };
+use crate::world::{ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex};
 
 pub struct AppRenderFrameData {
     pub camera: RenderCameraState,
-    pub visible_chunks: Vec<ChunkCoord>,
+    pub visible_chunks: Vec<RenderChunkCoord>,
     pub cube_instances: Vec<RenderCubeInstance>,
 }
 
@@ -52,7 +55,7 @@ impl GameApp {
             .unwrap_or([0.0, 0.0, 0.0]);
 
         let camera = build_quarter_view_camera(target, camera_state.quarter_turns);
-        let cube_instances = self
+        let mut cube_instances = self
             .ecs
             .local_player_transform()
             .map(|transform| {
@@ -64,10 +67,33 @@ impl GameApp {
             })
             .unwrap_or_default();
 
+        if let Some(player) = self.ecs.local_player_transform() {
+            cube_instances.insert(
+                0,
+                build_ground_shadow_instance(player.translation),
+            );
+        }
+
         AppRenderFrameData {
             camera,
-            visible_chunks: Vec::new(),
+            visible_chunks: self
+                .ecs
+                .visible_chunks()
+                .into_iter()
+                .map(world_chunk_to_render)
+                .collect(),
             cube_instances,
+        }
+    }
+
+    pub fn bridge_world_mesh_to_render_upload(
+        &self,
+        coord: WorldChunkCoord,
+        mesh: WorldCpuMesh,
+    ) -> RenderUploadRequest {
+        RenderUploadRequest::UpsertChunkMesh {
+            coord: world_chunk_to_render(coord),
+            mesh: world_mesh_to_render(mesh),
         }
     }
 }
@@ -101,6 +127,42 @@ fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCamer
             vertical_world_size: ORTHOGRAPHIC_VERTICAL_SIZE,
         },
         basis_override: Some(RenderViewBasis { right, up, forward }),
+    }
+}
+
+fn build_ground_shadow_instance(center: [f32; 3]) -> RenderCubeInstance {
+    let shadow_offset = [-0.18, 0.0, 0.12];
+    RenderCubeInstance {
+        center: [
+            center[0] + shadow_offset[0],
+            center[1] - 0.49,
+            center[2] + shadow_offset[2],
+        ],
+        half_extents: [0.62, 0.01, 0.62],
+        color: [0.08, 0.08, 0.10, 1.0],
+    }
+}
+
+fn world_chunk_to_render(coord: WorldChunkCoord) -> RenderChunkCoord {
+    RenderChunkCoord(coord.0, coord.1, coord.2)
+}
+
+fn world_mesh_to_render(mesh: WorldCpuMesh) -> RenderCpuMesh {
+    RenderCpuMesh {
+        vertices: mesh.vertices.into_iter().map(world_vertex_to_render).collect(),
+        indices: mesh.indices,
+        bounds: mesh.bounds.map(|bounds| crate::renderer::RenderBounds {
+            min: bounds.min,
+            max: bounds.max,
+        }),
+    }
+}
+
+fn world_vertex_to_render(vertex: WorldMeshVertex) -> RenderMeshVertex {
+    RenderMeshVertex {
+        position: vertex.position,
+        color: vertex.color,
+        normal: vertex.normal,
     }
 }
 
