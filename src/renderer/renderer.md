@@ -11,6 +11,7 @@
 - stub surface 상태와 live window surface attach
 - surface configure / resize 처리
 - render pipeline / shader / GPU camera state 관리
+- depth buffer 생성과 유지
 - CPU render DTO -> GPU draw command 변환
 - submit / present / recoverable render error 전달
 
@@ -85,6 +86,7 @@ NOT:
 ### 현재 구현 메모
 
 - 현재 구현은 플레이어 큐브 1개를 그리는 최소 dynamic object path까지 연결돼 있다.
+- 플레이어 큐브 path는 depth test/write를 사용해 실제 큐브 실루엣이 보이도록 한다.
 - chunk upload 경로는 아직 CPU-side bookkeeping 위주이며 실제 chunk draw는 이후 단계다.
 
 ### 하위 모듈 목록 및 역할

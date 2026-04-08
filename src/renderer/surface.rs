@@ -257,6 +257,13 @@ async fn create_backend(
         surface_handle.configure(&device, &surface_config);
     }
 
+    let depth_format = depth_texture_format(config.depth_format);
+    let (depth_texture, depth_view) = create_depth_texture(
+        &device,
+        surface.width().max(1),
+        surface.height().max(1),
+        depth_format,
+    );
     let shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
     let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_camera_buffer"),
@@ -309,7 +316,13 @@ async fn create_backend(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: None,
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -330,6 +343,9 @@ async fn create_backend(
         device,
         queue,
         surface_config,
+        depth_format,
+        depth_texture,
+        depth_view,
         camera_buffer,
         camera_bind_group,
         cube_pipeline,
@@ -386,4 +402,39 @@ pub(crate) fn reconfigure_surface_backend(
     backend.surface_config.width = width;
     backend.surface_config.height = height;
     backend.surface.configure(&backend.device, &backend.surface_config);
+    let (depth_texture, depth_view) =
+        create_depth_texture(&backend.device, width, height, backend.depth_format);
+    backend.depth_texture = depth_texture;
+    backend.depth_view = depth_view;
+}
+
+fn depth_texture_format(depth_format: super::DepthFormat) -> wgpu::TextureFormat {
+    match depth_format {
+        super::DepthFormat::Depth24Plus => wgpu::TextureFormat::Depth24Plus,
+        super::DepthFormat::Depth32Float => wgpu::TextureFormat::Depth32Float,
+    }
+}
+
+fn create_depth_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("renderer_depth_texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }

@@ -9,6 +9,7 @@
 - `RenderSurfaceTarget` abstraction
 - stub target과 live window target 모두 지원
 - `wgpu::Instance` / `Surface` / `Adapter` / `Device` / `Queue` 생성
+- depth texture 생성과 resize 재생성
 - surface configure / reconfigure
 - renderer bootstrap 시점과 `resumed()` 이후 attach 시점 연결
 
@@ -46,3 +47,4 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 ## 메모
 
 - 현재 구현은 player cube shader/pipeline과 camera uniform buffer를 backend 생성 시 함께 준비한다.
+- depth texture도 backend 생성/resize 시 같이 준비한다.

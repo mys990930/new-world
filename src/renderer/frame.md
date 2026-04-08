@@ -10,6 +10,7 @@
 - camera GPU state 갱신
 - camera uniform upload
 - surface texture acquire
+- depth clear / depth test
 - clear pass와 dynamic cube draw
 - submit / present
 - recoverable surface error 전달
