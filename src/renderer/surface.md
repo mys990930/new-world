@@ -50,3 +50,4 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 - The current backend creates the player-cube fill pipeline, edge overlay pipeline, and camera uniform buffer during initialization
 - Depth resources are recreated together with surface resize
+- When multiple sRGB surface formats are available, the current prototype prefers `Rgba8UnormSrgb` over `Bgra8UnormSrgb` so debug face colors read more predictably during renderer bring-up

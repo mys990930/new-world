@@ -33,7 +33,7 @@
 
 - Renderer consumes final render camera pose only
 - Gameplay camera rules stay in ECS/app
-- CPU-side math is row-major, then transposed before WGSL upload
+- CPU-side math is stored row-major, and the raw bytes are uploaded directly so WGSL's column-major matrix interpretation sees the intended transform
 
 ## Invariants
 
@@ -52,3 +52,4 @@
 
 - The current prototype uses orthographic 45-degree quarter-view rendering through an explicit basis override
 - This keeps camera rules outside the renderer while still giving the renderer deterministic `eye / target / basis` data
+- Camera uniform upload must not apply an extra transpose; doing so skews the screen axes and collapses the cube into the wrong silhouette

@@ -410,3 +410,343 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
         scale3(vector, length_sq.sqrt().recip())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use pollster::block_on;
+    use wgpu::util::DeviceExt;
+
+    use super::*;
+    use crate::renderer::{
+        CameraGpuState, CameraProjectionConfig, RenderProjectionMode, RenderViewBasis,
+    };
+
+    #[test]
+    fn offscreen_cube_render_contains_visible_top_face_pixels() {
+        let counts =
+            block_on(render_cube_offscreen(true)).expect("offscreen render should succeed");
+
+        assert!(counts.red > 0, "top face should contribute red pixels");
+        assert!(counts.blue > 0, "one visible side should contribute blue pixels");
+        assert!(
+            counts.red > counts.green,
+            "hidden green face should not dominate over the visible top face"
+        );
+    }
+
+    #[derive(Debug, Default)]
+    struct DominantColorCounts {
+        red: u32,
+        green: u32,
+        blue: u32,
+    }
+
+    async fn render_cube_offscreen(use_depth: bool) -> Result<DominantColorCounts, String> {
+        if use_depth {
+            render_cube_offscreen_with_depth_compare(wgpu::CompareFunction::LessEqual, 1.0).await
+        } else {
+            render_cube_offscreen_with_depth_compare(wgpu::CompareFunction::Always, 1.0).await
+        }
+    }
+
+    async fn render_cube_offscreen_with_depth_compare(
+        depth_compare: wgpu::CompareFunction,
+        depth_clear: f32,
+    ) -> Result<DominantColorCounts, String> {
+        const WIDTH: u32 = 256;
+        const HEIGHT: u32 = 256;
+        const BYTES_PER_PIXEL: u32 = 4;
+        let use_depth = depth_compare != wgpu::CompareFunction::Always;
+
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: None,
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+            })
+            .await
+            .map_err(|error| format!("adapter request failed: {error}"))?;
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("offscreen_test_device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            })
+            .await
+            .map_err(|error| format!("device request failed: {error}"))?;
+
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen_color_texture"),
+            size: wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let depth_texture = use_depth.then(|| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("offscreen_depth_texture"),
+                size: wgpu::Extent3d {
+                    width: WIDTH,
+                    height: HEIGHT,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+        });
+        let depth_view =
+            depth_texture.as_ref().map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen_camera_buffer"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("offscreen_camera_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("offscreen_camera_bind_group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("offscreen_pipeline_layout"),
+            bind_group_layouts: &[Some(&camera_bind_group_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("offscreen_cube_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[MeshVertex::vertex_buffer_layout()],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: use_depth.then_some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(depth_compare),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let camera_state = RenderCameraState {
+            eye: [9.0, 13.227922, -9.0],
+            target: [0.0, 0.5, 0.0],
+            up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+            aspect_override: Some(1.0),
+            projection_mode: RenderProjectionMode::Orthographic {
+                vertical_world_size: 5.0,
+            },
+            basis_override: Some(RenderViewBasis {
+                right: [std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
+                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+                forward: [
+                    -0.5,
+                    -std::f32::consts::FRAC_1_SQRT_2,
+                    0.5,
+                ],
+            }),
+        };
+        let mut camera_gpu_state = CameraGpuState::default();
+        camera_gpu_state
+            .update(
+                &camera_state,
+                &CameraProjectionConfig::default(),
+                WIDTH,
+                HEIGHT,
+                0,
+            )
+            .map_err(|error| format!("camera update failed: {error:?}"))?;
+        let camera_uniform = CameraUniform::from_view_projection(camera_gpu_state.view_projection);
+        queue.write_buffer(&camera_buffer, 0, cast_slice(&[camera_uniform]));
+
+        let (vertices, indices) = build_cube_mesh(&[RenderCubeInstance {
+            center: [0.0, 0.5, 0.0],
+            half_extents: [0.5, 0.5, 0.5],
+            color: [1.0, 1.0, 1.0, 1.0],
+        }])
+        .ok_or_else(|| "expected cube mesh".to_string())?;
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("offscreen_vertex_buffer"),
+            contents: cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("offscreen_index_buffer"),
+            contents: cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let padded_bytes_per_row =
+            (WIDTH * BYTES_PER_PIXEL).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen_output_buffer"),
+            size: u64::from(padded_bytes_per_row * HEIGHT),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("offscreen_encoder"),
+        });
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("offscreen_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: depth_view.as_ref().map(|depth_view| {
+                    wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(depth_clear),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            render_pass.set_pipeline(&pipeline);
+            render_pass.set_bind_group(0, &camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+        }
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &color_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(HEIGHT),
+                },
+            },
+            wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let submission_index = queue.submit(Some(encoder.finish()));
+        let slice = output_buffer.slice(..);
+        let (sender, receiver) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission_index),
+                timeout: None,
+            })
+            .map_err(|error| format!("device poll failed: {error:?}"))?;
+        receiver
+            .recv()
+            .map_err(|error| format!("map callback failed: {error}"))?
+            .map_err(|error| format!("buffer map failed: {error:?}"))?;
+
+        let data = slice.get_mapped_range();
+        let mut counts = DominantColorCounts::default();
+        for row in 0..HEIGHT as usize {
+            let start = row * padded_bytes_per_row as usize;
+            let row_bytes = &data[start..start + (WIDTH * BYTES_PER_PIXEL) as usize];
+            for pixel in row_bytes.chunks_exact(4) {
+                let [r, g, b, a]: [u8; 4] = pixel.try_into().unwrap();
+                if a == 0 || (r == 0 && g == 0 && b == 0) {
+                    continue;
+                }
+
+                if r > g && r > b {
+                    counts.red = counts.red.saturating_add(1);
+                } else if g > r && g > b {
+                    counts.green = counts.green.saturating_add(1);
+                } else if b > r && b > g {
+                    counts.blue = counts.blue.saturating_add(1);
+                }
+            }
+        }
+        drop(data);
+        output_buffer.unmap();
+
+        Ok(counts)
+    }
+}

@@ -25,11 +25,7 @@ pub struct CameraUniform {
 
 impl CameraUniform {
     pub fn from_view_projection(view_projection: Matrix4) -> Self {
-        Self {
-            // The CPU camera math stores matrices row-major.
-            // WGSL uniforms are consumed as column-major matrices.
-            view_projection: transpose_matrix4(view_projection),
-        }
+        Self { view_projection }
     }
 }
 
@@ -292,22 +288,12 @@ fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
 }
 
-fn transpose_matrix4(matrix: Matrix4) -> Matrix4 {
-    let mut result = [[0.0; 4]; 4];
-    for row in 0..4 {
-        for col in 0..4 {
-            result[row][col] = matrix[col][row];
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn transposed_uniform_matches_row_vector_cpu_transform() {
+    fn row_major_uniform_memory_matches_wgsl_column_major_transform() {
         let camera = RenderCameraState {
             eye: [10.392304, 10.392304, -10.392304],
             target: [0.0, 0.5, 0.0],
@@ -338,7 +324,7 @@ mod tests {
         let point = [0.5, 1.0, 0.5, 1.0];
 
         let cpu_clip = multiply_row_vector(point, gpu.view_projection);
-        let gpu_clip = multiply_column_vector(uniform.view_projection, point);
+        let gpu_clip = multiply_wgsl_column_major_uniform(uniform.view_projection, point);
 
         for index in 0..4 {
             assert!((cpu_clip[index] - gpu_clip[index]).abs() < 1e-5);
@@ -353,10 +339,20 @@ mod tests {
         result
     }
 
-    fn multiply_column_vector(matrix: Matrix4, vector: [f32; 4]) -> [f32; 4] {
+    fn multiply_wgsl_column_major_uniform(matrix: Matrix4, vector: [f32; 4]) -> [f32; 4] {
+        let flat = matrix
+            .into_iter()
+            .flat_map(|row| row.into_iter())
+            .collect::<Vec<_>>();
+        let columns = [
+            [flat[0], flat[1], flat[2], flat[3]],
+            [flat[4], flat[5], flat[6], flat[7]],
+            [flat[8], flat[9], flat[10], flat[11]],
+            [flat[12], flat[13], flat[14], flat[15]],
+        ];
         let mut result = [0.0; 4];
         for row in 0..4 {
-            result[row] = (0..4).map(|index| matrix[row][index] * vector[index]).sum();
+            result[row] = (0..4).map(|index| columns[index][row] * vector[index]).sum();
         }
         result
     }

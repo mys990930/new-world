@@ -252,6 +252,10 @@ async fn create_backend(
         .first()
         .copied()
         .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+    println!(
+        "[renderer] selected surface format: {:?}",
+        surface_config.format
+    );
 
     if surface.width() > 0 && surface.height() > 0 {
         surface_handle.configure(&device, &surface_config);
@@ -391,19 +395,37 @@ fn choose_surface_format(
     supported_formats: &[wgpu::TextureFormat],
 ) -> wgpu::TextureFormat {
     match config.preferred_surface_format {
-        super::SurfaceFormatPolicy::PreferredSrgb => supported_formats
-            .iter()
-            .copied()
-            .find(|format| format.is_srgb())
-            .or_else(|| supported_formats.first().copied())
-            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
-        super::SurfaceFormatPolicy::PreferredLinear => supported_formats
-            .iter()
-            .copied()
-            .find(|format| !format.is_srgb())
-            .or_else(|| supported_formats.first().copied())
-            .unwrap_or(wgpu::TextureFormat::Bgra8Unorm),
+        super::SurfaceFormatPolicy::PreferredSrgb => preferred_format_or_first(
+            supported_formats,
+            &[
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                wgpu::TextureFormat::Bgra8UnormSrgb,
+            ],
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            |format| format.is_srgb(),
+        ),
+        super::SurfaceFormatPolicy::PreferredLinear => preferred_format_or_first(
+            supported_formats,
+            &[wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm],
+            wgpu::TextureFormat::Rgba8Unorm,
+            |format| !format.is_srgb(),
+        ),
     }
+}
+
+fn preferred_format_or_first(
+    supported_formats: &[wgpu::TextureFormat],
+    preferred_formats: &[wgpu::TextureFormat],
+    fallback: wgpu::TextureFormat,
+    predicate: impl Fn(wgpu::TextureFormat) -> bool,
+) -> wgpu::TextureFormat {
+    preferred_formats
+        .iter()
+        .copied()
+        .find(|preferred| supported_formats.contains(preferred))
+        .or_else(|| supported_formats.iter().copied().find(|format| predicate(*format)))
+        .or_else(|| supported_formats.first().copied())
+        .unwrap_or(fallback)
 }
 
 fn choose_present_mode(
@@ -471,4 +493,28 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::renderer::{RenderConfig, SurfaceFormatPolicy};
+
+    #[test]
+    fn prefers_rgba_srgb_when_available() {
+        let config = RenderConfig {
+            preferred_surface_format: SurfaceFormatPolicy::PreferredSrgb,
+            ..RenderConfig::default()
+        };
+
+        let selected = choose_surface_format(
+            &config,
+            &[
+                wgpu::TextureFormat::Bgra8UnormSrgb,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            ],
+        );
+
+        assert_eq!(selected, wgpu::TextureFormat::Rgba8UnormSrgb);
+    }
 }
