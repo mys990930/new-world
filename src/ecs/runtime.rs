@@ -7,7 +7,7 @@ use super::command::{
 use super::input::{interpret_input_system, EcsInputSnapshot};
 use super::player::{
     spawn_default_player, sync_local_player_velocity_system, update_move_world_intent_system,
-    LocalPlayerEntity,
+    LocalPlayerEntity, Transform,
 };
 
 pub struct EcsRuntime {
@@ -90,5 +90,14 @@ impl EcsRuntime {
 
     pub fn move_world_intent(&self) -> MoveWorldIntent {
         *self.world.resource::<MoveWorldIntent>()
+    }
+
+    pub fn camera_state(&self) -> CameraState {
+        *self.world.resource::<CameraState>()
+    }
+
+    pub fn local_player_transform(&self) -> Option<Transform> {
+        let entity = self.world.resource::<LocalPlayerEntity>().0?;
+        self.world.get::<Transform>(entity).copied()
     }
 }

@@ -1,5 +1,5 @@
 use super::GameApp;
-use crate::renderer::{RenderCameraState, RenderFrameInput};
+use crate::renderer::RenderFrameInput;
 
 impl GameApp {
     pub fn update(&mut self) {
@@ -29,12 +29,11 @@ impl GameApp {
             }
         }
 
-        let camera = RenderCameraState::default();
-        let visible_chunks = [];
+        let render_frame = self.bridge_ecs_to_render_frame();
 
         if let Err(error) = self.renderer.render(RenderFrameInput {
-            camera: &camera,
-            visible_chunks: &visible_chunks,
+            camera: &render_frame.camera,
+            visible_chunks: &render_frame.visible_chunks,
             clear_color_override: None,
         }) {
             eprintln!("[app] renderer frame failed: {:?}", error);
