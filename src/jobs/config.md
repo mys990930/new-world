@@ -10,9 +10,6 @@
 ### JobConfig
 - `worker_count`
 - `max_pending_requests`
-- `max_completed_results`
-- `coalesce_policy`
-- `shutdown_policy`
 
 ## 입력
 
@@ -35,7 +32,7 @@
 
 - `worker_count`는 `1` 이상이어야 한다.
 - queue limit이 있다면 `pending`과 `completed`의 보존 정책이 명확해야 한다.
-- coalescing은 config로 켜더라도 모든 job type에 무조건 적용하지 않는다.
+- 현재 최소 구현에서 coalescing 범위는 config가 아니라 request type 규칙으로 고정한다.
 
 ## 비책임
 
@@ -51,5 +48,5 @@
 
 ## 메모
 
-- 현재 단계에서는 `JobConfig`가 최소한 worker 수와 queue 정책을 담는다는 계약만 고정한다.
-- 추후 profiling 결과에 따라 job class별 별도 제한값을 추가할 수 있다.
+- 현재 구현에서 기본값은 `worker_count = 1`, `max_pending_requests = None`이다.
+- 추후 profiling 결과에 따라 job class별 제한, shutdown policy, completed queue 제한을 추가할 수 있다.

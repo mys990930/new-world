@@ -1,5 +1,6 @@
 mod app;
 mod ecs;
+mod jobs;
 mod platform;
 mod renderer;
 mod world;

@@ -30,8 +30,8 @@
 
 ```rust
 JobSystem::new(config: JobConfig) -> JobSystem
-JobSystem::submit(request: JobRequest)
-JobSystem::submit_all(requests: impl IntoIterator<Item = JobRequest>)
+JobSystem::submit(request: JobRequest) -> Result<JobEnqueueOutcome, JobSubmitError>
+JobSystem::submit_all(requests: impl IntoIterator<Item = JobRequest>) -> Result<(), JobSubmitError>
 JobSystem::drain_completed() -> Vec<JobResult>
 JobSystem::shutdown()
 ```
@@ -70,4 +70,5 @@ JobSystem::shutdown()
 
 ## 메모
 
-- 실제 구현에서는 `submit()`가 내부적으로 즉시 dispatch를 시도할 수 있지만, 외부 계약상 request는 먼저 queue에 들어간 것으로 간주한다.
+- 현재 구현은 config에 따라 worker thread를 만들고, `submit()`/`drain_completed()` 시점에 결과 수거와 pending dispatch를 함께 진행한다.
+- `submit()`는 새 요청이 실제로 enqueue됐는지, 기존 요청과 coalesced됐는지 `JobEnqueueOutcome`으로 알려준다.

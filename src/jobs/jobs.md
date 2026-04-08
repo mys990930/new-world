@@ -10,7 +10,7 @@
 - job submission surface 제공
 - pending/running/completed queue ownership
 - worker thread/task 실행과 shutdown coordination
-- job type별 world/simulation API routing
+- job type별 world API routing
 - 완료 결과 수집과 deterministic drain surface 제공
 - 안전한 범위의 중복 요청 coalescing policy 유지
 
@@ -35,8 +35,8 @@
 
 ```rust
 JobSystem::new(config: JobConfig) -> JobSystem
-JobSystem::submit(request: JobRequest)
-JobSystem::submit_all(requests: impl IntoIterator<Item = JobRequest>)
+JobSystem::submit(request: JobRequest) -> Result<JobEnqueueOutcome, JobSubmitError>
+JobSystem::submit_all(requests: impl IntoIterator<Item = JobRequest>) -> Result<(), JobSubmitError>
 JobSystem::drain_completed() -> Vec<JobResult>
 JobSystem::shutdown()
 ```
@@ -44,7 +44,6 @@ JobSystem::shutdown()
 ### 의존성
 
 - `world`
-- `simulation`
 - thread/task runtime abstraction
 - logging
 
@@ -76,6 +75,9 @@ NOT:
 
 ### 현재 구현 메모
 
-- `jobs`는 아직 Rust 구현보다 문서가 앞선 상태다.
-- 이번 분해는 향후 `mod.rs + leaf.rs` 구조로 구현을 나눌 때의 기준 문서 역할을 한다.
-- 실제 async runtime 선택은 아직 고정하지 않고, 현재 문서에서는 요청/결과/queue 경계와 불변식만 먼저 확정한다.
+- `jobs`는 이제 최소 Rust 구현이 들어와 있지만, 아직 전체 target spec보다 범위가 좁다.
+- 현재 최소 구현은 `mod.rs + config.rs + request.rs + result.rs + queue.rs + runtime.rs + worker.rs + routing.rs`까지 연결되어 있다.
+- 현재 지원 job은 `GenerateChunk`와 `BuildChunkMesh` 두 종류다.
+- worker 실행은 `std::thread + std::sync::mpsc` 기반의 최소 worker pool을 사용한다.
+- `JobResult`는 `world::ChunkData` / `world::CpuMesh`까지만 들고 나오고, renderer upload 변환은 이후 app/ecs bridge 단계에서 연결한다.
+- load/save/simulation job routing은 다음 단계에서 request/result variant와 함께 확장한다.

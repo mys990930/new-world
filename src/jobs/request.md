@@ -8,23 +8,18 @@
 ## 소유 데이터
 
 ### JobRequest
-- `LoadChunk(coord)`
-- `GenerateChunk(coord)`
-- `BuildChunkMesh(coord, snapshot_bundle)`
-- `SaveChunk(coord, snapshot)`
-- `SimulateSubsystemTick(subsystem, tick, region, snapshot)`
-- `SimulateRegionTick(tick, region, bundle)`
+- `GenerateChunk { coord, meta }`
+- `BuildChunkMesh { center, neighbors }`
 
 ### Request identity / coalesce key
-- chunk 기반 요청의 dedupe 식별자
-- simulation tick 기반 요청의 중복 판별 정보
+- chunk 좌표 기반 dedupe 식별자
 
 ## 입력
 
 - `ChunkCoord`
-- immutable `ChunkSnapshot` 또는 snapshot bundle
-- simulation tick id / region / subsystem
-- world meta 또는 generation에 필요한 value payload
+- immutable `ChunkSnapshot`
+- `NeighborChunks`
+- `WorldMeta`
 
 ## 출력
 
@@ -55,8 +50,8 @@
 - `routing.md`
 - `../ecs/jobs.md`
 - `../world/world.md`
-- `../simulation/simulation.md`
 
 ## 메모
 
-- 현재 `BuildChunkMesh`와 simulation 계열 요청은 snapshot 비용이 크므로, 어떤 단위로 snapshot을 자를지는 추후 구현에서 조정할 수 있다.
+- 현재 최소 구현은 block plane vertical slice에 필요한 `GenerateChunk`와 `BuildChunkMesh`만 지원한다.
+- 중복 coalescing은 두 request 모두 chunk 좌표 기준으로만 적용한다.

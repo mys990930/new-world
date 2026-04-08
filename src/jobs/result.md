@@ -8,11 +8,8 @@
 ## 소유 데이터
 
 ### JobResult
-- `ChunkLoaded(coord, chunk)`
 - `ChunkGenerated(coord, chunk)`
 - `ChunkMeshBuilt(coord, mesh)`
-- `ChunkSaved(coord)`
-- `SimulationStepped(subsystem, tick, result)`
 - `JobFailed(request, error)`
 
 ### Result envelope metadata
@@ -56,4 +53,5 @@
 
 ## 메모
 
-- `JobFailed`의 에러 세분화 수준은 추후 구현에서 조정 가능하지만, 최소한 재시도 가능 여부를 구분할 수 있어야 한다.
+- 현재 최소 구현에서 `JobFailed`는 주로 shutdown 중 미실행 pending request 취소나 worker disconnect 상황을 표현한다.
+- generation/meshing 자체는 현재 world API 기준으로 fallible path가 없어서, worker 내부 계산 실패보다는 runtime 경계 실패를 먼저 다룬다.

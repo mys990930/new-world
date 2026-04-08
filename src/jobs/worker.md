@@ -21,9 +21,9 @@
 ## 소유 데이터
 
 ### WorkerContext
-- thread pool 또는 task runtime handle
-- request receiver / result sender
-- shutdown flag 또는 cancellation token
+- worker별 command sender
+- shared result receiver 측 sender
+- worker thread join handle
 
 ### Worker-local state
 - 현재 실행 중인 request 정보
@@ -64,4 +64,4 @@
 
 ## 메모
 
-- 실제 구현이 OS thread pool이든 async task runtime이든, 외부에서 보는 worker 계약은 동일하게 유지한다.
+- 현재 최소 구현은 worker마다 OS thread 하나를 사용하고, command/result 전달은 `std::sync::mpsc` 채널로 처리한다.
