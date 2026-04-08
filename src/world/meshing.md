@@ -1,0 +1,64 @@
+# meshing
+
+## 역할
+
+- 원본 청크 스냅샷을 기반으로 렌더링 가능한 CPU mesh 입력을 계산한다.
+- world 데이터에서 renderer upload DTO로 넘어가기 직전의 경계를 정의한다.
+
+## 책임
+
+- center + neighbor chunk snapshot bundle 정의
+- 블록 노출면 판단에 필요한 주변 블록 조회 규칙 정의
+- `CpuMesh` 생성 계약 정의
+- 청크 경계 face 처리 규칙 정의
+
+## 비책임
+
+- visible chunk calculation
+- GPU upload
+- draw call 실행
+- 월드 수정
+
+## 입력
+
+- center `ChunkSnapshot`
+- neighbor chunk snapshots
+- block registry / renderable block definition
+
+## 출력
+
+- `CpuMesh`
+
+## 처리 흐름
+
+1. center 청크의 블록을 순회한다.
+2. 각 블록의 렌더 가능 여부와 면 노출 여부를 판단한다.
+3. 경계 면은 neighbor snapshot을 함께 참조해 판정한다.
+4. 결과를 `CpuMesh`로 모아 반환한다.
+
+## 공개 인터페이스
+
+```rust
+meshing::build_chunk_mesh(
+    center: &ChunkSnapshot,
+    neighbors: NeighborChunks,
+    registry: &BlockRegistry,
+) -> CpuMesh
+```
+
+## 불변식
+
+- meshing은 입력 snapshot을 mutate하지 않는다.
+- 청크 경계 face 판정은 이웃 청크 존재 여부를 올바르게 반영해야 한다.
+- meshing 결과는 renderer upload용 CPU 데이터일 뿐, GPU 리소스를 직접 만들지 않는다.
+
+## 관련 모듈
+
+- `chunk.md`
+- `query.md`
+- `jobs`
+- `renderer`
+
+## 메모
+
+- `CpuMesh`의 최종 타입 소유 위치는 아직 열어두지만, world 문서에서는 "원본 월드 데이터에서 만든 CPU-side mesh 결과"라는 의미만 고정한다.
