@@ -43,6 +43,11 @@
 6. renderer upload/render
 7. platform.end_frame()
 
+## 현재 구현 메모
+
+- 현재 최소 vertical slice에서는 platform snapshot을 읽고 frame counter를 증가시키는 수준까지만 구현되어 있다
+- bridge / ecs / jobs / renderer 연결은 이후 frame.rs 안에서 단계적으로 확장한다
+
 ## 불변식
 
 - platform은 raw state만 제공하고 gameplay 의미는 ecs가 만든다
