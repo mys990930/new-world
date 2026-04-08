@@ -239,12 +239,12 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         ];
 
         let face_specs = [
-            ([4_u32, 5, 6, 7], tint_color(cube.color, 1.08)),
-            ([1_u32, 0, 3, 2], tint_color(cube.color, 0.60)),
-            ([0_u32, 4, 7, 3], tint_color(cube.color, 0.72)),
-            ([5_u32, 1, 2, 6], tint_color(cube.color, 0.88)),
-            ([3_u32, 7, 6, 2], tint_color(cube.color, 1.22)),
-            ([0_u32, 1, 5, 4], tint_color(cube.color, 0.52)),
+            ([4_u32, 5, 6, 7], shade_face(cube.color, 0.70, [0.08, 0.14, 0.22, 1.0])),
+            ([1_u32, 0, 3, 2], shade_face(cube.color, 0.42, [0.02, 0.04, 0.10, 1.0])),
+            ([0_u32, 4, 7, 3], shade_face(cube.color, 0.55, [0.04, 0.08, 0.16, 1.0])),
+            ([5_u32, 1, 2, 6], shade_face(cube.color, 0.90, [0.12, 0.18, 0.28, 1.0])),
+            ([3_u32, 7, 6, 2], shade_face(cube.color, 1.25, [0.92, 0.97, 1.0, 1.0])),
+            ([0_u32, 1, 5, 4], shade_face(cube.color, 0.30, [0.01, 0.02, 0.05, 1.0])),
         ];
 
         for (corner_indices, face_color) in face_specs {
@@ -270,11 +270,11 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
     Some((vertices, indices))
 }
 
-fn tint_color(color: [f32; 4], brightness: f32) -> [f32; 4] {
+fn shade_face(color: [f32; 4], brightness: f32, accent: [f32; 4]) -> [f32; 4] {
     [
-        (color[0] * brightness).clamp(0.0, 1.0),
-        (color[1] * brightness).clamp(0.0, 1.0),
-        (color[2] * brightness).clamp(0.0, 1.0),
+        ((color[0] * brightness) * 0.75 + accent[0] * 0.25).clamp(0.0, 1.0),
+        ((color[1] * brightness) * 0.75 + accent[1] * 0.25).clamp(0.0, 1.0),
+        ((color[2] * brightness) * 0.75 + accent[2] * 0.25).clamp(0.0, 1.0),
         color[3],
     ]
 }

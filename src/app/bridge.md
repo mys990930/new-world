@@ -56,3 +56,4 @@
   - `ecs -> AppRenderFrameData`
 - `AppRenderFrameData`는 현재 `camera`, `visible_chunks`, `cube_instances`를 가진다.
 - local player body-center transform은 플레이어 큐브 한 개의 `RenderCubeInstance`로 번역된다.
+- 현재 prototype은 플레이어 큐브를 디버그 가시성 우선으로 조금 크게 그리고, camera distance도 가깝게 둔다.

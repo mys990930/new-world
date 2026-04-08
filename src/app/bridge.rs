@@ -56,7 +56,7 @@ impl GameApp {
             .map(|transform| {
                 vec![RenderCubeInstance {
                     center: transform.translation,
-                    half_extents: [0.5, 0.5, 0.5],
+                    half_extents: [1.0, 1.0, 1.0],
                     color: [0.78, 0.88, 0.98, 1.0],
                 }]
             })
@@ -75,7 +75,8 @@ fn axis(negative: bool, positive: bool) -> i8 {
 }
 
 fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
-    const CAMERA_DISTANCE: f32 = 24.0;
+    // Keep the prototype camera close enough that the player cube is easy to inspect.
+    const CAMERA_DISTANCE: f32 = 10.0;
     const CAMERA_UP_BASE: [f32; 3] = [-1.0, 2.4, 1.0];
     const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 
