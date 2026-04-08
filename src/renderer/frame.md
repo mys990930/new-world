@@ -57,5 +57,5 @@
 
 ## 메모
 
-- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 기본 상태에서는 face tint만으로 입체감을 읽히게 한다.
+- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 기본 상태에서는 강한 per-face debug tint만으로 입체감을 읽히게 한다.
 - visible edge overlay는 현재 `RenderConfig.debug.debug_overlay`가 켜진 경우에만 그린다.

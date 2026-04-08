@@ -301,3 +301,63 @@ fn transpose_matrix4(matrix: Matrix4) -> Matrix4 {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transposed_uniform_matches_row_vector_cpu_transform() {
+        let camera = RenderCameraState {
+            eye: [10.392304, 10.392304, -10.392304],
+            target: [0.0, 0.5, 0.0],
+            up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+            aspect_override: Some(16.0 / 9.0),
+            projection_mode: RenderProjectionMode::Orthographic {
+                vertical_world_size: 5.0,
+            },
+            basis_override: Some(RenderViewBasis {
+                right: [std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
+                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+                forward: [
+                    -0.5,
+                    -std::f32::consts::FRAC_1_SQRT_2,
+                    0.5,
+                ],
+            }),
+        };
+        let projection = CameraProjectionConfig {
+            vertical_fov_radians: std::f32::consts::FRAC_PI_3,
+            near_plane: 0.1,
+            far_plane: 1000.0,
+        };
+
+        let mut gpu = CameraGpuState::default();
+        gpu.update(&camera, &projection, 1600, 900, 0).unwrap();
+        let uniform = CameraUniform::from_view_projection(gpu.view_projection);
+        let point = [0.5, 1.0, 0.5, 1.0];
+
+        let cpu_clip = multiply_row_vector(point, gpu.view_projection);
+        let gpu_clip = multiply_column_vector(uniform.view_projection, point);
+
+        for index in 0..4 {
+            assert!((cpu_clip[index] - gpu_clip[index]).abs() < 1e-5);
+        }
+    }
+
+    fn multiply_row_vector(vector: [f32; 4], matrix: Matrix4) -> [f32; 4] {
+        let mut result = [0.0; 4];
+        for column in 0..4 {
+            result[column] = (0..4).map(|index| vector[index] * matrix[index][column]).sum();
+        }
+        result
+    }
+
+    fn multiply_column_vector(matrix: Matrix4, vector: [f32; 4]) -> [f32; 4] {
+        let mut result = [0.0; 4];
+        for row in 0..4 {
+            result[row] = (0..4).map(|index| matrix[row][index] * vector[index]).sum();
+        }
+        result
+    }
+}

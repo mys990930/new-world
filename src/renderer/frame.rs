@@ -288,12 +288,12 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         ];
 
         let face_specs = [
-            ([4_u32, 5, 6, 7], [0.18, 0.26, 0.36, cube.color[3]]),
-            ([1_u32, 0, 3, 2], [0.24, 0.34, 0.46, cube.color[3]]),
-            ([0_u32, 4, 7, 3], [0.38, 0.54, 0.72, cube.color[3]]),
-            ([5_u32, 1, 2, 6], [0.56, 0.74, 0.92, cube.color[3]]),
-            ([3_u32, 7, 6, 2], [0.90, 0.97, 1.0, cube.color[3]]),
-            ([0_u32, 1, 5, 4], [0.10, 0.14, 0.20, cube.color[3]]),
+            ([4_u32, 5, 6, 7], [0.12, 0.74, 0.34, cube.color[3]]),
+            ([1_u32, 0, 3, 2], [0.10, 0.28, 0.76, cube.color[3]]),
+            ([0_u32, 4, 7, 3], [0.78, 0.18, 0.64, cube.color[3]]),
+            ([5_u32, 1, 2, 6], [0.24, 0.64, 0.96, cube.color[3]]),
+            ([3_u32, 7, 6, 2], [0.96, 0.22, 0.22, cube.color[3]]),
+            ([0_u32, 1, 5, 4], [0.18, 0.18, 0.22, cube.color[3]]),
         ];
 
         for (corner_indices, face_color) in face_specs {

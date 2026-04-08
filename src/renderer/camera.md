@@ -50,5 +50,5 @@
 
 ## Notes
 
-- The current prototype uses orthographic quarter-view rendering through an explicit basis override
+- The current prototype uses orthographic 45-degree quarter-view rendering through an explicit basis override
 - This keeps camera rules outside the renderer while still giving the renderer deterministic `eye / target / basis` data

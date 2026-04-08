@@ -127,3 +127,19 @@ impl Renderer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mesh_vertex_layout_matches_repr_c_memory() {
+        let layout = MeshVertex::vertex_buffer_layout();
+
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 28);
+        assert_eq!(layout.array_stride, 28);
+        assert_eq!(layout.attributes.len(), 2);
+        assert_eq!(layout.attributes[0].offset, 0);
+        assert_eq!(layout.attributes[1].offset, 12);
+    }
+}

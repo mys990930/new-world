@@ -60,4 +60,4 @@
   - `ecs -> AppRenderFrameData`
 - `AppRenderFrameData` currently carries `camera`, `visible_chunks`, and `cube_instances`
 - The local player body-center transform is translated into a single `RenderCubeInstance`
-- The current prototype uses an explicit 2:1 dimetric quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose
+- The current prototype uses an explicit 45-degree downward quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose

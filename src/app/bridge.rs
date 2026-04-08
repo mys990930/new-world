@@ -79,9 +79,10 @@ fn axis(negative: bool, positive: bool) -> i8 {
 fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
     const CAMERA_DISTANCE: f32 = 18.0;
     const ORTHOGRAPHIC_VERTICAL_SIZE: f32 = 5.0;
-    // A 2:1 dimetric quarter-view basis keeps the block silhouette closer to the
-    // familiar voxel look than a steeper orbit basis.
-    const CAMERA_UP_BASE: [f32; 3] = [-1.0, 2.0, 1.0];
+    // The current prototype uses a 45-degree downward pitch and a 45-degree yaw-like
+    // quarter-view basis so the top face reads as a diamond whose corners point
+    // toward screen up/down/left/right.
+    const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
     const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 
     let right = normalize3(rotate_y_quarter_turns(CAMERA_RIGHT_BASE, quarter_turns));
@@ -162,6 +163,49 @@ mod tests {
         assert!(north.1 > 0.0);
         assert!(up.0.abs() < 1e-5);
         assert!(up.1 > 0.0);
+    }
+
+    #[test]
+    fn top_face_projects_as_cardinal_diamond() {
+        let camera = build_quarter_view_camera([0.0, 0.5, 0.0], 0);
+        let basis = camera.basis_override.expect("quarter-view basis should exist");
+
+        let projected = [
+            project_to_screen_axes([-0.5, 1.0, -0.5], basis),
+            project_to_screen_axes([0.5, 1.0, -0.5], basis),
+            project_to_screen_axes([0.5, 1.0, 0.5], basis),
+            project_to_screen_axes([-0.5, 1.0, 0.5], basis),
+        ];
+
+        let left = projected
+            .iter()
+            .min_by(|left, right| left.0.total_cmp(&right.0))
+            .copied()
+            .unwrap();
+        let right = projected
+            .iter()
+            .max_by(|left, right| left.0.total_cmp(&right.0))
+            .copied()
+            .unwrap();
+        let top = projected
+            .iter()
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+            .copied()
+            .unwrap();
+        let bottom = projected
+            .iter()
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .copied()
+            .unwrap();
+
+        assert!(left.0 < 0.0);
+        assert!(right.0 > 0.0);
+        assert!(top.1 > 0.0);
+        assert!(bottom.1 > 0.0);
+        assert!(left.1 > bottom.1);
+        assert!(right.1 > bottom.1);
+        assert!(top.0.abs() < 1e-5);
+        assert!(bottom.0.abs() < 1e-5);
     }
 
     fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {
