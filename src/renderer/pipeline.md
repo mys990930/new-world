@@ -68,4 +68,4 @@
 
 - 초기에 opaque voxel chunk pipeline 하나만 있어도 문서 구조는 분리해두는 게 좋다
 - shader hot-reload가 필요해지면 `pipeline.rs` 또는 별도 `shader.rs` 분리를 고려할 수 있다
-
+- 현재 1차 구현의 `PipelineSet`은 실제 shader / `wgpu::RenderPipeline` 핸들 대신, 샘플 수와 재구성 generation을 담는 metadata 구조다

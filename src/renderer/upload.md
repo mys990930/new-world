@@ -59,4 +59,4 @@
 
 - 업로드량이 커지면 staging belt, batched upload, frame budget 정책을 추가할 수 있다
 - texture / material 업로드가 생기면 `mesh_upload.rs`, `texture_upload.rs`로 다시 분리 가능하다
-
+- 현재 1차 구현의 `GpuChunkMesh`는 실제 GPU buffer 핸들이 아니라, 검증된 mesh count / bounds / upload generation metadata를 담는다

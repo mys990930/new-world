@@ -63,4 +63,4 @@
 
 - orthographic / perspective 전환이 필요해지면 `RenderCameraState`에 mode를 추가할 수 있다
 - shadow cascade 같은 확장은 별도 카메라 계열 모듈로 분리 가능하다
-
+- 현재 1차 구현은 GPU buffer 업로드 대신 CPU-side matrix cache(`view`, `projection`, `view_projection`)까지만 계산한다

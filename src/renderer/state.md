@@ -14,30 +14,32 @@
 - camera gpu state
 - config
 - optional frame stats
+- frame index
 
 ### SurfaceState
-- device
-- queue
-- surface
-- surface config
-- depth texture / depth view
-- current drawable size
+- surface snapshot
+- configured / minimized state
+- resize generation
+- present generation
 
 ### RenderWorld
 - chunk coord -> `GpuChunkMesh` map
-- optional material / texture handle cache
-- optional pending destroy list
+- uploaded / removed counters
+- mesh generation counter
 
 ### GpuChunkMesh
-- vertex buffer
-- index buffer
+- vertex count
 - index count
-- optional bounds / vertex layout metadata
+- triangle count
+- optional bounds
+- upload generation
 
 ### CameraGpuState
-- camera uniform buffer
-- camera bind group
-- cached projection inputs
+- view matrix
+- projection matrix
+- view_projection matrix
+- cached aspect ratio
+- last uploaded frame
 
 ### RenderStats
 - draw_call_count
@@ -90,4 +92,4 @@
 
 - material system이 커지면 `RenderWorld`를 `mesh_cache.rs`, `material_cache.rs`로 다시 쪼갤 수 있다
 - 현재 단계에서는 chunk mesh 렌더링 중심의 최소 상태만 먼저 가정한다
-
+- 현재 1차 구현에서 `SurfaceState`와 `GpuChunkMesh`는 실제 GPU 핸들이 아니라 backend-less bookkeeping data를 저장한다

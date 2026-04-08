@@ -2,20 +2,21 @@
 
 ## 역할
 
-- renderer 초기화의 GPU context 부분을 담당한다
-- surface / device / queue lifecycle과 resize 처리를 관리한다
+- renderer 초기화의 surface-facing state를 담당한다
+- drawable size / configured 상태 / resize lifecycle을 관리한다
 
 ## 책임
 
-- instance / surface / adapter / device / queue 생성
-- surface capability 조회와 config 선택
-- 초기 surface configure
-- resize 시 surface reconfigure
-- depth texture 생성 / 재생성
+- `RenderSurfaceTarget` trait 경계 제공
+- drawable size snapshot 획득
+- 초기 configured / minimized 상태 판정
+- resize 시 surface state 재구성
+- resize / present generation bookkeeping
 - zero-sized window / minimized 상태에 대한 안전 처리
 
 ## 비책임
 
+- 실제 `wgpu` instance / surface / device / queue 생성
 - shader module 생성
 - render pipeline layout 구성
 - CPU mesh 업로드
@@ -24,33 +25,31 @@
 
 ## 소유 데이터
 
-- window / surface 생성 입력
-- adapter capability snapshot
-- surface config
-- depth texture / depth view
-- optional surface recreate 필요 플래그
+- `RenderSurfaceTarget`
+- `SurfaceSnapshot`
+- configured / minimized 상태
+- resize generation
+- present generation
 
 ## 처리 흐름
 
-1. platform window handle에서 surface 생성 입력을 받는다
-2. adapter / device / queue를 초기화한다
-3. capability를 보고 surface format / present mode / alpha mode를 선택한다
-4. surface.configure(...)를 호출한다
-5. drawable size에 맞는 depth texture를 만든다
-6. resize 이벤트 시 width / height를 검증한 뒤 surface / depth를 재설정한다
+1. `RenderSurfaceTarget`에서 drawable size를 읽는다
+2. `SurfaceSnapshot`과 configured 상태를 초기화한다
+3. `Renderer` 생성 시 pipeline / camera가 참조할 surface state를 제공한다
+4. resize 이벤트 시 width / height를 반영한다
+5. present 성공 시 present generation을 증가시킨다
 
 ## 출력
 
 - `SurfaceState`
-- resize 후 일관된 drawable size / depth 상태
-- recoverable surface error를 상위로 전달할 수 있는 상태 정보
+- resize 후 일관된 drawable size / configured 상태
+- 이후 실제 backend가 붙을 수 있는 surface lifecycle 슬롯
 
 ## 불변식
 
-- surface / device / queue는 서로 호환 가능한 조합이어야 한다
 - width 또는 height가 0인 동안에는 무의미한 configure / render를 강제하지 않는다
-- surface format이 바뀌면 pipeline 호환성 재검토가 필요하다
-- platform-specific window 세부사항은 surface 경계 안에 캡슐화한다
+- platform-specific window 세부사항은 `RenderSurfaceTarget` 경계 안에 캡슐화한다
+- resize bookkeeping과 camera/pipeline 재동기화 시점은 deterministic해야 한다
 
 ## 관련 모듈
 
@@ -63,6 +62,5 @@
 
 ## 메모
 
-- device lost / surface lost recovery를 어디까지 자동으로 처리할지는 이후 정책 확정 필요
+- 현재 1차 구현은 실제 `wgpu` surface/device/queue를 만들지 않고, 다음 단계에서 그 자리에 실제 backend를 붙일 수 있게 상태 경계만 먼저 만든다
 - 최소 구현에서는 단일 window / 단일 surface만 가정한다
-

@@ -53,7 +53,7 @@
 ### 인터페이스
 
 ```rust
-Renderer::new(window: &PlatformWindowHandle, config: RenderConfig) -> Result<Renderer, RenderInitError>
+Renderer::new(target: &impl RenderSurfaceTarget, config: RenderConfig) -> Result<Renderer, RenderInitError>
 Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 Renderer::apply_upload(request: RenderUploadRequest) -> Result<(), RenderUploadError>
@@ -89,6 +89,12 @@ NOT:
 4. CPU mesh cache와 world source of truth는 분리된다
 5. renderer는 render-ready DTO만 읽고, 도메인 원본 상태를 직접 소유하지 않는다
 
+### 현재 구현 메모
+
+- 현재 1차 구현은 `src/renderer/*.rs` 내부에서만 닫힌 최소 skeleton이다
+- 실제 `wgpu` device / queue / surface 연결은 아직 넣지 않았고, surface snapshot / camera matrix / upload bookkeeping / render stats까지만 구현했다
+- `Renderer::render(...)`는 visible chunk 중 GPU cache에 존재하는 mesh 수를 집계하고, 다음 단계에서 실제 backend를 붙일 자리를 유지한다
+
 ### 하위 모듈 목록 및 역할
 
 - mod.rs: public facade, re-export, renderer public API entry
@@ -99,4 +105,3 @@ NOT:
 - camera.rs: `RenderCameraState` -> `CameraGpuState` 변환 및 uniform upload
 - upload.rs: CPU mesh / render asset 업로드, 교체, 제거 경로
 - frame.rs: frame render pass encode, submit, present, surface error 처리
-

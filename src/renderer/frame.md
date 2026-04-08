@@ -47,7 +47,7 @@
 
 ## 현재 구현 메모
 
-- 현재 저장소에서는 renderer 코드가 아직 연결되지 않았고, 이 문서는 이후 `frame.rs`가 가져갈 책임을 먼저 정의한다
+- 현재 저장소의 `frame.rs`는 실제 command encoder / submit / present 대신, camera 갱신과 visible mesh 집계 및 `RenderStats` 생성까지만 수행한다
 
 ## 불변식
 
