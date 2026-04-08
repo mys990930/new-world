@@ -2,74 +2,57 @@
 
 ## 역할
 
-- frame update 파이프라인을 정의하고 실행한다
+- frame update pipeline을 정의하고 실행한다.
 
 ## 책임
 
-- platform frame begin/end 호출
-- OS/window/input 이벤트 수집 단계 실행
-- platform 상태를 게임 쪽으로 연결
-- ecs frame phase 실행
-- jobs 결과 수거
-- renderer upload/render 호출
+- platform snapshot을 ECS 입력으로 bridge
+- ECS pre/update/post 실행
+- discrete command 로그 확인
 
 ## 비책임
 
-- fixed timestep accumulator 관리
-- simulation 알고리즘 실행
-- world 내부 데이터 정합성 구현
-- raw input 저장
+- frame cap 계산
+- fixed timestep accumulator
+- simulation 실행
+- renderer draw
 
 ## 입력
 
-- GameApp
-- platform snapshot
-- frame dt
-- jobs completion
-- renderer pending upload state
+- 누적된 platform snapshot
+- 현재 frame 시점의 app timing state
 
 ## 출력
 
-- 갱신된 ecs/world/jobs/renderer 상태
-- 필요 시 world 변경 요청, jobs 요청, render 요청 생성
+- 갱신된 ECS world/resource state
+- discrete gameplay command 로그
 
 ## 처리 흐름
 
-1. platform.begin_frame()
-2. platform 이벤트 수집
-3. bridge를 통해 platform raw state를 ecs resource로 반영
-4. ecs pre/update/post 실행
-5. jobs 완료 결과 수거 및 반영
-6. renderer upload/render
-7. platform.end_frame()
-
-## 현재 구현 메모
-
-- 현재 최소 vertical slice에서는 platform snapshot을 bridge로 ecs resource에 반영하고, ecs pre/update/post를 실행한 뒤 나온 command를 로그로 확인한다
-- jobs / renderer 연결은 이후 frame.rs 안에서 단계적으로 확장한다
+1. `bridge_platform_to_ecs()`
+2. `ecs.run_pre_update()`
+3. `ecs.run_update()`
+4. `ecs.run_post_update()`
+5. 필요 시 discrete command를 drain해서 로그로 확인
 
 ## 불변식
 
-- platform은 raw state만 제공하고 gameplay 의미는 ecs가 만든다
-- jobs는 frame 안에서 요청/결과 수거만 수행한다
-- renderer는 world source of truth가 아니다
-- frame 단계에서 fixed simulation 규칙을 직접 계산하지 않는다
+- frame phase는 `pre -> update -> post` 순서를 유지한다.
+- continuous movement는 더 이상 `PlayerCommand`로 로그되지 않는다.
+- 현재 이동 의도는 ECS 내부 `MoveWorldIntent` resource로 유지된다.
 
 ## 비책임
 
 - fixed tick 반복
-- close 후 flush/drain 처리
-- 시스템 상세 등록 규칙 관리
+- close / flush 처리
+- render upload / draw
 
 ## 관련 모듈
 
-- bridge.rs
-- runner.rs
-- platform
-- ecs
-- jobs
-- renderer
+- `bridge.rs`
+- `runner.rs`
+- `ecs`
 
 ## 메모
 
-- jobs 결과 수거 시점을 ecs post 뒤로 둘지, 별도 apply phase를 둘지는 이후 확정 가능
+- 현재 최소 구현에서 app 로그는 `PrimaryAction`, `PlaceBlock`, `RotateCamera`, `RecenterCamera` 같은 discrete command만 대상으로 본다.

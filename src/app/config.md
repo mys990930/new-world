@@ -2,64 +2,52 @@
 
 ## 역할
 
-- app이 사용하는 설정 구조를 정의한다
-- 런타임 정책값을 코드와 분리한다
+- app가 사용하는 실행 정책을 typed config로 정의한다.
+- 프레임 타이밍 정책을 코드 흐름과 분리한다.
 
 ## 소유 데이터
 
 ### AppConfig
-- window / platform 관련 설정
-- renderer 초기화 설정
-- world / jobs / ecs / simulation 초기 설정
-- debug option
-- save/load 관련 상위 정책
+- window title
+- window width / height
+- timing config
 
 ### TimingConfig
-- target_frame_rate (optional)
-- fixed_dt
-- max_fixed_steps_per_frame
-- time_scale (optional)
-
-### SimulationConfig
-- subsystem enable/disable
-- simulation region policy
-- tick budget 관련 설정
+- `target_frame_rate: Option<u32>`
 
 ## 입력
 
-- 설정 파일 로드 결과
-- CLI/환경변수/디버그 오버라이드 값
 - 하드코딩 기본값
+- 향후 config file / CLI / 환경변수 결과
 
 ## 출력
 
-- bootstrap 단계에서 사용할 typed config
-- runner / fixed 단계에서 사용할 timing policy
+- bootstrap 단계에서 쓰이는 typed config
+- runner가 참고하는 frame timing policy
 
 ## 상태 전이 규칙
 
-- config는 로드 후 immutable하게 유지하는 것을 기본으로 한다
-- 런타임 중 변경 가능한 옵션이 필요하면 별도 runtime settings로 분리한다
+- bootstrap 이후 config는 immutable로 취급한다.
+- runtime 중 자주 바뀌는 값은 config가 아니라 별도 runtime state로 둔다.
 
 ## 불변식
 
-- fixed_dt는 0보다 커야 한다
-- max_fixed_steps_per_frame는 무한 catch-up을 막을 수 있어야 한다
-- config는 도메인 상태가 아니라 실행 정책이다
+- `target_frame_rate = Some(n)`이면 `n > 0`인 값만 유효하다.
+- `target_frame_rate = None`이면 frame cap 없이 poll cadence로 동작할 수 있다.
 
 ## 비책임
 
-- 설정 파일 파싱 구현 세부
-- 설정 검증 실패 후 사용자 UI 처리
-- 실제 시스템 초기화
+- config file 파싱
+- validation error UI
+- 실제 event loop control flow 구현
 
 ## 관련 모듈
 
-- bootstrap.rs가 config를 소비
-- fixed.rs가 TimingConfig를 사용
-- runner.rs가 종료/루프 정책 일부를 참조할 수 있음
+- `bootstrap.rs`
+- `state.rs`
+- `runner.rs`
 
 ## 메모
 
-- dev/prod preset 분리 가능
-- 나중에 network 설정이 들어오면 별도 NetworkConfig 추가 가능
+- 현재 최소 구현에서 실제로 연결된 timing 값은 `target_frame_rate` 하나다.
+- 기본값은 `Some(60)`이다.

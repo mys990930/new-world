@@ -26,13 +26,6 @@ pub(crate) fn interpret_input_system(
         return;
     }
 
-    if input.move_screen_x != 0 || input.move_screen_y != 0 {
-        command_buffer.0.push(PlayerCommand::MoveScreen {
-            x: input.move_screen_x,
-            y: input.move_screen_y,
-        });
-    }
-
     if input.primary_just_pressed {
         command_buffer.0.push(PlayerCommand::PrimaryAction);
     }

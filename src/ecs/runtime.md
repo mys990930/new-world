@@ -3,43 +3,50 @@
 ## 역할
 
 - ECS 런타임의 소유자
-- `bevy_ecs::World`와 각 frame/fixed schedule을 보관하고 실행한다
+- `bevy_ecs::World`와 frame/fixed schedule을 보관하고 실행한다
 
 ## 소유 데이터
 
 ### EcsRuntime
-- `bevy_ecs::World`
-- pre_update schedule
-- update schedule
-- post_update schedule
-- fixed_update schedule
-- 기본 resource 등록 규칙
+- `World`
+- `pre_update`
+- `update`
+- `post_update`
+- `fixed_update`
 
 ## 입력
 
-- bootstrap 시점의 초기 resource / component / system 등록
-- app이 주입한 frame 입력 resource
-- app이 호출하는 `run_pre_update`, `run_update`, `run_post_update`, `run_fixed_update`
+- bootstrap 시점의 초기 resource / system 등록
+- app가 주입하는 `EcsInputSnapshot`
+- app가 호출하는 phase 실행 함수
 
 ## 출력
 
 - 갱신된 ECS world/resource 상태
-- command buffer / simulation request / jobs request 같은 후속 단계 입력
+- discrete command buffer
+- `MoveWorldIntent`
 
 ## 처리 흐름
 
-1. runtime이 `World`와 schedule들을 초기화한다
-2. 최소 필수 resource를 등록한다
-3. 각 phase에 맞는 시스템을 schedule에 등록한다
-4. app이 frame/fixed 단계에 맞춰 schedule 실행을 요청한다
-5. 실행 결과를 상위 계층이 읽거나 drain한다
+1. runtime이 `World`와 schedule을 초기화한다.
+2. 최소 필수 resource를 등록한다.
+3. pre/update/post/fixed 각 phase에 시스템을 등록한다.
+4. app가 각 phase를 호출한다.
 
 ## 현재 구현 메모
 
-- 현재 구현은 `EcsInputSnapshot`, `PlayerCommandBuffer`, `LocalPlayerEntity`를 등록하고, command buffer clear + input 해석 시스템만 연결한다
-- bootstrap 시점에 호출 가능한 기본 player spawn helper를 제공한다
+- 현재 등록되는 기본 resource는:
+  - `EcsInputSnapshot`
+  - `PlayerCommandBuffer`
+  - `MoveWorldIntent`
+  - `CameraState`
+  - `LocalPlayerEntity`
+- 현재 frame update 순서는:
+  - pre: command buffer clear, camera one-shot impulse clear
+  - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영
+- bootstrap 시점에 기본 player spawn helper를 제공한다.
 
-## 외부 인터페이스
+## 공개 인터페이스
 
 ```rust
 EcsRuntime::new() -> EcsRuntime
@@ -54,37 +61,38 @@ EcsRuntime::run_fixed_update()
 
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
+EcsRuntime::move_world_intent() -> MoveWorldIntent
 ```
 
 ## 의존성
 
-- bevy_ecs
-- input.rs
-- command.rs
-- 이후 player.rs / camera.rs / selection.rs / chunk.rs / jobs.rs / fixed.rs
+- `bevy_ecs`
+- `input.rs`
+- `command.rs`
+- `camera.rs`
+- `player.rs`
 
 ## 불변식
 
-- `bevy_ecs` 구체 타입은 runtime 내부에 캡슐화된다
-- phase 순서와 schedule ownership은 runtime이 가진다
-- runtime은 실행 순서를 소유하지만 gameplay 의미 자체를 만들지는 않는다
-- frame phase와 fixed phase는 분리되어 유지된다
+- runtime은 phase 순서와 schedule ownership을 가진다.
+- gameplay 해석 자체는 하위 시스템이 담당한다.
+- frame phase와 fixed phase는 분리 유지한다.
 
 ## 비책임
 
-- raw OS 입력 해석
+- raw OS input 해석
 - world 원본 데이터 소유
 - jobs 실행
-- renderer draw 호출
-- fixed timestep accumulator 관리
+- renderer draw
 
 ## 관련 모듈
 
-- mod.rs가 외부에 facade를 제공
-- input.rs / command.rs / player.rs / camera.rs / selection.rs / chunk.rs / jobs.rs / fixed.rs 시스템을 조립한다
-- app이 runtime을 호출해 frame/fixed 순서를 오케스트레이션한다
+- `mod.rs`
+- `input.rs`
+- `command.rs`
+- `camera.rs`
+- `player.rs`
 
 ## 메모
 
-- 시스템 등록이 많아지면 phase별 하위 registration 함수로 다시 분리할 수 있다
-- startup phase가 필요해지면 runtime 내부 또는 app bootstrap 단계와의 경계를 다시 잡아야 한다
+- 현재 `fixed_update`는 문서상 슬롯만 있고 gameplay 내용은 아직 비어 있다.

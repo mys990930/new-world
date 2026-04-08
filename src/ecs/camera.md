@@ -2,73 +2,65 @@
 
 ## 역할
 
-- 게임 카메라의 gameplay 상태를 정의한다
-- 4방향 쿼터뷰 회전, 느슨한 추적, 리센터 동작을 관리한다
+- gameplay 관점의 카메라 상태를 정의한다.
+- 4방향 쿼터뷰 회전과 recenter 관련 신호를 관리한다.
 
 ## 소유 데이터
 
 ### CameraState
-- current quarter-view direction
-- follow target entity 또는 target position
-- deadzone settings
-- movement bias offset settings
-- follow bias ratio
-- current follow offset / smoothing state
-- recenter in-progress state
-- recenter speed policy
+- `quarter_turns`
+- `recenter_boost_requested`
 
 ## 입력
 
-- `RotateCamera` command
-- `RecenterCamera` command
-- 플레이어 transform / velocity
-- 플레이어 이동 intent / 최근 진행 방향
-- 좌/우클릭 상호작용 트리거
-- 선택/가림 처리용 현재 camera orientation
+- `RotateCamera`
+- `RecenterCamera`
+- `PrimaryAction`
+- `PlaceBlock`
+- 향후 player transform / velocity / move intent
 
 ## 출력
 
-- 현재 카메라 방향 상태
-- follow target 기준 카메라 위치/오프셋
-- bias와 deadzone이 반영된 camera focus state
-- selection / chunk / renderer bridge가 읽을 카메라 snapshot
+- 현재 카메라 회전 상태
+- `MoveWorldIntent` 계산에 필요한 orientation basis
+- 향후 renderer / selection / chunk가 참조할 camera snapshot
 
 ## 상태 전이 규칙
 
-- 카메라는 4방향 쿼터뷰만 제공한다
-- `Q/E`는 항상 90도 단위 회전만 허용한다
-- `WASD`는 플레이어 이동용 입력이며, 카메라는 그 입력에 직접 1:1로 묶여 움직이지 않는다
-- 카메라는 플레이어를 느슨하게 추적한다
-- 진행 방향 쪽에 더 많은 시야를 보여주도록, 플레이어는 화면상 진행 방향의 대략 `35%` 지점에 있고 나머지 `65%`는 전방 시야로 남기도록 bias를 줄 수 있다
-- 플레이어가 이동 중일 때는 진행 방향 bias를 유지한다
-- 플레이어가 멈추면 카메라는 천천히 center 쪽으로 복귀한다
-- `Y`는 플레이어 기준 빠른 recenter 요청이다
-- 좌/우클릭 상호작용 시에도 일반 정지 상태보다 더 빠른 recenter를 허용할 수 있다
-- 빠른 recenter는 지속 모드가 아니라, 해당 입력 시점에 적용되는 1회성 boost다
-- edge scroll은 지원하지 않는다
+- 카메라는 4방향 쿼터뷰 preset만 제공한다.
+- `Q/E`는 항상 90도 단위 회전이다.
+- 같은 프레임의 회전은 그 프레임 이동 intent 계산 전에 적용된다.
+- `Y`는 빠른 recenter 1회성 boost 신호다.
+- `좌클릭`, `우클릭` 상호작용도 빠른 recenter 1회성 boost 신호를 만든다.
+- boost는 지속 모드가 아니라 해당 프레임에만 의미를 가진다.
+- slow tracking, deadzone, 35/65 진행 방향 bias는 향후 camera follow 구현에서 확장한다.
+
+## 좌표계 규칙
+
+- 창 기준 좌표계와 world 기준 좌표계는 45도 어긋나 보인다.
+- 기본 쿼터뷰에서:
+  - 화면 우측 상단 = world north
+  - 화면 우측 하단 = world east
+- 따라서 player 이동 해석은 camera orientation을 거친 world axis 변환이 필요하다.
 
 ## 불변식
 
-- 카메라는 RTS식 자유 팬이 아니라 편안한 추적 카메라다
-- 회전 상태는 연속 yaw가 아니라 4방향 preset 상태다
-- camera 모듈은 renderer의 GPU matrix 세부 구현을 알 필요가 없다
-- camera 상태는 selection과 `MoveScreen -> MoveWorldIntent` 변환에 결정적으로 사용될 수 있어야 한다
+- camera 모듈은 renderer의 GPU matrix를 직접 계산하지 않는다.
+- camera orientation은 selection과 movement intent 변환의 기준이 된다.
 
 ## 비책임
 
 - raw input 수집
-- draw matrix 업로드
-- world occlusion mesh 처리
-- 블록 파괴/배치 적용
+- world edit apply
+- renderer draw matrix 업로드
 
 ## 관련 모듈
 
-- player.rs의 플레이어 상태를 따라간다
-- selection.rs가 카메라 방향/위치를 기준으로 타겟을 판정한다
-- app bridge 또는 renderer bridge가 카메라 snapshot을 외부 모듈에 전달할 수 있다
+- `command.rs`
+- `player.rs`
+- `selection.rs`
+- `chunk.rs`
 
 ## 메모
 
-- 화면 흔들림이나 줌 단계가 필요해지면 camera 상태에 확장 필드를 추가할 수 있다
-- 추적/리센터 smoothing 파라미터는 프로토타입 중 조정 가능성이 높다
-- `35 / 65` 시야 bias 비율은 프로토타입 중 조금 조정될 수 있다
+- 현재 최소 구현은 `quarter_turns`와 `recenter_boost_requested`만 실제 코드로 연결되어 있다.

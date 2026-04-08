@@ -1,115 +1,83 @@
 ## ecs
+
 ### 역할
 
-- 게임 상태 전이의 중심
-- 지금 게임이 어떤 상태고, 이번 프레임에 어떻게 바뀌는가
-- **처음부터 멀티플레이를 고려해서 구조를 짤 것**
-    - input → command 생성 → command 소비 (apply) 구조로 반드시 짜자.
-    - 잘못된 구조: 좌클릭 들어오면 바로 world.set_block()
-    - 좋은 구조: 좌클릭 시 ecs가 BlockBreakCommand 생성 후, 싱글이라면 바로 적용해도 되지만 멀티라면 그 command를 서버로 전송
+- 게임 상태 전이의 중심 계층
+- 입력 상태를 gameplay 의미로 해석하고, 후속 world/simulation/jobs 요청의 기반 상태를 만든다
+- 멀티플레이를 고려한 command / intent 경계를 유지한다
 
 ### 책임
 
-- game status save
-- frame/tick level status transition
-- input interpretation (at a game’s viewpoint)
-- player/npc/item… dynamic entity management
-- chunk meta status management
-- event/command handling
-- *jobs* result handling →  add to game status
-- system execution order definition
-- active simulation region calculation
-- per subsystem sim request init
-- sim result conversion to following world/jobs/renderer jobs
+- frame/tick 수준 상태 전이
+- input interpretation
+- player 중심 entity/component 관리
+- camera 상태 관리
+- chunk meta 상태 관리
+- jobs 결과 반영
+- 시스템 실행 순서 정의
 
 ### 비책임
 
-- chunk direct i/o
-- procedural world generation algorithm
-- meshing algorithm
-- main loop bootstraping (app에서 할 것)
+- raw OS event 수집
+- world 원본 block 데이터 소유
+- chunk direct I/O
+- procedural generation
+- meshing 알고리즘
+- main loop bootstrap
 
 ### 데이터
 
 #### Resource
 
-- EcsInputSnapshot
-- PlayerCommandBuffer
-- MoveWorldIntent
-- WorldTime
-- SimClock
-- ActiveSimRegion
-- PendingSimulationResults
-- SimulationControlState
-- WeatherState
-- ChunkStates (interest, visible, loading, meshing, dirty_mesh, save_pending)
-- PendingJobResults
-- CameraState
-- SelectionState
-- DebugFlags
+- `EcsInputSnapshot`
+- `PlayerCommandBuffer`
+- `MoveWorldIntent`
+- `CameraState`
+- `LocalPlayerEntity`
+- `ChunkStates`
+- `SelectionState`
+- `PendingJobResults`
+- `ActiveSimRegion`
 
-#### Entity/Component
+#### Entity / Component
 
-- Player
-- Transform
-- Velocity
-- MoveTarget
-- Inventory
-- Health
-- AnimalAI
-- DroppedItem
-- InteractionTarget
+- `Player`
+- `Transform`
+- `Velocity`
+- `Inventory`
+- `Health`
+- `InteractionTarget`
 
-#### Event/Command
+#### Event / Command
 
-- MoveScreenCommand
-- MoveWorldIntent
-- PrimaryActionCommand / BlockPlaceRequest
-- RotateCameraRequest
-- CameraRecenterRequest
-- ChunkLoadRequested
-- ChunkMeshRequested
+- `PrimaryAction`
+- `PlaceBlock`
+- `RotateCamera`
+- `RecenterCamera`
 
 ### 유스케이스
 
-- raw input을 게임 의미로 변환
-    - WASD 화면 기준 이동 → 이동 명령
-    - 좌클릭 → 상호작용/파괴 요청
-    - 우클릭 → 블록 배치 요청
-    - Q/E → 카메라 90도 회전 요청
-    - Y → 카메라 리센터 요청
-- 플레이어/엔티티 상태 갱신
-    - `MoveScreen`을 camera 회전 상태 기준으로 `MoveWorldIntent`로 변환
-    - 같은 프레임에 회전과 이동이 함께 들어오면 회전 후 기준으로 변환
-    - 이동
-    - 속도/행동 갱신
-    - AI 상태 전이
+- raw input을 gameplay 의미로 해석
+  - `WASD`는 화면 기준 이동 상태로 입력된다
+  - `좌클릭`은 기본 행위 요청
+  - `우클릭`은 블록 배치 요청
+  - `Q/E`는 카메라 90도 회전 요청
+  - `Y`는 카메라 리센터 요청
+- 플레이어 이동 의도 생성
+  - 화면 기준 입력은 command가 아니라 frame input state로 유지한다
+  - `CameraState`의 quarter rotation을 먼저 반영한다
+  - 같은 프레임에 회전과 이동이 같이 오면 회전 후 기준으로 `MoveWorldIntent`를 계산한다
+  - `MoveWorldIntent`는 world 기준 이동 의미이며 멀티플레이 경계에도 적합하다
+- 쿼터뷰 좌표계 해석
+  - 창 기준 상하좌우와 월드 기준 동서남북은 일치하지 않는다
+  - 기본 쿼터뷰에서 화면 우측 상단이 북쪽, 화면 우측 하단이 동쪽이다
+  - 따라서 화면 기준 이동은 world axis로 투영한 뒤 사용한다
 - 카메라 상태 갱신
-    - 플레이어 이동 방향 기반 slow tracking
-    - 진행 방향 쪽 시야 bias 유지
-    - 정지 시 천천히 recenter
-    - `Y` 또는 좌/우클릭 상호작용 시 빠른 recenter
-    - 빠른 recenter는 지속 상태가 아니라 1회성 boost로 적용
-- 월드 상호작용 요청 처리
-    - 블록 파괴 요청 생성/소비
-    - world.apply_edit(…) 호출
-    - dirty 청크 표시
-- interest / visible chunk 계산
-    - 플레이어 기준 interest chunk 산출
-    - 카메라 기준 visible chunk 산출
-- 플레이어 주변/관심 범위 기반 시뮬레이션 활성 영역 산출
-    - sim result 반영 후 dirty chunk, save reuqest, remesh request 생성
-- jobs 결과 반영
-    - 로드 완료 청크를 world에 삽입
-    - 메싱 완료 결과를 renderer 업로드 큐로 넘김
-- 후속 작업 요청 생성
-    - 청크 로드 요청
-    - 메싱 요청
-    - 저장 요청
+  - 4방향 쿼터뷰 회전
+  - `Y`나 좌/우클릭 상호작용 시 1회성 fast recenter boost 신호
+  - slow tracking / bias / deadzone은 향후 camera 시스템이 확장한다
 
-### 인터페이스
-
-일반적으로 **시스템 집합 + 스케줄 + 리소스 초기화 함수**를 제공하기. 시스템들은 일반 rust 함수로 정의하고 Schedule::add_systems(…)로 등록하는 형태. Schedule은 시스템과 실행 메타데이터를 담고, run(&but world)로 실행된다
+### 공개 인터페이스
 
 ```rust
 EcsRuntime::new() -> EcsRuntime
@@ -121,47 +89,48 @@ EcsRuntime::run_pre_update()
 EcsRuntime::run_update()
 EcsRuntime::run_post_update()
 EcsRuntime::run_fixed_update()
+
+EcsRuntime::spawn_default_player()
+EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
+EcsRuntime::move_world_intent() -> MoveWorldIntent
 ```
 
 ### 의존성
 
-- bevy_ecs
-- world
-- simulation
-- jobs의 request/result 타입
+- `bevy_ecs`
+- `world`
+- `simulation`
+- `jobs`
 
 NOT:
 
-- platform 내부 구현
-    - raw state를 값으로 받되, platform::Window같은 구체 구현 타입은 받지 않기
-- renderer의 gpu 세부 구현
-- app
+- `platform` 구현
+- renderer GPU 구현
+- app loop ownership
 
 ### 불변식
 
-1. ecs는 게임 의미를 다룬다. raw OS 이벤트는 직접 다루지 않는다.
-2. 개별 블록 원본 데이터는 world가 SoT, ecs는 청크 메타 상태만 가진다.
-3. 한 프레임 안에서 입력 해석 → 상태 갱신 → 후속 작업 요청 순서는 일관되어야 한다.
-4. fixed tick에서만 적용되는 상태 전이는 frame update와 섞이지 않는다.
-5. simulation 결과 반영 순서는 명확해야 한다.
-6. jobs 결과 반영 순서는 명확해야 한다.
+1. ECS는 raw OS event를 직접 다루지 않는다.
+2. world 원본 block 데이터는 ECS가 아니라 world가 소유한다.
+3. discrete 행동과 continuous 이동 의도는 같은 표현으로 섞지 않는다.
+4. 화면 기준 입력과 world 기준 intent는 별도 경계로 유지한다.
+5. 같은 프레임의 회전은 그 프레임 이동 intent 계산에 먼저 반영된다.
 
 ### 하위 모듈 목록 및 역할
-
 - mod.rs: public facade, re-export
-- runtime.rs: EcsRuntime, bevy_ecs World/Schedule 소유, resource 초기화, pre/update/post/fixed 실행 진입점
-- input.rs: EcsInputSnapshot, frame 입력 resource, 화면 기준 입력을 gameplay command 후보로 해석하는 시스템
-- command.rs: PlayerCommand, MoveWorldIntent, ECS 내부 command/request buffer 정의, app/network와 맞닿는 안정적인 DTO 경계
-- player.rs: Player/Transform/Velocity 등 플레이어 중심 component와 이동/행동 상태 전이
-- camera.rs: CameraState, 4방향 쿼터뷰 회전, slow tracking, 진행 방향 bias, 리센터 상태와 규칙
-- selection.rs: SelectionState/InteractionTarget, 가림 처리 기반 타겟 판정, hover 기반 앞/뒤 전환, 배치 프리뷰 상태
-- chunk.rs: ChunkStates, player 기준 interest / camera 기준 visible 계산, dirty/load/mesh/save 메타 상태 전이
-- jobs.rs: PendingJobResults 반영, ECS 측 후속 jobs/world/renderer 요청 생성 규칙
-- fixed.rs: ActiveSimRegion, SimulationControlState, fixed tick용 simulation 요청/결과 흐름
+- runtime.rs: `EcsRuntime`, `World`/`Schedule` 소유, resource 초기화, pre/update/post/fixed 실행 진입점
+- input.rs: `EcsInputSnapshot`, frame 입력 resource, discrete command 후보 생성
+- command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS 내부 command/request buffer 정의
+- player.rs: `Player`/`Transform`/`Velocity`, local player spawn, 화면 기준 이동 상태를 world 기준 이동 intent로 변환
+- camera.rs: `CameraState`, 4방향 쿼터뷰 회전 상태, recenter one-shot boost 신호
+- selection.rs: selection / interaction target / placement preview 상태 정의
+- chunk.rs: player 기준 interest / camera 기준 visible chunk meta 상태 정의
+- jobs.rs: jobs 결과 반영과 후속 요청 생성 규칙
+- fixed.rs: fixed tick용 simulation 흐름 정의
 
 ### 현재 구현 메모
 
-- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
-- `MoveScreen -> MoveWorldIntent`, camera slow tracking, interest/visible chunk 분리는 아직 문서만 먼저 고정된 상태다
-- app bootstrap에서 간단한 local player entity를 하나 생성해 ECS world에 넣는 방향으로 간다
-- 현재 기본 player spawn 가정은 원점 위치의 단순 `Player + Transform + Velocity` 엔티티 하나다
+- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer + MoveWorldIntent`까지 연결되어 있다.
+- discrete command는 app에서 로그로 확인할 수 있다.
+- `MoveWorldIntent`는 local player `Velocity`에 반영된다.
+- 기본 local player는 bootstrap 시점에 1회 spawn된다.

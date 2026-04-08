@@ -11,7 +11,5 @@ impl GameApp {
         if !commands.is_empty() {
             println!("[app] ecs commands: {:?}", commands);
         }
-
-        self.frame_index = self.frame_index.saturating_add(1);
     }
 }

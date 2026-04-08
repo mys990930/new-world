@@ -2,65 +2,62 @@
 
 ## 역할
 
-- 메인 루프의 소유자
-- frame / fixed / shutdown 순서를 오케스트레이션한다
+- winit `ApplicationHandler`를 통해 메인 루프를 소유한다.
+- frame cadence와 종료 시점을 조율한다.
 
 ## 책임
 
-- run() 진입점 제공
-- 프레임 반복
-- begin/end frame 경계 유지
-- 종료 조건 확인
-- shutdown 진입 시점 결정
+- event loop 진입
+- 종료 조건 검사
+- frame cap 적용
+- 프레임 실행 시점 결정
+- redraw 요청
 
 ## 비책임
 
 - raw input 파싱
-- ecs 내부 시스템 조합 구현
-- simulation 알고리즘
-- renderer draw 세부 구현
+- ECS 시스템 구현
+- simulation fixed tick 구현
+- renderer draw 구현
 
 ## 소유 데이터
 
-- 루프 제어 상태
-- running flag
-- frame counter
-- optional profiling hook
+- event loop control flow 정책
+- frame deadline 판단 로직
 
 ## 처리 흐름
 
-1. 종료되지 않았으면 반복
-2. frame 시작 준비
-3. platform/frame pipeline 실행
-4. fixed update 필요량 계산 및 실행
-5. render 포함 frame 마무리
-6. 종료 조건 검사
-7. 필요 시 shutdown 실행
+1. OS/window 이벤트를 platform에 전달한다.
+2. `about_to_wait`에서 종료 여부를 검사한다.
+3. frame deadline 이전이면 `WaitUntil(deadline)`로 대기한다.
+4. frame deadline에 도달하면 app frame을 실행한다.
+5. redraw를 요청한다.
+6. 현재 프레임을 끝내고 다음 프레임 accumulation을 위해 platform transient state를 초기화한다.
 
 ## 출력
 
-- 프로그램 종료
-- 종료 코드 또는 AppExitReason 반환 가능
+- frame update 실행
+- event loop 종료
 
 ## 상태 전이 규칙
 
-- running 중에는 frame 순서를 항상 동일하게 유지
-- exit_requested 감지 시 normal loop에서 shutdown phase로 전이
-- shutdown 완료 시 loop 종료
+- 현재 frame cadence는 fixed tick이 아니라 `about_to_wait` 기반 frame loop다.
+- frame cap이 켜져 있으면 `ControlFlow::WaitUntil`을 사용한다.
+- frame cap이 없으면 `ControlFlow::Poll`을 사용할 수 있다.
 
 ## 불변식
 
-- app의 frame 순서는 항상 동일해야 한다
-- frame update와 fixed update는 명확히 분리된다
-- catch-up 정책은 모든 프레임에서 동일하게 적용된다
+- platform input transient는 event loop iteration마다 지우지 않는다.
+- transient state는 실제 프레임을 소비한 뒤에만 다음 accumulation을 위해 초기화한다.
+- 따라서 입력 이벤트가 frame deadline 전에 도착해도 다음 프레임에서 잃지 않는다.
 
 ## 관련 모듈
 
-- frame.rs
-- fixed.rs
-- shutdown.rs
-- state.rs
+- `state.rs`
+- `frame.rs`
+- `platform`
 
 ## 메모
 
-- 초기에 runner 하나에 frame/fixed/shutdown이 모두 들어가도 되지만, 문서는 분리해두는 게 맞다
+- 이전 최소 구현은 사실상 uncapped frame loop였다.
+- 현재 기본 정책은 `60 FPS` cap이다.

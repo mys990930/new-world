@@ -2,95 +2,87 @@
 
 ### 역할
 
-- 전체 프로그램의 조립과 프레임 루프 오케스트레이션
+- 전체 프로그램 조립과 프레임 루프 오케스트레이션
+- `platform -> app -> ecs -> (simulation) -> world/jobs -> renderer` 흐름의 상위 owner
 
 ### 책임
 
-- program bootstrap
-- module init/injection
-- main loop posession
-- frame sequence definition
-- platform → ecs → jobs → renderer flow connection
-- exit condition processing
+- 프로그램 bootstrap
+- 모듈 초기화 / 주입
+- 프레임 루프 ownership
+- frame update / fixed update 경계 정의
+- 프레임 타이밍 정책과 최대 프레임 제한 관리
+- 종료 조건 처리
 
 ### 비책임
 
-- algorithm implementation
-- event parsing implementation
+- raw input 파싱 구현
+- gameplay 규칙 계산
+- world 원본 데이터 수정
+- renderer 내부 draw 로직
 
-### 데이터
+### 소유 데이터
 
-- Platform
-- Renderer
-- WorldCore
-- SimulationCore
-- EcsRuntime
-- JobSystem
-- frame timing
-- fixed timestep accumulator
-- app config
-- simulation config
+- `Platform`
+- `EcsRuntime`
+- `AppConfig`
+- `AppTimingState`
 
 ### 유스케이스
 
 - 프로그램 시작
-    - 설정 로드
-    - platform 초기화
-    - renderer 초기화
-    - world/ecs/jobs 초기화
+  - config 로드
+  - platform 초기화
+  - ecs 초기화
 - 프레임 실행
-    - OS/window event poll
-    - raw state를 ecs resource로 반영
-    - pre/update/post schedule 실행
-    - jobs 결과 수거
-    - renderer 업로드/렌더
-- fixed tick 실행
-    - 시뮬레이션 결과 반영
+  - 누적된 platform snapshot을 읽음
+  - ECS pre/update/post 실행
+  - discrete command 로그 확인
+  - redraw 요청
+- 프레임 속도 제어
+  - `AppConfig::timing.target_frame_rate` 기준으로 다음 프레임 시점을 예약
 - 종료 처리
-    - close request 확인
-    - 필요 시 저장 flush
-    - 자원 정리
+  - close request / quit request 확인
+  - event loop 종료
 
-### 인터페이스
-
-일반적으로 **시스템 집합 + 스케줄 + 리소스 초기화 함수**를 제공하기. 시스템들은 일반 rust 함수로 정의하고 Schedule::add_systems(…)로 등록하는 형태. Schedule은 시스템과 실행 메타데이터를 담고, run(&but world)로 실행된다
+### 공개 인터페이스
 
 ```rust
 GameApp::new(config: AppConfig) -> GameApp
 GameApp::run(self)
 
-//내부적으로는:
-fn begin_frame(&mut self)
-fn run_fixed_update(&mut self)
-fn run_pre_update(&mut self)
-fn run_update(&mut self)
-fn run_post_update(&mut self)
-fn render(&mut self)
+fn update(&mut self)
+fn bridge_platform_to_ecs(&mut self)
+fn begin_timed_frame(&mut self, now: Instant)
+fn should_run_frame(&self, now: Instant) -> bool
+fn frame_deadline(&self) -> Option<Instant>
 ```
 
 ### 의존성
 
-- 다른 모든 상위 모듈들 (조립해야하기 때문)
+- 상위 조립 계층이므로 `platform`, `ecs`에 의존
 
 ### 불변식
 
-1. app은 각 모듈 간 흐름만 조율하고, 도메인 규칙은 하위 모듈에 위임한다.
-2. 프레임 순서는 항상 동일해야 한다.
-    - platform poll
-    - ecs pre/update/post
-    - renderer upload/render
-3. frame update와 fixed update 순서는 명확히 분리된다.
-4. fixed tick catch-up 정책은 항상 동일하다.
-5. app만이 모듈 간 구체 연결 방식을 안다. platform은 ecs를 모르고, world는 renderer를 모른다.
-6. 플랫폼 차이로 인해 바뀌는 bootstrap/loop 코드는 가능한 app과 platform에 국한한다.
+1. app만이 모듈 간 실제 연결을 안다.
+2. frame update와 fixed update는 개념적으로 분리된다.
+3. 현재 frame loop는 fixed tick이 아니라 app-owned frame cadence다.
+4. 최대 프레임 제한은 app timing policy가 담당한다.
+5. platform transient state는 프레임이 끝난 뒤 다음 accumulation 구간을 시작할 때만 초기화한다.
 
 ### 하위 모듈 목록 및 역할
 - mod.rs: public facade, re-export
-- config.rs: AppConfig / TimingConfig / SimulationConfig 정의
-- state.rs: GameApp/AppState 소유 데이터 정의 (Platform, Renderer, World, Ecs, Jobs, timing state 등)
-- bootstrap.rs: program bootstrap, module init/injection, 초기 리소스 연결
-- runner.rs: main loop owner, frame/fixed/shutdown 순서 orchestration
+- config.rs: `AppConfig` / `TimingConfig` 정의
+- state.rs: `GameApp`, `AppTimingState` 등 app-owned 상위 상태 정의
+- bootstrap.rs: module 생성과 초기 주입
+- runner.rs: winit `ApplicationHandler`, frame cadence 제어, 종료 처리
 - frame.rs: frame update pipeline orchestration
-- fixed.rs: fixed timestep accumulator, catch-up policy, fixed tick orchestration
-- bridge.rs: module 간 상태/DTO 변환 (platform → ecs, jobs → ecs/world, world/ecs → renderer)
-- shutdown.rs: exit condition handling, flush/drain, teardown
+- fixed.rs: 향후 fixed timestep accumulator와 fixed tick orchestration
+- bridge.rs: platform snapshot -> ECS resource 변환
+- shutdown.rs: 향후 flush / drain / teardown 처리
+
+### 현재 구현 메모
+
+- 현재 최소 구현은 `platform + ecs`만 실제로 연결되어 있다.
+- frame loop는 기본값으로 `60 FPS`를 목표로 제한한다.
+- fixed update는 아직 미연결 상태다.

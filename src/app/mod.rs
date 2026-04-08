@@ -6,4 +6,4 @@ mod frame;
 mod runner;
 
 pub use config::AppConfig;
-pub use state::GameApp;
+pub use state::{AppTimingState, GameApp};

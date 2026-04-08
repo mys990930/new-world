@@ -1,12 +1,13 @@
+use std::time::Instant;
+
 use winit::application::ApplicationHandler;
-use winit::event_loop::ActiveEventLoop;
-use winit::event::{WindowEvent, StartCause};
+use winit::event::{StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
 use super::GameApp;
 
 impl ApplicationHandler for GameApp {
-    
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.platform.resumed(event_loop);
     }
@@ -15,9 +16,7 @@ impl ApplicationHandler for GameApp {
         self.platform.suspended();
     }
 
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {
-        self.platform.begin_frame();
-    }
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: StartCause) {}
 
     fn window_event(
         &mut self,
@@ -36,7 +35,7 @@ impl ApplicationHandler for GameApp {
         }
 
         if let WindowEvent::RedrawRequested = event {
-            // 나중에 renderer.render() 같은 연결부가 여기 들어오면 된다.
+            // Renderer hookup will live here once the render path exists.
         }
     }
 
@@ -48,12 +47,26 @@ impl ApplicationHandler for GameApp {
             return;
         }
 
-        // 현재 최소 vertical slice 에서는
-        // "platform snapshot 읽기 -> app update"만 실제로 수행한다.
-        self.update();
+        let now = Instant::now();
+        if !self.should_run_frame(now) {
+            if let Some(deadline) = self.frame_deadline() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Poll);
+            }
+            return;
+        }
 
-        // 연속 프레임을 보고 싶으면 redraw 요청.
+        self.begin_timed_frame(now);
+        self.update();
         self.platform.request_redraw();
         self.platform.end_frame();
+        self.platform.begin_frame();
+
+        if let Some(deadline) = self.frame_deadline() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Poll);
+        }
     }
 }

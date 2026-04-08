@@ -1,8 +1,14 @@
-use bevy_ecs::prelude::{Resource, Schedule, World};
+use bevy_ecs::prelude::{IntoScheduleConfigs, Resource, Schedule, World};
 
-use super::command::{clear_player_command_buffer_system, PlayerCommand, PlayerCommandBuffer};
+use super::camera::{apply_camera_commands_system, clear_camera_impulses_system, CameraState};
+use super::command::{
+    clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
+};
 use super::input::{interpret_input_system, EcsInputSnapshot};
-use super::player::{spawn_default_player, LocalPlayerEntity};
+use super::player::{
+    spawn_default_player, sync_local_player_velocity_system, update_move_world_intent_system,
+    LocalPlayerEntity,
+};
 
 pub struct EcsRuntime {
     world: World,
@@ -17,13 +23,23 @@ impl EcsRuntime {
         let mut world = World::new();
         world.insert_resource(EcsInputSnapshot::default());
         world.insert_resource(PlayerCommandBuffer::default());
+        world.insert_resource(MoveWorldIntent::default());
+        world.insert_resource(CameraState::default());
         world.insert_resource(LocalPlayerEntity::default());
 
         let mut pre_update = Schedule::default();
-        pre_update.add_systems(clear_player_command_buffer_system);
+        pre_update.add_systems((clear_player_command_buffer_system, clear_camera_impulses_system));
 
         let mut update = Schedule::default();
-        update.add_systems(interpret_input_system);
+        update.add_systems(
+            (
+                interpret_input_system,
+                apply_camera_commands_system,
+                update_move_world_intent_system,
+                sync_local_player_velocity_system,
+            )
+                .chain(),
+        );
 
         Self {
             world,
@@ -70,5 +86,9 @@ impl EcsRuntime {
     pub fn drain_player_commands(&mut self) -> Vec<PlayerCommand> {
         let mut buffer = self.world.resource_mut::<PlayerCommandBuffer>();
         std::mem::take(&mut buffer.0)
+    }
+
+    pub fn move_world_intent(&self) -> MoveWorldIntent {
+        *self.world.resource::<MoveWorldIntent>()
     }
 }
