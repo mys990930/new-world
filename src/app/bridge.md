@@ -60,3 +60,4 @@
 
 - 이 파일은 app 내부에서 제일 더러워지기 쉬우니, 변환 방향별로 하위 파일 분리도 고려할 수 있다
 - 예: bridge/input.rs, bridge/jobs.rs, bridge/render.rs
+- 현재 최소 구현은 platform snapshot을 `EcsInputSnapshot`으로 변환해 ecs resource로 주입하는 경로만 포함한다

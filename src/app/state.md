@@ -70,3 +70,4 @@
 ## 메모
 
 - AppContext / GameApp / AppRuntime 중 네이밍 하나로 통일하는 게 좋다
+- 현재 최소 구현은 `platform`, `ecs`, `config`, `frame_index`만 실제로 보유한다

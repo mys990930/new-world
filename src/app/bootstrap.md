@@ -62,3 +62,4 @@
 ## 메모
 
 - 초기 세이브 로드, 플레이어 스폰, 초기 청크 warm-up도 추후 여기 또는 별도 startup_phase로 둘 수 있다
+- 현재 최소 구현은 `Platform`과 `EcsRuntime`만 실제로 생성/주입한다

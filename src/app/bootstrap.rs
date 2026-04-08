@@ -1,4 +1,5 @@
 use super::{AppConfig, GameApp};
+use crate::ecs::EcsRuntime;
 use crate::platform::{Platform, PlatformConfig};
 
 impl GameApp {
@@ -8,10 +9,12 @@ impl GameApp {
             width: config.width,
             height: config.height,
         });
+        let ecs = EcsRuntime::new();
 
         Self {
             config,
             platform,
+            ecs,
             frame_index: 0,
         }
     }

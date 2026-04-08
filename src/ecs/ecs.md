@@ -33,7 +33,7 @@
 
 #### Resource
 
-- InputState
+- EcsInputSnapshot
 - PlayerCommandBuffer
 - WorldTime
 - SimClock
@@ -61,16 +61,21 @@
 
 #### Event/Command
 
-- MoveCommand
-- BlockBreakRequest/BlockPlaceRequest
+- MoveScreenCommand
+- PrimaryActionCommand / BlockPlaceRequest
+- RotateCameraRequest
+- CameraRecenterRequest
 - ChunkLoadRequested
 - ChunkMeshRequested
 
 ### 유스케이스
 
 - raw input을 게임 의미로 변환
-    - 우클릭 → 이동 명령
+    - WASD 화면 기준 이동 → 이동 명령
     - 좌클릭 → 상호작용/파괴 요청
+    - 우클릭 → 블록 배치 요청
+    - Q/E → 카메라 90도 회전 요청
+    - Y → 카메라 리센터 요청
 - 플레이어/엔티티 상태 갱신
     - 이동
     - 속도/행동 갱신
@@ -130,3 +135,8 @@ NOT:
 4. fixed tick에서만 적용되는 상태 전이는 frame update와 섞이지 않는다.
 5. simulation 결과 반영 순서는 명확해야 한다.
 6. jobs 결과 반영 순서는 명확해야 한다.
+
+### 현재 구현 메모
+
+- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
+- 이동 기준은 화면 기준이며, `Q/E`는 90도 회전, `Y`는 카메라 리센터로 해석한다

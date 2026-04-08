@@ -1,4 +1,5 @@
 mod app;
+mod ecs;
 mod platform;
 
 use std::error::Error;

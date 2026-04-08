@@ -39,6 +39,10 @@
 4. event 종류에 따라 window/input/lifecycle reducer에 전달한다
 5. 갱신된 state snapshot을 상위가 읽을 수 있게 유지한다
 
+## 현재 구현 메모
+
+- 현재 구현은 reducer fan-out 직전에 각 `PlatformEvent`를 콘솔에 출력해 실제 발행 여부를 확인할 수 있게 한다
+
 ## 외부 인터페이스
 
 ```rust

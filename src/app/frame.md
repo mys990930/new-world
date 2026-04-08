@@ -45,8 +45,8 @@
 
 ## 현재 구현 메모
 
-- 현재 최소 vertical slice에서는 platform snapshot을 읽고 frame counter를 증가시키는 수준까지만 구현되어 있다
-- bridge / ecs / jobs / renderer 연결은 이후 frame.rs 안에서 단계적으로 확장한다
+- 현재 최소 vertical slice에서는 platform snapshot을 bridge로 ecs resource에 반영하고, ecs pre/update/post를 실행한 뒤 나온 command를 로그로 확인한다
+- jobs / renderer 연결은 이후 frame.rs 안에서 단계적으로 확장한다
 
 ## 불변식
 
