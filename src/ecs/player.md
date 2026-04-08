@@ -1,65 +1,69 @@
 # player
 
-## 역할
+## Role
 
-- 플레이어 중심 component와 이동 관련 상태 전이를 정의한다.
-- 화면 기준 이동 상태를 world 기준 이동 intent로 변환한다.
+- Define player-facing ECS components and movement state transitions
+- Convert screen-relative movement into world-relative movement intent
 
-## 소유 데이터
+## Owned Data
 
 ### Entity / Component
+
 - `Player`
 - `Transform`
 - `Velocity`
 
-### Resource / 보조 상태
+### Resource / Support State
+
 - `LocalPlayerEntity`
 - `MoveWorldIntent`
 
-## 입력
+## Inputs
 
 - `EcsInputSnapshot`
 - `CameraState`
 - `PlayerCommandBuffer`
-- local player entity id
+- Local player entity id
 
-## 출력
+## Outputs
 
 - `MoveWorldIntent`
-- local player `Velocity`
-- 향후 `Transform`, action state, chunk interest 계산 입력
+- Local player `Velocity`
+- Future `Transform`, action state, and chunk-interest inputs
 
-## 상태 전이 규칙
+## State Transition Rules
 
-- 화면 기준 상하좌우는 world 기준 동서남북과 일치하지 않는다.
-- 기본 쿼터뷰에서 화면 우측 상단이 북쪽, 화면 우측 하단이 동쪽이다.
-- 따라서 화면 기준 이동은 먼저 쿼터뷰 world axis로 투영한다.
-- 그 다음 `CameraState.quarter_turns`를 반영해 현재 시점의 world 기준 이동 의도로 바꾼다.
-- 같은 프레임에 `RotateCamera`가 들어오면 회전 후 기준으로 `MoveWorldIntent`를 계산한다.
-- 현재 최소 구현에서는 `MoveWorldIntent`를 local player `Velocity`에 즉시 반영한다.
+- Screen-relative directions do not match world east/north directly
+- In the default quarter-view:
+  - screen top-right = world north
+  - screen bottom-right = world east
+- Movement input is first interpreted in that skewed quarter-view basis
+- `CameraState.quarter_turns` is then applied to produce the current world-relative movement intent
+- If `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
+- In the current minimal slice, `MoveWorldIntent` is copied directly into the local player `Velocity`
 
-## 불변식
+## Invariants
 
-- player 모듈은 raw key state를 직접 읽지 않는다.
-- `Transform.translation`은 현재 몸 중심 기준 위치로 해석한다.
-- `MoveWorldIntent`는 continuous world-space movement 의미다.
-- discrete action은 `PlayerCommandBuffer`, continuous movement는 `MoveWorldIntent`로 나뉜다.
+- `Transform.translation` is interpreted as body-center position
+- `MoveWorldIntent` is the continuous world-space movement channel
+- Discrete actions stay in `PlayerCommandBuffer`
+- The bootstrap local player spawns at body-center `[0.0, 0.5, 0.0]` so a unit debug cube stands on ground level `y = 0.0`
 
-## 비책임
+## Non-Responsibilities
 
-- raw input 수집
-- camera tracking 계산
-- selection raycast
-- world block edit
+- Capturing raw keyboard state
+- Calculating camera follow behavior
+- Running selection raycasts
+- Applying world block edits
 
-## 관련 모듈
+## Related Modules
 
 - `input.rs`
 - `command.rs`
 - `camera.rs`
 - `chunk.rs`
 
-## 메모
+## Notes
 
-- 현재 최소 구현에서 local player는 bootstrap 시점에 원점에 spawn된다.
-- 현재는 velocity만 갱신하고 transform 적분은 아직 하지 않는다.
+- The current minimal implementation spawns one local player during bootstrap
+- The current slice updates velocity only; transform integration is still a later step

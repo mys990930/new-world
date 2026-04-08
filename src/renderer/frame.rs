@@ -207,9 +207,10 @@ impl Renderer {
 
         }
 
-        if let Some((edge_vertices, edge_indices)) =
-            build_cube_edge_mesh(frame.cube_instances, frame.camera)
-        {
+        if self.config.debug.debug_overlay {
+            if let Some((edge_vertices, edge_indices)) =
+                build_cube_edge_mesh(frame.cube_instances, frame.camera)
+            {
             let edge_vertex_buffer =
                 backend
                     .device
@@ -227,29 +228,31 @@ impl Renderer {
                         usage: wgpu::BufferUsages::INDEX,
                     });
 
-            let mut edge_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("renderer_edge_overlay_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+                let mut edge_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("renderer_edge_overlay_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &surface_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
 
-            edge_pass.set_pipeline(&backend.cube_edge_pipeline);
-            edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-            edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
-            edge_pass.set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            edge_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
-            stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                edge_pass.set_pipeline(&backend.cube_edge_pipeline);
+                edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+                edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
+                edge_pass
+                    .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                edge_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
         }
 
         backend.queue.submit(Some(encoder.finish()));
@@ -285,12 +288,12 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         ];
 
         let face_specs = [
-            ([4_u32, 5, 6, 7], shade_face(cube.color, 0.70, [0.08, 0.14, 0.22, 1.0])),
-            ([1_u32, 0, 3, 2], shade_face(cube.color, 0.42, [0.02, 0.04, 0.10, 1.0])),
-            ([0_u32, 4, 7, 3], shade_face(cube.color, 0.55, [0.04, 0.08, 0.16, 1.0])),
-            ([5_u32, 1, 2, 6], shade_face(cube.color, 0.90, [0.12, 0.18, 0.28, 1.0])),
-            ([3_u32, 7, 6, 2], shade_face(cube.color, 1.25, [0.92, 0.97, 1.0, 1.0])),
-            ([0_u32, 1, 5, 4], shade_face(cube.color, 0.30, [0.01, 0.02, 0.05, 1.0])),
+            ([4_u32, 5, 6, 7], [0.18, 0.26, 0.36, cube.color[3]]),
+            ([1_u32, 0, 3, 2], [0.24, 0.34, 0.46, cube.color[3]]),
+            ([0_u32, 4, 7, 3], [0.38, 0.54, 0.72, cube.color[3]]),
+            ([5_u32, 1, 2, 6], [0.56, 0.74, 0.92, cube.color[3]]),
+            ([3_u32, 7, 6, 2], [0.90, 0.97, 1.0, cube.color[3]]),
+            ([0_u32, 1, 5, 4], [0.10, 0.14, 0.20, cube.color[3]]),
         ];
 
         for (corner_indices, face_color) in face_specs {
@@ -406,13 +409,4 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
     } else {
         scale3(vector, length_sq.sqrt().recip())
     }
-}
-
-fn shade_face(color: [f32; 4], brightness: f32, accent: [f32; 4]) -> [f32; 4] {
-    [
-        ((color[0] * brightness) * 0.75 + accent[0] * 0.25).clamp(0.0, 1.0),
-        ((color[1] * brightness) * 0.75 + accent[1] * 0.25).clamp(0.0, 1.0),
-        ((color[2] * brightness) * 0.75 + accent[2] * 0.25).clamp(0.0, 1.0),
-        color[3],
-    ]
 }

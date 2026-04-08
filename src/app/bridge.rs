@@ -79,7 +79,9 @@ fn axis(negative: bool, positive: bool) -> i8 {
 fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
     const CAMERA_DISTANCE: f32 = 18.0;
     const ORTHOGRAPHIC_VERTICAL_SIZE: f32 = 5.0;
-    const CAMERA_UP_BASE: [f32; 3] = [-1.0, 2.4, 1.0];
+    // A 2:1 dimetric quarter-view basis keeps the block silhouette closer to the
+    // familiar voxel look than a steeper orbit basis.
+    const CAMERA_UP_BASE: [f32; 3] = [-1.0, 2.0, 1.0];
     const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 
     let right = normalize3(rotate_y_quarter_turns(CAMERA_RIGHT_BASE, quarter_turns));
@@ -139,4 +141,30 @@ fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
 
 fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quarter_view_basis_maps_world_axes_to_expected_screen_directions() {
+        let camera = build_quarter_view_camera([0.0, 0.5, 0.0], 0);
+        let basis = camera.basis_override.expect("quarter-view basis should exist");
+
+        let east = project_to_screen_axes([1.0, 0.0, 0.0], basis);
+        let north = project_to_screen_axes([0.0, 0.0, 1.0], basis);
+        let up = project_to_screen_axes([0.0, 1.0, 0.0], basis);
+
+        assert!(east.0 > 0.0);
+        assert!(east.1 < 0.0);
+        assert!(north.0 > 0.0);
+        assert!(north.1 > 0.0);
+        assert!(up.0.abs() < 1e-5);
+        assert!(up.1 > 0.0);
+    }
+
+    fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {
+        (dot3(point, basis.right), dot3(point, basis.up))
+    }
 }

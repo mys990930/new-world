@@ -78,7 +78,15 @@ pub(crate) fn spawn_default_player(world: &mut World) -> Entity {
         return entity;
     }
 
-    let entity = world.spawn((Player, Transform::default(), Velocity::default())).id();
+    let entity = world
+        .spawn((
+            Player,
+            Transform {
+                translation: [0.0, 0.5, 0.0],
+            },
+            Velocity::default(),
+        ))
+        .id();
     world.resource_mut::<LocalPlayerEntity>().0 = Some(entity);
     entity
 }

@@ -38,7 +38,7 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 - A zero-sized surface is not configured
 - Real surface configure/present only happens when a live backend exists
-- The current filled-cube pipeline uses `FrontFace::Cw` so culling matches the current camera/view transform path
+- The current filled-cube pipeline leaves face culling disabled so the depth-tested prototype cube is not sensitive to winding mistakes during early renderer bring-up
 
 ## Related Modules
 

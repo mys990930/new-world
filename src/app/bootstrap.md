@@ -1,46 +1,47 @@
 # bootstrap
 
-## 역할
+## Role
 
-- 앱 시작 시 필요한 상위 모듈을 생성하고 연결한다.
+- Create and connect the top-level runtime modules needed at app startup
 
-## 책임
+## Responsibilities
 
-- `AppConfig` 준비
-- `Platform` 생성
-- `Renderer` 생성
-- `EcsRuntime` 생성
-- 기본 local player spawn
-- `AppTimingState` 생성
-- `GameApp` 조립
+- Prepare `AppConfig`
+- Create `Platform`
+- Create `Renderer`
+- Create `EcsRuntime`
+- Spawn the default local player
+- Create `AppTimingState`
+- Assemble `GameApp`
 
-## 비책임
+## Non-Responsibilities
 
-- 메인 루프 실행
-- redraw scheduling
-- fixed tick 반복
-- gameplay rule 처리
+- Running the main loop
+- Scheduling redraws
+- Stepping fixed ticks
+- Applying gameplay rules
 
-## 처리 흐름
+## Process
 
-1. config를 받는다.
-2. `Platform`을 만든다.
-3. renderer는 아직 OS window가 없으므로 `StubSurfaceTarget`으로 먼저 생성한다.
-4. `EcsRuntime`을 만든다.
-5. 기본 local player entity를 spawn한다.
-6. app timing state를 만든다.
-7. `GameApp`을 반환한다.
+1. Read config inputs
+2. Create `Platform`
+3. Create `Renderer` from a `StubSurfaceTarget` because the OS window does not exist yet
+4. Create `EcsRuntime`
+5. Spawn the default local player entity
+6. Create app timing state
+7. Return `GameApp`
 
-## 출력
+## Output
 
-- 초기화된 `GameApp`
+- Initialized `GameApp`
 
-## 불변식
+## Invariants
 
-- bootstrap 시점 renderer는 반드시 생성되지만, live GPU backend는 아직 없을 수 있다.
-- local player는 bootstrap 시점에 한 번만 spawn한다.
+- During bootstrap, the renderer may exist without a live GPU surface backend
+- The default local player is spawned once during bootstrap
+- The bootstrap local player starts at body-center `[0.0, 0.5, 0.0]` so the current unit cube prototype stands on the ground plane
 
-## 관련 모듈
+## Related Modules
 
 - `config.rs`
 - `state.rs`
@@ -48,6 +49,6 @@
 - `renderer`
 - `ecs`
 
-## 메모
+## Notes
 
-- live window surface attach는 bootstrap이 아니라 `runner.rs`의 `resumed()`에서 한다.
+- Live window surface attachment happens later in [`runner.rs`](C:/dev/new-world/src/app/runner.rs), during `resumed()`

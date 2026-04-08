@@ -11,7 +11,8 @@
 - camera uniform upload
 - surface texture acquire
 - depth clear / depth test
-- clear pass, filled cube draw, cube edge overlay draw
+- clear pass, filled cube draw
+- optional debug edge overlay draw
 - submit / present
 - recoverable surface error 전달
 
@@ -38,10 +39,9 @@
 4. surface texture를 acquire한다.
 5. camera uniform buffer를 업데이트한다.
 6. `cube_instances`를 face-tinted cube mesh로 확장한다.
-7. camera 방향 기준으로 visible face edge 집합을 계산한다.
-8. 첫 render pass에서 clear 후 cube fill을 그린다.
-9. 두 번째 render pass에서 color를 load하고 visible edge overlay를 화면 위에 덮어그린다.
-10. submit / present 한다.
+7. 첫 render pass에서 clear 후 cube fill을 그린다.
+8. `debug_overlay`가 켜져 있으면 visible face edge 집합을 계산하고 두 번째 pass에서 overlay를 그린다.
+9. submit / present 한다.
 
 ## 불변식
 
@@ -57,4 +57,5 @@
 
 ## 메모
 
-- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, face tint와 visible edge overlay로 입체감을 읽히게 한다.
+- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 기본 상태에서는 face tint만으로 입체감을 읽히게 한다.
+- visible edge overlay는 현재 `RenderConfig.debug.debug_overlay`가 켜진 경우에만 그린다.
