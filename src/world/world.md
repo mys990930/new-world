@@ -109,6 +109,6 @@ NOT:
 ### 현재 구현 메모
 
 - 현재 최소 구현은 `mod.rs + leaf.rs` 구조까지 추가되어 있다.
-- generation은 `WorldMeta`와 `ChunkCoord`를 받아 `world y = 0`에 한 층짜리 grass plane을 채우는 deterministic flat-plane generator만 제공한다.
+- generation은 `WorldMeta`와 `ChunkCoord`를 받아 `world y = 0`에서 로컬 `(1..=5, 1..=5)` 범위만 채우는 deterministic grass patch generator만 제공한다.
 - meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, renderer 타입으로의 변환은 이후 jobs/app bridge 단계에서 연결한다.
 - `BlockRegistry`는 아직 도입하지 않고, 현재는 `BlockId` 자체가 최소한의 solid/face-color 규칙을 가진다.

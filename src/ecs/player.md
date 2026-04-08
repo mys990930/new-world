@@ -47,7 +47,7 @@
 - `Transform.translation` is interpreted as body-center position
 - `MoveWorldIntent` is the continuous world-space movement channel
 - Discrete actions stay in `PlayerCommandBuffer`
-- The bootstrap local player spawns at body-center `[8.0, 1.5, 8.0]` so a unit debug cube stands on top of the generated chunk plane
+- The bootstrap local player spawns at body-center `[3.0, 1.5, 3.0]` so a unit debug cube stands on the center of the generated `(1..=5, 1..=5)` chunk patch
 
 ## Non-Responsibilities
 

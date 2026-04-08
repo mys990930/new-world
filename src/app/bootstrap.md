@@ -43,7 +43,7 @@
 
 - During bootstrap, the renderer may exist without a live GPU surface backend
 - The default local player is spawned once during bootstrap
-- The bootstrap local player starts at body-center `[8.0, 1.5, 8.0]` so the unit cube stands on top of the generated chunk plane
+- The bootstrap local player starts at body-center `[3.0, 1.5, 3.0]` so the unit cube stands on top of the generated chunk patch
 
 ## Related Modules
 

@@ -32,7 +32,7 @@
 ## 처리 흐름
 
 1. `WorldMeta.seed`와 청크 좌표를 바탕으로 생성 입력을 만든다.
-2. 현재 최소 구현은 청크의 world-space `y = 0` layer만 채우는 flat plane 규칙을 사용한다.
+2. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
 3. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
 4. 완성된 청크를 반환한다.
 
@@ -63,4 +63,4 @@ generation::generate_chunk(
 ## 메모
 
 - 현재 최소 구현은 `BlockRegistry` 없이 `BlockId` 기반 규칙만 사용한다.
-- 첫 vertical slice용으로 `world y = 0`에 grass block plane 한 층만 생성한다.
+- 첫 vertical slice용으로 `world y = 0`에 로컬 `(1,1)`부터 `(5,5)`까지의 grass block patch만 생성한다.
