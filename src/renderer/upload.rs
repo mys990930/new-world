@@ -1,3 +1,5 @@
+use bytemuck::{Pod, Zeroable};
+
 use super::Renderer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,7 +11,8 @@ pub struct RenderBounds {
     pub max: [f32; 3],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct MeshVertex {
     pub position: [f32; 3],
     pub color: [f32; 4],
@@ -25,6 +28,19 @@ pub struct CpuMesh {
 impl CpuMesh {
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
+    }
+}
+
+impl MeshVertex {
+    pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<MeshVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &ATTRIBUTES,
+        }
     }
 }
 

@@ -34,6 +34,7 @@ impl GameApp {
         if let Err(error) = self.renderer.render(RenderFrameInput {
             camera: &render_frame.camera,
             visible_chunks: &render_frame.visible_chunks,
+            cube_instances: &render_frame.cube_instances,
             clear_color_override: None,
         }) {
             eprintln!("[app] renderer frame failed: {:?}", error);

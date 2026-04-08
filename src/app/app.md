@@ -2,24 +2,23 @@
 
 ### 역할
 
-- 전체 프로그램 조립과 프레임 루프 오케스트레이션
+- 프로그램 전체 조립과 frame loop orchestration
 - `platform -> app -> ecs -> (simulation) -> world/jobs -> renderer` 흐름의 상위 owner
 
 ### 책임
 
-- 프로그램 bootstrap
-- 모듈 초기화 / 주입
-- 프레임 루프 ownership
-- frame update / fixed update 경계 정의
-- 프레임 타이밍 정책과 최대 프레임 제한 관리
+- bootstrap
+- 모듈 생성과 주입
+- frame cadence와 redraw 타이밍 제어
+- platform snapshot을 ECS/renderer bridge로 연결
 - 종료 조건 처리
 
 ### 비책임
 
-- raw input 파싱 구현
-- gameplay 규칙 계산
-- world 원본 데이터 수정
-- renderer 내부 draw 로직
+- raw input 수집
+- gameplay rule 계산
+- world source of truth 수정
+- GPU draw 구현
 
 ### 소유 데이터
 
@@ -28,25 +27,6 @@
 - `Renderer`
 - `AppConfig`
 - `AppTimingState`
-
-### 유스케이스
-
-- 프로그램 시작
-  - config 로드
-  - platform 초기화
-  - renderer 초기화
-  - ecs 초기화
-- 프레임 실행
-  - 누적된 platform snapshot을 읽음
-  - ECS pre/update/post 실행
-  - discrete command 로그 확인
-  - redraw 요청
-  - redraw 시점에 renderer render 호출
-- 프레임 속도 제어
-  - `AppConfig::timing.target_frame_rate` 기준으로 다음 프레임 시점을 예약
-- 종료 처리
-  - close request / quit request 확인
-  - event loop 종료
 
 ### 공개 인터페이스
 
@@ -57,6 +37,7 @@ GameApp::run(self)
 fn update(&mut self)
 fn render(&mut self)
 fn bridge_platform_to_ecs(&mut self)
+fn bridge_ecs_to_render_frame(&self) -> AppRenderFrameData
 fn begin_timed_frame(&mut self, now: Instant)
 fn should_run_frame(&self, now: Instant) -> bool
 fn frame_deadline(&self) -> Option<Instant>
@@ -64,29 +45,30 @@ fn frame_deadline(&self) -> Option<Instant>
 
 ### 의존성
 
-- 상위 조립 계층이므로 `platform`, `ecs`, `renderer`에 의존
+- `platform`
+- `ecs`
+- `renderer`
 
 ### 불변식
 
-1. app만이 모듈 간 실제 연결을 안다.
-2. frame update와 fixed update는 개념적으로 분리된다.
-3. 현재 frame loop는 fixed tick이 아니라 app-owned frame cadence다.
-4. 최대 프레임 제한은 app timing policy가 담당한다.
-5. platform transient state는 프레임이 끝난 뒤 다음 accumulation 구간을 시작할 때만 초기화한다.
+1. app만이 모듈 간 실제 연결을 소유한다.
+2. frame cadence는 fixed tick이 아니라 app-owned frame policy다.
+3. renderer는 app bridge가 만든 render-ready DTO만 받는다.
 
 ### 하위 모듈 목록 및 역할
+
 - mod.rs: public facade, re-export
-- config.rs: `AppConfig` / `TimingConfig` 정의
-- state.rs: `GameApp`, `AppTimingState` 등 app-owned 상위 상태 정의
+- config.rs: `AppConfig` / `TimingConfig`
+- state.rs: `GameApp`, `AppTimingState`
 - bootstrap.rs: module 생성과 초기 주입
-- runner.rs: winit `ApplicationHandler`, frame cadence 제어, 종료 처리
+- runner.rs: winit `ApplicationHandler`, frame cadence, redraw, 종료 처리
 - frame.rs: frame update pipeline orchestration
-- fixed.rs: 향후 fixed timestep accumulator와 fixed tick orchestration
-- bridge.rs: platform snapshot -> ECS resource 변환
-- shutdown.rs: 향후 flush / drain / teardown 처리
+- fixed.rs: future fixed timestep orchestration
+- bridge.rs: cross-module DTO translation
+- shutdown.rs: future teardown / flush
 
 ### 현재 구현 메모
 
-- 현재 최소 구현은 `platform + ecs + renderer stub`까지 실제로 연결되어 있다.
-- frame loop는 기본값으로 `60 FPS`를 목표로 제한한다.
-- fixed update는 아직 미연결 상태다.
+- 현재 bootstrap은 window가 아직 없으므로 `StubSurfaceTarget`으로 renderer를 먼저 만든다.
+- 실제 GPU surface attach는 `runner.rs`의 `resumed()`에서 window 생성 직후 수행한다.
+- render path는 ECS camera state와 local player body-center transform을 render DTO로 바꿔 플레이어 큐브 한 개를 그리는 최소 vertical slice까지 연결돼 있다.

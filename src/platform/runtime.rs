@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Ime, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -8,7 +10,7 @@ use super::event::PlatformEvent;
 use super::{LifecycleState, PlatformConfig, RawInputState, WindowState};
 
 pub struct PlatformRuntime {
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
 }
 
 impl PlatformRuntime {
@@ -98,7 +100,7 @@ impl PlatformRuntime {
             .expect("failed to create window");
         window.set_ime_allowed(true);
 
-        self.window = Some(window);
+        self.window = Some(Arc::new(window));
     }
 
     fn normalize_window_event(&self, event: &WindowEvent) -> Vec<PlatformEvent> {
@@ -205,5 +207,9 @@ impl PlatformRuntime {
         if let Some(window) = self.window.as_ref() {
             window.set_title(title);
         }
+    }
+
+    pub fn window_handle(&self) -> Option<Arc<Window>> {
+        self.window.clone()
     }
 }

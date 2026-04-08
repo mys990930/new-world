@@ -4,16 +4,17 @@
 
 - winit adapter
 - window creation
-- OS/winit 이벤트 수집
-- PlatformEvent 생성
-- 각 state reducer fan-out 호출
+- OS/winit event collection
+- `PlatformEvent` 생성
+- window/input/lifecycle reducer fan-out
 
 ## 책임
 
 - event loop / window 초기화
-- platform-specific runtime context 보유
-- 외부 이벤트를 PlatformEvent로 정규화
-- window / input / lifecycle 상태 갱신 흐름 실행
+- platform runtime context 보유
+- OS 이벤트를 `PlatformEvent`로 정규화
+- reducer dispatch 실행
+- renderer bootstrap용 `Arc<Window>` 보관과 노출
 
 ## 비책임
 
@@ -26,50 +27,47 @@
 
 ## 소유 데이터
 
-- window handle
-- event loop 관련 context
-- platform runtime context
-- 필요 시 event queue 또는 pending event buffer
+- `Arc<Window>`
+- event loop runtime context
+- normalized event dispatch flow
 
 ## 처리 흐름
 
-1. runtime이 OS/winit 이벤트를 수신한다
-2. 해당 이벤트를 PlatformEvent로 정규화한다
-3. 필요하면 하나의 OS 이벤트를 여러 PlatformEvent로 fan-out 한다
-4. event 종류에 따라 window/input/lifecycle reducer에 전달한다
-5. 갱신된 state snapshot을 상위가 읽을 수 있게 유지한다
+1. runtime이 OS/winit event를 수신한다.
+2. event를 `PlatformEvent`로 정규화한다.
+3. 필요하면 하나의 OS event를 여러 `PlatformEvent`로 fan-out한다.
+4. window/input/lifecycle reducer에 순서대로 전달한다.
+5. 상위 계층이 읽을 수 있는 snapshot state를 유지한다.
 
-## 현재 구현 메모
-
-- 현재 구현은 reducer fan-out 직전에 각 `PlatformEvent`를 콘솔에 출력해 실제 발행 여부를 확인할 수 있게 한다
-
-## 외부 인터페이스
+## 공개 인터페이스
 
 ```rust
-PlatformRuntime::new(...) -> PlatformRuntime
+PlatformRuntime::new() -> PlatformRuntime
 PlatformRuntime::resumed(...)
 PlatformRuntime::suspended(...)
 PlatformRuntime::handle_window_event(...)
+PlatformRuntime::request_redraw(&self)
+PlatformRuntime::window_handle(&self) -> Option<Arc<Window>>
 ```
+
 ## 의존성
 
 - winit
-- platform-specific bindings (필요 시)
 
 ## 불변식
 
-- winit 세부사항은 runtime 내부에 캡슐화된다
-- window/input/lifecycle reducer는 가능하면 winit 타입에 직접 의존하지 않는다
-- runtime은 gameplay 의미를 만들지 않는다
-- app이 전체 프레임 순서의 주인이다
+- reducer는 winit 타입에 직접 의존하지 않는다.
+- runtime은 gameplay state를 만들지 않는다.
+- live window는 `Arc<Window>`로 유지해 app/renderer가 안전하게 attach할 수 있게 한다.
 
 ## 관련 모듈
 
-- mod.rs가 외부에 facade를 제공
-- event.rs를 생성/사용
-- window.rs / input.rs / lifecycle.rs reducer에 fan-out 한다
-- app이 runtime 상태를 읽어 다음 단계로 넘긴다
+- `mod.rs`
+- `event.rs`
+- `window.rs`
+- `input.rs`
+- `lifecycle.rs`
 
 ## 메모
 
-- winit 0.30 계열에서는 callback 기반 설계가 더 자연스럽다
+- 현재 구현은 reducer fan-out 직전에 모든 `PlatformEvent`를 콘솔에 로그로 출력한다.

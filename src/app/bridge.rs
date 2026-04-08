@@ -2,11 +2,12 @@ use winit::keyboard::KeyCode;
 
 use super::GameApp;
 use crate::ecs::EcsInputSnapshot;
-use crate::renderer::{ChunkCoord, RenderCameraState};
+use crate::renderer::{ChunkCoord, RenderCameraState, RenderCubeInstance};
 
 pub struct AppRenderFrameData {
     pub camera: RenderCameraState,
     pub visible_chunks: Vec<ChunkCoord>,
+    pub cube_instances: Vec<RenderCubeInstance>,
 }
 
 impl GameApp {
@@ -49,10 +50,22 @@ impl GameApp {
             .unwrap_or([0.0, 0.0, 0.0]);
 
         let camera = build_quarter_view_camera(target, camera_state.quarter_turns);
+        let cube_instances = self
+            .ecs
+            .local_player_transform()
+            .map(|transform| {
+                vec![RenderCubeInstance {
+                    center: transform.translation,
+                    half_extents: [0.5, 0.5, 0.5],
+                    color: [0.78, 0.88, 0.98, 1.0],
+                }]
+            })
+            .unwrap_or_default();
 
         AppRenderFrameData {
             camera,
             visible_chunks: Vec::new(),
+            cube_instances,
         }
     }
 }

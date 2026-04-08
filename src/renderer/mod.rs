@@ -14,7 +14,7 @@ pub use config::{
     RenderConfig, SurfaceFormatPolicy,
 };
 #[allow(unused_imports)]
-pub use frame::{RenderError, RenderFrameInput, RenderStats};
+pub use frame::{RenderCubeInstance, RenderError, RenderFrameInput, RenderStats};
 #[allow(unused_imports)]
 pub use pipeline::{PipelineKind, PipelineSet, PipelineState};
 pub use state::{RenderWorld, Renderer};

@@ -10,9 +10,11 @@ pub use input::RawInputState;
 pub use lifecycle::LifecycleState;
 pub use window::WindowState;
 
+use std::sync::Arc;
+
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::WindowId;
+use winit::window::{Window, WindowId};
 
 use runtime::PlatformRuntime;
 
@@ -83,6 +85,10 @@ impl Platform {
 
     pub fn set_window_title(&self, title: &str) {
         self.runtime.set_title(title);
+    }
+
+    pub fn window_handle(&self) -> Option<Arc<Window>> {
+        self.runtime.window_handle()
     }
 
     pub fn window_state(&self) -> &WindowState {

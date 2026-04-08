@@ -2,70 +2,56 @@
 
 ## 역할
 
-- renderer의 frame render pass를 정의하고 실행한다
+- renderer frame render pass를 encode하고 submit/present를 수행한다.
 
 ## 책임
 
-- current surface texture acquire
-- command encoder / render pass 생성
-- clear color / depth clear 적용
-- camera GPU state 갱신 호출
-- visible chunk draw call 기록
-- queue submit / present
-- surface error를 분류해 상위에 전달
+- frame 통계 계산
+- camera GPU state 갱신
+- camera uniform upload
+- surface texture acquire
+- clear pass와 dynamic cube draw
+- submit / present
+- recoverable surface error 전달
 
 ## 비책임
 
-- 메인 루프 소유
-- fixed timestep 관리
-- meshing / upload 요청 생성
-- gameplay 입력 해석
-- world 수정
+- render DTO 생성
+- chunk visibility 계산
+- gameplay state 해석
 
 ## 입력
 
 - `RenderFrameInput`
-- `Renderer`
-- visible chunk 목록
-- optional debug draw 입력
 
 ## 출력
 
-- present된 프레임
 - `RenderStats`
-- recoverable `RenderError`
+- `RenderError`
 
 ## 처리 흐름
 
-1. drawable size가 유효한지 확인한다
-2. current surface texture를 acquire 한다
-3. camera.rs를 통해 최신 camera uniform을 반영한다
-4. command encoder와 render pass를 연다
-5. visible chunk 순회하며 존재하는 `GpuChunkMesh`만 draw 한다
-6. submit 후 present 한다
-7. surface error면 재시도 / resize 필요 여부를 상위로 전달한다
-
-## 현재 구현 메모
-
-- 현재 저장소의 `frame.rs`는 실제 command encoder / submit / present 대신, camera 갱신과 visible mesh 집계 및 `RenderStats` 생성까지만 수행한다
+1. frame index와 stats를 갱신한다.
+2. `RenderCameraState`를 `CameraGpuState`로 갱신한다.
+3. live backend가 없으면 stats만 반환한다.
+4. surface texture를 acquire한다.
+5. camera uniform buffer를 업데이트한다.
+6. `cube_instances`를 임시 cube mesh로 확장한다.
+7. render pass에서 clear 후 cube를 draw한다.
+8. submit / present 한다.
 
 ## 불변식
 
-- 동일 입력에 대한 draw 순서는 deterministic해야 한다
-- present는 성공적인 submit 이후에만 수행한다
-- frame 단계는 gameplay 의미나 world source data를 만들지 않는다
-- surface acquire 실패나 outdated 상태는 조용히 삼키지 않고 상위에 전달한다
+- renderer는 `RenderCubeInstance` 같은 render-ready DTO만 본다.
+- live backend가 없거나 surface가 configure되지 않았으면 present하지 않는다.
+- acquire 실패는 recoverable `RenderSurfaceError`로 상위에 전달한다.
 
 ## 관련 모듈
 
-- surface.rs가 acquire / present 대상 surface를 제공
-- pipeline.rs가 draw pipeline을 제공
-- camera.rs가 camera uniform을 준비한다
-- upload.rs가 채운 GPU cache를 사용한다
-- app::frame가 renderer 호출 순서를 조율한다
-- platform::window가 resize / minimized 상태 정보를 제공할 수 있다
+- `camera.rs`
+- `surface.rs`
+- `state.rs`
 
 ## 메모
 
-- 초기에는 chunk pass 하나만 있어도 되지만, 이후 transparent / entity / debug overlay pass가 늘어날 수 있다
-- render graph가 필요해질 정도로 pass가 복잡해지면 별도 상위 구조를 도입한다
+- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공한다.

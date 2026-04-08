@@ -1,6 +1,24 @@
+use bytemuck::{Pod, Zeroable};
+
 use super::CameraProjectionConfig;
 
 pub type Matrix4 = [[f32; 4]; 4];
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct CameraUniform {
+    pub view_projection: Matrix4,
+}
+
+impl CameraUniform {
+    pub fn from_view_projection(view_projection: Matrix4) -> Self {
+        Self {
+            // The CPU camera math stores matrices row-major.
+            // WGSL uniforms are consumed as column-major matrices.
+            view_projection: transpose_matrix4(view_projection),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderCameraState {
@@ -197,4 +215,14 @@ fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
 
 fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn transpose_matrix4(matrix: Matrix4) -> Matrix4 {
+    let mut result = [[0.0; 4]; 4];
+    for row in 0..4 {
+        for col in 0..4 {
+            result[row][col] = matrix[col][row];
+        }
+    }
+    result
 }

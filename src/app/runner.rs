@@ -10,6 +10,12 @@ use super::GameApp;
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.platform.resumed(event_loop);
+
+        if let Some(window) = self.platform.window_handle() {
+            if let Err(error) = self.renderer.attach_window_surface(window) {
+                eprintln!("[app] renderer surface attach failed: {:?}", error);
+            }
+        }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {

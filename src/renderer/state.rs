@@ -4,13 +4,13 @@ use super::{
     CameraGpuState, ChunkCoord, GpuChunkMesh, PipelineSet, RenderConfig, RenderStats, SurfaceState,
 };
 
-#[derive(Debug, Clone)]
 pub struct Renderer {
     pub(crate) config: RenderConfig,
     pub(crate) surface: SurfaceState,
     pub(crate) pipelines: PipelineSet,
     pub(crate) world: RenderWorld,
     pub(crate) camera: CameraGpuState,
+    pub(crate) backend: Option<RendererBackend>,
     pub(crate) last_stats: RenderStats,
     pub(crate) frame_index: u64,
 }
@@ -43,6 +43,10 @@ impl Renderer {
     pub fn frame_index(&self) -> u64 {
         self.frame_index
     }
+
+    pub fn has_live_backend(&self) -> bool {
+        self.backend.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -69,4 +73,14 @@ impl RenderWorld {
         self.removed_this_frame = 0;
         (uploaded, removed)
     }
+}
+
+pub(crate) struct RendererBackend {
+    pub(crate) surface: wgpu::Surface<'static>,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) surface_config: wgpu::SurfaceConfiguration,
+    pub(crate) camera_buffer: wgpu::Buffer,
+    pub(crate) camera_bind_group: wgpu::BindGroup,
+    pub(crate) cube_pipeline: wgpu::RenderPipeline,
 }

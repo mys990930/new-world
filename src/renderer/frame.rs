@@ -1,9 +1,23 @@
-use super::{CameraUpdateError, ChunkCoord, RenderCameraState, RenderSurfaceError, Renderer};
+use bytemuck::cast_slice;
+use wgpu::util::DeviceExt;
+
+use super::{
+    camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderCameraState,
+    RenderSurfaceError, Renderer,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderCubeInstance {
+    pub center: [f32; 3],
+    pub half_extents: [f32; 3],
+    pub color: [f32; 4],
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderFrameInput<'a> {
     pub camera: &'a RenderCameraState,
     pub visible_chunks: &'a [ChunkCoord],
+    pub cube_instances: &'a [RenderCubeInstance],
     pub clear_color_override: Option<[f32; 4]>,
 }
 
@@ -86,10 +100,180 @@ impl Renderer {
 
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = submitted_chunk_count;
+
+        let Some(backend) = self.backend.as_mut() else {
+            self.last_stats = stats;
+            return Ok(stats);
+        };
+
+        let camera_uniform = CameraUniform::from_view_projection(self.camera.view_projection);
+        backend
+            .queue
+            .write_buffer(&backend.camera_buffer, 0, cast_slice(&[camera_uniform]));
+
+        let surface_texture = match backend.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(surface_texture)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => surface_texture,
+            wgpu::CurrentSurfaceTexture::Lost => {
+                super::surface::reconfigure_surface_backend(
+                    backend,
+                    self.surface.width(),
+                    self.surface.height(),
+                );
+                return Err(RenderError::Surface(RenderSurfaceError::Lost));
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                super::surface::reconfigure_surface_backend(
+                    backend,
+                    self.surface.width(),
+                    self.surface.height(),
+                );
+                return Err(RenderError::Surface(RenderSurfaceError::Outdated));
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Err(RenderError::Surface(RenderSurfaceError::Timeout));
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(RenderError::Surface(RenderSurfaceError::Validation));
+            }
+        };
+
+        let surface_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = backend
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("renderer_frame_encoder"),
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("renderer_main_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear_color[0] as f64,
+                            g: clear_color[1] as f64,
+                            b: clear_color[2] as f64,
+                            a: clear_color[3] as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(&backend.cube_pipeline);
+            render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+
+            if let Some((vertices, indices)) = build_cube_mesh(frame.cube_instances) {
+                let vertex_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_vertex_buffer"),
+                            contents: cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                let index_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_index_buffer"),
+                            contents: cast_slice(&indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+
+                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
+        }
+
+        backend.queue.submit(Some(encoder.finish()));
+        surface_texture.present();
         stats.presented = true;
 
         self.surface.mark_presented();
         self.last_stats = stats;
         Ok(stats)
     }
+}
+
+fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVertex>, Vec<u32>)> {
+    if cube_instances.is_empty() {
+        return None;
+    }
+
+    let mut vertices = Vec::with_capacity(cube_instances.len() * 8);
+    let mut indices = Vec::with_capacity(cube_instances.len() * 36);
+
+    for cube in cube_instances {
+        let base_index = vertices.len() as u32;
+        let [cx, cy, cz] = cube.center;
+        let [hx, hy, hz] = cube.half_extents;
+        let color = cube.color;
+
+        let positions = [
+            [cx - hx, cy - hy, cz - hz],
+            [cx + hx, cy - hy, cz - hz],
+            [cx + hx, cy + hy, cz - hz],
+            [cx - hx, cy + hy, cz - hz],
+            [cx - hx, cy - hy, cz + hz],
+            [cx + hx, cy - hy, cz + hz],
+            [cx + hx, cy + hy, cz + hz],
+            [cx - hx, cy + hy, cz + hz],
+        ];
+
+        vertices.extend(positions.into_iter().map(|position| MeshVertex { position, color }));
+        indices.extend_from_slice(&[
+            base_index + 4,
+            base_index + 5,
+            base_index + 6,
+            base_index + 4,
+            base_index + 6,
+            base_index + 7,
+            base_index + 1,
+            base_index,
+            base_index + 3,
+            base_index + 1,
+            base_index + 3,
+            base_index + 2,
+            base_index,
+            base_index + 4,
+            base_index + 7,
+            base_index,
+            base_index + 7,
+            base_index + 3,
+            base_index + 5,
+            base_index + 1,
+            base_index + 2,
+            base_index + 5,
+            base_index + 2,
+            base_index + 6,
+            base_index + 3,
+            base_index + 7,
+            base_index + 6,
+            base_index + 3,
+            base_index + 6,
+            base_index + 2,
+            base_index,
+            base_index + 1,
+            base_index + 5,
+            base_index,
+            base_index + 5,
+            base_index + 4,
+        ]);
+    }
+
+    Some((vertices, indices))
 }
