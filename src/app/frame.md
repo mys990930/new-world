@@ -6,6 +6,7 @@
 
 ## 책임
 
+- app timing state를 ECS frame delta resource로 주입
 - platform snapshot을 ECS 입력으로 bridge
 - ECS pre/update/post 실행
 - jobs 완료 결과 수거와 world/renderer 반영
@@ -35,16 +36,17 @@
 
 ## 처리 흐름
 
-1. `bridge_platform_to_ecs()`
-2. `ecs.run_pre_update()`
-3. `ecs.run_update()`
-4. `ecs.run_post_update()`
-5. 이전에 완료된 jobs 결과를 수거해서 ECS/world/renderer에 반영한다
-6. ECS chunk meta를 바탕으로 다음 jobs 요청을 만든다
-7. jobs에 요청을 제출한다
-8. 다시 완료된 jobs 결과를 수거해 같은 frame에 반영 가능한 범위까지 반영한다
-9. discrete command를 drain해서 필요 시 로그 확인
-10. `bridge_ecs_to_render_frame()` 결과를 `renderer.render(...)`에 전달
+1. app timing state를 ECS frame delta resource로 주입한다
+2. `bridge_platform_to_ecs()`
+3. `ecs.run_pre_update()`
+4. `ecs.run_update()`
+5. `ecs.run_post_update()`
+6. 이전에 완료된 jobs 결과를 수거해서 ECS/world/renderer에 반영한다
+7. ECS chunk meta를 바탕으로 다음 jobs 요청을 만든다
+8. jobs에 요청을 제출한다
+9. 다시 완료된 jobs 결과를 수거해 같은 frame에 반영 가능한 범위까지 반영한다
+10. discrete command를 drain해서 필요 시 로그 확인
+11. `bridge_ecs_to_render_frame()` 결과를 `renderer.render(...)`에 전달
 
 ## 불변식
 

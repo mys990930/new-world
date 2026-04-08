@@ -36,6 +36,28 @@ impl Default for Velocity {
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct LocalPlayerEntity(pub Option<Entity>);
 
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct FrameDeltaSeconds(pub f32);
+
+impl Default for FrameDeltaSeconds {
+    fn default() -> Self {
+        Self(0.0)
+    }
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct PlayerMovementConfig {
+    pub units_per_second: f32,
+}
+
+impl Default for PlayerMovementConfig {
+    fn default() -> Self {
+        Self {
+            units_per_second: 4.0,
+        }
+    }
+}
+
 pub(crate) fn update_move_world_intent_system(
     input: Res<EcsInputSnapshot>,
     camera: Res<CameraState>,
@@ -71,6 +93,31 @@ pub(crate) fn sync_local_player_velocity_system(
         0.0,
         move_world_intent.north as f32,
     ];
+}
+
+pub(crate) fn integrate_local_player_transform_system(
+    local_player: Res<LocalPlayerEntity>,
+    frame_delta: Res<FrameDeltaSeconds>,
+    movement: Res<PlayerMovementConfig>,
+    mut players: Query<(&mut Transform, &Velocity), With<Player>>,
+) {
+    let Some(entity) = local_player.0 else {
+        return;
+    };
+
+    let Ok((mut transform, velocity)) = players.get_mut(entity) else {
+        return;
+    };
+
+    let dt = frame_delta.0.max(0.0);
+    if dt <= f32::EPSILON {
+        return;
+    }
+
+    let distance_scale = movement.units_per_second * dt;
+    transform.translation[0] += velocity.linear[0] * distance_scale;
+    transform.translation[1] += velocity.linear[1] * distance_scale;
+    transform.translation[2] += velocity.linear[2] * distance_scale;
 }
 
 pub(crate) fn spawn_default_player(world: &mut World) -> Entity {
@@ -110,5 +157,35 @@ fn rotate_quarter_view_axes(east: i8, north: i8, quarter_turns: u8) -> (i8, i8) 
         2 => (-east, -north),
         3 => (-north, east),
         _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_ecs::prelude::Schedule;
+
+    use super::*;
+
+    #[test]
+    fn local_player_transform_integrates_velocity_using_frame_delta() {
+        let mut world = World::new();
+        world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(FrameDeltaSeconds(0.5));
+        world.insert_resource(PlayerMovementConfig {
+            units_per_second: 4.0,
+        });
+        let entity = spawn_default_player(&mut world);
+
+        {
+            let mut velocity = world.get_mut::<Velocity>(entity).unwrap();
+            velocity.linear = [1.0, 0.0, -1.0];
+        }
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(integrate_local_player_transform_system);
+        schedule.run(&mut world);
+
+        let transform = world.get::<Transform>(entity).copied().unwrap();
+        assert_eq!(transform.translation, [5.0, 1.5, 1.0]);
     }
 }

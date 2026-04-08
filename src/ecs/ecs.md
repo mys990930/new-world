@@ -32,6 +32,8 @@
 - `EcsInputSnapshot`
 - `PlayerCommandBuffer`
 - `MoveWorldIntent`
+- `FrameDeltaSeconds`
+- `PlayerMovementConfig`
 - `CameraState`
 - `LocalPlayerEntity`
 - `ChunkStates`
@@ -133,4 +135,5 @@ NOT:
 - 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer + MoveWorldIntent`까지 연결되어 있다.
 - discrete command는 app에서 로그로 확인할 수 있다.
 - `MoveWorldIntent`는 local player `Velocity`에 반영된다.
+- local player `Velocity`는 같은 frame의 `FrameDeltaSeconds`를 사용해 `Transform.translation`에 적분된다.
 - 기본 local player는 bootstrap 시점에 1회 spawn된다.

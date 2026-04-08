@@ -16,12 +16,16 @@
 ### Resource / Support State
 
 - `LocalPlayerEntity`
+- `FrameDeltaSeconds`
+- `PlayerMovementConfig`
 - `MoveWorldIntent`
 
 ## Inputs
 
 - `EcsInputSnapshot`
 - `CameraState`
+- `FrameDeltaSeconds`
+- `PlayerMovementConfig`
 - `PlayerCommandBuffer`
 - Local player entity id
 
@@ -29,7 +33,8 @@
 
 - `MoveWorldIntent`
 - Local player `Velocity`
-- Future `Transform`, action state, and chunk-interest inputs
+- Local player `Transform`
+- Future action state and chunk-interest inputs
 
 ## State Transition Rules
 
@@ -40,7 +45,8 @@
 - Movement input is first interpreted in that skewed quarter-view basis
 - `CameraState.quarter_turns` is then applied to produce the current world-relative movement intent
 - If `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
-- In the current minimal slice, `MoveWorldIntent` is copied directly into the local player `Velocity`
+- `MoveWorldIntent` is copied into the local player `Velocity`
+- The same frame then integrates `Velocity * PlayerMovementConfig.units_per_second * FrameDeltaSeconds` into `Transform.translation`
 
 ## Invariants
 
@@ -66,4 +72,4 @@
 ## Notes
 
 - The current minimal implementation spawns one local player during bootstrap
-- The current slice updates velocity only; transform integration is still a later step
+- The current slice updates both velocity and transform, without collision or gravity yet

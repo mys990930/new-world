@@ -7,8 +7,9 @@ use super::command::{
 };
 use super::input::{interpret_input_system, EcsInputSnapshot};
 use super::player::{
-    spawn_default_player, sync_local_player_velocity_system, update_move_world_intent_system,
-    LocalPlayerEntity, Transform,
+    integrate_local_player_transform_system, spawn_default_player,
+    sync_local_player_velocity_system, update_move_world_intent_system, FrameDeltaSeconds,
+    LocalPlayerEntity, PlayerMovementConfig, Transform,
 };
 
 pub struct EcsRuntime {
@@ -27,6 +28,8 @@ impl EcsRuntime {
         world.insert_resource(MoveWorldIntent::default());
         world.insert_resource(CameraState::default());
         world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(FrameDeltaSeconds::default());
+        world.insert_resource(PlayerMovementConfig::default());
         world.insert_resource(ChunkStates::default());
 
         let mut pre_update = Schedule::default();
@@ -39,6 +42,7 @@ impl EcsRuntime {
                 apply_camera_commands_system,
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
+                integrate_local_player_transform_system,
             )
                 .chain(),
         );
@@ -54,6 +58,10 @@ impl EcsRuntime {
 
     pub fn insert_resource<T: Resource>(&mut self, value: T) {
         self.world.insert_resource(value);
+    }
+
+    pub fn set_frame_delta_seconds(&mut self, dt_seconds: f32) {
+        self.world.resource_mut::<FrameDeltaSeconds>().0 = dt_seconds.max(0.0);
     }
 
     pub fn spawn_default_player(&mut self) {

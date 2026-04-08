@@ -4,6 +4,8 @@ use crate::renderer::RenderFrameInput;
 
 impl GameApp {
     pub fn update(&mut self) {
+        self.ecs
+            .set_frame_delta_seconds(self.timing.frame_dt.as_secs_f32());
         self.bridge_platform_to_ecs();
         self.ecs.run_pre_update();
         self.ecs.run_update();

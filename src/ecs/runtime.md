@@ -40,12 +40,14 @@
   - `EcsInputSnapshot`
   - `PlayerCommandBuffer`
   - `MoveWorldIntent`
+  - `FrameDeltaSeconds`
+  - `PlayerMovementConfig`
   - `CameraState`
   - `LocalPlayerEntity`
   - `ChunkStates`
 - 현재 frame update 순서는:
   - pre: command buffer clear, camera one-shot impulse clear
-  - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영
+  - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영 -> local player transform 적분
 - app bridge는 runtime helper를 통해 현재 `CameraState`와 local player `Transform`을 읽어 renderer DTO를 만든다
 - app frame은 runtime helper를 통해 현재 player 기준 chunk interest와 visible chunk 목록도 읽는다
 
@@ -65,6 +67,7 @@ EcsRuntime::run_fixed_update()
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
 EcsRuntime::move_world_intent() -> MoveWorldIntent
+EcsRuntime::set_frame_delta_seconds(dt_seconds: f32)
 EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::plan_chunk_job_requests(world: &WorldCore) -> Vec<JobRequest>
