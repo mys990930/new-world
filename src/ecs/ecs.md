@@ -136,6 +136,24 @@ NOT:
 5. simulation 결과 반영 순서는 명확해야 한다.
 6. jobs 결과 반영 순서는 명확해야 한다.
 
+### 하위 모듈 목록 및 역할
+
+- mod.rs: public facade, re-export
+- runtime.rs: EcsRuntime, bevy_ecs World/Schedule 소유, resource 초기화, pre/update/post/fixed 실행 진입점
+- input.rs: EcsInputSnapshot, frame 입력 resource, 화면 기준 입력을 gameplay command 후보로 해석하는 시스템
+- command.rs: PlayerCommand 및 ECS 내부 command/request buffer 정의, app/network와 맞닿는 안정적인 DTO 경계
+- player.rs: Player/Transform/Velocity 등 플레이어 중심 component와 이동/행동 상태 전이
+- camera.rs: CameraState, 4방향 쿼터뷰 회전, 느슨한 추적, 리센터 상태와 규칙
+- selection.rs: SelectionState/InteractionTarget, 가림 처리 기반 타겟 판정, hover 기반 앞/뒤 전환, 배치 프리뷰 상태
+- chunk.rs: ChunkStates, visible/interest chunk 계산, dirty/load/mesh/save 메타 상태 전이
+- jobs.rs: PendingJobResults 반영, ECS 측 후속 jobs/world/renderer 요청 생성 규칙
+- fixed.rs: ActiveSimRegion, SimulationControlState, fixed tick용 simulation 요청/결과 흐름
+
+### 현재 구현 메모
+
+- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
+- 이동 기준은 화면 기준이며, `Q/E`는 90도 회전, `Y`는 카메라 리센터로 해석한다
+
 ### 현재 구현 메모
 
 - 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
