@@ -1,59 +1,63 @@
 # bridge
 
-## 역할
+## Role
 
-- 모듈 간 표현 차이를 연결하는 번역 계층
-- cross-module DTO mapping은 app 내부에서만 담당한다
+- Translate cross-module state at runtime boundaries
+- Keep module-owned data models from leaking into neighboring modules
 
-## 책임
+## Responsibilities
 
-- platform raw state -> `EcsInputSnapshot`
-- ECS gameplay state -> renderer render-ready DTO
-- future jobs/world 결과 -> renderer upload request
+- Convert platform raw state into `EcsInputSnapshot`
+- Convert ECS gameplay state into render-ready DTOs
+- Convert future world/jobs outputs into renderer upload requests
 
-## 비책임
+## Non-Responsibilities
 
-- gameplay state transition 생성
-- world source of truth 수정
-- renderer draw 구현
-- network protocol 구현
+- Owning gameplay state transitions
+- Mutating world source-of-truth data
+- Encoding renderer draw commands directly
+- Defining network protocol payloads
 
-## 입력
+## Inputs
 
 - `Platform` state
 - `EcsRuntime` state
-- future `JobResult`, world dirty info
+- Future `JobResult` and world dirty state
 
-## 출력
+## Outputs
 
 - `EcsInputSnapshot`
 - `AppRenderFrameData`
-- future `RenderUploadRequest`
+- Future `RenderUploadRequest`
 
-## 상태 전이 규칙
+## Boundary Rules
 
-- bridge는 가능한 한 stateless translator로 유지한다.
-- gameplay 해석은 ECS가 담당한다.
-- renderer는 ECS/world 내부 타입을 직접 알지 않는다.
+- `bridge` stays a mostly stateless translator
+- Input meaning belongs to ECS, not to `bridge`
+- Renderer receives render-ready DTOs only, never ECS/world internals
 
-## 불변식
+## Invariants
 
-- `platform -> ecs` 경계에서는 raw state를 frame 입력 DTO로만 바꾼다.
-- `ecs -> renderer` 경계에서는 render-ready DTO만 만든다.
-- renderer는 local player entity나 ECS `Transform`을 직접 query하지 않는다.
+- `platform -> ecs` only maps raw transient/held input into frame input resources
+- `ecs -> renderer` only maps camera pose, visibility, and draw-ready instances
+- Renderer does not query ECS `Transform` or local player entities directly
+- Quarter-view camera basis is owned by the bridge and kept consistent with the current prototype mapping:
+  - east projects to screen bottom-right
+  - north projects to screen top-right
+  - world up projects upward on screen
 
-## 관련 모듈
+## Related Modules
 
 - `frame.rs`
 - `platform`
 - `ecs`
 - `renderer`
 
-## 메모
+## Notes
 
-- 현재 최소 구현에는 두 경로가 있다.
+- The current vertical slice uses two active bridge paths:
   - `platform -> EcsInputSnapshot`
   - `ecs -> AppRenderFrameData`
-- `AppRenderFrameData`는 현재 `camera`, `visible_chunks`, `cube_instances`를 가진다.
-- local player body-center transform은 플레이어 큐브 한 개의 `RenderCubeInstance`로 번역된다.
-- 현재 prototype은 quarter-view 문서 기준 축을 맞추기 위해 explicit camera basis를 renderer에 넘기고, perspective 왜곡을 줄이기 위해 orthographic projection을 사용한다.
+- `AppRenderFrameData` currently carries `camera`, `visible_chunks`, and `cube_instances`
+- The local player body-center transform is translated into a single `RenderCubeInstance`
+- The current prototype uses an explicit quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose

@@ -207,7 +207,9 @@ impl Renderer {
 
         }
 
-        if let Some((edge_vertices, edge_indices)) = build_cube_edge_mesh(frame.cube_instances) {
+        if let Some((edge_vertices, edge_indices)) =
+            build_cube_edge_mesh(frame.cube_instances, frame.camera)
+        {
             let edge_vertex_buffer =
                 backend
                     .device
@@ -316,6 +318,7 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
 
 fn build_cube_edge_mesh(
     cube_instances: &[RenderCubeInstance],
+    camera: &RenderCameraState,
 ) -> Option<(Vec<MeshVertex>, Vec<u32>)> {
     if cube_instances.is_empty() {
         return None;
@@ -344,35 +347,65 @@ fn build_cube_edge_mesh(
             position,
             color: edge_color,
         }));
-        indices.extend_from_slice(&[
-            base_index,
-            base_index + 1,
-            base_index + 1,
-            base_index + 2,
-            base_index + 2,
-            base_index + 3,
-            base_index + 3,
-            base_index,
-            base_index + 4,
-            base_index + 5,
-            base_index + 5,
-            base_index + 6,
-            base_index + 6,
-            base_index + 7,
-            base_index + 7,
-            base_index + 4,
-            base_index,
-            base_index + 4,
-            base_index + 1,
-            base_index + 5,
-            base_index + 2,
-            base_index + 6,
-            base_index + 3,
-            base_index + 7,
-        ]);
+        let view_to_eye = view_direction_towards_eye(camera);
+        let edge_pairs = visible_edge_pairs(view_to_eye);
+
+        for (a, b) in edge_pairs {
+            indices.extend_from_slice(&[base_index + a, base_index + b]);
+        }
     }
 
     Some((vertices, indices))
+}
+
+fn view_direction_towards_eye(camera: &RenderCameraState) -> [f32; 3] {
+    match camera.basis_override {
+        Some(basis) => scale3(basis.forward, -1.0),
+        None => normalize3([
+            camera.eye[0] - camera.target[0],
+            camera.eye[1] - camera.target[1],
+            camera.eye[2] - camera.target[2],
+        ]),
+    }
+}
+
+fn visible_edge_pairs(view_to_eye: [f32; 3]) -> Vec<(u32, u32)> {
+    let mut edges = Vec::new();
+
+    if view_to_eye[0] >= 0.0 {
+        edges.extend_from_slice(&[(1, 5), (5, 6), (6, 2), (1, 2)]);
+    } else {
+        edges.extend_from_slice(&[(0, 4), (4, 7), (7, 3), (0, 3)]);
+    }
+
+    if view_to_eye[1] >= 0.0 {
+        edges.extend_from_slice(&[(3, 2), (2, 6), (6, 7), (7, 3)]);
+    } else {
+        edges.extend_from_slice(&[(0, 1), (1, 5), (5, 4), (4, 0)]);
+    }
+
+    if view_to_eye[2] >= 0.0 {
+        edges.extend_from_slice(&[(4, 5), (5, 6), (6, 7), (7, 4)]);
+    } else {
+        edges.extend_from_slice(&[(0, 1), (1, 2), (2, 3), (3, 0)]);
+    }
+
+    edges.sort_unstable();
+    edges.dedup();
+    edges
+}
+
+fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
+    [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar]
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length_sq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
+    if length_sq <= f32::EPSILON {
+        [0.0, 0.0, 0.0]
+    } else {
+        scale3(vector, length_sq.sqrt().recip())
+    }
 }
 
 fn shade_face(color: [f32; 4], brightness: f32, accent: [f32; 4]) -> [f32; 4] {

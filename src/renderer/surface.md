@@ -1,25 +1,26 @@
 # surface
 
-## 역할
+## Role
 
-- renderer surface/backend 초기화와 resize를 담당한다.
+- Own renderer surface/backend initialization and resize handling
 
-## 책임
+## Responsibilities
 
-- `RenderSurfaceTarget` abstraction
-- stub target과 live window target 모두 지원
-- `wgpu::Instance` / `Surface` / `Adapter` / `Device` / `Queue` 생성
-- depth texture 생성과 resize 재생성
-- surface configure / reconfigure
-- renderer bootstrap 시점과 `resumed()` 이후 attach 시점 연결
+- Define the `RenderSurfaceTarget` abstraction
+- Support both stub and live window-backed targets
+- Create `wgpu::Instance`, `Surface`, `Adapter`, `Device`, and `Queue`
+- Create and recreate the depth texture on resize
+- Configure and reconfigure the surface
+- Bridge renderer bootstrap time and post-`resumed()` live attach time
+- Build the fill and edge overlay pipelines used by the current cube prototype
 
-## 비책임
+## Non-Responsibilities
 
-- frame DTO 생성
-- draw call encode
-- gameplay state 해석
+- Creating frame DTOs
+- Encoding per-frame draw calls
+- Interpreting gameplay state
 
-## 공개 인터페이스
+## Public Interface
 
 ```rust
 Renderer::new(target: &impl RenderSurfaceTarget, config: RenderConfig) -> Result<Renderer, RenderInitError>
@@ -27,24 +28,25 @@ Renderer::attach_window_surface(window: Arc<Window>) -> Result<(), RenderInitErr
 Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 ```
 
-## 상태 전이 규칙
+## State Rules
 
-- stub target으로 만들면 `RendererBackend`는 비어 있을 수 있다.
-- live window가 attach되면 real `wgpu` backend를 생성한다.
-- resize 시 CPU-side `SurfaceState`, camera projection cache, live surface config를 함께 갱신한다.
+- A renderer created from a stub target may have no live `RendererBackend`
+- Attaching a live window creates the real `wgpu` backend
+- Resize updates `SurfaceState`, camera aspect cache, and live surface configuration together
 
-## 불변식
+## Invariants
 
-- surface 크기가 0이면 configured 상태가 아니다.
-- live backend가 있을 때만 실제 surface configure/present가 일어난다.
+- A zero-sized surface is not configured
+- Real surface configure/present only happens when a live backend exists
+- The current filled-cube pipeline uses `FrontFace::Cw` so culling matches the current camera/view transform path
 
-## 관련 모듈
+## Related Modules
 
 - `state.rs`
 - `camera.rs`
 - `frame.rs`
 
-## 메모
+## Notes
 
-- 현재 구현은 player cube fill pipeline, edge overlay pipeline, camera uniform buffer를 backend 생성 시 함께 준비한다.
-- depth texture도 backend 생성/resize 시 같이 준비한다.
+- The current backend creates the player-cube fill pipeline, edge overlay pipeline, and camera uniform buffer during initialization
+- Depth resources are recreated together with surface resize
