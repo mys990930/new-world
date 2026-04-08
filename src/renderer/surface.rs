@@ -337,6 +337,45 @@ async fn create_backend(
         multiview_mask: None,
         cache: None,
     });
+    let cube_edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("renderer_cube_edge_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[super::MeshVertex::vertex_buffer_layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_config.format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
 
     Ok(RendererBackend {
         surface: surface_handle,
@@ -349,6 +388,7 @@ async fn create_backend(
         camera_buffer,
         camera_bind_group,
         cube_pipeline,
+        cube_edge_pipeline,
     })
 }
 

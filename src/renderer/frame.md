@@ -11,7 +11,7 @@
 - camera uniform upload
 - surface texture acquire
 - depth clear / depth test
-- clear pass와 dynamic cube draw
+- clear pass, filled cube draw, cube edge overlay draw
 - submit / present
 - recoverable surface error 전달
 
@@ -38,7 +38,7 @@
 4. surface texture를 acquire한다.
 5. camera uniform buffer를 업데이트한다.
 6. `cube_instances`를 face-tinted cube mesh로 확장한다.
-7. render pass에서 clear 후 cube를 draw한다.
+7. render pass에서 clear 후 cube fill을 그리고, 이어서 edge overlay를 그린다.
 8. submit / present 한다.
 
 ## 불변식
@@ -55,4 +55,4 @@
 
 ## 메모
 
-- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 면이 읽히도록 face tint를 적용한다.
+- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, face tint와 edge overlay로 입체감을 읽히게 한다.

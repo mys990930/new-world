@@ -204,6 +204,33 @@ impl Renderer {
                 render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
+
+            if let Some((edge_vertices, edge_indices)) = build_cube_edge_mesh(frame.cube_instances) {
+                let edge_vertex_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_edge_vertex_buffer"),
+                            contents: cast_slice(&edge_vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                let edge_index_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_edge_index_buffer"),
+                            contents: cast_slice(&edge_indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+
+                render_pass.set_pipeline(&backend.cube_edge_pipeline);
+                render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
         }
 
         backend.queue.submit(Some(encoder.finish()));
@@ -265,6 +292,67 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
                 base_index + 3,
             ]);
         }
+    }
+
+    Some((vertices, indices))
+}
+
+fn build_cube_edge_mesh(
+    cube_instances: &[RenderCubeInstance],
+) -> Option<(Vec<MeshVertex>, Vec<u32>)> {
+    if cube_instances.is_empty() {
+        return None;
+    }
+
+    let mut vertices = Vec::with_capacity(cube_instances.len() * 8);
+    let mut indices = Vec::with_capacity(cube_instances.len() * 24);
+
+    for cube in cube_instances {
+        let base_index = vertices.len() as u32;
+        let [cx, cy, cz] = cube.center;
+        let [hx, hy, hz] = cube.half_extents;
+        let edge_color = [0.01, 0.01, 0.02, 1.0];
+        let corners = [
+            [cx - hx, cy - hy, cz - hz],
+            [cx + hx, cy - hy, cz - hz],
+            [cx + hx, cy + hy, cz - hz],
+            [cx - hx, cy + hy, cz - hz],
+            [cx - hx, cy - hy, cz + hz],
+            [cx + hx, cy - hy, cz + hz],
+            [cx + hx, cy + hy, cz + hz],
+            [cx - hx, cy + hy, cz + hz],
+        ];
+
+        vertices.extend(corners.into_iter().map(|position| MeshVertex {
+            position,
+            color: edge_color,
+        }));
+        indices.extend_from_slice(&[
+            base_index,
+            base_index + 1,
+            base_index + 1,
+            base_index + 2,
+            base_index + 2,
+            base_index + 3,
+            base_index + 3,
+            base_index,
+            base_index + 4,
+            base_index + 5,
+            base_index + 5,
+            base_index + 6,
+            base_index + 6,
+            base_index + 7,
+            base_index + 7,
+            base_index + 4,
+            base_index,
+            base_index + 4,
+            base_index + 1,
+            base_index + 5,
+            base_index + 2,
+            base_index + 6,
+            base_index + 3,
+            base_index + 7,
+        ]);
     }
 
     Some((vertices, indices))

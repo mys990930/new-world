@@ -46,5 +46,5 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 ## 메모
 
-- 현재 구현은 player cube shader/pipeline과 camera uniform buffer를 backend 생성 시 함께 준비한다.
+- 현재 구현은 player cube fill pipeline, edge overlay pipeline, camera uniform buffer를 backend 생성 시 함께 준비한다.
 - depth texture도 backend 생성/resize 시 같이 준비한다.

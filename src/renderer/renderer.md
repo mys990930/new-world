@@ -85,7 +85,7 @@ NOT:
 
 ### 현재 구현 메모
 
-- 현재 구현은 플레이어 큐브 1개를 그리는 최소 dynamic object path까지 연결돼 있고, 면별 tint로 큐브 실루엣을 읽기 쉽게 만든다.
+- 현재 구현은 플레이어 큐브 1개를 그리는 최소 dynamic object path까지 연결돼 있고, 면별 tint와 edge overlay로 큐브 형태를 읽기 쉽게 만든다.
 - 플레이어 큐브 path는 depth test/write를 사용해 실제 큐브 실루엣이 보이도록 한다.
 - chunk upload 경로는 아직 CPU-side bookkeeping 위주이며 실제 chunk draw는 이후 단계다.
 
