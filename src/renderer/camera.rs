@@ -112,7 +112,9 @@ impl CameraGpuState {
 
         self.view = view;
         self.projection = projection;
-        self.view_projection = multiply_matrix4(projection, view);
+        // The CPU-side math in this module is expressed as row-major matrices
+        // multiplied by row vectors, so the composed order is view * projection.
+        self.view_projection = multiply_matrix4(view, projection);
         self.cached_aspect_ratio = aspect_ratio;
         self.last_uploaded_frame = Some(frame_index);
         Ok(())
