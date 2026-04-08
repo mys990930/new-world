@@ -2,6 +2,7 @@ mod app;
 mod ecs;
 mod platform;
 mod renderer;
+mod world;
 
 use std::error::Error;
 

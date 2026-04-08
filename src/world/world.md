@@ -29,9 +29,10 @@
 
 - `WorldMeta`
 - `ChunkCoord`, `LocalBlockCoord`, `WorldBlockCoord`
-- `BlockId`
+- `BlockId`, `BlockFace`
 - `ChunkData`, `ChunkSnapshot`
 - `WorldEdit`, `EditResult`
+- `MeshVertex`, `CpuMesh`, `RenderBounds`
 - `WorldCore`
 
 ### 공개 인터페이스
@@ -57,7 +58,6 @@ WorldCore::query_block_state(...)
 generation::generate_chunk(
     coord: ChunkCoord,
     meta: &WorldMeta,
-    registry: &BlockRegistry,
 ) -> ChunkData
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
@@ -66,14 +66,11 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 meshing::build_chunk_mesh(
     center: &ChunkSnapshot,
     neighbors: NeighborChunks,
-    registry: &BlockRegistry,
 ) -> CpuMesh
 ```
 
 ### 의존성
 
-- block registry / block definition lookup
-- biome / generation config
 - save format config
 
 NOT:
@@ -111,6 +108,7 @@ NOT:
 
 ### 현재 구현 메모
 
-- `world`는 아직 Rust 구현보다 문서가 앞선 상태다.
-- 이번 분해는 향후 `mod.rs + leaf.rs` 구조로 구현을 나눌 때의 기준 문서 역할을 한다.
-- `BlockRegistry`와 `CpuMesh` 같은 cross-module 타입의 최종 소유 위치는 아직 고정하지 않고, 현재 문서에서는 기존 계약 수준만 유지한다.
+- 현재 최소 구현은 `mod.rs + leaf.rs` 구조까지 추가되어 있다.
+- generation은 `WorldMeta`와 `ChunkCoord`를 받아 `world y = 0`에 한 층짜리 grass plane을 채우는 deterministic flat-plane generator만 제공한다.
+- meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, renderer 타입으로의 변환은 이후 jobs/app bridge 단계에서 연결한다.
+- `BlockRegistry`는 아직 도입하지 않고, 현재는 `BlockId` 자체가 최소한의 solid/face-color 규칙을 가진다.

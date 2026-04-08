@@ -7,6 +7,7 @@
 
 ## 책임
 
+- `BlockId` / `BlockFace` 정의
 - 고정 크기 블록 저장 구조 정의
 - 청크 내부 block read/write 규칙 정의
 - 청크 스냅샷 표현 정의
@@ -25,12 +26,14 @@
 
 ### ChunkData
 
+- `coord`
 - block storage
 - optional raw metadata
 - future light/raw block-state payloads
 
 ### ChunkSnapshot
 
+- `coord`
 - immutable block/raw metadata view or copy
 - jobs / simulation / meshing 전달용 read-only payload
 
@@ -56,7 +59,7 @@
 
 ```rust
 ChunkData::get_block(local: LocalBlockCoord) -> Option<BlockId>
-ChunkData::set_block(local: LocalBlockCoord, block: BlockId) -> Result<(), ChunkWriteError>
+ChunkData::set_block(local: LocalBlockCoord, block: BlockId) -> Result<BlockId, ChunkWriteError>
 ChunkData::snapshot(&self) -> ChunkSnapshot
 ```
 
@@ -79,3 +82,4 @@ ChunkData::snapshot(&self) -> ChunkSnapshot
 ## 메모
 
 - light, raw metadata, block state payload는 필요해질 때 추가할 수 있지만, 여전히 "원본 월드 데이터" 범위를 벗어나면 안 된다.
+- 현재 최소 구현의 `ChunkSnapshot`은 block 배열을 clone한 immutable value payload다.

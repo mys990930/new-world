@@ -61,3 +61,4 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 ## 메모
 
 - 실제 파일 입출력과 저장 타이밍 정책은 storage가 아니라 jobs/app 상위 계층이 결정한다.
+- 현재 최소 구현은 `NWCH` magic + version + chunk coord + fixed block payload 형식의 단순 binary 포맷을 사용한다.

@@ -24,7 +24,6 @@
 
 - `ChunkCoord`
 - `WorldMeta`
-- block registry / generation config
 
 ## 출력
 
@@ -33,7 +32,7 @@
 ## 처리 흐름
 
 1. `WorldMeta.seed`와 청크 좌표를 바탕으로 생성 입력을 만든다.
-2. 필요한 biome/noise/config를 평가한다.
+2. 현재 최소 구현은 청크의 world-space `y = 0` layer만 채우는 flat plane 규칙을 사용한다.
 3. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
 4. 완성된 청크를 반환한다.
 
@@ -43,7 +42,6 @@
 generation::generate_chunk(
     coord: ChunkCoord,
     meta: &WorldMeta,
-    registry: &BlockRegistry,
 ) -> ChunkData
 ```
 
@@ -64,4 +62,5 @@ generation::generate_chunk(
 
 ## 메모
 
-- `BlockRegistry`의 최종 소유 위치는 아직 고정하지 않고, 여기서는 read-only block definition dependency로만 다룬다.
+- 현재 최소 구현은 `BlockRegistry` 없이 `BlockId` 기반 규칙만 사용한다.
+- 첫 vertical slice용으로 `world y = 0`에 grass block plane 한 층만 생성한다.

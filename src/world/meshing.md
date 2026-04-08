@@ -23,11 +23,10 @@
 
 - center `ChunkSnapshot`
 - neighbor chunk snapshots
-- block registry / renderable block definition
 
 ## 출력
 
-- `CpuMesh`
+- world-owned `CpuMesh`
 
 ## 처리 흐름
 
@@ -42,7 +41,6 @@
 meshing::build_chunk_mesh(
     center: &ChunkSnapshot,
     neighbors: NeighborChunks,
-    registry: &BlockRegistry,
 ) -> CpuMesh
 ```
 
@@ -61,4 +59,5 @@ meshing::build_chunk_mesh(
 
 ## 메모
 
-- `CpuMesh`의 최종 타입 소유 위치는 아직 열어두지만, world 문서에서는 "원본 월드 데이터에서 만든 CPU-side mesh 결과"라는 의미만 고정한다.
+- 현재 최소 구현은 `BlockId`가 가진 solid/face-color 규칙으로 노출면을 계산한다.
+- 이 `CpuMesh`는 renderer가 직접 소유하는 타입이 아니라, 이후 jobs/app bridge에서 renderer upload DTO로 변환될 world-side CPU mesh다.
