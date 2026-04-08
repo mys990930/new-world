@@ -221,16 +221,13 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         return None;
     }
 
-    let mut vertices = Vec::with_capacity(cube_instances.len() * 8);
+    let mut vertices = Vec::with_capacity(cube_instances.len() * 24);
     let mut indices = Vec::with_capacity(cube_instances.len() * 36);
 
     for cube in cube_instances {
-        let base_index = vertices.len() as u32;
         let [cx, cy, cz] = cube.center;
         let [hx, hy, hz] = cube.half_extents;
-        let color = cube.color;
-
-        let positions = [
+        let corners = [
             [cx - hx, cy - hy, cz - hz],
             [cx + hx, cy - hy, cz - hz],
             [cx + hx, cy + hy, cz - hz],
@@ -241,46 +238,43 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
             [cx - hx, cy + hy, cz + hz],
         ];
 
-        vertices.extend(positions.into_iter().map(|position| MeshVertex { position, color }));
-        indices.extend_from_slice(&[
-            base_index + 4,
-            base_index + 5,
-            base_index + 6,
-            base_index + 4,
-            base_index + 6,
-            base_index + 7,
-            base_index + 1,
-            base_index,
-            base_index + 3,
-            base_index + 1,
-            base_index + 3,
-            base_index + 2,
-            base_index,
-            base_index + 4,
-            base_index + 7,
-            base_index,
-            base_index + 7,
-            base_index + 3,
-            base_index + 5,
-            base_index + 1,
-            base_index + 2,
-            base_index + 5,
-            base_index + 2,
-            base_index + 6,
-            base_index + 3,
-            base_index + 7,
-            base_index + 6,
-            base_index + 3,
-            base_index + 6,
-            base_index + 2,
-            base_index,
-            base_index + 1,
-            base_index + 5,
-            base_index,
-            base_index + 5,
-            base_index + 4,
-        ]);
+        let face_specs = [
+            ([4_u32, 5, 6, 7], tint_color(cube.color, 1.08)),
+            ([1_u32, 0, 3, 2], tint_color(cube.color, 0.60)),
+            ([0_u32, 4, 7, 3], tint_color(cube.color, 0.72)),
+            ([5_u32, 1, 2, 6], tint_color(cube.color, 0.88)),
+            ([3_u32, 7, 6, 2], tint_color(cube.color, 1.22)),
+            ([0_u32, 1, 5, 4], tint_color(cube.color, 0.52)),
+        ];
+
+        for (corner_indices, face_color) in face_specs {
+            let base_index = vertices.len() as u32;
+            for corner_index in corner_indices {
+                vertices.push(MeshVertex {
+                    position: corners[corner_index as usize],
+                    color: face_color,
+                });
+            }
+
+            indices.extend_from_slice(&[
+                base_index,
+                base_index + 1,
+                base_index + 2,
+                base_index,
+                base_index + 2,
+                base_index + 3,
+            ]);
+        }
     }
 
     Some((vertices, indices))
+}
+
+fn tint_color(color: [f32; 4], brightness: f32) -> [f32; 4] {
+    [
+        (color[0] * brightness).clamp(0.0, 1.0),
+        (color[1] * brightness).clamp(0.0, 1.0),
+        (color[2] * brightness).clamp(0.0, 1.0),
+        color[3],
+    ]
 }

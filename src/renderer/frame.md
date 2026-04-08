@@ -37,7 +37,7 @@
 3. live backend가 없으면 stats만 반환한다.
 4. surface texture를 acquire한다.
 5. camera uniform buffer를 업데이트한다.
-6. `cube_instances`를 임시 cube mesh로 확장한다.
+6. `cube_instances`를 face-tinted cube mesh로 확장한다.
 7. render pass에서 clear 후 cube를 draw한다.
 8. submit / present 한다.
 
@@ -55,4 +55,4 @@
 
 ## 메모
 
-- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공한다.
+- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 면이 읽히도록 face tint를 적용한다.
