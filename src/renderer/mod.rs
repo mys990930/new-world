@@ -7,7 +7,10 @@ mod surface;
 mod upload;
 
 #[allow(unused_imports)]
-pub use camera::{CameraGpuState, CameraUpdateError, Matrix4, RenderCameraState};
+pub use camera::{
+    CameraGpuState, CameraUpdateError, Matrix4, RenderCameraState, RenderProjectionMode,
+    RenderViewBasis,
+};
 #[allow(unused_imports)]
 pub use config::{
     CameraProjectionConfig, ClearColor, DebugRenderConfig, DepthFormat, PresentMode,

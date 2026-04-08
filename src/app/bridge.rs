@@ -2,7 +2,9 @@ use winit::keyboard::KeyCode;
 
 use super::GameApp;
 use crate::ecs::EcsInputSnapshot;
-use crate::renderer::{ChunkCoord, RenderCameraState, RenderCubeInstance};
+use crate::renderer::{
+    ChunkCoord, RenderCameraState, RenderCubeInstance, RenderProjectionMode, RenderViewBasis,
+};
 
 pub struct AppRenderFrameData {
     pub camera: RenderCameraState,
@@ -56,7 +58,7 @@ impl GameApp {
             .map(|transform| {
                 vec![RenderCubeInstance {
                     center: transform.translation,
-                    half_extents: [1.0, 1.0, 1.0],
+                    half_extents: [0.5, 0.5, 0.5],
                     color: [0.78, 0.88, 0.98, 1.0],
                 }]
             })
@@ -75,13 +77,15 @@ fn axis(negative: bool, positive: bool) -> i8 {
 }
 
 fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
-    // Keep the prototype camera close enough that the player cube is easy to inspect.
-    const CAMERA_DISTANCE: f32 = 10.0;
+    const CAMERA_DISTANCE: f32 = 18.0;
+    const ORTHOGRAPHIC_VERTICAL_SIZE: f32 = 5.0;
     const CAMERA_UP_BASE: [f32; 3] = [-1.0, 2.4, 1.0];
     const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 
     let right = normalize3(rotate_y_quarter_turns(CAMERA_RIGHT_BASE, quarter_turns));
     let up = normalize3(rotate_y_quarter_turns(CAMERA_UP_BASE, quarter_turns));
+    // With an explicit basis override, `right` and `up` define the screen axes directly:
+    // east -> screen bottom-right, north -> screen top-right.
     let forward = normalize3(cross3(right, up));
     let eye = add3(target, scale3(forward, -CAMERA_DISTANCE));
 
@@ -90,6 +94,10 @@ fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCamer
         target,
         up,
         aspect_override: None,
+        projection_mode: RenderProjectionMode::Orthographic {
+            vertical_world_size: ORTHOGRAPHIC_VERTICAL_SIZE,
+        },
+        basis_override: Some(RenderViewBasis { right, up, forward }),
     }
 }
 

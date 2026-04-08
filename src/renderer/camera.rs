@@ -4,6 +4,19 @@ use super::CameraProjectionConfig;
 
 pub type Matrix4 = [[f32; 4]; 4];
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RenderProjectionMode {
+    Perspective,
+    Orthographic { vertical_world_size: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderViewBasis {
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub forward: [f32; 3],
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct CameraUniform {
@@ -26,6 +39,8 @@ pub struct RenderCameraState {
     pub target: [f32; 3],
     pub up: [f32; 3],
     pub aspect_override: Option<f32>,
+    pub projection_mode: RenderProjectionMode,
+    pub basis_override: Option<RenderViewBasis>,
 }
 
 impl Default for RenderCameraState {
@@ -35,6 +50,8 @@ impl Default for RenderCameraState {
             target: [0.0, 0.0, 0.0],
             up: [0.0, 1.0, 0.0],
             aspect_override: None,
+            projection_mode: RenderProjectionMode::Perspective,
+            basis_override: None,
         }
     }
 }
@@ -102,13 +119,26 @@ impl CameraGpuState {
             .filter(|value| value.is_finite() && *value > 0.0)
             .unwrap_or_else(|| aspect_ratio_from_size(width, height));
 
-        let view = look_at_rh(camera.eye, camera.target, camera.up)?;
-        let projection = perspective_rh(
-            projection.vertical_fov_radians,
-            aspect_ratio,
-            projection.near_plane,
-            projection.far_plane,
-        )?;
+        let view = match camera.basis_override {
+            Some(basis) => view_from_basis(camera.eye, basis)?,
+            None => look_at_rh(camera.eye, camera.target, camera.up)?,
+        };
+        let projection = match camera.projection_mode {
+            RenderProjectionMode::Perspective => perspective_rh(
+                projection.vertical_fov_radians,
+                aspect_ratio,
+                projection.near_plane,
+                projection.far_plane,
+            )?,
+            RenderProjectionMode::Orthographic {
+                vertical_world_size,
+            } => orthographic_rh(
+                aspect_ratio,
+                vertical_world_size,
+                projection.near_plane,
+                projection.far_plane,
+            )?,
+        };
 
         self.view = view;
         self.projection = projection;
@@ -156,6 +186,24 @@ fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Result<Matrix4, 
     ])
 }
 
+fn view_from_basis(eye: [f32; 3], basis: RenderViewBasis) -> Result<Matrix4, CameraUpdateError> {
+    let right = normalize3(basis.right).ok_or(CameraUpdateError::DegenerateView)?;
+    let up = normalize3(basis.up).ok_or(CameraUpdateError::DegenerateView)?;
+    let forward = normalize3(basis.forward).ok_or(CameraUpdateError::DegenerateView)?;
+
+    Ok([
+        [right[0], up[0], -forward[0], 0.0],
+        [right[1], up[1], -forward[1], 0.0],
+        [right[2], up[2], -forward[2], 0.0],
+        [
+            -dot3(right, eye),
+            -dot3(up, eye),
+            dot3(forward, eye),
+            1.0,
+        ],
+    ])
+}
+
 fn perspective_rh(
     vertical_fov_radians: f32,
     aspect_ratio: f32,
@@ -176,6 +224,31 @@ fn perspective_rh(
         [0.0, focal_length, 0.0, 0.0],
         [0.0, 0.0, far_plane / (near_plane - far_plane), -1.0],
         [0.0, 0.0, (near_plane * far_plane) / (near_plane - far_plane), 0.0],
+    ])
+}
+
+fn orthographic_rh(
+    aspect_ratio: f32,
+    vertical_world_size: f32,
+    near_plane: f32,
+    far_plane: f32,
+) -> Result<Matrix4, CameraUpdateError> {
+    if aspect_ratio <= 0.0
+        || vertical_world_size <= 0.0
+        || near_plane <= 0.0
+        || far_plane <= near_plane
+    {
+        return Err(CameraUpdateError::InvalidProjectionConfig);
+    }
+
+    let half_height = vertical_world_size * 0.5;
+    let half_width = half_height * aspect_ratio;
+
+    Ok([
+        [1.0 / half_width, 0.0, 0.0, 0.0],
+        [0.0, 1.0 / half_height, 0.0, 0.0],
+        [0.0, 0.0, 1.0 / (near_plane - far_plane), 0.0],
+        [0.0, 0.0, near_plane / (near_plane - far_plane), 1.0],
     ])
 }
 

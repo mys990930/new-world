@@ -63,4 +63,4 @@
 
 - vsync / unlocked present mode 전환이 필요해지면 `RenderConfig`에서 정책만 노출하고 실제 전환은 surface.rs가 수행한다
 - 품질 프리셋이 커지면 `DebugRenderConfig`, `PostProcessConfig` 같은 하위 구조로 쪼갤 수 있다
-
+- projection kind 자체는 현재 `RenderCameraState`가 frame 단위 render-ready DTO로 override할 수 있다
