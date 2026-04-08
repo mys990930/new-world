@@ -50,6 +50,7 @@
 
 - 같은 프레임 내 command 생성 순서는 deterministic해야 한다
 - camera 회전, 이동, 상호작용 command의 상대 순서는 정책적으로 고정되어야 한다
+- 같은 프레임에 `RotateCamera`와 `MoveScreen`이 함께 들어오면, `MoveWorldIntent`는 회전 후 camera 기준으로 계산한다
 - 네트워크 전송 대상이 되는 command는 추후 sequence/tick 정보를 덧붙일 수 있어야 한다
 - 멀티플레이 경계에서는 가능하면 world 기준 intent를 사용하는 편이 좋다
 

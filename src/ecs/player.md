@@ -37,6 +37,7 @@
 ## 상태 전이 규칙
 
 - `MoveScreen` command는 카메라 4방향 회전 상태를 기준으로 `MoveWorldIntent`로 변환된다
+- 같은 프레임에 `RotateCamera`가 들어오면, 변환은 회전 후 camera 방향을 기준으로 한다
 - 플레이어 실제 이동은 `MoveWorldIntent`를 소비한 결과로 반영된다
 - 이동은 raw key state가 아니라 command 소비 결과로 반영된다
 - 행동 상태 전이는 플레이어 resource/component 안에서만 일어난다
@@ -69,3 +70,5 @@
 
 - 초반에는 local player 하나만 두더라도, 구조는 멀티플레이 확장을 고려해 두는 게 좋다
 - animation state가 생기면 player.md 범위를 더 세분화할 수 있다
+- 현재 최소 구현에서는 app bootstrap 시점에 단순한 local player entity를 하나 생성한다
+- 현재 기본 스폰 가정은 원점 위치, zero velocity다

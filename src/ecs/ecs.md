@@ -80,6 +80,7 @@
     - Y → 카메라 리센터 요청
 - 플레이어/엔티티 상태 갱신
     - `MoveScreen`을 camera 회전 상태 기준으로 `MoveWorldIntent`로 변환
+    - 같은 프레임에 회전과 이동이 함께 들어오면 회전 후 기준으로 변환
     - 이동
     - 속도/행동 갱신
     - AI 상태 전이
@@ -88,6 +89,7 @@
     - 진행 방향 쪽 시야 bias 유지
     - 정지 시 천천히 recenter
     - `Y` 또는 좌/우클릭 상호작용 시 빠른 recenter
+    - 빠른 recenter는 지속 상태가 아니라 1회성 boost로 적용
 - 월드 상호작용 요청 처리
     - 블록 파괴 요청 생성/소비
     - world.apply_edit(…) 호출
@@ -161,3 +163,5 @@ NOT:
 
 - 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer` 변환까지만 제공한다
 - `MoveScreen -> MoveWorldIntent`, camera slow tracking, interest/visible chunk 분리는 아직 문서만 먼저 고정된 상태다
+- app bootstrap에서 간단한 local player entity를 하나 생성해 ECS world에 넣는 방향으로 간다
+- 현재 기본 player spawn 가정은 원점 위치의 단순 `Player + Transform + Velocity` 엔티티 하나다

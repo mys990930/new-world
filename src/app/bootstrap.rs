@@ -9,7 +9,8 @@ impl GameApp {
             width: config.width,
             height: config.height,
         });
-        let ecs = EcsRuntime::new();
+        let mut ecs = EcsRuntime::new();
+        ecs.spawn_default_player();
 
         Self {
             config,

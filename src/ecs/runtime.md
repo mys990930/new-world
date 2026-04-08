@@ -36,7 +36,8 @@
 
 ## 현재 구현 메모
 
-- 현재 구현은 `EcsInputSnapshot`과 `PlayerCommandBuffer`를 등록하고, command buffer clear + input 해석 시스템만 연결한다
+- 현재 구현은 `EcsInputSnapshot`, `PlayerCommandBuffer`, `LocalPlayerEntity`를 등록하고, command buffer clear + input 해석 시스템만 연결한다
+- bootstrap 시점에 호출 가능한 기본 player spawn helper를 제공한다
 
 ## 외부 인터페이스
 
@@ -51,6 +52,7 @@ EcsRuntime::run_update()
 EcsRuntime::run_post_update()
 EcsRuntime::run_fixed_update()
 
+EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
 ```
 

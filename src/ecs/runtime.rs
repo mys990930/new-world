@@ -2,6 +2,7 @@ use bevy_ecs::prelude::{Resource, Schedule, World};
 
 use super::command::{clear_player_command_buffer_system, PlayerCommand, PlayerCommandBuffer};
 use super::input::{interpret_input_system, EcsInputSnapshot};
+use super::player::{spawn_default_player, LocalPlayerEntity};
 
 pub struct EcsRuntime {
     world: World,
@@ -16,6 +17,7 @@ impl EcsRuntime {
         let mut world = World::new();
         world.insert_resource(EcsInputSnapshot::default());
         world.insert_resource(PlayerCommandBuffer::default());
+        world.insert_resource(LocalPlayerEntity::default());
 
         let mut pre_update = Schedule::default();
         pre_update.add_systems(clear_player_command_buffer_system);
@@ -34,6 +36,11 @@ impl EcsRuntime {
 
     pub fn insert_resource<T: Resource>(&mut self, value: T) {
         self.world.insert_resource(value);
+    }
+
+    pub fn spawn_default_player(&mut self) {
+        let entity = spawn_default_player(&mut self.world);
+        println!("[ecs] spawned local player entity: {:?}", entity);
     }
 
     pub fn world(&self) -> &World {
