@@ -2,74 +2,36 @@
 
 ### 역할
 
-- 메인 프레임 루프에서 직접 돌리기엔 무거운 작업을 백그라운드에서 async로 처리함
-- 무슨 작업이 필요한지 판단하지는 않고, 요청된 작업을 실제로 수행함
+- 메인 frame/fixed loop에서 직접 돌리기 무거운 작업을 백그라운드 실행 단위로 분리한다.
+- 상위 모듈이 제출한 요청을 worker 실행으로 연결하고, 완료 결과를 명시적으로 수거할 수 있게 노출한다.
 
 ### 책임
 
-- job request queue administration
-- worker thread/task execution
-- job result collection
-- job type-specific routing
-- race condition prevention
+- job submission surface 제공
+- pending/running/completed queue ownership
+- worker thread/task 실행과 shutdown coordination
+- job type별 world/simulation API routing
+- 완료 결과 수집과 deterministic drain surface 제공
+- 안전한 범위의 중복 요청 coalescing policy 유지
 
 ### 비책임
 
-- dirty chunk judgment
-- draw call
-- ecs status modification
+- 어떤 job이 필요한지 gameplay 차원에서 판단
+- dirty chunk 판단
+- draw call 수행
+- ecs status 직접 수정
+- live world source of truth 장기 소유
 
-### 데이터
+### 소유 데이터
 
-#### JobRequest
+- `JobConfig`
+- `JobSystem`
+- `JobRequest`
+- `JobResult`
+- `JobQueue`
+- `WorkerContext`
 
-- LoadChunk(coord)
-- GenerateChunk(coord)
-- BuildChunkMesh(coord, snapshot)
-- SaveChunk(coord, snapshot)
-- SimulateSubsystemTick(subsystem, tick, region, snapshot)
-- SimulateRegionTick(tick, region, bundle)
-
-#### JobResult
-
-- ChunkLoaded(coord, chunk)
-- ChunkGenerated(coord, chunk)
-- ChunkMeshBuilt(coord, mesh)
-- ChunkSaved(coord)
-- JobFailed(…)
-- SimulationStepped(subsystem, tick, result)
-
-#### JobQueue
-
-- PendingRequest
-- RunningRequest
-- CompletedRequestQueue
-
-#### WorkerContext
-
-- ThreadPool
-- ChannelSender/ChannelReceiver
-- ShutdownFlag
-
-### 유스케이스
-
-- 청크 로드
-    - coord를 받아서 파일에서 읽기
-    - 없으면 실패 또는 generate fallback
-- 청크 생성
-    - seed, coord 기반 절차 생성
-    - 결과 ChunkData 반환
-- 청크 메싱
-    - 청크 스냅샷 + 이웃 스냅샷 받아서 CpuMesh 생성
-- 청크 저장
-    - ChunkData 스냅샷을 직렬화 후 파일 저장
-- 무거운 생태계/유체/화재 틱 실행
-- 결과 수거
-    - 완료된 작업을 메인 스레드가 가져갈 수 있게 큐에 쌓아둠
-
-### 인터페이스
-
-예시 public API:
+### 공개 인터페이스
 
 ```rust
 JobSystem::new(config: JobConfig) -> JobSystem
@@ -79,31 +41,41 @@ JobSystem::drain_completed() -> Vec<JobResult>
 JobSystem::shutdown()
 ```
 
-내부 워커는 보통 world 모듈의 API를 호출한다.
-
-- storage::load_chunk(…)
-- generation::generate_chunk(…)
-- meshing::build_chunk_mesh(…)
-
 ### 의존성
 
-- world
-- simulation
-- config
+- `world`
+- `simulation`
+- thread/task runtime abstraction
 - logging
 
 NOT:
 
-- platform
-- renderer
-- app
-- ecs
+- `platform`
+- `renderer`
+- `app`
+- `ecs`
 
 ### 불변식
 
-1. jobs는 월드 상태를 직접 들고 있지 않는다
-2. 요청 입력은 가능하면 immutable snapshot 기반으로 처리한다
-3. simulation job도 immutable snapshot 기반으로 처리한다
-4. 작업 결과는 메인 쪽에서 명시적으로 수거되기 전까지 완료 큐에 보존된다
-5. sim result는 명시적으로 수거되기 전까지 완료 큐에 보존된다
-6. 같은 청크에 대한 중복 작업 시 앞에서부터 coalesce(병합)한다. 
+1. jobs는 live world state를 직접 들고 있지 않는다.
+2. worker 입력은 가능하면 immutable snapshot 또는 value payload 기반으로 전달한다.
+3. simulation job도 동일하게 snapshot 기반으로 계산한다.
+4. 작업 결과는 메인 쪽에서 명시적으로 수거되기 전까지 completed queue에 보존된다.
+5. 같은 coalesce key를 가진 요청은 안전한 경우에만 병합한다.
+6. jobs는 결과를 계산하고 전달하지만, 그 결과의 gameplay 의미 해석은 상위 계층이 담당한다.
+
+### 하위 모듈 목록 및 역할
+
+- `config.md`: worker 개수, queue 정책, shutdown 정책 같은 실행 설정
+- `request.md`: `JobRequest` variant와 worker-safe 입력 payload 계약
+- `result.md`: `JobResult` variant와 완료/실패 결과 payload 계약
+- `queue.md`: pending/running/completed queue와 coalescing 규칙
+- `runtime.md`: `JobSystem` 소유 구조와 public API
+- `worker.md`: worker 실행 단위, thread/task context, shutdown coordination
+- `routing.md`: request variant를 `world`/`simulation` 작업으로 연결하는 dispatch 규칙
+
+### 현재 구현 메모
+
+- `jobs`는 아직 Rust 구현보다 문서가 앞선 상태다.
+- 이번 분해는 향후 `mod.rs + leaf.rs` 구조로 구현을 나눌 때의 기준 문서 역할을 한다.
+- 실제 async runtime 선택은 아직 고정하지 않고, 현재 문서에서는 요청/결과/queue 경계와 불변식만 먼저 확정한다.
