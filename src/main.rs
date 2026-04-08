@@ -1,6 +1,7 @@
 mod app;
 mod ecs;
 mod platform;
+mod renderer;
 
 use std::error::Error;
 

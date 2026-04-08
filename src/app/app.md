@@ -25,6 +25,7 @@
 
 - `Platform`
 - `EcsRuntime`
+- `Renderer`
 - `AppConfig`
 - `AppTimingState`
 
@@ -33,12 +34,14 @@
 - 프로그램 시작
   - config 로드
   - platform 초기화
+  - renderer 초기화
   - ecs 초기화
 - 프레임 실행
   - 누적된 platform snapshot을 읽음
   - ECS pre/update/post 실행
   - discrete command 로그 확인
   - redraw 요청
+  - redraw 시점에 renderer render 호출
 - 프레임 속도 제어
   - `AppConfig::timing.target_frame_rate` 기준으로 다음 프레임 시점을 예약
 - 종료 처리
@@ -52,6 +55,7 @@ GameApp::new(config: AppConfig) -> GameApp
 GameApp::run(self)
 
 fn update(&mut self)
+fn render(&mut self)
 fn bridge_platform_to_ecs(&mut self)
 fn begin_timed_frame(&mut self, now: Instant)
 fn should_run_frame(&self, now: Instant) -> bool
@@ -60,7 +64,7 @@ fn frame_deadline(&self) -> Option<Instant>
 
 ### 의존성
 
-- 상위 조립 계층이므로 `platform`, `ecs`에 의존
+- 상위 조립 계층이므로 `platform`, `ecs`, `renderer`에 의존
 
 ### 불변식
 
@@ -83,6 +87,6 @@ fn frame_deadline(&self) -> Option<Instant>
 
 ### 현재 구현 메모
 
-- 현재 최소 구현은 `platform + ecs`만 실제로 연결되어 있다.
+- 현재 최소 구현은 `platform + ecs + renderer stub`까지 실제로 연결되어 있다.
 - frame loop는 기본값으로 `60 FPS`를 목표로 제한한다.
 - fixed update는 아직 미연결 상태다.

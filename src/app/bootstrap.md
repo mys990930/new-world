@@ -8,6 +8,7 @@
 
 - `AppConfig` 소비
 - `Platform` 생성
+- `Renderer` 생성
 - `EcsRuntime` 생성
 - app-owned timing state 생성
 - 기본 local player spawn
@@ -29,10 +30,11 @@
 
 1. config를 받는다.
 2. platform을 생성한다.
-3. ECS runtime을 생성한다.
-4. 기본 local player entity를 spawn한다.
-5. config를 바탕으로 app timing state를 만든다.
-6. `GameApp`을 조립한다.
+3. config 기본값으로 renderer를 생성한다.
+4. ECS runtime을 생성한다.
+5. 기본 local player entity를 spawn한다.
+6. config를 바탕으로 app timing state를 만든다.
+7. `GameApp`을 조립한다.
 
 ## 출력
 
@@ -48,8 +50,10 @@
 - `config.rs`
 - `state.rs`
 - `platform`
+- `renderer`
 - `ecs`
 
 ## 메모
 
 - 현재 기본 player spawn은 원점 위치, zero velocity, 몸 중심 기준 `Transform`이다.
+- 현재 renderer는 `StubSurfaceTarget`으로 먼저 생성되고, redraw 직전 실제 window 크기와 동기화된다.

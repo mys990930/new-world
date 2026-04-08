@@ -35,7 +35,7 @@ impl ApplicationHandler for GameApp {
         }
 
         if let WindowEvent::RedrawRequested = event {
-            // Renderer hookup will live here once the render path exists.
+            self.render();
         }
     }
 

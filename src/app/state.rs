@@ -3,11 +3,13 @@ use std::time::{Duration, Instant};
 use crate::app::config::AppConfig;
 use crate::ecs::EcsRuntime;
 use crate::platform::Platform;
+use crate::renderer::Renderer;
 
 pub struct GameApp {
     pub config: AppConfig,
     pub platform: Platform,
     pub ecs: EcsRuntime,
+    pub renderer: Renderer,
     pub timing: AppTimingState,
 }
 

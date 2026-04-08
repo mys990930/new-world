@@ -12,13 +12,14 @@
 - frame cap 적용
 - 프레임 실행 시점 결정
 - redraw 요청
+- redraw 이벤트에서 renderer 호출
 
 ## 비책임
 
 - raw input 파싱
 - ECS 시스템 구현
 - simulation fixed tick 구현
-- renderer draw 구현
+- renderer 내부 draw 구현
 
 ## 소유 데이터
 
@@ -32,7 +33,8 @@
 3. frame deadline 이전이면 `WaitUntil(deadline)`로 대기한다.
 4. frame deadline에 도달하면 app frame을 실행한다.
 5. redraw를 요청한다.
-6. 현재 프레임을 끝내고 다음 프레임 accumulation을 위해 platform transient state를 초기화한다.
+6. `RedrawRequested`가 오면 renderer render를 호출한다.
+7. 현재 프레임을 끝내고 다음 프레임 accumulation을 위해 platform transient state를 초기화한다.
 
 ## 출력
 
@@ -56,8 +58,10 @@
 - `state.rs`
 - `frame.rs`
 - `platform`
+- `renderer`
 
 ## 메모
 
 - 이전 최소 구현은 사실상 uncapped frame loop였다.
 - 현재 기본 정책은 `60 FPS` cap이다.
+- 현재 redraw path는 renderer stub을 호출하고, 실제 GPU backend 연결은 이후 단계에서 확장한다.

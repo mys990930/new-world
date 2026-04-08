@@ -11,6 +11,7 @@
 - `config`
 - `platform`
 - `ecs`
+- `renderer`
 - `timing`
 
 ### AppTimingState
@@ -55,4 +56,4 @@
 
 ## 메모
 
-- 현재 최소 구현은 `Platform`, `EcsRuntime`, `AppConfig`, `AppTimingState`만 실소유한다.
+- 현재 최소 구현은 `Platform`, `EcsRuntime`, `Renderer`, `AppConfig`, `AppTimingState`를 실소유한다.
