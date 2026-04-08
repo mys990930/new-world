@@ -83,3 +83,14 @@ fn render(&mut self)
 4. fixed tick catch-up 정책은 항상 동일하다.
 5. app만이 모듈 간 구체 연결 방식을 안다. platform은 ecs를 모르고, world는 renderer를 모른다.
 6. 플랫폼 차이로 인해 바뀌는 bootstrap/loop 코드는 가능한 app과 platform에 국한한다.
+
+### 하위 모듈 목록 및 역할
+- mod.rs: public facade, re-export
+- config.rs: AppConfig / TimingConfig / SimulationConfig 정의
+- state.rs: GameApp/AppState 소유 데이터 정의 (Platform, Renderer, World, Ecs, Jobs, timing state 등)
+- bootstrap.rs: program bootstrap, module init/injection, 초기 리소스 연결
+- runner.rs: main loop owner, frame/fixed/shutdown 순서 orchestration
+- frame.rs: frame update pipeline orchestration
+- fixed.rs: fixed timestep accumulator, catch-up policy, fixed tick orchestration
+- bridge.rs: module 간 상태/DTO 변환 (platform → ecs, jobs → ecs/world, world/ecs → renderer)
+- shutdown.rs: exit condition handling, flush/drain, teardown
