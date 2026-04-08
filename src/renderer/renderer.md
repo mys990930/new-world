@@ -1,29 +1,29 @@
 ## renderer
 
-### 역할
+### Role
 
-- GPU / surface / draw / present 경계를 담당하는 렌더러 모듈
-- app bridge가 만든 render-ready DTO를 GPU 명령으로 실행한다
+- Own the GPU / surface / draw / present boundary
+- Execute render-ready DTOs produced by the app bridge
 
-### 책임
+### Responsibilities
 
-- renderer bootstrap과 GPU context 준비
-- stub surface 상태와 live window surface attach
-- surface configure / resize 처리
-- render pipeline / shader / GPU camera state 관리
-- depth buffer 생성과 유지
-- CPU render DTO -> GPU draw command 변환
-- submit / present / recoverable render error 전달
+- Renderer bootstrap and GPU context setup
+- Stub surface state and live window surface attach
+- Surface configure / resize handling
+- Render pipeline, shader, camera uniform, and light uniform management
+- Depth buffer creation and recreation
+- CPU render DTO -> GPU draw command conversion
+- Submit / present / recoverable render error propagation
 
-### 비책임
+### Non-Responsibilities
 
-- meshing 알고리즘
-- visible chunk 계산
-- world source of truth 소유
-- gameplay input 해석
-- main loop orchestration
+- Meshing algorithms
+- Visible chunk calculation
+- World source-of-truth ownership
+- Gameplay input interpretation
+- Main loop orchestration
 
-### 데이터
+### Data
 
 - `RenderConfig`
 - `Renderer`
@@ -34,18 +34,18 @@
 - `RenderCubeInstance`
 - `RenderStats`
 
-### 유스케이스
+### Use Cases
 
-- 초기화
-  - stub target 또는 live window target로 renderer 생성
+- initialization
+  - create a renderer from a stub target or a live window target
 - live surface attach
-  - `resumed()` 이후 실제 window를 받아 `wgpu` backend 생성
+  - after `resumed()`, receive the real window and create the `wgpu` backend
 - resize
-  - surface config와 projection 관련 상태 갱신
+  - update surface config and projection-related runtime state
 - frame render
-  - `RenderFrameInput`을 받아 camera uniform 갱신, clear, dynamic cube draw, present 수행
+  - accept `RenderFrameInput`, update camera uniforms, draw dynamic cubes, and present
 
-### 공개 인터페이스
+### Public Interface
 
 ```rust
 Renderer::new(target: &impl RenderSurfaceTarget, config: RenderConfig) -> Result<Renderer, RenderInitError>
@@ -65,37 +65,38 @@ struct RenderFrameInput<'a> {
 }
 ```
 
-### 의존성
+### Dependencies
 
 - `wgpu`
 - platform window / surface creation input
-- app bridge가 만든 render DTO
+- render DTOs produced by `app::bridge`
 
 NOT:
 
-- ECS 내부 resource 구조
-- world 내부 데이터 구조
-- app runner ownership
+- ECS internal resource layout
+- World internal data layout
+- App runner ownership
 
-### 불변식
+### Invariants
 
-1. renderer는 render-ready DTO만 받는다.
-2. bootstrap 시점에는 stub renderer만 있어도 되지만, live draw는 real backend가 붙은 뒤에만 수행한다.
-3. GPU resource 생성/파괴는 renderer 내부에서만 일어난다.
+1. Renderer only consumes render-ready DTOs.
+2. During bootstrap, a stub renderer may exist without a live backend, but real draw/present only happens after a live backend is attached.
+3. GPU resource creation and destruction happen only inside the renderer.
 
-### 현재 구현 메모
+### Current Implementation Notes
 
-- 현재 구현은 플레이어 큐브 1개를 그리는 최소 dynamic object path까지 연결돼 있고, 면별 tint와 edge overlay, orthographic quarter-view camera로 큐브 형태를 읽기 쉽게 만든다.
-- 플레이어 큐브 path는 depth test/write를 사용해 실제 큐브 실루엣이 보이도록 한다.
-- chunk upload 경로는 아직 CPU-side bookkeeping 위주이며 실제 chunk draw는 이후 단계다.
+- The current vertical slice renders a single player cube through the minimal dynamic object path.
+- The player cube now uses a white base color plus a fixed directional light, with optional edge overlay and an orthographic quarter-view camera.
+- The player cube path uses depth test/write so the cube reads as a solid volume.
+- The chunk upload path is still CPU-side bookkeeping only; real chunk drawing comes later.
 
-### 하위 모듈 목록 및 역할
+### Submodules
 
 - mod.rs: public facade, re-export
-- config.rs: `RenderConfig`와 renderer 정책 설정
+- config.rs: `RenderConfig` and renderer policy settings
 - state.rs: `Renderer`, `RenderWorld`, optional `RendererBackend`
-- surface.rs: device / queue / surface 초기화, live surface attach, resize 관리
+- surface.rs: device / queue / surface initialization, live surface attach, resize management, light buffer setup
 - pipeline.rs: pipeline metadata
-- camera.rs: `RenderCameraState` -> `CameraGpuState` / `CameraUniform` 변환
-- upload.rs: mesh/upload DTO와 vertex layout 정의
+- camera.rs: `RenderCameraState` -> `CameraGpuState` / `CameraUniform`
+- upload.rs: mesh/upload DTOs and shared vertex layout definitions
 - frame.rs: frame render pass encode, dynamic cube draw, submit, present

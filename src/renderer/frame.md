@@ -1,61 +1,64 @@
 # frame
 
-## 역할
+## Role
 
-- renderer frame render pass를 encode하고 submit/present를 수행한다.
+- Encode renderer frame passes and perform submit/present
 
-## 책임
+## Responsibilities
 
-- frame 통계 계산
-- camera GPU state 갱신
-- camera uniform upload
-- surface texture acquire
-- depth clear / depth test
-- clear pass, filled cube draw
-- optional debug edge overlay draw
-- submit / present
-- recoverable surface error 전달
+- Update frame stats
+- Update GPU camera state
+- Upload the camera uniform
+- Acquire the surface texture
+- Clear and use the depth buffer
+- Expand `cube_instances` into a white cube mesh with per-face normals
+- Draw the filled cube pass
+- Optionally draw the debug edge overlay pass
+- Submit and present
+- Propagate recoverable surface errors
 
-## 비책임
+## Non-Responsibilities
 
-- render DTO 생성
-- chunk visibility 계산
-- gameplay state 해석
+- Creating render DTOs
+- Calculating chunk visibility
+- Interpreting gameplay state
 
-## 입력
+## Inputs
 
 - `RenderFrameInput`
 
-## 출력
+## Outputs
 
 - `RenderStats`
 - `RenderError`
 
-## 처리 흐름
+## Processing Flow
 
-1. frame index와 stats를 갱신한다.
-2. `RenderCameraState`를 `CameraGpuState`로 갱신한다.
-3. live backend가 없으면 stats만 반환한다.
-4. surface texture를 acquire한다.
-5. camera uniform buffer를 업데이트한다.
-6. `cube_instances`를 face-tinted cube mesh로 확장한다.
-7. 첫 render pass에서 clear 후 cube fill을 그린다.
-8. `debug_overlay`가 켜져 있으면 visible face edge 집합을 계산하고 두 번째 pass에서 overlay를 그린다.
-9. submit / present 한다.
+1. Update frame index and stats.
+2. Update `RenderCameraState` into `CameraGpuState`.
+3. If there is no live backend, return stats only.
+4. Acquire the surface texture.
+5. Upload the camera uniform.
+6. Bind the fixed directional-light uniform.
+7. Expand `cube_instances` into a white cube mesh with face normals.
+8. Run the main pass to clear and draw the filled cube.
+9. If `debug_overlay` is enabled, compute visible edges and draw the overlay pass.
+10. Submit and present.
 
-## 불변식
+## Invariants
 
-- renderer는 `RenderCubeInstance` 같은 render-ready DTO만 본다.
-- live backend가 없거나 surface가 configure되지 않았으면 present하지 않는다.
-- acquire 실패는 recoverable `RenderSurfaceError`로 상위에 전달한다.
+- Renderer only sees render-ready DTOs such as `RenderCubeInstance`.
+- If there is no live backend or the surface is not configured, nothing is presented.
+- Acquire failures are returned as recoverable `RenderSurfaceError` values.
 
-## 관련 모듈
+## Related Modules
 
 - `camera.rs`
 - `surface.rs`
 - `state.rs`
 
-## 메모
+## Notes
 
-- 현재 구현은 chunk draw보다 플레이어 큐브 가시화에 필요한 최소 dynamic draw path를 먼저 제공하고, 기본 상태에서는 강한 per-face debug tint만으로 입체감을 읽히게 한다.
-- visible edge overlay는 현재 `RenderConfig.debug.debug_overlay`가 켜진 경우에만 그린다.
+- The current implementation prioritizes the minimum dynamic draw path needed to visualize the player cube before chunk drawing exists.
+- The cube uses a white base color, per-face normals, and a fixed directional light to make volume readable without gameplay-owned lighting state.
+- The visible edge overlay still exists, but only when `RenderConfig.debug.debug_overlay` is enabled.

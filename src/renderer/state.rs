@@ -85,6 +85,8 @@ pub(crate) struct RendererBackend {
     pub(crate) depth_view: wgpu::TextureView,
     pub(crate) camera_buffer: wgpu::Buffer,
     pub(crate) camera_bind_group: wgpu::BindGroup,
+    pub(crate) _light_buffer: wgpu::Buffer,
+    pub(crate) light_bind_group: wgpu::BindGroup,
     pub(crate) cube_pipeline: wgpu::RenderPipeline,
     pub(crate) cube_edge_pipeline: wgpu::RenderPipeline,
 }

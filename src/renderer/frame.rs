@@ -179,6 +179,7 @@ impl Renderer {
 
             render_pass.set_pipeline(&backend.cube_pipeline);
             render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &backend.light_bind_group, &[]);
 
             if let Some((vertices, indices)) = build_cube_mesh(frame.cube_instances) {
                 let vertex_buffer =
@@ -247,6 +248,7 @@ impl Renderer {
 
                 edge_pass.set_pipeline(&backend.cube_edge_pipeline);
                 edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+                edge_pass.set_bind_group(1, &backend.light_bind_group, &[]);
                 edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
                 edge_pass
                     .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -288,20 +290,21 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         ];
 
         let face_specs = [
-            ([4_u32, 5, 6, 7], [0.12, 0.74, 0.34, cube.color[3]]),
-            ([1_u32, 0, 3, 2], [0.10, 0.28, 0.76, cube.color[3]]),
-            ([0_u32, 4, 7, 3], [0.78, 0.18, 0.64, cube.color[3]]),
-            ([5_u32, 1, 2, 6], [0.24, 0.64, 0.96, cube.color[3]]),
-            ([3_u32, 7, 6, 2], [0.96, 0.22, 0.22, cube.color[3]]),
-            ([0_u32, 1, 5, 4], [0.18, 0.18, 0.22, cube.color[3]]),
+            ([4_u32, 5, 6, 7], [0.0, 0.0, 1.0]),
+            ([1_u32, 0, 3, 2], [0.0, 0.0, -1.0]),
+            ([0_u32, 4, 7, 3], [-1.0, 0.0, 0.0]),
+            ([5_u32, 1, 2, 6], [1.0, 0.0, 0.0]),
+            ([3_u32, 7, 6, 2], [0.0, 1.0, 0.0]),
+            ([0_u32, 1, 5, 4], [0.0, -1.0, 0.0]),
         ];
 
-        for (corner_indices, face_color) in face_specs {
+        for (corner_indices, face_normal) in face_specs {
             let base_index = vertices.len() as u32;
             for corner_index in corner_indices {
                 vertices.push(MeshVertex {
                     position: corners[corner_index as usize],
-                    color: face_color,
+                    color: cube.color,
+                    normal: face_normal,
                 });
             }
 
@@ -349,6 +352,7 @@ fn build_cube_edge_mesh(
         vertices.extend(corners.into_iter().map(|position| MeshVertex {
             position,
             color: edge_color,
+            normal: [0.0, 1.0, 0.0],
         }));
         let view_to_eye = view_direction_towards_eye(camera);
         let edge_pairs = visible_edge_pairs(view_to_eye);
@@ -420,30 +424,31 @@ mod tests {
 
     use super::*;
     use crate::renderer::{
+        surface::{default_directional_light_uniform, LightUniform},
         CameraGpuState, CameraProjectionConfig, RenderProjectionMode, RenderViewBasis,
     };
 
     #[test]
     fn offscreen_cube_render_contains_visible_top_face_pixels() {
-        let counts =
+        let stats =
             block_on(render_cube_offscreen(true)).expect("offscreen render should succeed");
 
-        assert!(counts.red > 0, "top face should contribute red pixels");
-        assert!(counts.blue > 0, "one visible side should contribute blue pixels");
+        assert!(stats.highlight_pixels > 0, "top face should contribute a highlight");
+        assert!(stats.midtone_pixels > 0, "visible side faces should contribute midtones");
         assert!(
-            counts.red > counts.green,
-            "hidden green face should not dominate over the visible top face"
+            stats.highlight_pixels + stats.midtone_pixels > stats.shadow_pixels,
+            "lit cube pixels should dominate over shadow-only pixels"
         );
     }
 
     #[derive(Debug, Default)]
-    struct DominantColorCounts {
-        red: u32,
-        green: u32,
-        blue: u32,
+    struct LitPixelStats {
+        highlight_pixels: u32,
+        midtone_pixels: u32,
+        shadow_pixels: u32,
     }
 
-    async fn render_cube_offscreen(use_depth: bool) -> Result<DominantColorCounts, String> {
+    async fn render_cube_offscreen(use_depth: bool) -> Result<LitPixelStats, String> {
         if use_depth {
             render_cube_offscreen_with_depth_compare(wgpu::CompareFunction::LessEqual, 1.0).await
         } else {
@@ -454,7 +459,7 @@ mod tests {
     async fn render_cube_offscreen_with_depth_compare(
         depth_compare: wgpu::CompareFunction,
         depth_clear: f32,
-    ) -> Result<DominantColorCounts, String> {
+    ) -> Result<LitPixelStats, String> {
         const WIDTH: u32 = 256;
         const HEIGHT: u32 = 256;
         const BYTES_PER_PIXEL: u32 = 4;
@@ -546,9 +551,42 @@ mod tests {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen_light_buffer"),
+            size: std::mem::size_of::<LightUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &light_buffer,
+            0,
+            cast_slice(&[default_directional_light_uniform()]),
+        );
+        let light_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("offscreen_light_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("offscreen_light_bind_group"),
+            layout: &light_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_buffer.as_entire_binding(),
+            }],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("offscreen_pipeline_layout"),
-            bind_group_layouts: &[Some(&camera_bind_group_layout)],
+            bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&light_bind_group_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -680,6 +718,7 @@ mod tests {
             });
             render_pass.set_pipeline(&pipeline);
             render_pass.set_bind_group(0, &camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &light_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
@@ -725,7 +764,7 @@ mod tests {
             .map_err(|error| format!("buffer map failed: {error:?}"))?;
 
         let data = slice.get_mapped_range();
-        let mut counts = DominantColorCounts::default();
+        let mut stats = LitPixelStats::default();
         for row in 0..HEIGHT as usize {
             let start = row * padded_bytes_per_row as usize;
             let row_bytes = &data[start..start + (WIDTH * BYTES_PER_PIXEL) as usize];
@@ -735,18 +774,19 @@ mod tests {
                     continue;
                 }
 
-                if r > g && r > b {
-                    counts.red = counts.red.saturating_add(1);
-                } else if g > r && g > b {
-                    counts.green = counts.green.saturating_add(1);
-                } else if b > r && b > g {
-                    counts.blue = counts.blue.saturating_add(1);
+                let luminance = r.max(g).max(b);
+                if luminance >= 220 {
+                    stats.highlight_pixels = stats.highlight_pixels.saturating_add(1);
+                } else if luminance >= 110 {
+                    stats.midtone_pixels = stats.midtone_pixels.saturating_add(1);
+                } else {
+                    stats.shadow_pixels = stats.shadow_pixels.saturating_add(1);
                 }
             }
         }
         drop(data);
         output_buffer.unmap();
 
-        Ok(counts)
+        Ok(stats)
     }
 }

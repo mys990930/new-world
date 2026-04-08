@@ -59,7 +59,7 @@ impl GameApp {
                 vec![RenderCubeInstance {
                     center: transform.translation,
                     half_extents: [0.5, 0.5, 0.5],
-                    color: [0.78, 0.88, 0.98, 1.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
                 }]
             })
             .unwrap_or_default();

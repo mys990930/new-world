@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytemuck::{Pod, Zeroable};
 use pollster::block_on;
 use winit::window::Window;
 
@@ -142,6 +143,23 @@ pub enum RenderSurfaceError {
     Outdated,
     Timeout,
     Validation,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub(crate) struct LightUniform {
+    pub direction_to_light: [f32; 4],
+    pub color: [f32; 4],
+    pub ambient: [f32; 4],
+}
+
+pub(crate) fn default_directional_light_uniform() -> LightUniform {
+    let direction = normalize3([0.35, 1.0, -0.25]);
+    LightUniform {
+        direction_to_light: [direction[0], direction[1], direction[2], 0.0],
+        color: [0.82, 0.82, 0.82, 1.0],
+        ambient: [0.22, 0.22, 0.22, 1.0],
+    }
 }
 
 impl Renderer {
@@ -297,9 +315,42 @@ async fn create_backend(
             resource: camera_buffer.as_entire_binding(),
         }],
     });
+    let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("renderer_light_buffer"),
+        size: std::mem::size_of::<LightUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &light_buffer,
+        0,
+        bytemuck::cast_slice(&[default_directional_light_uniform()]),
+    );
+    let light_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("renderer_light_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+    let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("renderer_light_bind_group"),
+        layout: &light_bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: light_buffer.as_entire_binding(),
+        }],
+    });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_cube_pipeline_layout"),
-        bind_group_layouts: &[Some(&camera_bind_group_layout)],
+        bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&light_bind_group_layout)],
         immediate_size: 0,
     });
     let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -385,6 +436,8 @@ async fn create_backend(
         depth_view,
         camera_buffer,
         camera_bind_group,
+        _light_buffer: light_buffer,
+        light_bind_group,
         cube_pipeline,
         cube_edge_pipeline,
     })
@@ -493,6 +546,20 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length_sq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
+    if length_sq <= f32::EPSILON {
+        [0.0, 1.0, 0.0]
+    } else {
+        let inv_length = length_sq.sqrt().recip();
+        [
+            vector[0] * inv_length,
+            vector[1] * inv_length,
+            vector[2] * inv_length,
+        ]
+    }
 }
 
 #[cfg(test)]

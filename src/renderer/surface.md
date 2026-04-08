@@ -10,6 +10,7 @@
 - Support both stub and live window-backed targets
 - Create `wgpu::Instance`, `Surface`, `Adapter`, `Device`, and `Queue`
 - Create and recreate the depth texture on resize
+- Create the fixed directional-light uniform buffer and bind group
 - Configure and reconfigure the surface
 - Bridge renderer bootstrap time and post-`resumed()` live attach time
 - Build the fill and edge overlay pipelines used by the current cube prototype
@@ -38,7 +39,7 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 - A zero-sized surface is not configured
 - Real surface configure/present only happens when a live backend exists
-- The current filled-cube pipeline leaves face culling disabled so the depth-tested prototype cube is not sensitive to winding mistakes during early renderer bring-up
+- The filled-cube pipeline leaves face culling disabled so the early cube prototype is not sensitive to winding mistakes
 
 ## Related Modules
 
@@ -48,6 +49,6 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 ## Notes
 
-- The current backend creates the player-cube fill pipeline, edge overlay pipeline, and camera uniform buffer during initialization
-- Depth resources are recreated together with surface resize
-- When multiple sRGB surface formats are available, the current prototype prefers `Rgba8UnormSrgb` over `Bgra8UnormSrgb` so debug face colors read more predictably during renderer bring-up
+- The current backend creates the player-cube fill pipeline, edge overlay pipeline, camera uniform buffer, and directional-light uniform buffer during initialization.
+- Depth resources are recreated together with surface resize.
+- When multiple sRGB surface formats are available, the current prototype prefers `Rgba8UnormSrgb` over `Bgra8UnormSrgb` so neutral white lighting reads predictably during bring-up.

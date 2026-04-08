@@ -1,10 +1,10 @@
 # upload
 
-## 역할
+## Role
 
-- renderer mesh/upload DTO와 vertex layout을 정의한다.
+- Define renderer mesh/upload DTOs and shared vertex layout
 
-## 책임
+## Responsibilities
 
 - `ChunkCoord`
 - `RenderBounds`
@@ -13,25 +13,26 @@
 - `GpuChunkMesh`
 - `RenderUploadRequest`
 - `RenderUploadError`
-- chunk mesh bookkeeping API
+- Chunk mesh bookkeeping API
 
-## 비책임
+## Non-Responsibilities
 
-- meshing 알고리즘
-- frame draw encode
-- gameplay state ownership
+- Meshing algorithms
+- Frame draw encoding
+- Gameplay state ownership
 
-## 불변식
+## Invariants
 
-- `MeshVertex`는 `#[repr(C)]` + `Pod`/`Zeroable`이며 GPU buffer write에 바로 쓸 수 있다.
-- `MeshVertex::vertex_buffer_layout()`는 player cube pipeline과 chunk pipeline이 공유할 수 있는 기본 vertex layout이다.
-- 현재 chunk upload 경로는 metadata/cache bookkeeping까지만 구현돼 있다.
+- `MeshVertex` uses `#[repr(C)]` plus `Pod`/`Zeroable` so it can be written directly to GPU buffers
+- `MeshVertex::vertex_buffer_layout()` is the shared baseline layout for the player-cube pipeline and future chunk pipelines
+- `MeshVertex` currently carries `position`, `color`, and `normal`
+- The chunk upload path is still metadata/cache bookkeeping only
 
-## 관련 모듈
+## Related Modules
 
 - `frame.rs`
 - `state.rs`
 
-## 메모
+## Notes
 
-- 현재 실제 화면 가시화는 `RenderCubeInstance` 기반 dynamic cube draw가 먼저 연결돼 있다.
+- The first on-screen geometry path still comes from `RenderCubeInstance`-based dynamic cube drawing.
