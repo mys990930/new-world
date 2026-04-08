@@ -38,14 +38,14 @@
 **프로젝트 전체를 한눈에 보는 상위 인덱스** 역할을 한다.
 아래 문서들이 각 모듈의 세부 설계를 담는다.
 
-- `platform/platform.md`
-- `world/world.md`
-- `simulation/simulation.md`
-- `ecs/ecs.md`
-- `jobs/jobs.md`
-- `renderer/renderer.md`
-- `app/app.md`
-- `network/network.md`
+- `src/platform/platform.md`
+- `src/world/world.md`
+- `src/simulation/simulation.md`
+- `src/ecs/ecs.md`
+- `src/jobs/jobs.md`
+- `src/renderer/renderer.md`
+- `src/app/app.md`
+- `src/network/network.md`
 
 ### 각 모듈 문서에 들어갈 것
 - 책임
