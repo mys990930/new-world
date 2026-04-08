@@ -1,4 +1,4 @@
-use winit::event::WindowEvent;
+use super::event::PlatformEvent;
 
 #[derive(Debug, Clone)]
 pub struct LifecycleState {
@@ -18,22 +18,19 @@ impl Default for LifecycleState {
 }
 
 impl LifecycleState {
-    pub fn on_resumed(&mut self) {
-        self.active = true;
-        self.suspended = false;
-    }
-
-    pub fn on_suspended(&mut self) {
-        self.active = false;
-        self.suspended = true;
-    }
-
-    pub fn apply_window_event(&mut self, event: &WindowEvent) {
+    pub fn apply_event(&mut self, event: &PlatformEvent) {
         match event {
-            WindowEvent::Focused(focused) => {
-                self.active = *focused;
+            PlatformEvent::ActiveChanged { active } => {
+                self.active = *active;
             }
-            WindowEvent::CloseRequested => {
+            PlatformEvent::Suspended => {
+                self.active = false;
+                self.suspended = true;
+            }
+            PlatformEvent::Resumed => {
+                self.suspended = false;
+            }
+            PlatformEvent::QuitRequested => {
                 self.quit_requested = true;
             }
             _ => {}

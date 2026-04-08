@@ -10,9 +10,9 @@
 - mouse_screen_pos: Vec2
 - mouse_delta: Vec2
 - wheel_delta: Vec2
-- pressed_mouse_buttons
-- just_pressed_mouse_buttons
-- just_released_mouse_buttons
+- left_pressed / right_pressed
+- left_just_pressed / right_just_pressed
+- left_just_released / right_just_released
 - pressed_keys
 - just_pressed_keys
 - just_released_keys
@@ -22,13 +22,13 @@
 ## 입력
 
 - CursorMoved
-- MouseMotion
 - MouseButtonChanged
 - MouseWheel
 - KeyChanged
 - ModifiersChanged
 - TextInput
 - FocusChanged(false) 또는 명시적 InputClearRequested
+- Suspended
 
 ## 출력
 
@@ -41,15 +41,16 @@
 ## 상태 전이 규칙
 
 - MouseButtonChanged(button, true)
-  - pressed_mouse_buttons 에 추가
-  - 기존에 눌려있지 않았다면 just_pressed_mouse_buttons 에 추가
+  - 해당 버튼의 pressed = true
+  - 기존에 눌려있지 않았다면 해당 just_pressed = true
 - MouseButtonChanged(button, false)
-  - pressed_mouse_buttons 에서 제거
-  - just_released_mouse_buttons 에 추가
+  - 해당 버튼의 pressed = false
+  - 이전에 눌려 있었다면 해당 just_released = true
 - KeyChanged 도 동일 규칙 적용
 - CursorMoved 는 mouse_screen_pos 갱신
-- MouseMotion 은 mouse_delta 누적
+- CursorMoved 간 차이를 mouse_delta 에 누적
 - MouseWheel 은 wheel_delta 누적
+- ModifiersChanged 는 modifier snapshot 갱신
 - TextInput 은 text_input_buffer 에 append
 
 ## 프레임 경계 규칙
@@ -65,6 +66,7 @@
 ## 포커스 상실 규칙
 
 - 포커스를 잃으면 stuck input 방지를 위해 pressed / just_pressed / just_released 를 모두 정리할 수 있어야 한다
+- suspend 시에도 같은 안전 정리를 적용할 수 있다
 - 이 동작은 gameplay 의미가 아니라 raw safety 처리다
 
 ## 불변식

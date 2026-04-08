@@ -26,8 +26,8 @@
 
 ### 데이터
 
-- WindowState (width, height, focused, minimized, resized_this_frame, close_requested)
-- RawInputState(mouse_screen_pos, mouse_delta, left/right_pressed, left/right_released, left/right_just_pressed, left/right_just_released, key pressed states, wheel delta)
+- WindowState (width, height, scale_factor, focused, minimized, resized_this_frame, close_requested)
+- RawInputState(mouse_screen_pos, mouse_delta, wheel_delta, left/right pressed 상태, key pressed states, modifiers, text input buffer)
 - PlatformLifecycleState(app active/inactive, suspended/resumed, quit requested)
 - PlatformContext(window handle, event loop 관련 상태, platform-specific runtime context)
 
@@ -53,8 +53,10 @@
 
 ```rust
 Platform::new(...) -> Platform
-Platform::poll_events(&mut self)
+Platform::resumed(&mut self, event_loop: &ActiveEventLoop)
+Platform::suspended(&mut self)
 Platform::begin_frame(&mut self)
+Platform::handle_window_event(&mut self, window_id: WindowId, event: &WindowEvent) -> bool
 Platform::end_frame(&mut self)
 
 Platform::window_state(&self) -> &WindowState
@@ -82,9 +84,9 @@ NOT:
 
 ### 하위 모듈 목록 및 역할
 
-- mod.rs: public facade, re-export
-- event.rs: normalized platform events
+- mod.rs: public facade, re-export, state snapshot getter
+- event.rs: normalized platform event enum + shared payload types
 - window.rs: WindowState + reducer
 - input.rs: RawInputState + reducer
 - lifecycle.rs: LifecycleState + reducer
-- runtime.rs: winit adapter, event ingestion, window creation
+- runtime.rs: winit adapter, window creation, event normalization, reducer dispatch

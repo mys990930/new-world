@@ -1,8 +1,11 @@
+pub mod event;
 pub mod input;
 pub mod lifecycle;
 pub mod runtime;
 pub mod window;
 
+#[allow(unused_imports)]
+pub use event::{PlatformEvent, PlatformModifiers, PlatformMouseButton};
 pub use input::RawInputState;
 pub use lifecycle::LifecycleState;
 pub use window::WindowState;
@@ -40,13 +43,18 @@ impl Platform {
     }
 
     pub fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.runtime
-            .ensure_window(event_loop, &self.config, &mut self.window);
-        self.lifecycle.on_resumed();
+        self.runtime.resumed(
+            event_loop,
+            &self.config,
+            &mut self.window,
+            &mut self.input,
+            &mut self.lifecycle,
+        );
     }
 
     pub fn suspended(&mut self) {
-        self.lifecycle.on_suspended();
+        self.runtime
+            .suspended(&mut self.window, &mut self.input, &mut self.lifecycle);
     }
 
     pub fn begin_frame(&mut self) {
@@ -60,19 +68,13 @@ impl Platform {
     }
 
     pub fn handle_window_event(&mut self, window_id: WindowId, event: &WindowEvent) -> bool {
-        if self.runtime.window_id() != Some(window_id) {
-            return false;
-        }
-
-        self.window.apply_window_event(event);
-        self.input.apply_window_event(event);
-        self.lifecycle.apply_window_event(event);
-
-        if matches!(event, WindowEvent::Focused(false)) {
-            self.input.clear_pressed();
-        }
-
-        true
+        self.runtime.handle_window_event(
+            window_id,
+            event,
+            &mut self.window,
+            &mut self.input,
+            &mut self.lifecycle,
+        )
     }
 
     pub fn request_redraw(&self) {

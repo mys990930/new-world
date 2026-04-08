@@ -27,7 +27,7 @@
 ## 상태 전이 규칙
 
 - ActiveChanged(active) 수신 시 active 갱신
-- Suspended 수신 시 suspended = true
+- Suspended 수신 시 suspended = true, active = false
 - Resumed 수신 시 suspended = false
 - QuitRequested 수신 시 quit_requested = true
 
