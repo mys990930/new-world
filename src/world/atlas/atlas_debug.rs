@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use image::{Rgb, RgbImage};
 
-use super::atlas_fields::AtlasFieldMap;
+use super::atlas_fields::{AtlasCell, AtlasFieldMap};
 use super::atlas_resolver::{
     AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass, ThermalClass,
 };
@@ -75,7 +75,7 @@ pub fn write_debug_images_with_options(
         ("04_temperature.png", render_temperature(fields, resolved, options)),
         ("05_humidity.png", render_humidity(fields, resolved, options)),
         ("06_overlay.png", render_overlay(fields, resolved, options)),
-        ("07_biome_preview.png", render_biome_preview(resolved, options)),
+        ("07_biome_preview.png", render_biome_preview(fields, resolved, options)),
         ("08_ecotone.png", render_ecotone(fields, options)),
     ];
 
@@ -206,31 +206,15 @@ fn render_overlay(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, options: 
     })
 }
 
-fn render_biome_preview(resolved: &AtlasResolvedMap, options: AtlasDebugOptions) -> RgbImage {
-    let area = resolved.area();
-    let scale = options.pixels_per_cell.max(1);
-    let mut image = RgbImage::new(area.width() * scale, area.height() * scale);
-
-    for (index, cell) in resolved.cells().values().iter().enumerate() {
-        let color = match cell.biome {
-            BiomePreview::Ocean => [20, 78, 164],
-            BiomePreview::Coast => [226, 214, 160],
-            BiomePreview::PolarTundra => [220, 230, 234],
-            BiomePreview::Alpine => [186, 188, 192],
-            BiomePreview::Mountain => [126, 102, 88],
-            BiomePreview::Wetland => [74, 114, 84],
-            BiomePreview::Riverplain => [92, 144, 124],
-            BiomePreview::Desert => [214, 188, 114],
-            BiomePreview::Steppe => [176, 170, 102],
-            BiomePreview::Grassland => [126, 170, 92],
-            BiomePreview::TemperateForest => [64, 122, 76],
-            BiomePreview::BorealForest => [56, 96, 92],
-            BiomePreview::TropicalForest => [44, 138, 86],
-        };
-        fill_cell(&mut image, area.width(), scale, index, color);
-    }
-
-    image
+fn render_biome_preview(
+    fields: &AtlasFieldMap,
+    resolved: &AtlasResolvedMap,
+    options: AtlasDebugOptions,
+) -> RgbImage {
+    render_map_with_resolved(fields, resolved, options, |cell, resolved, _, _| {
+        let signed_height = preview_signed_height(cell);
+        biome_preview_color(cell, resolved.biome, signed_height)
+    })
 }
 
 fn render_ecotone(fields: &AtlasFieldMap, options: AtlasDebugOptions) -> RgbImage {
@@ -283,6 +267,58 @@ fn render_map_with_resolved(
     }
 
     image
+}
+
+fn biome_preview_color(cell: &AtlasCell, biome: BiomePreview, signed_height: f32) -> [u8; 3] {
+    let abs_height = signed_height.abs().clamp(0.0, 1.0);
+    let color = match biome {
+        BiomePreview::Ocean => depth_shaded_blue(abs_height),
+        BiomePreview::Coast => shade_from_height([244, 232, 176], [214, 196, 126], abs_height, 0.52),
+        BiomePreview::PolarTundra => shade_from_height([250, 250, 246], [214, 222, 228], abs_height, 0.40),
+        BiomePreview::Desert => shade_from_height([238, 150, 64], [166, 88, 26], abs_height, 0.62),
+        BiomePreview::Wetland => shade_from_height([82, 138, 98], [40, 86, 66], abs_height, 0.70),
+        BiomePreview::Riverplain => shade_from_height([98, 164, 114], [48, 98, 78], abs_height, 0.60),
+        BiomePreview::Alpine => shade_from_height([126, 156, 134], [62, 94, 78], abs_height, 0.78),
+        BiomePreview::Mountain => shade_from_height([92, 138, 82], [28, 62, 32], abs_height, 0.86),
+        BiomePreview::Steppe => shade_from_height([142, 156, 92], [78, 96, 40], abs_height, 0.66),
+        BiomePreview::Grassland => shade_from_height([112, 172, 92], [44, 96, 34], abs_height, 0.68),
+        BiomePreview::TemperateForest => shade_from_height([74, 136, 72], [20, 58, 24], abs_height, 0.76),
+        BiomePreview::BorealForest => shade_from_height([72, 118, 94], [26, 56, 42], abs_height, 0.74),
+        BiomePreview::TropicalForest => shade_from_height([46, 154, 82], [12, 68, 30], abs_height, 0.72),
+    };
+
+    if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::Desert | BiomePreview::PolarTundra) {
+        color
+    } else if cell.overlay.riverine > 0.56 {
+        mix(color, [70, 142, 186], (cell.overlay.riverine * 0.18).clamp(0.0, 0.18))
+    } else {
+        color
+    }
+}
+
+fn preview_signed_height(cell: &AtlasCell) -> f32 {
+    if cell.overlay.ocean > 0.5 {
+        let depth = (cell.coast_distance * 0.72 + (1.0 - cell.landness) * 0.28).clamp(0.0, 1.0);
+        -depth
+    } else {
+        let height = (
+            cell.macro_elevation * 0.56
+                + cell.mountain_mass * 0.26
+                + cell.ruggedness * 0.12
+                + cell.alpine_factor * 0.06
+                - cell.coast_factor * 0.22
+        )
+        .clamp(0.0, 1.0);
+        height
+    }
+}
+
+fn depth_shaded_blue(depth: f32) -> [u8; 3] {
+    shade_from_height([106, 176, 232], [8, 38, 102], depth, 0.88)
+}
+
+fn shade_from_height(light: [u8; 3], dark: [u8; 3], height: f32, strength: f32) -> [u8; 3] {
+    mix(light, dark, (height.clamp(0.0, 1.0) * strength).clamp(0.0, 1.0))
 }
 
 fn fill_cell(image: &mut RgbImage, map_width: u32, scale: u32, index: usize, color: [u8; 3]) {
