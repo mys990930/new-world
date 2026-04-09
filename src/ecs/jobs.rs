@@ -17,6 +17,7 @@ impl EcsRuntime {
             requests.push(JobRequest::GenerateChunk {
                 coord: target_chunk,
                 meta: *world.meta(),
+                registry: world.block_registry_handle(),
             });
             chunk_states.generation_requested.insert(target_chunk);
             return requests;
@@ -30,6 +31,7 @@ impl EcsRuntime {
                 requests.push(JobRequest::BuildChunkMesh {
                     center,
                     neighbors: world.query_neighbors(target_chunk),
+                    registry: world.block_registry_handle(),
                 });
                 chunk_states.mesh_requested.insert(target_chunk);
             }

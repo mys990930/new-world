@@ -1,20 +1,24 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::chunk::{BlockId, ChunkData, ChunkSnapshot};
 use super::coord::{ChunkCoord, WorldBlockCoord, world_to_chunk_local};
 use super::edit::{EditError, EditResult, WorldEdit, remesh_targets_for_block};
 use super::meta::WorldMeta;
 use super::query::{NeighborChunks, Ray3, RaycastHit};
+use super::registry::BlockRegistry;
 
 pub struct WorldCore {
     meta: WorldMeta,
+    block_registry: Arc<BlockRegistry>,
     loaded_chunks: HashMap<ChunkCoord, ChunkData>,
 }
 
 impl WorldCore {
-    pub fn new(meta: WorldMeta) -> Self {
+    pub fn new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> Self {
         Self {
             meta,
+            block_registry,
             loaded_chunks: HashMap::new(),
         }
     }
@@ -25,6 +29,14 @@ impl WorldCore {
 
     pub fn has_chunk(&self, coord: ChunkCoord) -> bool {
         self.loaded_chunks.contains_key(&coord)
+    }
+
+    pub fn block_registry(&self) -> &BlockRegistry {
+        self.block_registry.as_ref()
+    }
+
+    pub fn block_registry_handle(&self) -> Arc<BlockRegistry> {
+        Arc::clone(&self.block_registry)
     }
 
     pub fn insert_chunk(&mut self, coord: ChunkCoord, mut chunk: ChunkData) {
@@ -132,7 +144,7 @@ impl WorldCore {
         let max_steps = (max_distance.ceil() as usize).saturating_mul(6).max(1);
 
         for _ in 0..max_steps {
-            if self.get_block(block).is_some_and(BlockId::is_solid) {
+            if self.get_block(block).is_some_and(|block_id| self.block_registry.is_solid(block_id)) {
                 let hit_face = entry_face.unwrap_or_else(|| opposite_face_for_direction(direction));
                 let point = add_scaled3(ray.origin, direction, traveled);
                 return Some(RaycastHit {
@@ -265,30 +277,37 @@ fn opposite_face_for_direction(direction: [f32; 3]) -> super::chunk::BlockFace {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::world::{BlockFace, LocalBlockCoord, generate_chunk};
+
+    fn test_registry() -> Arc<BlockRegistry> {
+        Arc::new(BlockRegistry::load_default().expect("default registry should load"))
+    }
 
     #[test]
     fn world_core_reads_generated_plane_block() {
         let meta = WorldMeta::new(42);
         let coord = ChunkCoord(0, 0, 0);
-        let chunk = generate_chunk(coord, &meta);
-        let mut world = WorldCore::new(meta);
+        let registry = test_registry();
+        let chunk = generate_chunk(coord, &meta, registry.as_ref());
+        let mut world = WorldCore::new(meta, registry);
         world.insert_chunk(coord, chunk);
 
-        assert_eq!(world.get_block(WorldBlockCoord(2, 0, 3)), Some(BlockId::Grass));
-        assert_eq!(world.get_block(WorldBlockCoord(2, 1, 3)), Some(BlockId::Air));
+        assert_eq!(world.get_block(WorldBlockCoord(2, 0, 3)), Some(BlockId::GRASS));
+        assert_eq!(world.get_block(WorldBlockCoord(2, 1, 3)), Some(BlockId::AIR));
     }
 
     #[test]
     fn boundary_edit_marks_neighbor_chunk_for_remesh() {
-        let mut world = WorldCore::new(WorldMeta::default());
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
         let coord = ChunkCoord(0, 0, 0);
         world.insert_chunk(coord, ChunkData::new_empty(coord));
 
         let result = world.apply_edit(WorldEdit::SetBlock {
             pos: WorldBlockCoord(15, 0, 0),
-            block: BlockId::Stone,
+            block: BlockId::STONE,
         });
 
         assert!(result.applied);
@@ -301,16 +320,16 @@ mod tests {
             world
                 .get_chunk(coord)
                 .and_then(|chunk| chunk.get_block(LocalBlockCoord::new(15, 0, 0).unwrap())),
-            Some(BlockId::Stone)
+            Some(BlockId::STONE)
         );
     }
 
     #[test]
     fn query_neighbors_returns_loaded_neighbor_snapshots() {
-        let mut world = WorldCore::new(WorldMeta::default());
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
         world.insert_chunk(ChunkCoord(0, 0, 0), ChunkData::new_empty(ChunkCoord(0, 0, 0)));
         let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
-        east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::Grass)
+        east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::GRASS)
             .unwrap();
         world.insert_chunk(ChunkCoord(1, 0, 0), east);
 
@@ -321,16 +340,16 @@ mod tests {
                 .pos_x
                 .as_ref()
                 .and_then(|chunk| chunk.get_block(LocalBlockCoord::new(0, 0, 0).unwrap())),
-            Some(BlockId::Grass)
+            Some(BlockId::GRASS)
         );
         assert!(neighbors.neg_x.is_none());
     }
 
     #[test]
     fn raycast_hits_top_face_of_plane_block() {
-        let mut world = WorldCore::new(WorldMeta::default());
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
         let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
-        chunk.set_block(LocalBlockCoord::new(3, 0, 3).unwrap(), BlockId::Grass)
+        chunk.set_block(LocalBlockCoord::new(3, 0, 3).unwrap(), BlockId::GRASS)
             .unwrap();
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 

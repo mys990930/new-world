@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::{
+    texture::{BlockTextureSet, GpuBlockTextureResources},
     CameraGpuState, ChunkCoord, GpuChunkMesh, PipelineSet, RenderConfig, RenderStats, SurfaceState,
 };
 
@@ -9,6 +10,7 @@ pub struct Renderer {
     pub(crate) surface: SurfaceState,
     pub(crate) pipelines: PipelineSet,
     pub(crate) world: RenderWorld,
+    pub(crate) block_textures: BlockTextureSet,
     pub(crate) camera: CameraGpuState,
     pub(crate) backend: Option<RendererBackend>,
     pub(crate) last_stats: RenderStats,
@@ -87,6 +89,8 @@ pub(crate) struct RendererBackend {
     pub(crate) camera_bind_group: wgpu::BindGroup,
     pub(crate) _light_buffer: wgpu::Buffer,
     pub(crate) light_bind_group: wgpu::BindGroup,
+    pub(crate) block_texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) block_textures: GpuBlockTextureResources,
     pub(crate) cube_pipeline: wgpu::RenderPipeline,
     pub(crate) cube_edge_pipeline: wgpu::RenderPipeline,
 }

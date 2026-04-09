@@ -3,51 +3,37 @@ use std::sync::Arc;
 use super::coord::{CHUNK_EDGE, CHUNK_VOLUME, ChunkCoord, LocalBlockCoord, is_local_in_bounds};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[repr(u16)]
-pub enum BlockId {
-    #[default]
-    Air = 0,
-    Grass = 1,
-    Dirt = 2,
-    Stone = 3,
-}
+#[repr(transparent)]
+pub struct BlockId(u16);
 
 impl BlockId {
-    pub const fn from_raw(raw: u16) -> Option<Self> {
-        match raw {
-            0 => Some(Self::Air),
-            1 => Some(Self::Grass),
-            2 => Some(Self::Dirt),
-            3 => Some(Self::Stone),
-            _ => None,
-        }
+    pub const AIR: Self = Self(0);
+    pub const GRASS: Self = Self(1);
+    pub const DIRT: Self = Self(2);
+    pub const STONE: Self = Self(3);
+
+    pub const fn new(raw: u16) -> Self {
+        Self(raw)
+    }
+
+    pub const fn from_raw(raw: u16) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> u16 {
+        self.0
     }
 
     pub const fn to_raw(self) -> u16 {
-        self as u16
+        self.raw()
     }
 
     pub const fn is_air(self) -> bool {
-        matches!(self, Self::Air)
+        self.raw() == Self::AIR.raw()
     }
 
     pub const fn is_solid(self) -> bool {
         !self.is_air()
-    }
-
-    pub const fn face_color(self, face: BlockFace) -> [f32; 4] {
-        match self {
-            Self::Air => [0.0, 0.0, 0.0, 0.0],
-            Self::Grass => match face {
-                BlockFace::PosY => [0.34, 0.72, 0.30, 1.0],
-                BlockFace::NegY => [0.24, 0.18, 0.10, 1.0],
-                BlockFace::NegX | BlockFace::PosX | BlockFace::NegZ | BlockFace::PosZ => {
-                    [0.46, 0.33, 0.18, 1.0]
-                }
-            },
-            Self::Dirt => [0.44, 0.30, 0.17, 1.0],
-            Self::Stone => [0.52, 0.54, 0.58, 1.0],
-        }
     }
 }
 
@@ -71,7 +57,7 @@ impl ChunkData {
     pub fn new_empty(coord: ChunkCoord) -> Self {
         Self {
             coord,
-            blocks: vec![BlockId::Air; CHUNK_VOLUME],
+            blocks: vec![BlockId::AIR; CHUNK_VOLUME],
         }
     }
 
@@ -156,12 +142,12 @@ mod tests {
         let mut chunk = ChunkData::new_empty(coord);
         let local = LocalBlockCoord::new(0, 0, 0).unwrap();
 
-        chunk.set_block(local, BlockId::Grass).unwrap();
+        chunk.set_block(local, BlockId::GRASS).unwrap();
         let snapshot = chunk.snapshot();
-        chunk.set_block(local, BlockId::Stone).unwrap();
+        chunk.set_block(local, BlockId::STONE).unwrap();
 
         assert_eq!(snapshot.coord(), coord);
-        assert_eq!(snapshot.get_block(local), Some(BlockId::Grass));
-        assert_eq!(chunk.get_block(local), Some(BlockId::Stone));
+        assert_eq!(snapshot.get_block(local), Some(BlockId::GRASS));
+        assert_eq!(chunk.get_block(local), Some(BlockId::STONE));
     }
 }

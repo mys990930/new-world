@@ -78,6 +78,7 @@ NOT:
 - `jobs`는 이제 최소 Rust 구현이 들어와 있지만, 아직 전체 target spec보다 범위가 좁다.
 - 현재 최소 구현은 `mod.rs + config.rs + request.rs + result.rs + queue.rs + runtime.rs + worker.rs + routing.rs`까지 연결되어 있다.
 - 현재 지원 job은 `GenerateChunk`와 `BuildChunkMesh` 두 종류다.
+- 두 request 모두 immutable snapshot/value payload와 함께 `Arc<BlockRegistry>`를 받아 worker에서 같은 block definition을 사용한다.
 - worker 실행은 `std::thread + std::sync::mpsc` 기반의 최소 worker pool을 사용한다.
 - `JobResult`는 `world::ChunkData` / `world::CpuMesh`까지만 들고 나오고, renderer upload 변환은 이후 app/ecs bridge 단계에서 연결한다.
 - load/save/simulation job routing은 다음 단계에서 request/result variant와 함께 확장한다.

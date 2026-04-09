@@ -143,8 +143,14 @@ impl JobQueue {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::world::{ChunkCoord, WorldMeta};
+    use crate::world::{BlockRegistry, ChunkCoord, WorldMeta};
+
+    fn test_registry() -> Arc<BlockRegistry> {
+        Arc::new(BlockRegistry::load_default().expect("default registry should load"))
+    }
 
     #[test]
     fn queue_coalesces_duplicate_generate_requests() {
@@ -152,6 +158,7 @@ mod tests {
         let request = JobRequest::GenerateChunk {
             coord: ChunkCoord(0, 0, 0),
             meta: WorldMeta::default(),
+            registry: test_registry(),
         };
 
         assert_eq!(
@@ -170,10 +177,12 @@ mod tests {
         let request_a = JobRequest::GenerateChunk {
             coord: ChunkCoord(0, 0, 0),
             meta: WorldMeta::default(),
+            registry: test_registry(),
         };
         let request_b = JobRequest::GenerateChunk {
             coord: ChunkCoord(1, 0, 0),
             meta: WorldMeta::default(),
+            registry: test_registry(),
         };
 
         queue.enqueue(request_a.clone()).unwrap();

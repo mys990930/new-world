@@ -5,13 +5,21 @@ use super::result::JobResult;
 
 pub(crate) fn execute(request: JobRequest) -> JobResult {
     match request {
-        JobRequest::GenerateChunk { coord, meta } => JobResult::ChunkGenerated {
+        JobRequest::GenerateChunk {
             coord,
-            chunk: generate_chunk(coord, &meta),
+            meta,
+            registry,
+        } => JobResult::ChunkGenerated {
+            coord,
+            chunk: generate_chunk(coord, &meta, registry.as_ref()),
         },
-        JobRequest::BuildChunkMesh { center, neighbors } => {
+        JobRequest::BuildChunkMesh {
+            center,
+            neighbors,
+            registry,
+        } => {
             let coord = center.coord();
-            let mesh = build_chunk_mesh(&center, neighbors);
+            let mesh = build_chunk_mesh(&center, neighbors, registry.as_ref());
             JobResult::ChunkMeshBuilt { coord, mesh }
         }
     }

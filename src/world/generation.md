@@ -24,6 +24,7 @@
 
 - `ChunkCoord`
 - `WorldMeta`
+- `BlockRegistry`
 
 ## 출력
 
@@ -32,9 +33,10 @@
 ## 처리 흐름
 
 1. `WorldMeta.seed`와 청크 좌표를 바탕으로 생성 입력을 만든다.
-2. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
-3. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
-4. 완성된 청크를 반환한다.
+2. registry에서 `"grass"` block id를 조회한다.
+3. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
+4. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
+5. 완성된 청크를 반환한다.
 
 ## 공개 인터페이스
 
@@ -42,6 +44,7 @@
 generation::generate_chunk(
     coord: ChunkCoord,
     meta: &WorldMeta,
+    registry: &BlockRegistry,
 ) -> ChunkData
 ```
 
@@ -51,6 +54,7 @@ generation::generate_chunk(
 - 생성 결과는 청크 크기와 좌표 규칙을 위반하면 안 된다.
 - generation은 loaded world state를 직접 mutate하지 않는다.
 - 생성 결과는 renderer용 메쉬가 아니라 원본 월드 데이터다.
+- generation은 block 정의를 registry에서 읽고, texture 파일을 직접 열지 않는다.
 
 ## 관련 모듈
 
@@ -58,9 +62,10 @@ generation::generate_chunk(
 - `coord.md`
 - `chunk.md`
 - `core.md`
+- `registry.md`
 - `jobs`
 
 ## 메모
 
-- 현재 최소 구현은 `BlockRegistry` 없이 `BlockId` 기반 규칙만 사용한다.
-- 첫 vertical slice용으로 `world y = 0`에 로컬 `(1,1)`부터 `(5,5)`까지의 grass block patch만 생성한다.
+- 현재 최소 구현은 registry에 `"grass"` key가 있으면 `world y = 0`에 로컬 `(1,1)`부터 `(5,5)`까지의 grass block patch만 생성한다.
+- 기본 manifest에서 `"grass"`가 빠지면 generator는 조용히 empty chunk를 반환한다.

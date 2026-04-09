@@ -11,6 +11,7 @@
 - Upload the camera uniform
 - Acquire the surface texture
 - Clear and use the depth buffer
+- Bind the block texture array
 - Draw uploaded chunk meshes for the current `visible_chunks`
 - Expand `cube_instances` into a white cube mesh with per-face normals
 - Draw the filled cube pass
@@ -62,5 +63,5 @@
 ## Notes
 
 - The current implementation first draws uploaded chunk meshes, then overlays dynamic cube instances such as the player body and the thin ground shadow slab.
-- The cube uses a white base color, per-face normals, and a fixed directional light to make volume readable without gameplay-owned lighting state.
+- The cube uses the built-in white texture layer plus tint color, per-face normals, and a fixed directional light to make volume readable without gameplay-owned lighting state.
 - The visible edge overlay still exists, but only when `RenderConfig.debug.debug_overlay` is enabled.

@@ -5,8 +5,12 @@ use pollster::block_on;
 use winit::window::Window;
 
 use super::{
-    state::RendererBackend, CameraGpuState, PipelineSet, RenderConfig, RenderStats, RenderWorld,
-    Renderer,
+    state::RendererBackend,
+    texture::{
+        BlockTextureSet, create_block_texture_bind_group_layout,
+        create_gpu_block_texture_resources,
+    },
+    CameraGpuState, PipelineSet, RenderConfig, RenderStats, RenderWorld, Renderer,
 };
 
 pub trait RenderSurfaceTarget {
@@ -177,9 +181,15 @@ impl Renderer {
             surface.height(),
         )
         .map_err(|_| RenderInitError::InvalidConfig("camera projection config is invalid"))?;
+        let block_textures = BlockTextureSet::default();
 
         let backend = match target.owned_window() {
-            Some(window) => Some(block_on(create_backend(window, &config, &surface))?),
+            Some(window) => Some(block_on(create_backend(
+                window,
+                &config,
+                &surface,
+                &block_textures,
+            ))?),
             None => None,
         };
 
@@ -188,6 +198,7 @@ impl Renderer {
             surface,
             pipelines,
             world: RenderWorld::default(),
+            block_textures,
             camera,
             backend,
             last_stats: RenderStats::default(),
@@ -204,7 +215,12 @@ impl Renderer {
         self.surface.resize(size.width, size.height);
         self.pipelines.handle_surface_reconfigured(&self.surface);
         self.camera.handle_resize(size.width, size.height);
-        self.backend = Some(block_on(create_backend(window, &self.config, &self.surface))?);
+        self.backend = Some(block_on(create_backend(
+            window,
+            &self.config,
+            &self.surface,
+            &self.block_textures,
+        ))?);
         self.rebuild_chunk_mesh_buffers()
             .map_err(|error| RenderInitError::Backend(format!("chunk mesh rebuild failed: {error:?}")))?;
         Ok(())
@@ -231,6 +247,7 @@ async fn create_backend(
     window: Arc<Window>,
     config: &RenderConfig,
     surface: &SurfaceState,
+    block_textures: &BlockTextureSet,
 ) -> Result<RendererBackend, RenderInitError> {
     let instance = wgpu::Instance::default();
     let surface_handle = instance
@@ -350,9 +367,20 @@ async fn create_backend(
             resource: light_buffer.as_entire_binding(),
         }],
     });
+    let block_texture_bind_group_layout = create_block_texture_bind_group_layout(&device);
+    let block_textures = create_gpu_block_texture_resources(
+        &device,
+        &queue,
+        &block_texture_bind_group_layout,
+        block_textures,
+    );
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_cube_pipeline_layout"),
-        bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&light_bind_group_layout)],
+        bind_group_layouts: &[
+            Some(&camera_bind_group_layout),
+            Some(&light_bind_group_layout),
+            Some(&block_texture_bind_group_layout),
+        ],
         immediate_size: 0,
     });
     let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -440,6 +468,8 @@ async fn create_backend(
         camera_bind_group,
         _light_buffer: light_buffer,
         light_bind_group,
+        block_texture_bind_group_layout,
+        block_textures,
         cube_pipeline,
         cube_edge_pipeline,
     })

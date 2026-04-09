@@ -6,6 +6,7 @@ mod generation;
 mod meshing;
 mod meta;
 mod query;
+mod registry;
 mod storage;
 
 #[allow(unused_imports)]
@@ -27,5 +28,10 @@ pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
 pub use meta::WorldMeta;
 #[allow(unused_imports)]
 pub use query::{NeighborChunks, Ray3, RaycastHit};
+#[allow(unused_imports)]
+pub use registry::{
+    BlockDef, BlockRegistry, BlockRegistryError, BlockRenderKind, FaceTextureSet, TextureTileDef,
+    TextureTileId, TextureTileSource,
+};
 #[allow(unused_imports)]
 pub use storage::{StorageError, load_chunk, save_chunk};

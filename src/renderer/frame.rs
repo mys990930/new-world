@@ -186,6 +186,7 @@ impl Renderer {
             render_pass.set_pipeline(&backend.cube_pipeline);
             render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &backend.light_bind_group, &[]);
+            render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
 
             for coord in frame.visible_chunks {
                 let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
@@ -272,6 +273,7 @@ impl Renderer {
                 edge_pass.set_pipeline(&backend.cube_edge_pipeline);
                 edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
                 edge_pass.set_bind_group(1, &backend.light_bind_group, &[]);
+                edge_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
                 edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
                 edge_pass
                     .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -320,14 +322,17 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
             ([3_u32, 7, 6, 2], [0.0, 1.0, 0.0]),
             ([0_u32, 1, 5, 4], [0.0, -1.0, 0.0]),
         ];
+        let face_uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
         for (corner_indices, face_normal) in face_specs {
             let base_index = vertices.len() as u32;
-            for corner_index in corner_indices {
+            for (corner_index, uv) in corner_indices.into_iter().zip(face_uvs) {
                 vertices.push(MeshVertex {
                     position: corners[corner_index as usize],
                     color: cube.color,
                     normal: face_normal,
+                    uv,
+                    texture_layer: 0,
                 });
             }
 
@@ -376,6 +381,8 @@ fn build_cube_edge_mesh(
             position,
             color: edge_color,
             normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            texture_layer: 0,
         }));
         let view_to_eye = view_direction_towards_eye(camera);
         let edge_pairs = visible_edge_pairs(view_to_eye);
@@ -607,9 +614,92 @@ mod tests {
                 resource: light_buffer.as_entire_binding(),
             }],
         });
+        let block_texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("offscreen_block_texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let block_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen_block_texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &block_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255, 255, 255, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let block_texture_view = block_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let block_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let block_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("offscreen_block_texture_bind_group"),
+            layout: &block_texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&block_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&block_texture_sampler),
+                },
+            ],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("offscreen_pipeline_layout"),
-            bind_group_layouts: &[Some(&camera_bind_group_layout), Some(&light_bind_group_layout)],
+            bind_group_layouts: &[
+                Some(&camera_bind_group_layout),
+                Some(&light_bind_group_layout),
+                Some(&block_texture_bind_group_layout),
+            ],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -742,6 +832,7 @@ mod tests {
             render_pass.set_pipeline(&pipeline);
             render_pass.set_bind_group(0, &camera_bind_group, &[]);
             render_pass.set_bind_group(1, &light_bind_group, &[]);
+            render_pass.set_bind_group(2, &block_texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);

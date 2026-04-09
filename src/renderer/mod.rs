@@ -4,6 +4,7 @@ mod frame;
 mod pipeline;
 mod state;
 mod surface;
+mod texture;
 mod upload;
 
 #[allow(unused_imports)]
@@ -25,6 +26,10 @@ pub use state::{RenderWorld, Renderer};
 pub use surface::{
     RenderInitError, RenderSurfaceError, RenderSurfaceTarget, StubSurfaceTarget, SurfaceSnapshot,
     SurfaceState,
+};
+#[allow(unused_imports)]
+pub use texture::{
+    RenderTextureArraySource, RenderTextureError, RenderTextureSource, RenderTextureTile,
 };
 #[allow(unused_imports)]
 pub use upload::{

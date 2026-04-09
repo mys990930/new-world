@@ -11,7 +11,6 @@ pub enum StorageError {
     InvalidMagic,
     UnsupportedVersion { found: u32 },
     InvalidBlockCount { found: usize },
-    UnknownBlockId(u16),
 }
 
 pub fn save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError> {
@@ -63,8 +62,7 @@ pub fn load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError> {
     let mut blocks = Vec::with_capacity(block_count);
     for chunk in bytes[HEADER_LEN..].chunks_exact(2) {
         let raw = u16::from_le_bytes(chunk.try_into().expect("block slice must fit"));
-        let block = BlockId::from_raw(raw).ok_or(StorageError::UnknownBlockId(raw))?;
-        blocks.push(block);
+        blocks.push(BlockId::from_raw(raw));
     }
 
     Ok(ChunkData::from_blocks(coord, blocks))
@@ -79,10 +77,10 @@ mod tests {
     fn storage_round_trip_preserves_chunk_contents() {
         let mut chunk = ChunkData::new_empty(ChunkCoord(-2, 0, 5));
         chunk
-            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::Grass)
+            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::GRASS)
             .unwrap();
         chunk
-            .set_block(LocalBlockCoord::new(3, 1, 4).unwrap(), BlockId::Stone)
+            .set_block(LocalBlockCoord::new(3, 1, 4).unwrap(), BlockId::STONE)
             .unwrap();
 
         let bytes = save_chunk(&chunk.snapshot()).expect("save should succeed");
@@ -91,11 +89,11 @@ mod tests {
         assert_eq!(restored.coord(), ChunkCoord(-2, 0, 5));
         assert_eq!(
             restored.get_block(LocalBlockCoord::new(0, 0, 0).unwrap()),
-            Some(BlockId::Grass)
+            Some(BlockId::GRASS)
         );
         assert_eq!(
             restored.get_block(LocalBlockCoord::new(3, 1, 4).unwrap()),
-            Some(BlockId::Stone)
+            Some(BlockId::STONE)
         );
     }
 }

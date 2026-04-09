@@ -20,6 +20,8 @@ pub struct MeshVertex {
     pub position: [f32; 3],
     pub color: [f32; 4],
     pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub texture_layer: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -37,8 +39,13 @@ impl CpuMesh {
 
 impl MeshVertex {
     pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4, 2 => Float32x3];
+        const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+            0 => Float32x3,
+            1 => Float32x4,
+            2 => Float32x3,
+            3 => Float32x2,
+            4 => Uint32
+        ];
 
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<MeshVertex>() as u64,
@@ -202,11 +209,13 @@ mod tests {
     fn mesh_vertex_layout_matches_repr_c_memory() {
         let layout = MeshVertex::vertex_buffer_layout();
 
-        assert_eq!(std::mem::size_of::<MeshVertex>(), 40);
-        assert_eq!(layout.array_stride, 40);
-        assert_eq!(layout.attributes.len(), 3);
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 52);
+        assert_eq!(layout.array_stride, 52);
+        assert_eq!(layout.attributes.len(), 5);
         assert_eq!(layout.attributes[0].offset, 0);
         assert_eq!(layout.attributes[1].offset, 12);
         assert_eq!(layout.attributes[2].offset, 28);
+        assert_eq!(layout.attributes[3].offset, 40);
+        assert_eq!(layout.attributes[4].offset, 48);
     }
 }

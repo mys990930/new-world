@@ -209,6 +209,8 @@ fn world_vertex_to_render(vertex: WorldMeshVertex) -> RenderMeshVertex {
         position: vertex.position,
         color: vertex.color,
         normal: vertex.normal,
+        uv: vertex.uv,
+        texture_layer: vertex.texture_layer,
     }
 }
 

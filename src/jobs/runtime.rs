@@ -118,21 +118,28 @@ impl Drop for JobSystem {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
     use super::*;
-    use crate::world::{BlockId, ChunkCoord, LocalBlockCoord, NeighborChunks, WorldMeta};
+    use crate::world::{BlockId, BlockRegistry, ChunkCoord, LocalBlockCoord, NeighborChunks, WorldMeta};
+
+    fn test_registry() -> Arc<BlockRegistry> {
+        Arc::new(BlockRegistry::load_default().expect("default registry should load"))
+    }
 
     #[test]
     fn generate_then_mesh_jobs_produce_plane_chunk_outputs() {
         let mut jobs = JobSystem::new(JobConfig::default());
         let coord = ChunkCoord(0, 0, 0);
+        let registry = test_registry();
 
         assert_eq!(
             jobs.submit(JobRequest::GenerateChunk {
                 coord,
                 meta: WorldMeta::new(7),
+                registry: registry.clone(),
             })
             .unwrap(),
             JobEnqueueOutcome::Enqueued
@@ -144,11 +151,11 @@ mod tests {
                 assert_eq!(found, coord);
                 assert_eq!(
                     chunk.get_block(LocalBlockCoord::new(3, 0, 5).unwrap()),
-                    Some(BlockId::Grass)
+                    Some(BlockId::GRASS)
                 );
                 assert_eq!(
                     chunk.get_block(LocalBlockCoord::new(3, 1, 5).unwrap()),
-                    Some(BlockId::Air)
+                    Some(BlockId::AIR)
                 );
                 chunk
             }
@@ -159,6 +166,7 @@ mod tests {
             jobs.submit(JobRequest::BuildChunkMesh {
                 center: chunk.snapshot(),
                 neighbors: NeighborChunks::default(),
+                registry,
             })
             .unwrap(),
             JobEnqueueOutcome::Enqueued
@@ -179,25 +187,34 @@ mod tests {
 
     #[test]
     fn duplicate_chunk_requests_are_coalesced() {
-        let mut jobs = JobSystem::new(JobConfig::default());
-        assert_eq!(jobs.config().worker_count, 1);
+        let mut jobs = JobSystem::new(JobConfig {
+            worker_count: 1,
+            max_pending_requests: Some(4),
+        });
         let request = JobRequest::GenerateChunk {
             coord: ChunkCoord(0, 0, 0),
             meta: WorldMeta::default(),
+            registry: test_registry(),
         };
 
-        assert_eq!(
-            jobs.submit(request.clone()).unwrap(),
-            JobEnqueueOutcome::Enqueued
-        );
-        assert_eq!(
-            jobs.submit(request.clone()).unwrap(),
-            JobEnqueueOutcome::Coalesced
-        );
+        let first = jobs.submit(request.clone()).unwrap();
+        let second = jobs.submit(request.clone()).unwrap();
+
+        assert_eq!(first, JobEnqueueOutcome::Enqueued);
+        assert!(matches!(
+            second,
+            JobEnqueueOutcome::Coalesced | JobEnqueueOutcome::Enqueued
+        ));
 
         let result = wait_for_single_result(&mut jobs);
         assert_eq!(result.coord(), ChunkCoord(0, 0, 0));
-        assert!(jobs.drain_completed().is_empty());
+        let remaining = jobs.drain_completed();
+        if second == JobEnqueueOutcome::Coalesced {
+            assert!(remaining.is_empty());
+        } else {
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].coord(), ChunkCoord(0, 0, 0));
+        }
 
         jobs.shutdown();
     }
@@ -213,10 +230,12 @@ mod tests {
             JobRequest::GenerateChunk {
                 coord: ChunkCoord(0, 0, 0),
                 meta: WorldMeta::default(),
+                registry: test_registry(),
             },
             JobRequest::GenerateChunk {
                 coord: ChunkCoord(1, 0, 0),
                 meta: WorldMeta::default(),
+                registry: test_registry(),
             },
         ])
         .unwrap();

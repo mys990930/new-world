@@ -9,7 +9,7 @@
 
 - Convert platform raw state into `EcsInputSnapshot`
 - Convert ECS gameplay state into render-ready DTOs
-- Convert future world/jobs outputs into renderer upload requests
+- Convert world/jobs outputs into renderer upload requests
 
 ## Non-Responsibilities
 
@@ -61,6 +61,7 @@
   - `ecs -> AppRenderFrameData`
   - `world/jobs -> RenderUploadRequest`
 - `AppRenderFrameData` currently carries `camera`, `visible_chunks`, and `cube_instances`
+- world-side chunk mesh vertices now keep `uv` and `texture_layer`, and the bridge copies those fields into renderer upload vertices without reinterpreting them
 - `cube_instances` currently include:
   - the white local player cube
   - a thin dark ground shadow slab

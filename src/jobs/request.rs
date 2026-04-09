@@ -1,14 +1,18 @@
-use crate::world::{ChunkCoord, ChunkSnapshot, NeighborChunks, WorldMeta};
+use std::sync::Arc;
+
+use crate::world::{BlockRegistry, ChunkCoord, ChunkSnapshot, NeighborChunks, WorldMeta};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobRequest {
     GenerateChunk {
         coord: ChunkCoord,
         meta: WorldMeta,
+        registry: Arc<BlockRegistry>,
     },
     BuildChunkMesh {
         center: ChunkSnapshot,
         neighbors: NeighborChunks,
+        registry: Arc<BlockRegistry>,
     },
 }
 

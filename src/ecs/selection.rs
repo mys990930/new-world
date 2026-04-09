@@ -95,14 +95,17 @@ fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::world::{ChunkCoord, ChunkData, LocalBlockCoord, WorldMeta};
+    use crate::world::{BlockRegistry, ChunkCoord, ChunkData, LocalBlockCoord, WorldMeta};
 
     #[test]
     fn center_cursor_hits_top_face_of_block_under_player() {
-        let mut world = WorldCore::new(WorldMeta::default());
+        let registry = Arc::new(BlockRegistry::load_default().expect("default registry should load"));
+        let mut world = WorldCore::new(WorldMeta::default(), registry);
         let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
-        chunk.set_block(LocalBlockCoord::new(2, 0, 3).unwrap(), crate::world::BlockId::Grass)
+        chunk.set_block(LocalBlockCoord::new(2, 0, 3).unwrap(), crate::world::BlockId::GRASS)
             .unwrap();
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 

@@ -1,6 +1,7 @@
 use super::chunk::{BlockFace, BlockId, ChunkSnapshot};
 use super::coord::{ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world};
 use super::query::NeighborChunks;
+use super::registry::BlockRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderBounds {
@@ -13,6 +14,8 @@ pub struct MeshVertex {
     pub position: [f32; 3],
     pub color: [f32; 4],
     pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub texture_layer: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -32,7 +35,11 @@ impl CpuMesh {
     }
 }
 
-pub fn build_chunk_mesh(center: &ChunkSnapshot, neighbors: NeighborChunks) -> CpuMesh {
+pub fn build_chunk_mesh(
+    center: &ChunkSnapshot,
+    neighbors: NeighborChunks,
+    registry: &BlockRegistry,
+) -> CpuMesh {
     let mut mesh = CpuMesh::default();
 
     for y in 0..super::coord::CHUNK_EDGE as u8 {
@@ -43,18 +50,19 @@ pub fn build_chunk_mesh(center: &ChunkSnapshot, neighbors: NeighborChunks) -> Cp
                 let Some(block) = center.get_block(local) else {
                     continue;
                 };
-                if !block.is_solid() {
+                let block_def = registry.block_or_missing(block);
+                if !block_def.is_rendered_cube() {
                     continue;
                 }
 
                 for face in faces() {
                     if neighbor_block(center, &neighbors, local, face)
-                        .is_some_and(BlockId::is_solid)
+                        .is_some_and(|neighbor| registry.block_or_missing(neighbor).is_opaque())
                     {
                         continue;
                     }
 
-                    append_face(&mut mesh, center.coord(), local, block, face);
+                    append_face(&mut mesh, center.coord(), local, block, block_def, face);
                 }
             }
         }
@@ -96,22 +104,27 @@ fn append_face(
     mesh: &mut CpuMesh,
     chunk: ChunkCoord,
     local: LocalBlockCoord,
-    block: BlockId,
+    _block: BlockId,
+    block_def: &super::registry::BlockDef,
     face: BlockFace,
 ) {
     let world = chunk_local_to_world(chunk, local);
     let positions = face_positions(world, face);
     let base_index = mesh.vertices.len() as u32;
-    let color = block.face_color(face);
+    let color = block_def.tint_as_linear_rgba();
     let normal = face_normal(face);
+    let uv = face_uvs();
+    let texture_layer = u32::from(block_def.texture_for_face(face).0);
 
     extend_bounds(&mut mesh.bounds, &positions);
 
-    for position in positions {
+    for (position, uv) in positions.into_iter().zip(uv) {
         mesh.vertices.push(MeshVertex {
             position,
             color,
             normal,
+            uv,
+            texture_layer,
         });
     }
 
@@ -123,6 +136,10 @@ fn append_face(
         base_index + 2,
         base_index + 3,
     ]);
+}
+
+fn face_uvs() -> [[f32; 2]; 4] {
+    [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
 }
 
 fn face_positions(world: WorldBlockCoord, face: BlockFace) -> [[f32; 3]; 4] {
@@ -215,7 +232,11 @@ fn faces() -> [BlockFace; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::ChunkData;
+    use crate::world::{BlockRegistry, ChunkData};
+
+    fn test_registry() -> BlockRegistry {
+        BlockRegistry::load_default().expect("default registry should load")
+    }
 
     #[test]
     fn generated_plane_chunk_produces_non_empty_mesh() {
@@ -223,11 +244,11 @@ mod tests {
         for x in 0..super::super::coord::CHUNK_EDGE as u8 {
             for z in 0..super::super::coord::CHUNK_EDGE as u8 {
                 let local = LocalBlockCoord::new(x, 0, z).unwrap();
-                chunk.set_block(local, BlockId::Grass).unwrap();
+                chunk.set_block(local, BlockId::GRASS).unwrap();
             }
         }
 
-        let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default());
+        let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default(), &test_registry());
 
         assert!(!mesh.is_empty());
         assert!(mesh.triangle_count() > 0);
@@ -246,16 +267,19 @@ mod tests {
         let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
         let center_local = LocalBlockCoord::new(15, 0, 0).unwrap();
         let east_local = LocalBlockCoord::new(0, 0, 0).unwrap();
-        center.set_block(center_local, BlockId::Grass).unwrap();
-        east.set_block(east_local, BlockId::Grass).unwrap();
+        center.set_block(center_local, BlockId::GRASS).unwrap();
+        east.set_block(east_local, BlockId::GRASS).unwrap();
+        let registry = test_registry();
 
-        let without_neighbor = build_chunk_mesh(&center.snapshot(), NeighborChunks::default());
+        let without_neighbor =
+            build_chunk_mesh(&center.snapshot(), NeighborChunks::default(), &registry);
         let with_neighbor = build_chunk_mesh(
             &center.snapshot(),
             NeighborChunks {
                 pos_x: Some(east.snapshot()),
                 ..NeighborChunks::default()
             },
+            &registry,
         );
 
         assert!(without_neighbor.triangle_count() > with_neighbor.triangle_count());
@@ -266,6 +290,7 @@ mod tests {
         let mesh = build_chunk_mesh(
             &ChunkData::new_empty(ChunkCoord(0, 0, 0)).snapshot(),
             NeighborChunks::default(),
+            &test_registry(),
         );
         assert!(mesh.is_empty());
         assert!(mesh.bounds.is_none());

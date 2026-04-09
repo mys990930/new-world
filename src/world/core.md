@@ -9,6 +9,7 @@
 
 - `WorldCore` 정의
 - `WorldMeta` 보관
+- immutable `BlockRegistry` 보관
 - loaded chunk map 소유
 - chunk insert/remove 관리
 - block/chunk read API 제공
@@ -28,12 +29,14 @@
 ### WorldCore
 
 - `meta`
+- `block_registry`
 - loaded chunk map keyed by `ChunkCoord`
 - public access policy for query/edit operations
 
 ## 입력
 
 - `WorldMeta`
+- `Arc<BlockRegistry>`
 - load/generation 결과로 생성된 `ChunkData`
 - block/chunk query 요청
 - explicit `WorldEdit`
@@ -58,7 +61,9 @@
 ## 공개 인터페이스
 
 ```rust
-WorldCore::new(meta: WorldMeta) -> WorldCore
+WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
+WorldCore::block_registry(&self) -> &BlockRegistry
+WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
 
 WorldCore::has_chunk(coord: ChunkCoord) -> bool
 WorldCore::insert_chunk(coord: ChunkCoord, chunk: ChunkData)
@@ -76,10 +81,11 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 ## 불변식
 
 - loaded chunk map의 source of truth owner는 `WorldCore`다.
+- registry 해석 결과의 source of truth owner는 `BlockRegistry`이며, `WorldCore`는 이를 읽기 전용으로 들고 있다.
 - 다른 모듈은 내부 블록 배열을 직접 건드리지 않는다.
 - 없는 청크에 대한 읽기/쓰기 규칙은 world 차원에서 일관되게 유지된다.
 - `WorldMeta`는 chunk 개별 데이터보다 상위 레벨에서 유지된다.
-- raycast는 loaded block grid 위를 따라 이동하며, 첫 번째 solid block만 hit로 반환한다.
+- raycast는 loaded block grid 위를 따라 이동하며, registry 기준 첫 번째 solid block만 hit로 반환한다.
 
 ## 관련 모듈
 
@@ -90,8 +96,10 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 - `query.md`
 - `generation.md`
 - `storage.md`
+- `registry.md`
 
 ## 메모
 
 - generation / storage / meshing은 `WorldCore`가 소유하는 loaded state와 직접 붙기보다, 명시적 입력/출력 타입으로 연결된다.
 - 현재 raycast 구현은 selection 같은 상위 시스템이 재사용할 수 있도록 `BlockFace`, hit point, distance를 함께 돌려준다.
+- jobs는 `block_registry_handle()`로 같은 immutable registry를 공유 받아 generation/meshing을 실행한다.

@@ -3,17 +3,20 @@
 ### 역할
 
 - 게임 세계의 원본 블록/청크 데이터와 정합성 있는 질의/수정 연산을 소유한다.
+- 블록 정의/텍스처 카탈로그를 `BlockRegistry`로 해석하는 world-side 계약을 소유한다.
 - 외부 모듈이 월드 내부 표현을 직접 수정하지 않도록 공용 API와 결과 타입을 정의한다.
 
 ### 책임
 
 - loaded chunk storage
 - world metadata storage
+- block registry storage
 - block/chunk read-write API
 - coordinate transformation rule ownership
 - snapshot/query surface provision
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
+- block definition / texture-tile lookup contract
 - save/load serialization contract
 - meshing input provision from chunk snapshot bundle
 - block-grid raycast query provision
@@ -31,6 +34,8 @@
 - `WorldMeta`
 - `ChunkCoord`, `LocalBlockCoord`, `WorldBlockCoord`
 - `BlockId`, `BlockFace`
+- `BlockDef`, `BlockRegistry`
+- `TextureTileId`, `TextureTileDef`, `TextureTileSource`
 - `ChunkData`, `ChunkSnapshot`
 - `WorldEdit`, `EditResult`
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
@@ -41,7 +46,12 @@
 ### 공개 인터페이스
 
 ```rust
-WorldCore::new(meta: WorldMeta) -> WorldCore
+BlockRegistry::load_default() -> Result<BlockRegistry, BlockRegistryError>
+BlockRegistry::load_from_path(path: impl AsRef<Path>) -> Result<BlockRegistry, BlockRegistryError>
+
+WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
+WorldCore::block_registry(&self) -> &BlockRegistry
+WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
 
 WorldCore::has_chunk(coord: ChunkCoord) -> bool
 WorldCore::insert_chunk(coord: ChunkCoord, chunk: ChunkData)
@@ -62,6 +72,7 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 generation::generate_chunk(
     coord: ChunkCoord,
     meta: &WorldMeta,
+    registry: &BlockRegistry,
 ) -> ChunkData
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
@@ -70,6 +81,7 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 meshing::build_chunk_mesh(
     center: &ChunkSnapshot,
     neighbors: NeighborChunks,
+    registry: &BlockRegistry,
 ) -> CpuMesh
 ```
 
@@ -96,8 +108,9 @@ NOT:
    - 쓰기: 실패
 7. 편집 결과는 영향받은 청크 정보를 정확히 반환해야 한다.
 8. 원본 월드 데이터와 렌더용 메시는 분리된다.
-9. 직렬화/역직렬화는 청크 데이터 의미를 보존해야 한다.
-10. raycast는 loaded world state만 기준으로 first solid hit를 판정한다.
+9. `BlockId`의 solid/render/texture 의미는 registry가 해석하고, 청크는 raw id만 저장한다.
+10. 직렬화/역직렬화는 raw block id 의미를 보존해야 한다.
+11. raycast는 loaded world state와 registry의 solid 규칙만 기준으로 first solid hit를 판정한다.
 
 ### 하위 모듈 목록 및 역할
 
@@ -107,6 +120,7 @@ NOT:
 - `core.md`: `WorldCore` 소유 구조와 top-level API
 - `edit.md`: `WorldEdit` / `EditResult` 기반 명시적 mutation 계약
 - `query.md`: read-only block/chunk/region/raycast query surface
+- `registry.md`: 데이터 기반 블록 정의/텍스처 타일 카탈로그 계약
 - `generation.md`: 절차 생성 결과를 `ChunkData`로 표현하는 규칙
 - `storage.md`: 청크 직렬화/역직렬화와 save/load 계약
 - `meshing.md`: 청크 스냅샷 기반 CPU mesh 입력 제공 계약
@@ -114,7 +128,8 @@ NOT:
 ### 현재 구현 메모
 
 - 현재 최소 구현은 `mod.rs + leaf.rs` 구조까지 추가되어 있다.
-- generation은 `WorldMeta`와 `ChunkCoord`를 받아 `world y = 0`에서 로컬 `(1..=5, 1..=5)` 범위만 채우는 deterministic grass patch generator만 제공한다.
-- meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, renderer 타입으로의 변환은 이후 jobs/app bridge 단계에서 연결한다.
-- `BlockRegistry`는 아직 도입하지 않고, 현재는 `BlockId` 자체가 최소한의 solid/face-color 규칙을 가진다.
+- 기본 block registry는 `assets/blocks/blocks.toml`에서 로드되고, 텍스처 경로는 그 manifest 기준 상대 경로로 해석된다.
+- generation은 `WorldMeta`, `ChunkCoord`, `BlockRegistry`를 받아 `world y = 0`에서 로컬 `(1..=5, 1..=5)` 범위만 grass로 채우는 deterministic patch generator만 제공한다.
+- meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, 각 vertex에 `uv`와 `texture_layer`를 넣는다.
+- renderer 타입으로의 변환은 jobs/app bridge 단계에서 계속 분리되어 있다.
 - 현재 raycast는 voxel DDA 방식으로 loaded chunk 위의 first solid block과 hit face / hit point / travel distance를 계산한다.
