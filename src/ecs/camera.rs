@@ -34,7 +34,9 @@ const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
 const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 const CAMERA_DEADZONE_HALF_WIDTH: f32 = 0.75;
 const CAMERA_DEADZONE_HALF_HEIGHT: f32 = 0.45;
-const CAMERA_MOVE_BIAS_DISTANCE: f32 = 0.6;
+const CAMERA_FORWARD_VIEW_RATIO: f32 = 0.65;
+const CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO: f32 = (CAMERA_FORWARD_VIEW_RATIO - 0.5) * 2.0;
+const QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER: f32 = 1.732_050_8;
 const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0;
 const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
@@ -236,14 +238,18 @@ fn movement_bias_offset(
     }
 
     let inv_length = screen_length_sq.sqrt().recip();
+    let bias_distance = QUARTER_VIEW_VERTICAL_WORLD_SIZE
+        * 0.5
+        * QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER
+        * CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO;
     add3(
         scale3(
             basis.right,
-            -screen_right * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
+            screen_right * inv_length * bias_distance,
         ),
         scale3(
             basis.up,
-            -screen_up * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
+            screen_up * inv_length * bias_distance,
         ),
     )
 }
@@ -334,8 +340,37 @@ mod tests {
             basis,
         );
 
-        assert!(dot3(bias, basis.right) < 0.0);
-        assert!(dot3(bias, basis.up) > 0.0);
+        assert!(dot3(bias, basis.right) > 0.0);
+        assert!(dot3(bias, basis.up) < 0.0);
+    }
+
+    #[test]
+    fn movement_bias_targets_forward_heavy_composition() {
+        let basis = quarter_view_basis(0);
+        let bias = movement_bias_offset(
+            MoveWorldIntent {
+                east: 1,
+                north: 0,
+            },
+            basis,
+        );
+        let screen_bias = [dot3(bias, basis.right), dot3(bias, basis.up)];
+        let forward_screen = [dot3([1.0, 0.0, 0.0], basis.right), dot3([1.0, 0.0, 0.0], basis.up)];
+        let forward_length = (forward_screen[0] * forward_screen[0]
+            + forward_screen[1] * forward_screen[1])
+            .sqrt();
+        let normalized_forward = [
+            forward_screen[0] / forward_length,
+            forward_screen[1] / forward_length,
+        ];
+        let projected_bias =
+            screen_bias[0] * normalized_forward[0] + screen_bias[1] * normalized_forward[1];
+        let expected_bias = QUARTER_VIEW_VERTICAL_WORLD_SIZE
+            * 0.5
+            * QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER
+            * CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO;
+
+        assert!((projected_bias - expected_bias).abs() < 1e-5);
     }
 
     #[test]
