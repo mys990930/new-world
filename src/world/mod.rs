@@ -26,6 +26,6 @@ pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
 #[allow(unused_imports)]
 pub use meta::WorldMeta;
 #[allow(unused_imports)]
-pub use query::NeighborChunks;
+pub use query::{NeighborChunks, Ray3, RaycastHit};
 #[allow(unused_imports)]
 pub use storage::{StorageError, load_chunk, save_chunk};

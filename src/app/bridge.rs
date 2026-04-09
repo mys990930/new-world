@@ -1,13 +1,18 @@
 use winit::keyboard::KeyCode;
 
 use super::GameApp;
-use crate::ecs::EcsInputSnapshot;
+use crate::ecs::{
+    EcsInputSnapshot, QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye,
+};
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
     RenderCameraState, RenderCubeInstance, RenderProjectionMode, RenderUploadRequest,
     RenderViewBasis,
 };
-use crate::world::{ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex};
+use crate::world::{
+    BlockFace, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex,
+    WorldBlockCoord,
+};
 
 pub struct AppRenderFrameData {
     pub camera: RenderCameraState,
@@ -74,6 +79,11 @@ impl GameApp {
             );
         }
 
+        let selection = self.ecs.selection_state();
+        if let (Some(block), Some(face)) = (selection.hovered_block, selection.hovered_face) {
+            cube_instances.push(build_selection_face_instance(block, face));
+        }
+
         AppRenderFrameData {
             camera,
             visible_chunks: self
@@ -103,30 +113,22 @@ fn axis(negative: bool, positive: bool) -> i8 {
 }
 
 fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
-    const CAMERA_DISTANCE: f32 = 18.0;
-    const ORTHOGRAPHIC_VERTICAL_SIZE: f32 = 5.0;
-    // The current prototype uses a 45-degree downward pitch and a 45-degree yaw-like
-    // quarter-view basis so the top face reads as a diamond whose corners point
-    // toward screen up/down/left/right.
-    const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
-    const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
-
-    let right = normalize3(rotate_y_quarter_turns(CAMERA_RIGHT_BASE, quarter_turns));
-    let up = normalize3(rotate_y_quarter_turns(CAMERA_UP_BASE, quarter_turns));
-    // With an explicit basis override, `right` and `up` define the screen axes directly:
-    // east -> screen bottom-right, north -> screen top-right.
-    let forward = normalize3(cross3(right, up));
-    let eye = add3(target, scale3(forward, -CAMERA_DISTANCE));
+    let basis = quarter_view_basis(quarter_turns);
+    let eye = quarter_view_eye(target, quarter_turns);
 
     RenderCameraState {
         eye,
         target,
-        up,
+        up: basis.up,
         aspect_override: None,
         projection_mode: RenderProjectionMode::Orthographic {
-            vertical_world_size: ORTHOGRAPHIC_VERTICAL_SIZE,
+            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         },
-        basis_override: Some(RenderViewBasis { right, up, forward }),
+        basis_override: Some(RenderViewBasis {
+            right: basis.right,
+            up: basis.up,
+            forward: basis.forward,
+        }),
     }
 }
 
@@ -140,6 +142,50 @@ fn build_ground_shadow_instance(center: [f32; 3]) -> RenderCubeInstance {
         ],
         half_extents: [0.62, 0.01, 0.62],
         color: [0.08, 0.08, 0.10, 1.0],
+    }
+}
+
+fn build_selection_face_instance(block: WorldBlockCoord, face: BlockFace) -> RenderCubeInstance {
+    const HIGHLIGHT_HALF_THICKNESS: f32 = 0.02;
+    const HIGHLIGHT_HALF_SPAN: f32 = 0.52;
+    const HIGHLIGHT_FACE_OFFSET: f32 = 0.02;
+    let center = [
+        block.0 as f32 + 0.5,
+        block.1 as f32 + 0.5,
+        block.2 as f32 + 0.5,
+    ];
+
+    match face {
+        BlockFace::NegX => RenderCubeInstance {
+            center: [center[0] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
+            half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
+        BlockFace::PosX => RenderCubeInstance {
+            center: [center[0] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
+            half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
+        BlockFace::NegY => RenderCubeInstance {
+            center: [center[0], center[1] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[2]],
+            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
+        BlockFace::PosY => RenderCubeInstance {
+            center: [center[0], center[1] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[2]],
+            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
+        BlockFace::NegZ => RenderCubeInstance {
+            center: [center[0], center[1], center[2] - 0.5 - HIGHLIGHT_FACE_OFFSET],
+            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
+        BlockFace::PosZ => RenderCubeInstance {
+            center: [center[0], center[1], center[2] + 0.5 + HIGHLIGHT_FACE_OFFSET],
+            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
+            color: [1.0, 0.92, 0.20, 1.0],
+        },
     }
 }
 
@@ -166,42 +212,7 @@ fn world_vertex_to_render(vertex: WorldMeshVertex) -> RenderMeshVertex {
     }
 }
 
-fn rotate_y_quarter_turns(vector: [f32; 3], quarter_turns: u8) -> [f32; 3] {
-    match quarter_turns % 4 {
-        0 => vector,
-        1 => [vector[2], vector[1], -vector[0]],
-        2 => [-vector[0], vector[1], -vector[2]],
-        3 => [-vector[2], vector[1], vector[0]],
-        _ => unreachable!(),
-    }
-}
-
-fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
-    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
-}
-
-fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
-    [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar]
-}
-
-fn normalize3(vector: [f32; 3]) -> [f32; 3] {
-    let length_sq = dot3(vector, vector);
-    if length_sq <= f32::EPSILON {
-        [0.0, 0.0, 0.0]
-    } else {
-        let inv_length = length_sq.sqrt().recip();
-        scale3(vector, inv_length)
-    }
-}
-
-fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
-}
-
+#[cfg(test)]
 fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
 }

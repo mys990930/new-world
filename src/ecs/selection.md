@@ -2,58 +2,46 @@
 
 ## 역할
 
-- 현재 상호작용/파괴/배치 타겟을 판정한다
-- 가림 처리와 배치 프리뷰에 필요한 gameplay 상태를 관리한다
+- 현재 커서가 가리키는 world block과 face를 판정한다
+- 상호작용/파괴/배치로 이어질 수 있는 최소 selection 상태를 보관한다
+- renderer가 노란 face highlight를 그릴 수 있는 gameplay snapshot을 제공한다
 
 ## 소유 데이터
 
 ### SelectionState
-- current target block/entity
-- current hit face
-- placement preview target position
-- front occluder candidate
-- front-hover timer
-- target transition state
-
-### InteractionTarget
-- block 또는 entity target 식별 정보
-- interaction validity
+- `hovered_block`
+- `hovered_face`
+- `hit_point`
 
 ## 입력
 
-- cursor screen position
-- camera orientation / follow state
-- player position / interaction range
-- world query / raycast 결과
-- `PrimaryAction` / `PlaceBlock` command
+- `EcsInputSnapshot.cursor_screen_pos`
+- `EcsInputSnapshot.focused`
+- `EcsInputSnapshot.active`
+- current `CameraState.quarter_turns`
+- local player `Transform`
+- viewport width/height
+- `WorldCore::raycast_blocks(...)` 결과
 
 ## 출력
 
-- 현재 상호작용 타겟
-- 현재 배치 프리뷰 위치/면
-- world request로 변환 가능한 target 정보
-- 가림 처리 대상 후보
+- 현재 hover block
+- 현재 hover face
+- hit point
+- app bridge가 render highlight로 번역할 수 있는 최소 selection snapshot
 
 ## 상태 전이 규칙
 
-- 기본적으로는 뒤쪽의 유효 타겟을 우선 선택한다
-- 플레이어 앞의 가림 블록을 수정하려는 경우, 특정 면 위에 커서를 약 `0.3s` 이상 머무르면 앞쪽 타겟으로 전환 가능해야 한다
-- 블록 배치는 커서가 가리키는 노출된 면 기준으로, 기존 블록에 인접한 위치에 배치한다
-- 프리뷰는 설치될 위치에 반투명으로 표시되며, 어느 면에 붙는지 분명해야 한다
-- 원하는 면이 보이지 않으면 카메라 회전으로 해결하는 흐름을 전제로 한다
-
-## 가림 처리 규칙
-
-- 카메라 기준으로 플레이어를 실제로 가리는 최소 블록만 반투명 처리한다
-- 앞쪽 전체를 일괄 반투명 처리하지 않는다
-- 반투명 상태 블록은 시야 확보용으로 동작하며, 뒤쪽 타겟 우선 판정과 함께 사용된다
+- app frame은 world/job 결과 반영 뒤 현재 viewport와 world state를 기준으로 selection을 갱신한다
+- selection ray는 current quarter-view basis와 cursor screen position으로부터 orthographic 방식으로 계산한다
+- raycast가 solid block에 닿으면 `hovered_block`, `hovered_face`, `hit_point`를 채운다
+- hit가 없거나 viewport/cursor/focus 조건이 유효하지 않으면 selection을 clear한다
 
 ## 불변식
 
-- selection은 타겟 판정과 프리뷰 상태를 소유하지만 world를 직접 수정하지 않는다
-- 기본 타겟 우선순위는 뒤쪽 유효 타겟이다
-- 앞쪽 전환은 의도적 hover를 통해서만 허용된다
-- placement preview는 실제 배치 결과와 일관돼야 한다
+- selection은 타겟 판정 상태를 소유하지만 world를 직접 수정하지 않는다
+- selection은 world 내부 블록 step 알고리즘을 직접 소유하지 않고 world query surface를 사용한다
+- renderer는 `SelectionState`를 직접 읽지 않고 app bridge가 만든 render-ready cube instance만 받는다
 
 ## 비책임
 
@@ -61,16 +49,18 @@
 - 반투명 렌더링 구현
 - 실제 block edit apply
 - raw input 수집
+- 앞/뒤 타겟 hover 전환 정책의 완성 구현
 
 ## 관련 모듈
 
-- camera.rs의 방향/상태를 읽는다
-- player.rs의 위치/범위를 읽는다
-- command.rs의 상호작용/배치 command를 소비한다
-- world가 query 결과를 제공하고 renderer가 preview/occlusion 표현을 담당할 수 있다
-- 상호작용 시 camera.rs가 빠른 recenter를 선택할 수 있도록 signal을 줄 수 있다
+- `camera.rs`의 방향 helper를 읽는다
+- `player.rs`의 local player transform을 읽는다
+- `runtime.rs`가 selection update 진입점을 제공한다
+- `world`가 raycast hit를 제공하고 `app/bridge.rs`가 렌더용 노란 face highlight로 바꾼다
 
 ## 메모
 
-- hover 전환 시간 `0.3s`는 프로토타입 중 조정 가능성이 높다
-- entity interaction과 block interaction을 분리할지 여부는 이후 확장 포인트다
+- 현재 구현은 최소 vertical slice만 포함한다.
+  - stored state: `hovered_block`, `hovered_face`, `hit_point`
+  - render output: hovered face 위의 얇은 노란 slab
+- 뒤쪽 타겟 우선, 앞쪽 hover `0.3s` 전환, placement preview position 분리, occluder 후보 추적은 아직 future work다.

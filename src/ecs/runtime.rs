@@ -11,6 +11,8 @@ use super::player::{
     sync_local_player_velocity_system, update_move_world_intent_system, FrameDeltaSeconds,
     LocalPlayerEntity, PlayerMovementConfig, Transform,
 };
+use super::selection::{SelectionState, update_selection_from_world};
+use crate::world::WorldCore;
 
 pub struct EcsRuntime {
     world: World,
@@ -31,6 +33,7 @@ impl EcsRuntime {
         world.insert_resource(FrameDeltaSeconds::default());
         world.insert_resource(PlayerMovementConfig::default());
         world.insert_resource(ChunkStates::default());
+        world.insert_resource(SelectionState::default());
 
         let mut pre_update = Schedule::default();
         pre_update.add_systems((clear_player_command_buffer_system, clear_camera_impulses_system));
@@ -109,5 +112,30 @@ impl EcsRuntime {
     pub fn local_player_transform(&self) -> Option<Transform> {
         let entity = self.world.resource::<LocalPlayerEntity>().0?;
         self.world.get::<Transform>(entity).copied()
+    }
+
+    pub fn update_selection_from_world(
+        &mut self,
+        world: &WorldCore,
+        viewport_width: u32,
+        viewport_height: u32,
+    ) {
+        let input = self.world.resource::<EcsInputSnapshot>().clone();
+        let camera = *self.world.resource::<CameraState>();
+        let player_transform = self.local_player_transform();
+        let mut selection = self.world.resource_mut::<SelectionState>();
+        update_selection_from_world(
+            &mut selection,
+            world,
+            &input,
+            camera.quarter_turns,
+            player_transform,
+            viewport_width,
+            viewport_height,
+        );
+    }
+
+    pub fn selection_state(&self) -> SelectionState {
+        *self.world.resource::<SelectionState>()
     }
 }

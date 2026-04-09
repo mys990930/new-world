@@ -4,7 +4,7 @@ use super::chunk::{BlockId, ChunkData, ChunkSnapshot};
 use super::coord::{ChunkCoord, WorldBlockCoord, world_to_chunk_local};
 use super::edit::{EditError, EditResult, WorldEdit, remesh_targets_for_block};
 use super::meta::WorldMeta;
-use super::query::NeighborChunks;
+use super::query::{NeighborChunks, Ray3, RaycastHit};
 
 pub struct WorldCore {
     meta: WorldMeta,
@@ -102,12 +102,171 @@ impl WorldCore {
     pub fn query_block_state(&self, pos: WorldBlockCoord) -> Option<BlockId> {
         self.get_block(pos)
     }
+
+    pub fn raycast_blocks(&self, ray: Ray3, max_distance: f32) -> Option<RaycastHit> {
+        if max_distance <= 0.0 {
+            return None;
+        }
+
+        let direction = normalize3(ray.direction)?;
+        let mut block = WorldBlockCoord(
+            ray.origin[0].floor() as i32,
+            ray.origin[1].floor() as i32,
+            ray.origin[2].floor() as i32,
+        );
+        let mut traveled = 0.0_f32;
+        let mut entry_face = None;
+
+        let step_x = step_sign(direction[0]);
+        let step_y = step_sign(direction[1]);
+        let step_z = step_sign(direction[2]);
+
+        let mut t_max_x = first_boundary_distance(ray.origin[0], direction[0], block.0, step_x);
+        let mut t_max_y = first_boundary_distance(ray.origin[1], direction[1], block.1, step_y);
+        let mut t_max_z = first_boundary_distance(ray.origin[2], direction[2], block.2, step_z);
+
+        let t_delta_x = axis_delta(direction[0]);
+        let t_delta_y = axis_delta(direction[1]);
+        let t_delta_z = axis_delta(direction[2]);
+
+        let max_steps = (max_distance.ceil() as usize).saturating_mul(6).max(1);
+
+        for _ in 0..max_steps {
+            if self.get_block(block).is_some_and(BlockId::is_solid) {
+                let hit_face = entry_face.unwrap_or_else(|| opposite_face_for_direction(direction));
+                let point = add_scaled3(ray.origin, direction, traveled);
+                return Some(RaycastHit {
+                    block,
+                    face: hit_face,
+                    point,
+                    distance: traveled,
+                });
+            }
+
+            if t_max_x <= t_max_y && t_max_x <= t_max_z {
+                traveled = t_max_x;
+                if traveled > max_distance {
+                    return None;
+                }
+                block.0 += step_x;
+                t_max_x += t_delta_x;
+                entry_face = Some(if step_x >= 0 {
+                    super::chunk::BlockFace::NegX
+                } else {
+                    super::chunk::BlockFace::PosX
+                });
+            } else if t_max_y <= t_max_z {
+                traveled = t_max_y;
+                if traveled > max_distance {
+                    return None;
+                }
+                block.1 += step_y;
+                t_max_y += t_delta_y;
+                entry_face = Some(if step_y >= 0 {
+                    super::chunk::BlockFace::NegY
+                } else {
+                    super::chunk::BlockFace::PosY
+                });
+            } else {
+                traveled = t_max_z;
+                if traveled > max_distance {
+                    return None;
+                }
+                block.2 += step_z;
+                t_max_z += t_delta_z;
+                entry_face = Some(if step_z >= 0 {
+                    super::chunk::BlockFace::NegZ
+                } else {
+                    super::chunk::BlockFace::PosZ
+                });
+            }
+        }
+
+        None
+    }
+}
+
+fn normalize3(vector: [f32; 3]) -> Option<[f32; 3]> {
+    let length_sq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
+    if length_sq <= f32::EPSILON {
+        None
+    } else {
+        let inv_length = length_sq.sqrt().recip();
+        Some([
+            vector[0] * inv_length,
+            vector[1] * inv_length,
+            vector[2] * inv_length,
+        ])
+    }
+}
+
+fn step_sign(axis: f32) -> i32 {
+    if axis > 0.0 {
+        1
+    } else if axis < 0.0 {
+        -1
+    } else {
+        0
+    }
+}
+
+fn axis_delta(axis: f32) -> f32 {
+    if axis.abs() <= f32::EPSILON {
+        f32::INFINITY
+    } else {
+        axis.abs().recip()
+    }
+}
+
+fn first_boundary_distance(origin: f32, direction: f32, block: i32, step: i32) -> f32 {
+    if step == 0 || direction.abs() <= f32::EPSILON {
+        return f32::INFINITY;
+    }
+
+    let boundary = if step > 0 {
+        block as f32 + 1.0
+    } else {
+        block as f32
+    };
+    ((boundary - origin) / direction).max(0.0)
+}
+
+fn add_scaled3(origin: [f32; 3], direction: [f32; 3], distance: f32) -> [f32; 3] {
+    [
+        origin[0] + direction[0] * distance,
+        origin[1] + direction[1] * distance,
+        origin[2] + direction[2] * distance,
+    ]
+}
+
+fn opposite_face_for_direction(direction: [f32; 3]) -> super::chunk::BlockFace {
+    let abs_x = direction[0].abs();
+    let abs_y = direction[1].abs();
+    let abs_z = direction[2].abs();
+
+    if abs_x >= abs_y && abs_x >= abs_z {
+        if direction[0] >= 0.0 {
+            super::chunk::BlockFace::NegX
+        } else {
+            super::chunk::BlockFace::PosX
+        }
+    } else if abs_y >= abs_z {
+        if direction[1] >= 0.0 {
+            super::chunk::BlockFace::NegY
+        } else {
+            super::chunk::BlockFace::PosY
+        }
+    } else if direction[2] >= 0.0 {
+        super::chunk::BlockFace::NegZ
+    } else {
+        super::chunk::BlockFace::PosZ
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{LocalBlockCoord, generate_chunk};
+    use crate::world::{BlockFace, LocalBlockCoord, generate_chunk};
 
     #[test]
     fn world_core_reads_generated_plane_block() {
@@ -165,5 +324,30 @@ mod tests {
             Some(BlockId::Grass)
         );
         assert!(neighbors.neg_x.is_none());
+    }
+
+    #[test]
+    fn raycast_hits_top_face_of_plane_block() {
+        let mut world = WorldCore::new(WorldMeta::default());
+        let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        chunk.set_block(LocalBlockCoord::new(3, 0, 3).unwrap(), BlockId::Grass)
+            .unwrap();
+        world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
+
+        let hit = world
+            .raycast_blocks(
+                Ray3 {
+                    origin: [3.5, 4.0, 3.5],
+                    direction: [0.0, -1.0, 0.0],
+                },
+                16.0,
+            )
+            .expect("ray should hit the plane block");
+
+        assert_eq!(hit.block, WorldBlockCoord(3, 0, 3));
+        assert_eq!(hit.face, BlockFace::PosY);
+        assert!((hit.point[0] - 3.5).abs() < 1e-5);
+        assert!((hit.point[1] - 1.0).abs() < 1e-5);
+        assert!((hit.point[2] - 3.5).abs() < 1e-5);
     }
 }

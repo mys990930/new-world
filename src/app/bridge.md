@@ -41,7 +41,7 @@
 - `platform -> ecs` only maps raw transient/held input into frame input resources
 - `ecs -> renderer` only maps camera pose, visibility, and draw-ready instances
 - Renderer does not query ECS `Transform` or local player entities directly
-- Quarter-view camera basis is owned by the bridge and kept consistent with the current prototype mapping:
+- Quarter-view direction rules are defined once in `ecs::camera` helper functions and reused by the bridge so movement, selection, and rendering stay aligned:
   - east projects to screen bottom-right
   - north projects to screen top-right
   - world up projects upward on screen
@@ -58,7 +58,10 @@
 - The current vertical slice uses three active bridge paths:
   - `platform -> EcsInputSnapshot`
   - `ecs -> AppRenderFrameData`
-- `world/jobs -> RenderUploadRequest`
+  - `world/jobs -> RenderUploadRequest`
 - `AppRenderFrameData` currently carries `camera`, `visible_chunks`, and `cube_instances`
-- The local player body-center transform is translated into a white `RenderCubeInstance` plus a thin dark ground shadow slab
+- `cube_instances` currently include:
+  - the white local player cube
+  - a thin dark ground shadow slab
+  - a thin yellow face-highlight slab generated from `SelectionState`
 - The current prototype uses an explicit 45-degree downward quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose

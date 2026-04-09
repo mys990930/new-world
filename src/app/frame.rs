@@ -19,6 +19,10 @@ impl GameApp {
 
         self.collect_job_results();
 
+        let window = self.platform.window_state();
+        self.ecs
+            .update_selection_from_world(&self.world, window.width, window.height);
+
         let commands = self.ecs.drain_player_commands();
         if !commands.is_empty() {
             println!("[app] ecs commands: {:?}", commands);

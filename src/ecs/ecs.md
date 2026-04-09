@@ -12,6 +12,7 @@
 - input interpretation
 - player 중심 entity/component 관리
 - camera 상태 관리
+- selection 상태 관리
 - chunk meta 상태 관리
 - jobs 결과 반영
 - 시스템 실행 순서 정의
@@ -78,6 +79,11 @@
   - 4방향 쿼터뷰 회전
   - `Y`나 좌/우클릭 상호작용 시 1회성 fast recenter boost 신호
   - slow tracking / bias / deadzone은 향후 camera 시스템이 확장한다
+- 커서 기반 selection 갱신
+  - app가 프레임마다 mouse position과 viewport를 전달한다
+  - ECS는 current camera basis와 local player transform을 기준으로 orthographic ray를 만든다
+  - world raycast 결과를 `SelectionState`로 저장한다
+  - app bridge는 그 상태를 노란 face highlight 렌더 입력으로 바꾼다
 
 ### 공개 인터페이스
 
@@ -95,6 +101,12 @@ EcsRuntime::run_fixed_update()
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
 EcsRuntime::move_world_intent() -> MoveWorldIntent
+EcsRuntime::update_selection_from_world(
+    world: &WorldCore,
+    viewport_width: u32,
+    viewport_height: u32,
+)
+EcsRuntime::selection_state() -> SelectionState
 ```
 
 ### 의존성
@@ -117,6 +129,7 @@ NOT:
 3. discrete 행동과 continuous 이동 의도는 같은 표현으로 섞지 않는다.
 4. 화면 기준 입력과 world 기준 intent는 별도 경계로 유지한다.
 5. 같은 프레임의 회전은 그 프레임 이동 intent 계산에 먼저 반영된다.
+6. selection policy는 ECS가 소유하지만 실제 블록 step/raycast는 world query를 사용한다.
 
 ### 하위 모듈 목록 및 역할
 - mod.rs: public facade, re-export
@@ -124,8 +137,8 @@ NOT:
 - input.rs: `EcsInputSnapshot`, frame 입력 resource, discrete command 후보 생성
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS 내부 command/request buffer 정의
 - player.rs: `Player`/`Transform`/`Velocity`, local player spawn, 화면 기준 이동 상태를 world 기준 이동 intent로 변환
-- camera.rs: `CameraState`, 4방향 쿼터뷰 회전 상태, recenter one-shot boost 신호
-- selection.rs: selection / interaction target / placement preview 상태 정의
+- camera.rs: `CameraState`, 4방향 쿼터뷰 회전 상태, recenter one-shot boost 신호, shared quarter-view basis helper
+- selection.rs: world raycast 기반 hover target 상태 정의와 최소 selection update 규칙
 - chunk.rs: player 기준 interest / camera 기준 visible chunk meta 상태 정의
 - jobs.rs: jobs 결과 반영과 후속 요청 생성 규칙
 - fixed.rs: fixed tick용 simulation 흐름 정의
@@ -137,3 +150,5 @@ NOT:
 - `MoveWorldIntent`는 local player `Velocity`에 반영된다.
 - local player `Velocity`는 같은 frame의 `FrameDeltaSeconds`를 사용해 `Transform.translation`에 적분된다.
 - 기본 local player는 bootstrap 시점에 1회 spawn된다.
+- 현재 selection은 `EcsInputSnapshot.cursor_screen_pos`와 current quarter-view camera basis를 바탕으로 world raycast를 수행해 `hovered_block`, `hovered_face`, `hit_point`를 채운다.
+- 앞/뒤 타겟 전환, 배치 프리뷰 위치 분리, hover `0.3s` 규칙은 아직 future work다.

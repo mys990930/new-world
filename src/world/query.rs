@@ -11,6 +11,20 @@ pub struct NeighborChunks {
     pub pos_z: Option<ChunkSnapshot>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ray3 {
+    pub origin: [f32; 3],
+    pub direction: [f32; 3],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RaycastHit {
+    pub block: super::coord::WorldBlockCoord,
+    pub face: BlockFace,
+    pub point: [f32; 3],
+    pub distance: f32,
+}
+
 impl NeighborChunks {
     pub fn block_across_face(&self, face: BlockFace, local: LocalBlockCoord) -> Option<BlockId> {
         let max = CHUNK_EDGE_USIZE as u8 - 1;

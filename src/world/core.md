@@ -3,7 +3,7 @@
 ## 역할
 
 - loaded world state와 top-level world API를 소유한다.
-- 외부 모듈이 world 내부 표현 대신 `WorldCore`를 통해 상호작용하도록 경계를 만든다.
+- 다른 모듈이 world 내부 표현 대신 `WorldCore`를 통해 상호작용하도록 경계를 만든다.
 
 ## 책임
 
@@ -13,6 +13,7 @@
 - chunk insert/remove 관리
 - block/chunk read API 제공
 - edit/query/generation/storage/meshing 하위 계약을 묶는 진입점 제공
+- loaded block-grid raycast 진입점 제공
 
 ## 비책임
 
@@ -36,6 +37,7 @@
 - load/generation 결과로 생성된 `ChunkData`
 - block/chunk query 요청
 - explicit `WorldEdit`
+- `Ray3`와 raycast 최대 거리
 
 ## 출력
 
@@ -43,10 +45,11 @@
 - 제거된 `ChunkData`
 - `EditResult`
 - snapshot/query 결과
+- `RaycastHit`
 
 ## 처리 흐름
 
-1. 외부 요청은 `WorldCore`로 진입한다.
+1. 외부 요청이 `WorldCore`로 진입한다.
 2. 필요하면 `coord` 규칙으로 좌표를 분해한다.
 3. loaded chunk map에서 대상 청크를 찾는다.
 4. `chunk`, `edit`, `query` 하위 계약을 사용해 결과를 계산한다.
@@ -67,14 +70,16 @@ WorldCore::get_chunk_mut(coord: ChunkCoord) -> Option<&mut ChunkData>
 WorldCore::snapshot_chunk(coord: ChunkCoord) -> Option<ChunkSnapshot>
 
 WorldCore::apply_edit(edit: WorldEdit) -> EditResult
+WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 ```
 
 ## 불변식
 
 - loaded chunk map의 source of truth owner는 `WorldCore`다.
-- 외부 모듈은 내부 블록 배열을 직접 건드리지 않는다.
+- 다른 모듈은 내부 블록 배열을 직접 건드리지 않는다.
 - 없는 청크에 대한 읽기/쓰기 규칙은 world 차원에서 일관되게 유지된다.
 - `WorldMeta`는 chunk 개별 데이터보다 상위 레벨에서 유지된다.
+- raycast는 loaded block grid 위를 따라 이동하며, 첫 번째 solid block만 hit로 반환한다.
 
 ## 관련 모듈
 
@@ -88,4 +93,5 @@ WorldCore::apply_edit(edit: WorldEdit) -> EditResult
 
 ## 메모
 
-- generation / storage / meshing은 `WorldCore`가 소유하는 loaded state에 직접 붙기보다, 명시적 입력/출력 타입으로 연결된다.
+- generation / storage / meshing은 `WorldCore`가 소유하는 loaded state와 직접 붙기보다, 명시적 입력/출력 타입으로 연결된다.
+- 현재 raycast 구현은 selection 같은 상위 시스템이 재사용할 수 있도록 `BlockFace`, hit point, distance를 함께 돌려준다.

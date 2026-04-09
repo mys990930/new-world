@@ -19,12 +19,14 @@
 - bootstrap 시점의 초기 resource / system 등록
 - app가 주입하는 `EcsInputSnapshot`
 - app가 호출하는 phase 실행 함수
+- app가 넘기는 world/viewport 기반 selection update 요청
 
 ## 출력
 
 - 갱신된 ECS world/resource 상태
 - discrete command buffer
 - `MoveWorldIntent`
+- `SelectionState`
 - app bridge가 읽을 수 있는 최소 gameplay snapshot
 
 ## 처리 흐름
@@ -33,6 +35,7 @@
 2. 최소 필수 resource를 등록한다
 3. pre/update/post/fixed 각 phase에 시스템을 등록한다
 4. app가 각 phase를 호출한다
+5. app가 world/job 결과 반영 이후 selection helper를 호출하면 runtime이 world raycast 기반 `SelectionState`를 갱신한다
 
 ## 현재 구현 메모
 
@@ -45,11 +48,13 @@
   - `CameraState`
   - `LocalPlayerEntity`
   - `ChunkStates`
+  - `SelectionState`
 - 현재 frame update 순서는:
   - pre: command buffer clear, camera one-shot impulse clear
   - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영 -> local player transform 적분
-- app bridge는 runtime helper를 통해 현재 `CameraState`와 local player `Transform`을 읽어 renderer DTO를 만든다
-- app frame은 runtime helper를 통해 현재 player 기준 chunk interest와 visible chunk 목록도 읽는다
+- current selection update는 bevy system이 아니라 runtime helper로 분리되어 있다.
+  - 이유: world source-of-truth는 ECS 내부가 아니라 app가 소유하므로, `WorldCore` 참조를 직접 받는 지점이 필요하다.
+- app bridge는 runtime helper를 통해 현재 `CameraState`, local player `Transform`, `SelectionState`, visible chunk 목록을 읽어 renderer DTO를 만든다.
 
 ## 공개 인터페이스
 
@@ -70,6 +75,12 @@ EcsRuntime::move_world_intent() -> MoveWorldIntent
 EcsRuntime::set_frame_delta_seconds(dt_seconds: f32)
 EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
+EcsRuntime::update_selection_from_world(
+    world: &WorldCore,
+    viewport_width: u32,
+    viewport_height: u32,
+)
+EcsRuntime::selection_state() -> SelectionState
 EcsRuntime::plan_chunk_job_requests(world: &WorldCore) -> Vec<JobRequest>
 EcsRuntime::apply_job_result(result: &JobResult)
 EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
@@ -82,6 +93,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - `command.rs`
 - `camera.rs`
 - `player.rs`
+- `selection.rs`
 - `chunk.rs`
 - `jobs.rs`
 
@@ -90,6 +102,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - runtime은 phase 순서와 schedule ownership을 가진다
 - gameplay 해석 자체는 하위 시스템이 담당한다
 - frame phase와 fixed phase는 분리 유지한다
+- world source-of-truth를 직접 읽는 selection update는 app 오케스트레이션 이후에만 실행된다
 
 ## 비책임
 
@@ -105,8 +118,9 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - `command.rs`
 - `camera.rs`
 - `player.rs`
+- `selection.rs`
 
 ## 메모
 
-- 현재 `fixed_update`는 문서상 슬롯만 있고 gameplay 내용은 아직 비어 있다
-- 현재 chunk/job 관련 흐름은 player가 서 있는 청크 하나를 deterministic interest 대상으로 삼는 최소 vertical slice다
+- 현재 `fixed_update`는 문서상 슬롯만 있고 gameplay 내용은 아직 비어 있다.
+- 현재 chunk/job 관련 흐름은 player가 서 있는 청크 하나를 deterministic interest 대상으로 삼는 최소 vertical slice다.

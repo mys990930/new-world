@@ -76,4 +76,5 @@ fn frame_deadline(&self) -> Option<Instant>
 - 현재 bootstrap은 window가 아직 없으므로 `StubSurfaceTarget`으로 renderer를 먼저 만든다.
 - 실제 GPU surface attach는 `runner.rs`의 `resumed()`에서 window 생성 직후 수행한다.
 - 현재 frame path는 `ecs -> jobs -> world -> renderer upload -> renderer draw`의 최소 chunk plane vertical slice까지 연결돼 있다.
-- render path는 ECS camera state와 local player body-center transform을 render DTO로 바꿔, 생성된 chunk plane 위의 플레이어 큐브와 얇은 ground shadow slab을 함께 그린다.
+- app frame은 world/job 결과 반영 뒤 `cursor -> world raycast -> SelectionState` 경로를 갱신한다.
+- render path는 ECS camera state, local player body-center transform, selection state를 render DTO로 바꿔, 생성된 chunk plane 위의 플레이어 큐브와 ground shadow slab, 그리고 hovered face 위 노란 highlight slab을 함께 그린다.
