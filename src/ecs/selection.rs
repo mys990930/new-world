@@ -1,10 +1,9 @@
 use bevy_ecs::prelude::Resource;
 
 use super::camera::{
-    quarter_view_basis, quarter_view_eye, QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+    CameraState, quarter_view_camera_pose, QUARTER_VIEW_VERTICAL_WORLD_SIZE,
 };
 use super::input::EcsInputSnapshot;
-use super::player::Transform;
 use crate::world::{BlockFace, Ray3, WorldBlockCoord, WorldCore};
 
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
@@ -24,8 +23,7 @@ pub fn update_selection_from_world(
     selection: &mut SelectionState,
     world: &WorldCore,
     input: &EcsInputSnapshot,
-    camera_quarter_turns: u8,
-    player_transform: Option<Transform>,
+    camera: CameraState,
     viewport_width: u32,
     viewport_height: u32,
 ) {
@@ -33,7 +31,7 @@ pub fn update_selection_from_world(
         || !input.focused
         || viewport_width == 0
         || viewport_height == 0
-        || player_transform.is_none()
+        || !camera.initialized
     {
         selection.clear();
         return;
@@ -49,28 +47,24 @@ pub fn update_selection_from_world(
         return;
     }
 
-    let target = player_transform
-        .map(|transform| transform.translation)
-        .unwrap_or([0.0, 0.0, 0.0]);
-    let basis = quarter_view_basis(camera_quarter_turns);
-    let eye = quarter_view_eye(target, camera_quarter_turns);
+    let pose = quarter_view_camera_pose(camera);
     let aspect = viewport_width as f32 / viewport_height as f32;
     let half_height = QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5;
     let half_width = half_height * aspect;
     let ndc_x = (cursor.0 as f32 / viewport_width as f32) * 2.0 - 1.0;
     let ndc_y = 1.0 - (cursor.1 as f32 / viewport_height as f32) * 2.0;
     let origin = add3(
-        eye,
+        pose.eye,
         add3(
-            scale3(basis.right, ndc_x * half_width),
-            scale3(basis.up, ndc_y * half_height),
+            scale3(pose.basis.right, ndc_x * half_width),
+            scale3(pose.basis.up, ndc_y * half_height),
         ),
     );
 
     let hit = world.raycast_blocks(
         Ray3 {
             origin,
-            direction: basis.forward,
+            direction: pose.basis.forward,
         },
         1024.0,
     );
@@ -119,10 +113,14 @@ mod tests {
                 active: true,
                 ..EcsInputSnapshot::default()
             },
-            0,
-            Some(Transform {
-                translation: [3.0, 1.5, 3.0],
-            }),
+            CameraState {
+                quarter_turns: 0,
+                smoothed_target: [3.0, 1.5, 3.0],
+                desired_target: [3.0, 1.5, 3.0],
+                recenter_requested: false,
+                recentering: false,
+                initialized: true,
+            },
             800,
             600,
         );

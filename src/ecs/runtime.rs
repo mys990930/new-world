@@ -1,6 +1,9 @@
 use bevy_ecs::prelude::{IntoScheduleConfigs, Resource, Schedule, World};
 
-use super::camera::{apply_camera_commands_system, clear_camera_impulses_system, CameraState};
+use super::camera::{
+    CameraState, apply_camera_commands_system, clear_camera_impulses_system,
+    update_camera_follow_system,
+};
 use super::chunk::ChunkStates;
 use super::command::{
     clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
@@ -46,6 +49,7 @@ impl EcsRuntime {
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
                 integrate_local_player_transform_system,
+                update_camera_follow_system,
             )
                 .chain(),
         );
@@ -122,14 +126,12 @@ impl EcsRuntime {
     ) {
         let input = self.world.resource::<EcsInputSnapshot>().clone();
         let camera = *self.world.resource::<CameraState>();
-        let player_transform = self.local_player_transform();
         let mut selection = self.world.resource_mut::<SelectionState>();
         update_selection_from_world(
             &mut selection,
             world,
             &input,
-            camera.quarter_turns,
-            player_transform,
+            camera,
             viewport_width,
             viewport_height,
         );

@@ -2,7 +2,7 @@ use winit::keyboard::KeyCode;
 
 use super::GameApp;
 use crate::ecs::{
-    EcsInputSnapshot, QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye,
+    CameraState, EcsInputSnapshot, QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_camera_pose,
 };
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
@@ -53,13 +53,7 @@ impl GameApp {
 
     pub fn bridge_ecs_to_render_frame(&self) -> AppRenderFrameData {
         let camera_state = self.ecs.camera_state();
-        let target = self
-            .ecs
-            .local_player_transform()
-            .map(|transform| transform.translation)
-            .unwrap_or([0.0, 0.0, 0.0]);
-
-        let camera = build_quarter_view_camera(target, camera_state.quarter_turns);
+        let camera = build_quarter_view_camera(camera_state);
         let mut cube_instances = self
             .ecs
             .local_player_transform()
@@ -112,22 +106,21 @@ fn axis(negative: bool, positive: bool) -> i8 {
     (positive as i8) - (negative as i8)
 }
 
-fn build_quarter_view_camera(target: [f32; 3], quarter_turns: u8) -> RenderCameraState {
-    let basis = quarter_view_basis(quarter_turns);
-    let eye = quarter_view_eye(target, quarter_turns);
+fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
+    let pose = quarter_view_camera_pose(camera_state);
 
     RenderCameraState {
-        eye,
-        target,
-        up: basis.up,
+        eye: pose.eye,
+        target: pose.target,
+        up: pose.basis.up,
         aspect_override: None,
         projection_mode: RenderProjectionMode::Orthographic {
             vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         },
         basis_override: Some(RenderViewBasis {
-            right: basis.right,
-            up: basis.up,
-            forward: basis.forward,
+            right: pose.basis.right,
+            up: pose.basis.up,
+            forward: pose.basis.forward,
         }),
     }
 }
@@ -225,7 +218,14 @@ mod tests {
 
     #[test]
     fn quarter_view_basis_maps_world_axes_to_expected_screen_directions() {
-        let camera = build_quarter_view_camera([0.0, 0.5, 0.0], 0);
+        let camera = build_quarter_view_camera(CameraState {
+            quarter_turns: 0,
+            smoothed_target: [0.0, 0.5, 0.0],
+            desired_target: [0.0, 0.5, 0.0],
+            recenter_requested: false,
+            recentering: false,
+            initialized: true,
+        });
         let basis = camera.basis_override.expect("quarter-view basis should exist");
 
         let east = project_to_screen_axes([1.0, 0.0, 0.0], basis);
@@ -242,7 +242,14 @@ mod tests {
 
     #[test]
     fn top_face_projects_as_cardinal_diamond() {
-        let camera = build_quarter_view_camera([0.0, 0.5, 0.0], 0);
+        let camera = build_quarter_view_camera(CameraState {
+            quarter_turns: 0,
+            smoothed_target: [0.0, 0.5, 0.0],
+            desired_target: [0.0, 0.5, 0.0],
+            recenter_requested: false,
+            recentering: false,
+            initialized: true,
+        });
         let basis = camera.basis_override.expect("quarter-view basis should exist");
 
         let projected = [
