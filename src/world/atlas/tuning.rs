@@ -31,6 +31,7 @@ impl Default for AtlasTuning {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasNormalizationTuning {
+    /// Authoritative land/ocean split used by atlas generation and preview.
     pub land_threshold: f32,
     pub ocean_distance_normalizer: f32,
     pub coast_distance_normalizer: f32,
@@ -44,7 +45,7 @@ pub struct AtlasNormalizationTuning {
 impl Default for AtlasNormalizationTuning {
     fn default() -> Self {
         Self {
-            land_threshold: 0.53,
+            land_threshold: 0.43,
             ocean_distance_normalizer: 24.0,
             coast_distance_normalizer: 12.0,
             continent_core_normalizer: 22.0,
@@ -88,7 +89,7 @@ impl Default for AtlasContinentTuning {
         Self {
             warp_scale: 1.0 / 96.0,
             warp_amplitude: 6.5,
-            primary_scale: 96.0,
+            primary_scale: 128.0,
             primary_octaves: 5,
             primary_lacunarity: 2.0,
             primary_gain: 0.55,
@@ -466,7 +467,7 @@ impl Default for AtlasWeightTuning {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AtlasResolverTuning {
-    pub ocean_landness_threshold: f32,
+    /// Minimum overlay strength before preview uses overlay-driven biomes.
     pub overlay_min_strength: f32,
     pub alpine_form_threshold: f32,
     pub coast_mountain_cap: f32,
@@ -478,7 +479,6 @@ pub struct AtlasResolverTuning {
 impl Default for AtlasResolverTuning {
     fn default() -> Self {
         Self {
-            ocean_landness_threshold: 0.5,
             overlay_min_strength: 0.34,
             alpine_form_threshold: 0.48,
             coast_mountain_cap: 0.45,

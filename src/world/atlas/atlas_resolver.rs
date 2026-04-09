@@ -183,7 +183,9 @@ fn classify_biome(
     tuning: &AtlasTuning,
 ) -> BiomePreview {
     let resolver = tuning.resolver;
-    if overlay == OverlayClass::Ocean || cell.landness < resolver.ocean_landness_threshold {
+    // Preview must honor the land/ocean split established in atlas_fields.
+    // Re-applying a separate raw landness cutoff here causes preview-only oceans.
+    if overlay == OverlayClass::Ocean {
         return BiomePreview::Ocean;
     }
     if matches!(overlay, OverlayClass::Alpine)
@@ -250,6 +252,9 @@ fn dominant_by_weight<T: Copy, const N: usize>(pairs: [(f32, T); N], fallback: T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::atlas::atlas_fields::{
+        AtlasCell, CoverPotentials, OverlayWeights, TerrainFormWeights,
+    };
     use crate::world::{AtlasArea, AtlasCoord, WorldMeta, generate_atlas_fields};
 
     #[test]
@@ -259,5 +264,44 @@ mod tests {
         let resolved = resolve_atlas(&fields);
 
         assert_eq!(resolved.cells().values().len(), area.len());
+    }
+
+    #[test]
+    fn classify_biome_does_not_reintroduce_preview_ocean_for_land_cells() {
+        let tuning = AtlasTuning::default();
+        let cell = AtlasCell {
+            landness: tuning.normalization.land_threshold + 0.01,
+            form: TerrainFormWeights {
+                plain: 1.0,
+                hill: 0.0,
+                mountain: 0.0,
+            },
+            overlay: OverlayWeights {
+                ocean: 0.0,
+                coast: 0.18,
+                riverine: 0.0,
+                wetland: 0.0,
+                alpine: 0.0,
+            },
+            cover: CoverPotentials {
+                openness: 0.8,
+                grass_potential: 0.8,
+                shrub_potential: 0.2,
+                canopy_potential: 0.1,
+                forest_potential: 0.2,
+            },
+            ..AtlasCell::default()
+        };
+
+        let biome = classify_biome(
+            &cell,
+            ThermalClass::Temperate,
+            MoistureClass::Subhumid,
+            TerrainFormClass::Plain,
+            OverlayClass::None,
+            &tuning,
+        );
+
+        assert_ne!(biome, BiomePreview::Ocean);
     }
 }

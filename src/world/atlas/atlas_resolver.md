@@ -1,24 +1,23 @@
 # atlas_resolver
 
-## 역할
+## Role
 
-- atlas field를 읽어 dominant thermal / moisture / form / overlay와 preview biome를 해석한다.
+- Reads atlas fields and chooses dominant `thermal`, `moisture`, `form`, `overlay`, and `biome preview` classes.
 
-## 책임
+## Responsibilities
 
-- dominant class 선택
-- preview biome classification
-- tuning용 categorical debug surface 제공
+- Select dominant categorical classes from the weighted atlas field outputs.
+- Produce a debug-facing biome preview that is easy to inspect while tuning atlas generation.
+- Keep preview classification consistent with field-generation ownership and boundaries.
 
-## 비책임
+## Notes
 
-- authoritative biome table 소유
-- chunk material rule 확정
-- vegetation placement rule 확정
+- Resolver now honors the land/ocean split decided in `atlas_fields`.
+- Ocean preview comes from the field overlay and land mask, not from a second raw `landness` cutoff.
+- Overlay-driven categories such as `ocean`, `coast`, `wetland`, `riverine`, and `alpine` still have priority when their strength is high enough.
 
-## 불변식
+## Non-Goals
 
-1. preview biome는 atlas tuning을 위한 읽기 쉬운 시각화 결과다.
-2. atlas field가 유지하는 연속 weight 정보는 resolver 이후에도 보존된다.
-3. ocean / coast / alpine / wetland 같은 overlay 성격은 biome preview에서 우선 반영될 수 있다.
-4. preview biome 임계값은 `tuning.rs`의 resolver 섹션에서 한 번에 조정 가능해야 한다.
+- It is not the authoritative final biome table for chunk realization.
+- It does not assign materials, vegetation placement, or block-level realization rules.
+- It should stay lightweight enough to support fast atlas iteration and debug image generation.

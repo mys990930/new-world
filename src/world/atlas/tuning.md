@@ -31,6 +31,15 @@
 
 ---
 
+## Important Note
+
+- `normalization.land_threshold` is the single authoritative land/ocean split for atlas generation and biome preview.
+- Lowering `land_threshold` does not just add more land. It also changes continent connectivity, ocean distance, coast distance, continent core, hydrology, and final biome distribution together.
+- If you want more land without flattening biome variety, tune `continent.bias`, `continent.primary_scale`, `continent.secondary_scale`, and `continent.coast_penalty` before touching `land_threshold`.
+- Resolver no longer has a separate raw-landness ocean cutoff. If a cell became land during field generation, preview now keeps it on the land side unless an actual ocean overlay says otherwise.
+
+---
+
 ## Quick Knobs
 
 가장 자주 손댈 가능성이 큰 필드는 이쪽이다.
@@ -297,9 +306,11 @@
 
 ## resolver
 
+Resolver follows the land/ocean split that was already decided in `atlas_fields`.
+Preview no longer applies a second raw `landness` cutoff on top of field generation.
+
 | 필드 | 뜻 | 올리면 | 내리면 |
 | --- | --- | --- | --- |
-| `ocean_landness_threshold` | preview에서 육지를 ocean으로 보지 않기 위한 최소 landness | coastline 근처가 ocean으로 남기 쉬움 | 얕은 육지도 육지 preview로 읽힘 |
 | `overlay_min_strength` | coast/riverine/wetland/alpine overlay를 dominant로 인정하는 최소 강도 | overlay가 더 드물고 순수 biome가 많아짐 | overlay biome preview가 쉽게 등장 |
 | `alpine_form_threshold` | mountain form이 alpine으로 넘어가는 추가 기준 | alpine이 더 드물어짐 | alpine이 더 쉽게 등장 |
 | `coast_mountain_cap` | coast biome를 허용하는 mountain 상한 | 산악 해안이 coast로 남기 쉬움 | 조금만 험해도 coast 대신 mountain/other로 감 |
