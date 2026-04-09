@@ -1,13 +1,6 @@
-mod app;
-mod ecs;
-mod jobs;
-mod platform;
-mod renderer;
-mod world;
-
 use std::error::Error;
 
-use app::{AppConfig, GameApp};
+use new_world::app::{AppConfig, GameApp};
 use winit::event_loop::EventLoop;
 
 fn main() -> Result<(), Box<dyn Error>> {

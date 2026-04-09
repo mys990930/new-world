@@ -1,3 +1,4 @@
+pub mod atlas;
 mod chunk;
 mod coord;
 mod core;
@@ -9,6 +10,14 @@ mod query;
 mod registry;
 mod storage;
 
+#[allow(unused_imports)]
+pub use atlas::{
+    ATLAS_CELL_SIZE_IN_CHUNKS, ATLAS_CELL_SIZE_IN_REGIONS, ATLAS_CELL_SIZE_M, AtlasArea,
+    AtlasAreaError, AtlasCell, AtlasCoord, AtlasDebugError, AtlasDebugOptions, AtlasFieldMap,
+    AtlasGrid, AtlasResolvedCell, AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass,
+    TerrainFormClass, ThermalClass, generate_atlas_fields, resolve_atlas, write_debug_images,
+    write_debug_images_with_options,
+};
 #[allow(unused_imports)]
 pub use chunk::{BlockFace, BlockId, ChunkData, ChunkSnapshot, ChunkWriteError};
 #[allow(unused_imports)]

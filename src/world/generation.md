@@ -4,6 +4,7 @@
 
 - 월드 seed와 좌표를 바탕으로 새 청크의 원본 데이터를 계산한다.
 - 절차 생성 결과를 `ChunkData`로 표현하는 계약을 정의한다.
+- atlas가 도입된 이후에는 atlas-scale 환경 해석 결과를 chunk realization 입력으로 소비하는 확장 지점을 가진다.
 
 ## 책임
 
@@ -33,10 +34,11 @@
 ## 처리 흐름
 
 1. `WorldMeta.seed`와 청크 좌표를 바탕으로 생성 입력을 만든다.
-2. registry에서 `"grass"` block id를 조회한다.
-3. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
-4. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
-5. 완성된 청크를 반환한다.
+2. 장기적으로는 atlas/biome resolver 결과를 조회해 chunk-level realization 입력을 만든다.
+3. registry에서 필요한 block id를 조회한다.
+4. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
+5. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
+6. 완성된 청크를 반환한다.
 
 ## 공개 인터페이스
 
@@ -63,9 +65,11 @@ generation::generate_chunk(
 - `chunk.md`
 - `core.md`
 - `registry.md`
+- `atlas/atlas.md`
 - `jobs`
 
 ## 메모
 
 - 현재 최소 구현은 registry에 `"grass"` key가 있으면 `world y = 0`에 로컬 `(1,1)`부터 `(5,5)`까지의 grass block patch만 생성한다.
 - 기본 manifest에서 `"grass"`가 빠지면 generator는 조용히 empty chunk를 반환한다.
+- atlas prototype은 먼저 별도 debug binary에서 거시 필드와 biome preview를 검증하고, chunk realization 연결은 후속 단계에서 붙인다.

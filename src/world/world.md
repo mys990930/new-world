@@ -13,6 +13,7 @@
 - block registry storage
 - block/chunk read-write API
 - coordinate transformation rule ownership
+- atlas-scale macro environment interpretation
 - snapshot/query surface provision
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -37,6 +38,8 @@
 - `BlockDef`, `BlockRegistry`
 - `TextureTileId`, `TextureTileDef`, `TextureTileSource`
 - `ChunkData`, `ChunkSnapshot`
+- `AtlasCoord`, `AtlasArea`
+- `AtlasFieldMap`, `AtlasResolvedMap`
 - `WorldEdit`, `EditResult`
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
 - `NeighborChunks`
@@ -74,6 +77,13 @@ generation::generate_chunk(
     meta: &WorldMeta,
     registry: &BlockRegistry,
 ) -> ChunkData
+
+atlas::generate_atlas_fields(
+    meta: &WorldMeta,
+    area: AtlasArea,
+) -> AtlasFieldMap
+
+atlas::resolve_atlas(fields: &AtlasFieldMap) -> AtlasResolvedMap
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
@@ -123,6 +133,7 @@ NOT:
 - `query.md`: read-only block/chunk/region/raycast query surface
 - `registry.md`: 데이터 기반 블록 정의/텍스처 타일 카탈로그 계약
 - `generation.md`: 절차 생성 결과를 `ChunkData`로 표현하는 규칙
+- `atlas/atlas.md`: 청크 이전 단계의 거시 atlas 필드와 디버그 출력 계약
 - `storage.md`: 청크 직렬화/역직렬화와 save/load 계약
 - `meshing.md`: 청크 스냅샷 기반 CPU mesh 입력 제공 계약
 
@@ -137,3 +148,4 @@ NOT:
 - storage는 current save format v1에서 uniform chunk를 compact payload로 저장하고, dense chunk는 full payload로 저장한다.
 - renderer 타입으로의 변환은 jobs/app bridge 단계에서 계속 분리되어 있다.
 - 현재 raycast는 voxel DDA 방식으로 loaded chunk 위의 first solid block과 hit face / hit point / travel distance를 계산한다.
+- atlas prototype은 `src/world/atlas/*`와 `src/bin/atlas_proto.rs`에서 먼저 오프라인 2D 필드/PNG 출력으로 검증하고, chunk generation 본 연결은 이후 단계에서 확장한다.
