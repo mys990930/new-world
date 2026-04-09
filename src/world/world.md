@@ -130,10 +130,10 @@ NOT:
 
 - 현재 최소 구현은 `mod.rs + leaf.rs` 구조까지 추가되어 있다.
 - 현재 고정 청크 크기는 `32 x 32 x 32` block이다.
-- 기본 block registry는 `assets/blocks/blocks.toml`에서 로드되고, 텍스처 경로는 그 manifest 기준 상대 경로로 해석된다.
+- 기본 block registry는 `assets/blocks/index.toml`에서 로드되고, 텍스처/블럭 정의 경로는 그 index 기준 상대 경로로 해석된다.
 - generation은 `WorldMeta`, `ChunkCoord`, `BlockRegistry`를 받아 `world y = 0`에서 로컬 `(1..=5, 1..=5)` 범위만 grass로 채우는 deterministic patch generator만 제공한다.
 - meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, 각 vertex에 `uv`와 `texture_layer`를 넣는다.
 - empty chunk는 memory에서 uniform `AIR` 표현으로 유지되다가 첫 non-air write 시 dense block array로 materialize된다.
-- storage는 save format v2에서 uniform chunk를 compact payload로 저장하고, 기존 v1 dense payload도 계속 읽을 수 있다.
+- storage는 current save format v1에서 uniform chunk를 compact payload로 저장하고, dense chunk는 full payload로 저장한다.
 - renderer 타입으로의 변환은 jobs/app bridge 단계에서 계속 분리되어 있다.
 - 현재 raycast는 voxel DDA 방식으로 loaded chunk 위의 first solid block과 hit face / hit point / travel distance를 계산한다.

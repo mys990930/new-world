@@ -29,7 +29,7 @@
 
 1. Read config inputs
 2. Create `Platform`
-3. Load the default block registry from `assets/blocks/blocks.toml`
+3. Load the default block registry from `assets/blocks/index.toml`
 4. Create `Renderer` from a `StubSurfaceTarget` because the OS window does not exist yet
 5. Convert registry texture tiles into renderer texture DTOs and call `Renderer::set_block_textures(...)`
 6. Create `EcsRuntime`

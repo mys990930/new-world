@@ -52,7 +52,7 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 - storage payload에는 renderer 전용 캐시나 transient gameplay state가 들어가면 안 된다.
 - storage는 block key 문자열이나 texture 경로가 아니라 raw `u16` block id payload만 저장한다.
 - registry에 없는 block id도 load 단계에서는 그대로 복원하고, 의미 해석은 이후 registry fallback이 담당한다.
-- save format v2는 uniform chunk와 dense chunk를 구분해 저장할 수 있어야 한다.
+- current save format v1은 uniform chunk와 dense chunk를 구분해 저장할 수 있어야 한다.
 
 ## 관련 모듈
 
@@ -65,6 +65,6 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 
 - 실제 파일 입출력과 저장 타이밍 정책은 storage가 아니라 jobs/app 상위 계층이 결정한다.
 - 현재 구현은 `NWCH` magic + version + chunk coord 기반 binary 포맷을 사용한다.
-- save format v1은 dense `u16` block payload만 저장했고, 현재 구현은 이를 계속 읽을 수 있다.
-- save format v2는 encoding byte를 추가해 uniform chunk는 single `u16`, dense chunk는 full `u16` array로 저장한다.
-- current `WorldMeta::save_format_version`은 `2`다.
+- current save format v1은 encoding byte를 포함한다.
+- uniform chunk는 single `u16`, dense chunk는 full `u16` array로 저장한다.
+- current `WorldMeta::save_format_version`은 `1`이다.

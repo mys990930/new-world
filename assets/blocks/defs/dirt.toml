@@ -1,0 +1,8 @@
+id = 2
+key = "dirt"
+solid = true
+opaque = true
+render = "cube"
+top = "dirt"
+bottom = "dirt"
+side = "dirt"

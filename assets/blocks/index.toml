@@ -1,0 +1,29 @@
+# Block asset index
+# - `tile_size` is the required width/height for every block texture PNG.
+# - texture paths and block definition paths are resolved relative to this file.
+# - layer 0 is reserved for the built-in white texture used by debug cubes and tint-only draws.
+
+tile_size = 16
+
+block_files = [
+  "defs/air.toml",
+  "defs/grass.toml",
+  "defs/dirt.toml",
+  "defs/stone.toml",
+]
+
+[[textures]]
+key = "grass_top"
+path = "textures/grass_top.png"
+
+[[textures]]
+key = "grass_side"
+path = "textures/grass_side.png"
+
+[[textures]]
+key = "dirt"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "stone"
+path = "textures/stone.png"

@@ -1,0 +1,8 @@
+id = 1
+key = "grass"
+solid = true
+opaque = true
+render = "cube"
+top = "grass_top"
+bottom = "dirt"
+side = "grass_side"

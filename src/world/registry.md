@@ -91,11 +91,11 @@ default_manifest_path() -> PathBuf
 - `chunk.md`
 - `generation.md`
 - `meshing.md`
-- `../../assets/blocks/blocks.toml`
+- `../../assets/blocks/index.toml`
 
 ## 메모
 
-- 기본 manifest 경로는 `assets/blocks/blocks.toml`이다.
-- texture 파일 경로는 manifest 파일 기준 상대 경로로 해석된다.
-- 현재 manifest는 `tile_size`, `[[textures]]`, `[[blocks]]` 섹션을 사용한다.
-- cube block은 `top`, `bottom`, `side` texture key를 사용하고, `tint`는 선택 사항이다.
+- 기본 manifest 경로는 `assets/blocks/index.toml`이다.
+- texture 파일과 block definition 파일 경로는 index 파일 기준 상대 경로로 해석된다.
+- 현재 index manifest는 `tile_size`, `[[textures]]`, `block_files = [...]`를 사용한다.
+- 각 block definition 파일은 block 하나만 정의하고, cube block은 `top`, `bottom`, `side` texture key를 사용하며 `tint`는 선택 사항이다.

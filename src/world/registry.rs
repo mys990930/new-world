@@ -151,11 +151,12 @@ impl BlockRegistry {
             textures_by_key.insert(texture.key, id);
         }
 
-        let max_id = manifest.blocks.iter().map(|block| block.id).max().unwrap_or(0) as usize;
+        let block_defs = load_block_defs(&manifest.block_files, base_dir)?;
+        let max_id = block_defs.iter().map(|block| block.id).max().unwrap_or(0) as usize;
         let mut blocks = vec![None; max_id.saturating_add(1)];
         let mut blocks_by_key = HashMap::new();
 
-        for block in manifest.blocks {
+        for block in block_defs {
             let id = BlockId::new(block.id);
             if blocks_by_key.contains_key(&block.key) {
                 return Err(BlockRegistryError::DuplicateBlockKey(block.key));
@@ -247,6 +248,28 @@ impl BlockRegistry {
     }
 }
 
+fn load_block_defs(
+    block_files: &[String],
+    base_dir: &Path,
+) -> Result<Vec<ManifestBlockDef>, BlockRegistryError> {
+    let mut blocks = Vec::with_capacity(block_files.len());
+
+    for block_file in block_files {
+        let path = base_dir.join(block_file);
+        let text = fs::read_to_string(&path).map_err(|source| BlockRegistryError::ReadBlockDef {
+            path: path.clone(),
+            source,
+        })?;
+        let block = toml::from_str(&text).map_err(|source| BlockRegistryError::ParseBlockDef {
+            path,
+            source,
+        })?;
+        blocks.push(block);
+    }
+
+    Ok(blocks)
+}
+
 fn lookup_texture(
     textures_by_key: &HashMap<String, TextureTileId>,
     key: &str,
@@ -261,7 +284,7 @@ pub fn default_manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
         .join("blocks")
-        .join("blocks.toml")
+        .join("index.toml")
 }
 
 #[derive(Debug)]
@@ -271,6 +294,14 @@ pub enum BlockRegistryError {
         source: std::io::Error,
     },
     ParseManifest(toml::de::Error),
+    ReadBlockDef {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    ParseBlockDef {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
     InvalidTileSize(u32),
     DuplicateTextureKey(String),
     UnknownTextureKey(String),
@@ -285,7 +316,7 @@ pub struct BlockRegistryManifest {
     #[serde(default)]
     pub textures: Vec<ManifestTextureDef>,
     #[serde(default)]
-    pub blocks: Vec<ManifestBlockDef>,
+    pub block_files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

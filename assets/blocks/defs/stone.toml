@@ -1,0 +1,8 @@
+id = 3
+key = "stone"
+solid = true
+opaque = true
+render = "cube"
+top = "stone"
+bottom = "stone"
+side = "stone"

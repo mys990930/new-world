@@ -1,0 +1,5 @@
+id = 0
+key = "air"
+solid = false
+opaque = false
+render = "empty"
