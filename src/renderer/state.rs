@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use super::{
     texture::{BlockTextureSet, GpuBlockTextureResources},
-    CameraGpuState, ChunkCoord, GpuChunkMesh, PipelineSet, RenderConfig, RenderStats, SurfaceState,
+    CameraGpuState, ChunkCoord, ClearColor, GpuChunkMesh, PipelineSet, RenderConfig,
+    RenderEnvironment, RenderStats, SurfaceState,
 };
 
 pub struct Renderer {
@@ -11,6 +12,7 @@ pub struct Renderer {
     pub(crate) pipelines: PipelineSet,
     pub(crate) world: RenderWorld,
     pub(crate) block_textures: BlockTextureSet,
+    pub(crate) environment: RenderEnvironmentState,
     pub(crate) camera: CameraGpuState,
     pub(crate) backend: Option<RendererBackend>,
     pub(crate) last_stats: RenderStats,
@@ -34,6 +36,14 @@ impl Renderer {
         &self.world
     }
 
+    pub fn environment(&self) -> &RenderEnvironmentState {
+        &self.environment
+    }
+
+    pub fn set_environment(&mut self, environment: RenderEnvironment) {
+        self.environment.set(environment);
+    }
+
     pub fn camera_gpu_state(&self) -> &CameraGpuState {
         &self.camera
     }
@@ -48,6 +58,40 @@ impl Renderer {
 
     pub fn has_live_backend(&self) -> bool {
         self.backend.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderEnvironmentState {
+    current: RenderEnvironment,
+    generation: u64,
+}
+
+impl RenderEnvironmentState {
+    pub(crate) fn from_config(config: &RenderConfig) -> Self {
+        Self {
+            current: config.environment,
+            generation: 0,
+        }
+    }
+
+    pub fn current(&self) -> &RenderEnvironment {
+        &self.current
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn resolved_clear_color(&self, fallback: ClearColor) -> [f32; 4] {
+        self.current.resolved_clear_color(fallback)
+    }
+
+    pub(crate) fn set(&mut self, next: RenderEnvironment) {
+        if self.current != next {
+            self.current = next;
+            self.generation = self.generation.saturating_add(1);
+        }
     }
 }
 
@@ -87,10 +131,11 @@ pub(crate) struct RendererBackend {
     pub(crate) depth_view: wgpu::TextureView,
     pub(crate) camera_buffer: wgpu::Buffer,
     pub(crate) camera_bind_group: wgpu::BindGroup,
-    pub(crate) _light_buffer: wgpu::Buffer,
-    pub(crate) light_bind_group: wgpu::BindGroup,
+    pub(crate) environment_buffer: wgpu::Buffer,
+    pub(crate) environment_bind_group: wgpu::BindGroup,
     pub(crate) block_texture_bind_group_layout: wgpu::BindGroupLayout,
     pub(crate) block_textures: GpuBlockTextureResources,
-    pub(crate) cube_pipeline: wgpu::RenderPipeline,
-    pub(crate) cube_edge_pipeline: wgpu::RenderPipeline,
+    pub(crate) terrain_pipeline: wgpu::RenderPipeline,
+    pub(crate) dynamic_cube_pipeline: wgpu::RenderPipeline,
+    pub(crate) debug_edge_pipeline: wgpu::RenderPipeline,
 }

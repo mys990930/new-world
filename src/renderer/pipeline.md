@@ -1,71 +1,60 @@
 # pipeline
 
-## 역할
+## Role
 
-- renderer가 사용하는 shader / layout / render pipeline을 생성하고 유지한다
+- Track renderer pipeline metadata independently from the live `wgpu::RenderPipeline` handles
 
-## 책임
+## Responsibilities
 
-- shader module 로드 / 생성
-- bind group layout 정의
-- pipeline layout 생성
-- render pipeline 생성
-- surface format / sample count 변경 시 재구성 판단
-- draw 단계가 사용할 pipeline handle 제공
+- Describe which logical pipelines the renderer expects
+- Mirror sample-count and depth policy at the metadata layer
+- Track rebuild generations when the surface is reconfigured
 
-## 비책임
+## Non-Responsibilities
 
-- CPU mesh 생성
-- camera 움직임 계산
-- frame loop 소유
-- visible chunk 결정
-- world 데이터 변환 정책 판단
+- CPU mesh generation
+- camera math
+- frame-loop ownership
+- chunk visibility decisions
+- live shader / bind-group creation
 
-## 소유 데이터
+## Owned Data
 
-- shader module handle
-- bind group layout
-- pipeline layout
-- opaque chunk pipeline
-- optional debug / wireframe pipeline
+- terrain opaque pipeline metadata
+- dynamic opaque pipeline metadata
+- optional debug overlay pipeline metadata
 
-## 입력
+## Inputs
 
 - `RenderConfig`
-- current surface format
-- current depth format
-- camera / material binding contract
+- current `SurfaceState`
 
-## 출력
+## Outputs
 
 - `PipelineSet`
-- frame.rs가 사용할 draw-ready pipeline handle
-- camera.rs가 사용할 bind group layout 정보
+- rebuild-generation hints for renderer runtime code
 
-## 처리 흐름
+## Processing Flow
 
-1. surface 초기화가 끝난 뒤 format / sample count를 확인한다
-2. shader module을 준비한다
-3. bind group layout / pipeline layout을 만든다
-4. render pipeline을 생성한다
-5. 호환성이 깨지면 pipeline을 재생성한다
+1. Build metadata for the terrain opaque pipeline.
+2. Build metadata for the dynamic opaque pipeline.
+3. Optionally build metadata for the debug overlay pipeline.
+4. Bump rebuild generations whenever the surface is reconfigured.
 
-## 불변식
+## Invariants
 
-- pipeline은 현재 surface format / depth format과 호환되어야 한다
-- shader-specific binding 세부사항은 pipeline 경계 안에 캡슐화한다
-- binding contract가 바뀌면 관련 bind group / resource도 함께 갱신되어야 한다
+- metadata must stay aligned with the logical draw structure used in `frame.rs`
+- debug overlay metadata only exists when the debug flag is enabled
+- pipeline metadata does not own live GPU resources
 
-## 관련 모듈
+## Related Modules
 
-- config.rs가 sample / debug 정책을 제공
-- state.rs가 `PipelineSet`을 저장
-- camera.rs가 camera bind group layout을 사용
-- frame.rs가 실제 draw 시 pipeline을 바인딩한다
-- surface.rs가 format 정보를 제공한다
+- `config.rs`
+- `state.rs`
+- `surface.rs`
+- `frame.rs`
 
-## 메모
+## Notes
 
-- 초기에 opaque voxel chunk pipeline 하나만 있어도 문서 구조는 분리해두는 게 좋다
-- shader hot-reload가 필요해지면 `pipeline.rs` 또는 별도 `shader.rs` 분리를 고려할 수 있다
-- 현재 1차 구현의 `PipelineSet`은 실제 shader / `wgpu::RenderPipeline` 핸들 대신, 샘플 수와 재구성 generation을 담는 metadata 구조다
+- The live `wgpu::RenderPipeline` handles are created in `surface.rs` and stored in `RendererBackend`.
+- `pipeline.rs` remains useful as the stable description of what kinds of passes the renderer believes exist, even while the live backend is rebuilt.

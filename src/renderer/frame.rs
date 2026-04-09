@@ -62,7 +62,7 @@ impl Renderer {
         let (uploaded_mesh_count, removed_mesh_count) = self.world.finish_frame();
         let clear_color = frame
             .clear_color_override
-            .unwrap_or_else(|| self.config.clear_color.to_array());
+            .unwrap_or_else(|| self.environment.resolved_clear_color(self.config.clear_color));
 
         let visible_chunk_count = u32::try_from(frame.visible_chunks.len()).unwrap_or(u32::MAX);
         let mut stats = RenderStats {
@@ -112,10 +112,22 @@ impl Renderer {
             return Ok(stats);
         };
 
-        let camera_uniform = CameraUniform::from_view_projection(self.camera.view_projection);
+        let camera_uniform = CameraUniform::from_view_projection_and_eye(
+            self.camera.view_projection,
+            self.camera.eye_position,
+        );
+        let environment_uniform = super::surface::EnvironmentUniform::from_settings(
+            self.environment.current(),
+            &self.config.quality,
+        );
         backend
             .queue
             .write_buffer(&backend.camera_buffer, 0, cast_slice(&[camera_uniform]));
+        backend.queue.write_buffer(
+            &backend.environment_buffer,
+            0,
+            cast_slice(&[environment_uniform]),
+        );
 
         let surface_texture = match backend.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture)
@@ -183,10 +195,10 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(&backend.cube_pipeline);
             render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &backend.light_bind_group, &[]);
+            render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
             render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
+            render_pass.set_pipeline(&backend.terrain_pipeline);
 
             for coord in frame.visible_chunks {
                 let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
@@ -223,6 +235,7 @@ impl Renderer {
                             usage: wgpu::BufferUsages::INDEX,
                         });
 
+                render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 render_pass
                     .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -270,9 +283,9 @@ impl Renderer {
                     multiview_mask: None,
                 });
 
-                edge_pass.set_pipeline(&backend.cube_edge_pipeline);
+                edge_pass.set_pipeline(&backend.debug_edge_pipeline);
                 edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-                edge_pass.set_bind_group(1, &backend.light_bind_group, &[]);
+                edge_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
                 edge_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
                 edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
                 edge_pass
@@ -454,7 +467,9 @@ mod tests {
 
     use super::*;
     use crate::renderer::{
-        surface::{default_directional_light_uniform, LightUniform},
+        surface::{
+            create_environment_bind_group_layout, default_environment_uniform, EnvironmentUniform,
+        },
         CameraGpuState, CameraProjectionConfig, RenderProjectionMode, RenderViewBasis,
     };
 
@@ -564,7 +579,7 @@ mod tests {
                 label: Some("offscreen_camera_bind_group_layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -581,37 +596,24 @@ mod tests {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
-        let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("offscreen_light_buffer"),
-            size: std::mem::size_of::<LightUniform>() as u64,
+        let environment_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen_environment_buffer"),
+            size: std::mem::size_of::<EnvironmentUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         queue.write_buffer(
-            &light_buffer,
+            &environment_buffer,
             0,
-            cast_slice(&[default_directional_light_uniform()]),
+            cast_slice(&[default_environment_uniform()]),
         );
-        let light_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("offscreen_light_bind_group_layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-        let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("offscreen_light_bind_group"),
-            layout: &light_bind_group_layout,
+        let environment_bind_group_layout = create_environment_bind_group_layout(&device);
+        let environment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("offscreen_environment_bind_group"),
+            layout: &environment_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: light_buffer.as_entire_binding(),
+                resource: environment_buffer.as_entire_binding(),
             }],
         });
         let block_texture_bind_group_layout =
@@ -697,7 +699,7 @@ mod tests {
             label: Some("offscreen_pipeline_layout"),
             bind_group_layouts: &[
                 Some(&camera_bind_group_layout),
-                Some(&light_bind_group_layout),
+                Some(&environment_bind_group_layout),
                 Some(&block_texture_bind_group_layout),
             ],
             immediate_size: 0,
@@ -770,7 +772,10 @@ mod tests {
                 0,
             )
             .map_err(|error| format!("camera update failed: {error:?}"))?;
-        let camera_uniform = CameraUniform::from_view_projection(camera_gpu_state.view_projection);
+        let camera_uniform = CameraUniform::from_view_projection_and_eye(
+            camera_gpu_state.view_projection,
+            camera_gpu_state.eye_position,
+        );
         queue.write_buffer(&camera_buffer, 0, cast_slice(&[camera_uniform]));
 
         let (vertices, indices) = build_cube_mesh(&[RenderCubeInstance {
@@ -831,7 +836,7 @@ mod tests {
             });
             render_pass.set_pipeline(&pipeline);
             render_pass.set_bind_group(0, &camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &light_bind_group, &[]);
+            render_pass.set_bind_group(1, &environment_bind_group, &[]);
             render_pass.set_bind_group(2, &block_texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);

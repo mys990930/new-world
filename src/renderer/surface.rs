@@ -5,12 +5,13 @@ use pollster::block_on;
 use winit::window::Window;
 
 use super::{
-    state::RendererBackend,
+    state::{RenderEnvironmentState, RendererBackend},
     texture::{
         BlockTextureSet, create_block_texture_bind_group_layout,
         create_gpu_block_texture_resources,
     },
-    CameraGpuState, PipelineSet, RenderConfig, RenderStats, RenderWorld, Renderer,
+    CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig,
+    RenderStats, RenderWorld, Renderer,
 };
 
 pub trait RenderSurfaceTarget {
@@ -151,19 +152,116 @@ pub enum RenderSurfaceError {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
-pub(crate) struct LightUniform {
-    pub direction_to_light: [f32; 4],
-    pub color: [f32; 4],
-    pub ambient: [f32; 4],
+pub(crate) struct EnvironmentUniform {
+    pub sun_direction_time: [f32; 4],
+    pub sun_color_intensity: [f32; 4],
+    pub ambient_color_intensity: [f32; 4],
+    pub fog_color_density: [f32; 4],
+    pub horizon_color_height_falloff: [f32; 4],
+    pub sky_color_overcast: [f32; 4],
+    pub climate_tint_weather: [f32; 4],
+    pub weather_climate_params: [f32; 4],
+    pub readability: [f32; 4],
+    pub quality_flags: [u32; 4],
 }
 
-pub(crate) fn default_directional_light_uniform() -> LightUniform {
-    let direction = normalize3([0.35, 1.0, -0.25]);
-    LightUniform {
-        direction_to_light: [direction[0], direction[1], direction[2], 0.0],
-        color: [0.82, 0.82, 0.82, 1.0],
-        ambient: [0.22, 0.22, 0.22, 1.0],
+impl EnvironmentUniform {
+    pub(crate) fn from_settings(
+        environment: &RenderEnvironment,
+        quality: &RenderQualityConfig,
+    ) -> Self {
+        Self {
+            sun_direction_time: [
+                environment.sun_direction[0],
+                environment.sun_direction[1],
+                environment.sun_direction[2],
+                environment.time_of_day_hours,
+            ],
+            sun_color_intensity: [
+                environment.sun_color[0],
+                environment.sun_color[1],
+                environment.sun_color[2],
+                environment.sun_intensity,
+            ],
+            ambient_color_intensity: [
+                environment.ambient_color[0],
+                environment.ambient_color[1],
+                environment.ambient_color[2],
+                environment.ambient_intensity,
+            ],
+            fog_color_density: [
+                environment.fog_color[0],
+                environment.fog_color[1],
+                environment.fog_color[2],
+                environment.fog_density,
+            ],
+            horizon_color_height_falloff: [
+                environment.horizon_color[0],
+                environment.horizon_color[1],
+                environment.horizon_color[2],
+                environment.fog_height_falloff,
+            ],
+            sky_color_overcast: [
+                environment.sky_color[0],
+                environment.sky_color[1],
+                environment.sky_color[2],
+                environment.overcast,
+            ],
+            climate_tint_weather: [
+                environment.climate_tint[0],
+                environment.climate_tint[1],
+                environment.climate_tint[2],
+                environment.weather_strength,
+            ],
+            weather_climate_params: [
+                environment.wetness,
+                environment.climate_humidity,
+                environment.climate_temperature_bias,
+                match quality.shadow_quality {
+                    super::ShadowQuality::Off => 0.0,
+                    super::ShadowQuality::ReservedHardSun => 1.0,
+                },
+            ],
+            readability: [
+                environment.top_face_boost,
+                environment.side_shadow_strength,
+                environment.silhouette_boost,
+                environment.saturation_boost,
+            ],
+            quality_flags: [
+                u32::from(quality.fog_enabled),
+                u32::from(quality.color_grading_enabled),
+                u32::from(quality.climate_tint_enabled),
+                u32::from(quality.weather_tint_enabled),
+            ],
+        }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn default_environment_uniform() -> EnvironmentUniform {
+    EnvironmentUniform::from_settings(
+        &RenderEnvironment::sunset_quarter_view(),
+        &RenderQualityConfig::default(),
+    )
+}
+
+pub(crate) fn create_environment_bind_group_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("renderer_environment_bind_group_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
 }
 
 impl Renderer {
@@ -182,6 +280,7 @@ impl Renderer {
         )
         .map_err(|_| RenderInitError::InvalidConfig("camera projection config is invalid"))?;
         let block_textures = BlockTextureSet::default();
+        let environment = RenderEnvironmentState::from_config(&config);
 
         let backend = match target.owned_window() {
             Some(window) => Some(block_on(create_backend(
@@ -189,6 +288,7 @@ impl Renderer {
                 &config,
                 &surface,
                 &block_textures,
+                environment.current(),
             ))?),
             None => None,
         };
@@ -199,6 +299,7 @@ impl Renderer {
             pipelines,
             world: RenderWorld::default(),
             block_textures,
+            environment,
             camera,
             backend,
             last_stats: RenderStats::default(),
@@ -220,6 +321,7 @@ impl Renderer {
             &self.config,
             &self.surface,
             &self.block_textures,
+            self.environment.current(),
         ))?);
         self.rebuild_chunk_mesh_buffers()
             .map_err(|error| RenderInitError::Backend(format!("chunk mesh rebuild failed: {error:?}")))?;
@@ -248,6 +350,7 @@ async fn create_backend(
     config: &RenderConfig,
     surface: &SurfaceState,
     block_textures: &BlockTextureSet,
+    environment: &RenderEnvironment,
 ) -> Result<RendererBackend, RenderInitError> {
     let instance = wgpu::Instance::default();
     let surface_handle = instance
@@ -305,7 +408,8 @@ async fn create_backend(
         surface.height().max(1),
         depth_format,
     );
-    let shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
+    let terrain_shader = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
+    let dynamic_shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
     let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_camera_buffer"),
         size: std::mem::size_of::<super::camera::CameraUniform>() as u64,
@@ -317,7 +421,7 @@ async fn create_backend(
             label: Some("renderer_camera_bind_group_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -334,37 +438,27 @@ async fn create_backend(
             resource: camera_buffer.as_entire_binding(),
         }],
     });
-    let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("renderer_light_buffer"),
-        size: std::mem::size_of::<LightUniform>() as u64,
+    let environment_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("renderer_environment_buffer"),
+        size: std::mem::size_of::<EnvironmentUniform>() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     queue.write_buffer(
-        &light_buffer,
+        &environment_buffer,
         0,
-        bytemuck::cast_slice(&[default_directional_light_uniform()]),
+        bytemuck::cast_slice(&[EnvironmentUniform::from_settings(
+            environment,
+            &config.quality,
+        )]),
     );
-    let light_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("renderer_light_bind_group_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-    let light_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("renderer_light_bind_group"),
-        layout: &light_bind_group_layout,
+    let environment_bind_group_layout = create_environment_bind_group_layout(&device);
+    let environment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("renderer_environment_bind_group"),
+        layout: &environment_bind_group_layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
-            resource: light_buffer.as_entire_binding(),
+            resource: environment_buffer.as_entire_binding(),
         }],
     });
     let block_texture_bind_group_layout = create_block_texture_bind_group_layout(&device);
@@ -375,86 +469,41 @@ async fn create_backend(
         block_textures,
     );
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("renderer_cube_pipeline_layout"),
+        label: Some("renderer_pipeline_layout"),
         bind_group_layouts: &[
             Some(&camera_bind_group_layout),
-            Some(&light_bind_group_layout),
+            Some(&environment_bind_group_layout),
             Some(&block_texture_bind_group_layout),
         ],
         immediate_size: 0,
     });
-    let cube_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("renderer_cube_pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[super::MeshVertex::vertex_buffer_layout()],
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: depth_format,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview_mask: None,
-        cache: None,
-    });
-    let cube_edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("renderer_cube_edge_pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[super::MeshVertex::vertex_buffer_layout()],
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::LineList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::REPLACE),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview_mask: None,
-        cache: None,
-    });
+    let terrain_pipeline = create_render_pipeline(
+        &device,
+        "renderer_terrain_pipeline",
+        &pipeline_layout,
+        &terrain_shader,
+        surface_config.format,
+        Some(depth_format),
+        wgpu::PrimitiveTopology::TriangleList,
+    );
+    let dynamic_cube_pipeline = create_render_pipeline(
+        &device,
+        "renderer_dynamic_cube_pipeline",
+        &pipeline_layout,
+        &dynamic_shader,
+        surface_config.format,
+        Some(depth_format),
+        wgpu::PrimitiveTopology::TriangleList,
+    );
+    let debug_edge_pipeline = create_render_pipeline(
+        &device,
+        "renderer_debug_edge_pipeline",
+        &pipeline_layout,
+        &dynamic_shader,
+        surface_config.format,
+        None,
+        wgpu::PrimitiveTopology::LineList,
+    );
 
     Ok(RendererBackend {
         surface: surface_handle,
@@ -466,12 +515,63 @@ async fn create_backend(
         depth_view,
         camera_buffer,
         camera_bind_group,
-        _light_buffer: light_buffer,
-        light_bind_group,
+        environment_buffer,
+        environment_bind_group,
         block_texture_bind_group_layout,
         block_textures,
-        cube_pipeline,
-        cube_edge_pipeline,
+        terrain_pipeline,
+        dynamic_cube_pipeline,
+        debug_edge_pipeline,
+    })
+}
+
+fn create_render_pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    surface_format: wgpu::TextureFormat,
+    depth_format: Option<wgpu::TextureFormat>,
+    topology: wgpu::PrimitiveTopology,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[super::MeshVertex::vertex_buffer_layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
     })
 }
 
@@ -578,20 +678,6 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
-}
-
-fn normalize3(vector: [f32; 3]) -> [f32; 3] {
-    let length_sq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
-    if length_sq <= f32::EPSILON {
-        [0.0, 1.0, 0.0]
-    } else {
-        let inv_length = length_sq.sqrt().recip();
-        [
-            vector[0] * inv_length,
-            vector[1] * inv_length,
-            vector[2] * inv_length,
-        ]
-    }
 }
 
 #[cfg(test)]

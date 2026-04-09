@@ -15,13 +15,14 @@ pub use camera::{
 #[allow(unused_imports)]
 pub use config::{
     CameraProjectionConfig, ClearColor, DebugRenderConfig, DepthFormat, PresentMode,
-    RenderConfig, SurfaceFormatPolicy,
+    RenderConfig, RenderEnvironment, RenderQualityConfig, RenderQualityTier, ShadowQuality,
+    SurfaceFormatPolicy,
 };
 #[allow(unused_imports)]
 pub use frame::{RenderCubeInstance, RenderError, RenderFrameInput, RenderStats};
 #[allow(unused_imports)]
 pub use pipeline::{PipelineKind, PipelineSet, PipelineState};
-pub use state::{RenderWorld, Renderer};
+pub use state::{RenderEnvironmentState, RenderWorld, Renderer};
 #[allow(unused_imports)]
 pub use surface::{
     RenderInitError, RenderSurfaceError, RenderSurfaceTarget, StubSurfaceTarget, SurfaceSnapshot,

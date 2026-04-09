@@ -21,11 +21,15 @@ pub struct RenderViewBasis {
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct CameraUniform {
     pub view_projection: Matrix4,
+    pub eye_position: [f32; 4],
 }
 
 impl CameraUniform {
-    pub fn from_view_projection(view_projection: Matrix4) -> Self {
-        Self { view_projection }
+    pub fn from_view_projection_and_eye(view_projection: Matrix4, eye_position: [f32; 3]) -> Self {
+        Self {
+            view_projection,
+            eye_position: [eye_position[0], eye_position[1], eye_position[2], 1.0],
+        }
     }
 }
 
@@ -57,6 +61,7 @@ pub struct CameraGpuState {
     pub view: Matrix4,
     pub projection: Matrix4,
     pub view_projection: Matrix4,
+    pub eye_position: [f32; 3],
     pub cached_aspect_ratio: f32,
     pub last_uploaded_frame: Option<u64>,
 }
@@ -67,6 +72,7 @@ impl Default for CameraGpuState {
             view: identity_matrix(),
             projection: identity_matrix(),
             view_projection: identity_matrix(),
+            eye_position: [0.0, 0.0, 0.0],
             cached_aspect_ratio: 1.0,
             last_uploaded_frame: None,
         }
@@ -141,6 +147,7 @@ impl CameraGpuState {
         // The CPU-side math in this module is expressed as row-major matrices
         // multiplied by row vectors, so the composed order is view * projection.
         self.view_projection = multiply_matrix4(view, projection);
+        self.eye_position = camera.eye;
         self.cached_aspect_ratio = aspect_ratio;
         self.last_uploaded_frame = Some(frame_index);
         Ok(())
@@ -320,7 +327,8 @@ mod tests {
 
         let mut gpu = CameraGpuState::default();
         gpu.update(&camera, &projection, 1600, 900, 0).unwrap();
-        let uniform = CameraUniform::from_view_projection(gpu.view_projection);
+        let uniform =
+            CameraUniform::from_view_projection_and_eye(gpu.view_projection, gpu.eye_position);
         let point = [0.5, 1.0, 0.5, 1.0];
 
         let cpu_clip = multiply_row_vector(point, gpu.view_projection);
