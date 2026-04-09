@@ -21,3 +21,4 @@
 1. preview biome는 atlas tuning을 위한 읽기 쉬운 시각화 결과다.
 2. atlas field가 유지하는 연속 weight 정보는 resolver 이후에도 보존된다.
 3. ocean / coast / alpine / wetland 같은 overlay 성격은 biome preview에서 우선 반영될 수 있다.
+4. preview biome 임계값은 `tuning.rs`의 resolver 섹션에서 한 번에 조정 가능해야 한다.

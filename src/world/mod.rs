@@ -13,10 +13,14 @@ mod storage;
 #[allow(unused_imports)]
 pub use atlas::{
     ATLAS_CELL_SIZE_IN_CHUNKS, ATLAS_CELL_SIZE_IN_REGIONS, ATLAS_CELL_SIZE_M, AtlasArea,
-    AtlasAreaError, AtlasCell, AtlasCoord, AtlasDebugError, AtlasDebugOptions, AtlasFieldMap,
-    AtlasGrid, AtlasResolvedCell, AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass,
-    TerrainFormClass, ThermalClass, generate_atlas_fields, resolve_atlas, write_debug_images,
-    write_debug_images_with_options,
+    AtlasAreaError, AtlasCell, AtlasClimateTuning, AtlasColorRgb, AtlasContinentTuning,
+    AtlasCoord, AtlasDebugError, AtlasDebugOptions, AtlasFieldMap, AtlasGrid,
+    AtlasHydrologyTuning, AtlasNormalizationTuning, AtlasPreviewDebugTuning, AtlasResolvedCell,
+    AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasTerrainTuning, AtlasTuning,
+    AtlasWeightTuning, BiomePreview, MoistureClass, OverlayClass, TerrainFormClass,
+    ThermalClass, generate_atlas_fields, generate_atlas_fields_with_tuning, resolve_atlas,
+    resolve_atlas_with_tuning, write_debug_images, write_debug_images_with_options,
+    write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
 pub use chunk::{BlockFace, BlockId, ChunkData, ChunkSnapshot, ChunkWriteError};

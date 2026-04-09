@@ -1,5 +1,6 @@
 use super::atlas_fields::AtlasFieldMap;
 use super::scale::{AtlasArea, AtlasCoord, AtlasGrid};
+use super::tuning::AtlasTuning;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThermalClass {
@@ -82,13 +83,20 @@ impl AtlasResolvedMap {
 }
 
 pub fn resolve_atlas(fields: &AtlasFieldMap) -> AtlasResolvedMap {
+    resolve_atlas_with_tuning(fields, &AtlasTuning::default())
+}
+
+pub fn resolve_atlas_with_tuning(
+    fields: &AtlasFieldMap,
+    tuning: &AtlasTuning,
+) -> AtlasResolvedMap {
     let mut resolved = Vec::with_capacity(fields.cells().values().len());
     for cell in fields.cells().values() {
         let thermal = dominant_thermal(cell);
         let moisture = dominant_moisture(cell);
         let form = dominant_form(cell);
-        let overlay = dominant_overlay(cell);
-        let biome = classify_biome(cell, thermal, moisture, form, overlay);
+        let overlay = dominant_overlay(cell, tuning);
+        let biome = classify_biome(cell, thermal, moisture, form, overlay, tuning);
 
         resolved.push(AtlasResolvedCell {
             thermal,
@@ -135,7 +143,8 @@ fn dominant_form(cell: &super::atlas_fields::AtlasCell) -> TerrainFormClass {
     dominant_by_weight(values, TerrainFormClass::Plain)
 }
 
-fn dominant_overlay(cell: &super::atlas_fields::AtlasCell) -> OverlayClass {
+fn dominant_overlay(cell: &super::atlas_fields::AtlasCell, tuning: &AtlasTuning) -> OverlayClass {
+    let resolver = tuning.resolver;
     let values = [
         (cell.overlay.ocean, OverlayClass::Ocean),
         (cell.overlay.coast, OverlayClass::Coast),
@@ -158,7 +167,7 @@ fn dominant_overlay(cell: &super::atlas_fields::AtlasCell) -> OverlayClass {
         OverlayClass::Alpine => cell.overlay.alpine,
     };
 
-    if strength < 0.34 {
+    if strength < resolver.overlay_min_strength {
         OverlayClass::None
     } else {
         overlay
@@ -171,20 +180,24 @@ fn classify_biome(
     moisture: MoistureClass,
     form: TerrainFormClass,
     overlay: OverlayClass,
+    tuning: &AtlasTuning,
 ) -> BiomePreview {
-    if overlay == OverlayClass::Ocean || cell.landness < 0.5 {
+    let resolver = tuning.resolver;
+    if overlay == OverlayClass::Ocean || cell.landness < resolver.ocean_landness_threshold {
         return BiomePreview::Ocean;
     }
-    if matches!(overlay, OverlayClass::Alpine) || (form == TerrainFormClass::Mountain && cell.alpine_factor > 0.48) {
+    if matches!(overlay, OverlayClass::Alpine)
+        || (form == TerrainFormClass::Mountain && cell.alpine_factor > resolver.alpine_form_threshold)
+    {
         return BiomePreview::Alpine;
     }
     if overlay == OverlayClass::Wetland {
         return BiomePreview::Wetland;
     }
-    if overlay == OverlayClass::Coast && cell.form.mountain < 0.45 {
+    if overlay == OverlayClass::Coast && cell.form.mountain < resolver.coast_mountain_cap {
         return BiomePreview::Coast;
     }
-    if overlay == OverlayClass::Riverine && cell.wetness > 0.40 {
+    if overlay == OverlayClass::Riverine && cell.wetness > resolver.riverplain_wetness_threshold {
         return BiomePreview::Riverplain;
     }
     if thermal == ThermalClass::Polar {
@@ -201,7 +214,7 @@ fn classify_biome(
         return BiomePreview::Steppe;
     }
 
-    if cell.cover.forest_potential > 0.60 {
+    if cell.cover.forest_potential > resolver.forest_threshold {
         if matches!(thermal, ThermalClass::Hot | ThermalClass::Warm)
             && matches!(moisture, MoistureClass::Humid | MoistureClass::Wet)
         {
@@ -213,7 +226,7 @@ fn classify_biome(
         return BiomePreview::TemperateForest;
     }
 
-    if cell.cover.grass_potential > 0.52 {
+    if cell.cover.grass_potential > resolver.grass_threshold {
         return BiomePreview::Grassland;
     }
 

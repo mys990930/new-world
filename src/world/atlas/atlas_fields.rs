@@ -9,12 +9,7 @@ use super::seed::{
     SALT_HUMIDITY, SALT_MOUNTAIN_CLUSTER, SALT_RIDGE_PRIMARY, SALT_RIDGE_SECONDARY,
     SALT_TEMPERATURE, domain_warp, fbm, ridged_fbm,
 };
-
-const LAND_THRESHOLD: f32 = 0.53;
-const OCEAN_DISTANCE_NORMALIZER: f32 = 24.0;
-const COAST_DISTANCE_NORMALIZER: f32 = 12.0;
-const CONTINENT_CORE_NORMALIZER: f32 = 22.0;
-const RIVER_DISTANCE_NORMALIZER: f32 = 10.0;
+use super::tuning::AtlasTuning;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ThermalWeights {
@@ -115,9 +110,21 @@ impl AtlasFieldMap {
 }
 
 pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap {
+    generate_atlas_fields_with_tuning(meta, area, &AtlasTuning::default())
+}
+
+pub fn generate_atlas_fields_with_tuning(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    tuning: &AtlasTuning,
+) -> AtlasFieldMap {
     let width = area.width();
     let height = area.height();
     let len = area.len();
+    let normalization = tuning.normalization;
+    let terrain = tuning.terrain;
+    let climate = tuning.climate;
+    let hydrology = tuning.hydrology;
 
     let mut cells = vec![AtlasCell::default(); len];
     let mut land_mask = vec![false; len];
@@ -127,14 +134,35 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
 
     for coord in area.coords() {
         let index = area.index_of(coord).expect("atlas coord must index into area");
-        let landness = sample_landness(meta.seed, coord);
-        let is_land = landness >= LAND_THRESHOLD;
+        let landness = sample_landness(meta.seed, coord, tuning);
+        let is_land = landness >= normalization.land_threshold;
 
         cells[index].landness = landness;
-        cells[index].ridge_factor = sample_ridge_factor(meta.seed, coord) * smoothstep(0.35, 0.95, landness);
+        cells[index].ridge_factor = sample_ridge_factor(meta.seed, coord, tuning)
+            * smoothstep(
+                normalization.ridge_landness_min,
+                normalization.ridge_landness_max,
+                landness,
+            );
         land_mask[index] = is_land;
-        temperature_noise[index] = fbm(meta.seed, coord.x as f64 / 64.0, coord.z as f64 / 64.0, 4, 2.0, 0.5, SALT_TEMPERATURE);
-        humidity_noise[index] = fbm(meta.seed, coord.x as f64 / 48.0, coord.z as f64 / 48.0, 5, 2.0, 0.5, SALT_HUMIDITY);
+        temperature_noise[index] = fbm(
+            meta.seed,
+            coord.x as f64 / climate.temperature_field_scale,
+            coord.z as f64 / climate.temperature_field_scale,
+            climate.temperature_octaves,
+            climate.temperature_lacunarity,
+            climate.temperature_gain,
+            SALT_TEMPERATURE,
+        );
+        humidity_noise[index] = fbm(
+            meta.seed,
+            coord.x as f64 / climate.humidity_field_scale,
+            coord.z as f64 / climate.humidity_field_scale,
+            climate.humidity_octaves,
+            climate.humidity_lacunarity,
+            climate.humidity_gain,
+            SALT_HUMIDITY,
+        );
     }
 
     let ocean_distance_raw = compute_distance_to_value(&land_mask, width, height, false);
@@ -151,38 +179,35 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
         };
         let coast_distance_cells = coast_distance_cells(&land_mask, &ocean_distance_raw, &land_distance_raw, index);
         let continent_core = if is_land {
-            clamp01(ocean_distance_cells / CONTINENT_CORE_NORMALIZER)
+            clamp01(ocean_distance_cells / normalization.continent_core_normalizer)
         } else {
             0.0
         };
         let coast_factor = if is_land {
-            1.0 - clamp01(coast_distance_cells / 6.0)
+            1.0 - clamp01(coast_distance_cells / normalization.coast_factor_distance)
         } else {
             0.0
         };
-        let mountain_mass = sample_mountain_mass(
-            meta.seed,
-            coord,
-            cells[index].ridge_factor,
-            continent_core,
-            cells[index].landness,
-        );
-        let continental_lift = smoothstep(LAND_THRESHOLD, 1.0, cells[index].landness);
+        let mountain_mass =
+            sample_mountain_mass(meta.seed, coord, cells[index].ridge_factor, continent_core, cells[index].landness, tuning);
+        let continental_lift = smoothstep(normalization.land_threshold, 1.0, cells[index].landness);
         let macro_elevation = if is_land {
             clamp01(
-                0.06
-                    + continental_lift * 0.18
-                    + continent_core * 0.42
-                    + mountain_mass * 0.26
-                    - coast_factor * 0.08,
+                terrain.macro_base_height
+                    + continental_lift * terrain.macro_landness_weight
+                    + continent_core * terrain.macro_continent_core_weight
+                    + mountain_mass * terrain.macro_mountain_weight
+                    - coast_factor * terrain.macro_coast_penalty,
             )
         } else {
-            clamp01(cells[index].landness * 0.08)
+            clamp01(cells[index].landness * terrain.macro_ocean_floor_scale)
         };
 
         cells[index].continent_id = continent_ids[index];
-        cells[index].ocean_distance = clamp01(ocean_distance_cells / OCEAN_DISTANCE_NORMALIZER);
-        cells[index].coast_distance = clamp01(coast_distance_cells / COAST_DISTANCE_NORMALIZER);
+        cells[index].ocean_distance =
+            clamp01(ocean_distance_cells / normalization.ocean_distance_normalizer);
+        cells[index].coast_distance =
+            clamp01(coast_distance_cells / normalization.coast_distance_normalizer);
         cells[index].continent_core_factor = continent_core;
         cells[index].coast_factor = coast_factor;
         cells[index].mountain_mass = mountain_mass;
@@ -197,38 +222,61 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
 
         let coord = area.coord_at(index).expect("index should map to coord");
         let (neighbor_mean, mean_diff, max_diff) = local_neighbor_stats(area, &height_field, index);
-        let detail = fbm(meta.seed, coord.x as f64 / 12.0, coord.z as f64 / 12.0, 3, 2.0, 0.5, SALT_DETAIL);
+        let detail = fbm(
+            meta.seed,
+            coord.x as f64 / terrain.detail_scale,
+            coord.z as f64 / terrain.detail_scale,
+            terrain.detail_octaves,
+            terrain.detail_lacunarity,
+            terrain.detail_gain,
+            SALT_DETAIL,
+        );
 
-        cells[index].slope = clamp01(max_diff * 3.25);
-        cells[index].ruggedness = clamp01(cells[index].ridge_factor * 0.52 + cells[index].slope * 0.33 + detail * 0.15);
-        cells[index].basinness = clamp01((neighbor_mean - height_field[index] + 0.05) * 4.0);
+        cells[index].slope = clamp01(max_diff * terrain.slope_scale);
+        cells[index].ruggedness = clamp01(
+            cells[index].ridge_factor * terrain.rugged_ridge_weight
+                + cells[index].slope * terrain.rugged_slope_weight
+                + detail * terrain.rugged_detail_weight,
+        );
+        cells[index].basinness =
+            clamp01((neighbor_mean - height_field[index] + terrain.basin_offset) * terrain.basin_scale);
         cells[index].pass_potential = clamp01(
-            cells[index].mountain_mass * (1.0 - cells[index].ridge_factor * 0.68) * (1.0 - cells[index].slope * 0.45)
-                + mean_diff * 0.25,
+            cells[index].mountain_mass
+                * (1.0 - cells[index].ridge_factor * terrain.pass_ridge_penalty)
+                * (1.0 - cells[index].slope * terrain.pass_slope_penalty)
+                + mean_diff * terrain.pass_mean_diff_weight,
         );
     }
 
     for index in 0..len {
         let coord = area.coord_at(index).expect("index should map to coord");
-        let equator_heat = 1.0 - ((coord.z as f32) / 320.0).abs().tanh();
+        let equator_heat = 1.0 - ((coord.z as f32) / climate.equator_falloff_scale).abs().tanh();
 
         cells[index].inlandness = cells[index].ocean_distance;
         cells[index].temperature = clamp01(
-            equator_heat * 0.62
-                + temperature_noise[index] * 0.38
-                - cells[index].macro_elevation * 0.46
-                - cells[index].mountain_mass * 0.08,
+            equator_heat * climate.temperature_equator_weight
+                + temperature_noise[index] * climate.temperature_noise_weight
+                - cells[index].macro_elevation * climate.temperature_elevation_cooling
+                - cells[index].mountain_mass * climate.temperature_mountain_cooling,
         );
-        cells[index].polar_factor = smoothstep(0.18, 0.02, cells[index].temperature);
+        cells[index].polar_factor = smoothstep(
+            climate.polar_edge_warm,
+            climate.polar_edge_cold,
+            cells[index].temperature,
+        );
         cells[index].humidity = clamp01(
-            humidity_noise[index] * 0.52
-                + (1.0 - cells[index].ocean_distance) * 0.32
-                + cells[index].basinness * 0.16
-                - cells[index].inlandness * 0.26
-                - cells[index].mountain_mass * cells[index].inlandness * 0.18,
+            humidity_noise[index] * climate.humidity_noise_weight
+                + (1.0 - cells[index].ocean_distance) * climate.humidity_ocean_bonus
+                + cells[index].basinness * climate.humidity_basin_bonus
+                - cells[index].inlandness * climate.humidity_inland_penalty
+                - cells[index].mountain_mass
+                    * cells[index].inlandness
+                    * climate.humidity_rain_shadow_penalty,
         );
         cells[index].river_source_potential = clamp01(
-            cells[index].mountain_mass * 0.42 + cells[index].humidity * 0.34 + cells[index].slope * 0.24,
+            cells[index].mountain_mass * hydrology.river_source_mountain_weight
+                + cells[index].humidity * hydrology.river_source_humidity_weight
+                + cells[index].slope * hydrology.river_source_slope_weight,
         );
     }
 
@@ -240,10 +288,10 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
         }
 
         flow_accumulation[index] = clamp01(
-            0.12
-                + cells[index].humidity * 0.58
-                + cells[index].mountain_mass * 0.20
-                + (1.0 - cells[index].temperature) * 0.10,
+            hydrology.flow_base
+                + cells[index].humidity * hydrology.flow_humidity_weight
+                + cells[index].mountain_mass * hydrology.flow_mountain_weight
+                + (1.0 - cells[index].temperature) * hydrology.flow_cold_weight,
         );
     }
 
@@ -271,17 +319,23 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
         let flow = flow_accumulation[index] / max_flow;
         cells[index].river_flow_potential = clamp01(flow);
         cells[index].lake_potential = clamp01(
-            cells[index].basinness * 0.54
-                + flow * 0.26
-                + if downhill[index].is_none() { 0.20 } else { 0.0 }
-                + (1.0 - cells[index].slope) * 0.10,
+            cells[index].basinness * hydrology.lake_basin_weight
+                + flow * hydrology.lake_flow_weight
+                + if downhill[index].is_none() {
+                    hydrology.lake_sink_bonus
+                } else {
+                    0.0
+                }
+                + (1.0 - cells[index].slope) * hydrology.lake_flat_bonus,
         );
 
-        river_mask[index] = flow > 0.045
-            && (cells[index].river_source_potential > 0.38 || flow > 0.10)
-            && cells[index].macro_elevation > 0.10;
-        lake_mask[index] =
-            cells[index].lake_potential > 0.62 && cells[index].macro_elevation > 0.08 && cells[index].slope < 0.45;
+        river_mask[index] = flow > hydrology.river_threshold
+            && (cells[index].river_source_potential > hydrology.river_source_threshold
+                || flow > hydrology.river_override_threshold)
+            && cells[index].macro_elevation > hydrology.river_min_macro_elevation;
+        lake_mask[index] = cells[index].lake_potential > hydrology.lake_threshold
+            && cells[index].macro_elevation > hydrology.lake_min_macro_elevation
+            && cells[index].slope < hydrology.lake_max_slope;
     }
 
     let mut waterline_mask = vec![false; len];
@@ -292,42 +346,69 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
 
     for index in 0..len {
         let river_distance_cells = river_distance_raw[index] as f32 / 1000.0;
-        cells[index].river_distance_estimate = clamp01(river_distance_cells / RIVER_DISTANCE_NORMALIZER);
+        cells[index].river_distance_estimate =
+            clamp01(river_distance_cells / normalization.river_distance_normalizer);
         cells[index].riverine_factor = if land_mask[index] {
-            clamp01((1.0 - cells[index].river_distance_estimate) * 0.74 + cells[index].river_flow_potential * 0.26)
+            clamp01(
+                (1.0 - cells[index].river_distance_estimate) * hydrology.riverine_distance_weight
+                    + cells[index].river_flow_potential * hydrology.riverine_flow_weight,
+            )
         } else {
             0.0
         };
-        cells[index].humidity = clamp01(cells[index].humidity + cells[index].riverine_factor * 0.18 + cells[index].lake_potential * 0.08);
+        cells[index].humidity = clamp01(
+            cells[index].humidity
+                + cells[index].riverine_factor * climate.humidity_river_bonus
+                + cells[index].lake_potential * climate.humidity_lake_bonus,
+        );
         cells[index].wetness = clamp01(
-            cells[index].humidity * 0.55
-                + cells[index].riverine_factor * 0.25
-                + cells[index].lake_potential * 0.10
-                + cells[index].basinness * 0.10,
+            cells[index].humidity * hydrology.wetness_humidity_weight
+                + cells[index].riverine_factor * hydrology.wetness_river_weight
+                + cells[index].lake_potential * hydrology.wetness_lake_weight
+                + cells[index].basinness * hydrology.wetness_basin_weight,
         );
         cells[index].aridity = clamp01(
-            (1.0 - cells[index].humidity) * 0.60
-                + cells[index].inlandness * 0.30
-                + (1.0 - cells[index].wetness) * 0.10
-                - cells[index].riverine_factor * 0.15,
+            (1.0 - cells[index].humidity) * hydrology.aridity_dryness_weight
+                + cells[index].inlandness * hydrology.aridity_inland_weight
+                + (1.0 - cells[index].wetness) * hydrology.aridity_low_wetness_weight
+                - cells[index].riverine_factor * hydrology.aridity_river_relief,
         );
         cells[index].alpine_factor = clamp01(
-            smoothstep(0.60, 0.82, cells[index].macro_elevation) * 0.45
-                + smoothstep(0.52, 0.76, cells[index].mountain_mass) * 0.55
-                - cells[index].polar_factor * 0.10,
+            smoothstep(
+                hydrology.alpine_elevation_min,
+                hydrology.alpine_elevation_max,
+                cells[index].macro_elevation,
+            ) * hydrology.alpine_elevation_weight
+                + smoothstep(
+                    hydrology.alpine_mountain_min,
+                    hydrology.alpine_mountain_max,
+                    cells[index].mountain_mass,
+                ) * hydrology.alpine_mountain_weight
+                - cells[index].polar_factor * hydrology.alpine_polar_penalty,
         );
         cells[index].wetland_factor = clamp01(
-            cells[index].wetness * 0.45
-                + cells[index].basinness * 0.35
-                + cells[index].riverine_factor * 0.20
-                - cells[index].slope * 0.25,
+            cells[index].wetness * hydrology.wetland_wetness_weight
+                + cells[index].basinness * hydrology.wetland_basin_weight
+                + cells[index].riverine_factor * hydrology.wetland_river_weight
+                - cells[index].slope * hydrology.wetland_slope_penalty,
         );
         cells[index].overlay = overlay_weights(land_mask[index], &cells[index]);
-        cells[index].thermal = thermal_weights(cells[index].temperature, cells[index].polar_factor);
-        cells[index].moisture = moisture_weights(cells[index].humidity, cells[index].aridity, cells[index].wetness);
-        cells[index].form = form_weights(cells[index].macro_elevation, cells[index].ruggedness, cells[index].mountain_mass);
-        cells[index].cover = cover_potentials(land_mask[index], &cells[index]);
-        cells[index].ecotone_strength = ecotone_strength(&cells[index]);
+        cells[index].thermal =
+            thermal_weights(cells[index].temperature, cells[index].polar_factor, tuning);
+        cells[index].moisture = moisture_weights(
+            cells[index].humidity,
+            cells[index].aridity,
+            cells[index].wetness,
+            tuning,
+        );
+        cells[index].form = form_weights(
+            cells[index].macro_elevation,
+            cells[index].ruggedness,
+            cells[index].mountain_mass,
+            tuning,
+        );
+        cells[index].cover = cover_potentials(land_mask[index], &cells[index], tuning);
+        cells[index].ecotone_strength = ecotone_strength(&cells[index], tuning);
     }
 
     AtlasFieldMap {
@@ -335,41 +416,111 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
     }
 }
 
-fn sample_landness(seed: u64, coord: AtlasCoord) -> f32 {
+fn sample_landness(seed: u64, coord: AtlasCoord, tuning: &AtlasTuning) -> f32 {
+    let continent = tuning.continent;
     let x = coord.x as f64;
     let z = coord.z as f64;
-    let (wx, wz) = domain_warp(seed, x, z, 1.0 / 96.0, 6.5);
-    let primary = fbm(seed, wx / 96.0, wz / 96.0, 5, 2.0, 0.55, SALT_CONTINENT_PRIMARY);
-    let secondary = fbm(seed, wx / 28.0, wz / 28.0, 4, 2.1, 0.55, SALT_CONTINENT_SECONDARY);
-    let islands = fbm(seed, x / 14.0, z / 14.0, 3, 2.0, 0.5, SALT_DETAIL);
-    let coast = ridged_fbm(seed, wx / 20.0, wz / 20.0, 4, 2.0, 0.55, SALT_COAST_ROUGHNESS);
+    let (wx, wz) = domain_warp(seed, x, z, continent.warp_scale, continent.warp_amplitude);
+    let primary = fbm(
+        seed,
+        wx / continent.primary_scale,
+        wz / continent.primary_scale,
+        continent.primary_octaves,
+        continent.primary_lacunarity,
+        continent.primary_gain,
+        SALT_CONTINENT_PRIMARY,
+    );
+    let secondary = fbm(
+        seed,
+        wx / continent.secondary_scale,
+        wz / continent.secondary_scale,
+        continent.secondary_octaves,
+        continent.secondary_lacunarity,
+        continent.secondary_gain,
+        SALT_CONTINENT_SECONDARY,
+    );
+    let islands = fbm(
+        seed,
+        x / continent.island_scale,
+        z / continent.island_scale,
+        continent.island_octaves,
+        continent.island_lacunarity,
+        continent.island_gain,
+        SALT_DETAIL,
+    );
+    let coast = ridged_fbm(
+        seed,
+        wx / continent.coast_scale,
+        wz / continent.coast_scale,
+        continent.coast_octaves,
+        continent.coast_lacunarity,
+        continent.coast_gain,
+        SALT_COAST_ROUGHNESS,
+    );
 
-    clamp01(primary * 0.62 + secondary * 0.26 + islands * 0.12 - coast * 0.18 + 0.02)
+    clamp01(
+        primary * continent.primary_weight
+            + secondary * continent.secondary_weight
+            + islands * continent.island_weight
+            - coast * continent.coast_penalty
+            + continent.bias,
+    )
 }
 
-fn sample_ridge_factor(seed: u64, coord: AtlasCoord) -> f32 {
+fn sample_ridge_factor(seed: u64, coord: AtlasCoord, tuning: &AtlasTuning) -> f32 {
+    let ridge = tuning.ridge;
     let x = coord.x as f64;
     let z = coord.z as f64;
-    let (wx, wz) = domain_warp(seed, x, z, 1.0 / 18.0, 2.6);
-    let primary = ridged_fbm(seed, wx / 18.0, wz / 18.0, 5, 2.03, 0.53, SALT_RIDGE_PRIMARY);
-    let secondary = ridged_fbm(seed, wx / 42.0, wz / 42.0, 3, 2.0, 0.5, SALT_RIDGE_SECONDARY);
+    let (wx, wz) = domain_warp(seed, x, z, ridge.warp_scale, ridge.warp_amplitude);
+    let primary = ridged_fbm(
+        seed,
+        wx / ridge.primary_scale,
+        wz / ridge.primary_scale,
+        ridge.primary_octaves,
+        ridge.primary_lacunarity,
+        ridge.primary_gain,
+        SALT_RIDGE_PRIMARY,
+    );
+    let secondary = ridged_fbm(
+        seed,
+        wx / ridge.secondary_scale,
+        wz / ridge.secondary_scale,
+        ridge.secondary_octaves,
+        ridge.secondary_lacunarity,
+        ridge.secondary_gain,
+        SALT_RIDGE_SECONDARY,
+    );
 
-    clamp01(primary * 0.72 + secondary * 0.28)
+    clamp01(primary * ridge.primary_weight + secondary * ridge.secondary_weight)
 }
 
-fn sample_mountain_mass(seed: u64, coord: AtlasCoord, ridge_factor: f32, continent_core: f32, landness: f32) -> f32 {
+fn sample_mountain_mass(
+    seed: u64,
+    coord: AtlasCoord,
+    ridge_factor: f32,
+    continent_core: f32,
+    landness: f32,
+    tuning: &AtlasTuning,
+) -> f32 {
+    let terrain = tuning.terrain;
     let cluster = fbm(
         seed,
-        coord.x as f64 / 40.0,
-        coord.z as f64 / 40.0,
-        4,
-        2.0,
-        0.52,
+        coord.x as f64 / terrain.mountain_cluster_scale,
+        coord.z as f64 / terrain.mountain_cluster_scale,
+        terrain.mountain_cluster_octaves,
+        terrain.mountain_cluster_lacunarity,
+        terrain.mountain_cluster_gain,
         SALT_MOUNTAIN_CLUSTER,
     );
-    let base = ridge_factor * 0.72 + cluster * 0.28;
+    let base = ridge_factor * terrain.mountain_ridge_weight
+        + cluster * terrain.mountain_cluster_weight;
 
-    smoothstep(0.48, 0.82, base) * smoothstep(0.08, 0.35, continent_core + landness * 0.35)
+    smoothstep(terrain.mountain_base_min, terrain.mountain_base_max, base)
+        * smoothstep(
+            terrain.mountain_continent_min,
+            terrain.mountain_continent_max,
+            continent_core + landness * terrain.mountain_landness_bias,
+        )
 }
 
 fn overlay_weights(is_land: bool, cell: &AtlasCell) -> OverlayWeights {
@@ -392,8 +543,13 @@ fn overlay_weights(is_land: bool, cell: &AtlasCell) -> OverlayWeights {
     }
 }
 
-fn thermal_weights(temperature: f32, polar_factor: f32) -> ThermalWeights {
-    let mut values = triangular_weights(temperature, [0.04, 0.22, 0.50, 0.72, 0.92], [0.18, 0.22, 0.24, 0.22, 0.18]);
+fn thermal_weights(temperature: f32, polar_factor: f32, tuning: &AtlasTuning) -> ThermalWeights {
+    let weights = tuning.weights;
+    let mut values = triangular_weights(
+        temperature,
+        weights.thermal_centers,
+        weights.thermal_widths,
+    );
     values[0] = values[0].max(polar_factor);
     normalize_weights(&mut values);
 
@@ -406,11 +562,21 @@ fn thermal_weights(temperature: f32, polar_factor: f32) -> ThermalWeights {
     }
 }
 
-fn moisture_weights(humidity: f32, aridity: f32, wetness: f32) -> MoistureWeights {
-    let moisture_signal = clamp01(humidity * 0.72 + wetness * 0.18 - aridity * 0.20 + 0.15);
-    let mut values = triangular_weights(moisture_signal, [0.06, 0.24, 0.50, 0.74, 0.94], [0.16, 0.20, 0.24, 0.20, 0.16]);
-    values[0] = values[0].max(aridity * 0.72);
-    values[4] = values[4].max(wetness * 0.72);
+fn moisture_weights(humidity: f32, aridity: f32, wetness: f32, tuning: &AtlasTuning) -> MoistureWeights {
+    let weights = tuning.weights;
+    let moisture_signal = clamp01(
+        humidity * weights.moisture_signal_humidity_weight
+            + wetness * weights.moisture_signal_wetness_weight
+            - aridity * weights.moisture_signal_aridity_penalty
+            + weights.moisture_signal_bias,
+    );
+    let mut values = triangular_weights(
+        moisture_signal,
+        weights.moisture_centers,
+        weights.moisture_widths,
+    );
+    values[0] = values[0].max(aridity * weights.moisture_arid_boost);
+    values[4] = values[4].max(wetness * weights.moisture_wet_boost);
     normalize_weights(&mut values);
 
     MoistureWeights {
@@ -422,12 +588,33 @@ fn moisture_weights(humidity: f32, aridity: f32, wetness: f32) -> MoistureWeight
     }
 }
 
-fn form_weights(macro_elevation: f32, ruggedness: f32, mountain_mass: f32) -> TerrainFormWeights {
-    let mountain = clamp01(smoothstep(0.54, 0.78, mountain_mass * 0.68 + ruggedness * 0.32));
+fn form_weights(
+    macro_elevation: f32,
+    ruggedness: f32,
+    mountain_mass: f32,
+    tuning: &AtlasTuning,
+) -> TerrainFormWeights {
+    let weights = tuning.weights;
+    let mountain = clamp01(smoothstep(
+        weights.form_mountain_min,
+        weights.form_mountain_max,
+        mountain_mass * weights.form_mountain_mass_weight
+            + ruggedness * weights.form_mountain_ruggedness_weight,
+    ));
     let hill = clamp01(
-        smoothstep(0.24, 0.52, ruggedness + macro_elevation * 0.18) * (1.0 - mountain * 0.60),
+        smoothstep(
+            weights.form_hill_min,
+            weights.form_hill_max,
+            ruggedness + macro_elevation * weights.form_hill_macro_elevation_weight,
+        ) * (1.0 - mountain * weights.form_hill_mountain_suppression),
     );
-    let mut values = [clamp01(1.0 - mountain * 0.85 - hill * 0.55), hill, mountain];
+    let mut values = [
+        clamp01(
+            1.0 - mountain * weights.form_plain_mountain_penalty - hill * weights.form_plain_hill_penalty,
+        ),
+        hill,
+        mountain,
+    ];
     normalize_weights(&mut values);
 
     TerrainFormWeights {
@@ -437,27 +624,44 @@ fn form_weights(macro_elevation: f32, ruggedness: f32, mountain_mass: f32) -> Te
     }
 }
 
-fn cover_potentials(is_land: bool, cell: &AtlasCell) -> CoverPotentials {
+fn cover_potentials(is_land: bool, cell: &AtlasCell, tuning: &AtlasTuning) -> CoverPotentials {
     if !is_land {
         return CoverPotentials::default();
     }
 
+    let weights = tuning.weights;
     let canopy = clamp01(
-        cell.humidity * 0.44
-            + cell.wetness * 0.20
-            + (cell.thermal.temperate + cell.thermal.warm * 0.35) * 0.20
-            - cell.aridity * 0.34
-            - cell.overlay.alpine * 0.20,
+        cell.humidity * weights.cover_canopy_humidity_weight
+            + cell.wetness * weights.cover_canopy_wetness_weight
+            + (cell.thermal.temperate + cell.thermal.warm * weights.cover_canopy_warm_bonus_weight)
+                * weights.cover_canopy_temperate_weight
+            - cell.aridity * weights.cover_canopy_aridity_penalty
+            - cell.overlay.alpine * weights.cover_canopy_alpine_penalty,
     );
-    let forest = clamp01(canopy * 0.70 + cell.overlay.riverine * 0.15 + cell.moisture.humid * 0.15);
-    let openness = clamp01(0.45 + cell.aridity * 0.25 + cell.form.plain * 0.15 - canopy * 0.35 - cell.moisture.wet * 0.10);
+    let forest = clamp01(
+        canopy * weights.cover_forest_canopy_weight
+            + cell.overlay.riverine * weights.cover_forest_river_weight
+            + cell.moisture.humid * weights.cover_forest_humid_weight,
+    );
+    let openness = clamp01(
+        weights.cover_openness_base
+            + cell.aridity * weights.cover_openness_aridity_weight
+            + cell.form.plain * weights.cover_openness_plain_weight
+            - canopy * weights.cover_openness_canopy_penalty
+            - cell.moisture.wet * weights.cover_openness_wet_penalty,
+    );
     let grass = clamp01(
-        openness * 0.45
-            + cell.moisture.subhumid * 0.20
-            + cell.moisture.humid * 0.15
-            + cell.thermal.temperate * 0.10,
+        openness * weights.cover_grass_openness_weight
+            + cell.moisture.subhumid * weights.cover_grass_subhumid_weight
+            + cell.moisture.humid * weights.cover_grass_humid_weight
+            + cell.thermal.temperate * weights.cover_grass_temperate_weight,
     );
-    let shrub = clamp01(cell.aridity * 0.35 + cell.moisture.semi_arid * 0.25 + cell.form.hill * 0.15 + 0.15);
+    let shrub = clamp01(
+        cell.aridity * weights.cover_shrub_aridity_weight
+            + cell.moisture.semi_arid * weights.cover_shrub_semi_arid_weight
+            + cell.form.hill * weights.cover_shrub_hill_weight
+            + weights.cover_shrub_bias,
+    );
 
     CoverPotentials {
         openness,
@@ -468,7 +672,8 @@ fn cover_potentials(is_land: bool, cell: &AtlasCell) -> CoverPotentials {
     }
 }
 
-fn ecotone_strength(cell: &AtlasCell) -> f32 {
+fn ecotone_strength(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
+    let weights = tuning.weights;
     let thermal_competition = 1.0 - max5([
         cell.thermal.polar,
         cell.thermal.cold,
@@ -491,7 +696,11 @@ fn ecotone_strength(cell: &AtlasCell) -> f32 {
         cell.overlay.alpine,
     ]);
 
-    clamp01(thermal_competition * 0.40 + moisture_competition * 0.40 + overlay_competition * 0.20)
+    clamp01(
+        thermal_competition * weights.ecotone_thermal_weight
+            + moisture_competition * weights.ecotone_moisture_weight
+            + overlay_competition * weights.ecotone_overlay_weight,
+    )
 }
 
 fn triangular_weights(value: f32, centers: [f32; 5], widths: [f32; 5]) -> [f32; 5] {
@@ -790,12 +999,13 @@ mod tests {
         let meta = WorldMeta::new(42);
         let area = AtlasArea::new(AtlasCoord::new(-32, -32), 64, 64).unwrap();
         let atlas = generate_atlas_fields(&meta, area);
+        let tuning = AtlasTuning::default();
 
         let land_cells = atlas
             .cells()
             .values()
             .iter()
-            .filter(|cell| cell.landness >= LAND_THRESHOLD)
+            .filter(|cell| cell.landness >= tuning.normalization.land_threshold)
             .count();
 
         assert!(land_cells > 0, "reference preview should contain some land");

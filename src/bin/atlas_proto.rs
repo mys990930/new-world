@@ -4,8 +4,9 @@ use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
 use new_world::world::{
-    AtlasArea, AtlasCoord, AtlasDebugOptions, WorldMeta, generate_atlas_fields, resolve_atlas,
-    write_debug_images_with_options,
+    AtlasArea, AtlasCoord, AtlasDebugOptions, AtlasTuning, WorldMeta,
+    generate_atlas_fields_with_tuning, resolve_atlas_with_tuning,
+    write_debug_images_with_options_and_tuning,
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -43,14 +44,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let meta = WorldMeta::new(seed);
+    let tuning = AtlasTuning::default();
     let area = AtlasArea::new(AtlasCoord::new(origin_x, origin_z), width, height)?;
-    let fields = generate_atlas_fields(&meta, area);
-    let resolved = resolve_atlas(&fields);
-    let files = write_debug_images_with_options(
+    let fields = generate_atlas_fields_with_tuning(&meta, area, &tuning);
+    let resolved = resolve_atlas_with_tuning(&fields, &tuning);
+    let files = write_debug_images_with_options_and_tuning(
         &fields,
         &resolved,
         &output_dir,
         AtlasDebugOptions { pixels_per_cell },
+        &tuning,
     )?;
 
     println!("atlas seed: {seed}");

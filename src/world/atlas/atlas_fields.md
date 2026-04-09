@@ -28,3 +28,4 @@
 1. scalar field는 명시적으로 정규화된 범위를 가져야 한다.
 2. hydrology는 ocean/land 구조와 모순되면 안 된다.
 3. preview tuning 단계에서도 field 이름과 의미는 문서 기준으로 유지한다.
+4. 기본 tuning 값은 `tuning.rs`에서 읽고, 계산식은 그 값을 조합해 사용한다.

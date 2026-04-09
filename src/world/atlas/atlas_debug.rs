@@ -9,6 +9,7 @@ use super::atlas_fields::{AtlasCell, AtlasFieldMap};
 use super::atlas_resolver::{
     AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass, ThermalClass,
 };
+use super::tuning::AtlasTuning;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AtlasDebugOptions {
@@ -55,7 +56,13 @@ pub fn write_debug_images(
     resolved: &AtlasResolvedMap,
     output_dir: impl AsRef<Path>,
 ) -> Result<Vec<PathBuf>, AtlasDebugError> {
-    write_debug_images_with_options(fields, resolved, output_dir, AtlasDebugOptions::default())
+    write_debug_images_with_options_and_tuning(
+        fields,
+        resolved,
+        output_dir,
+        AtlasDebugOptions::default(),
+        &AtlasTuning::default(),
+    )
 }
 
 pub fn write_debug_images_with_options(
@@ -63,6 +70,22 @@ pub fn write_debug_images_with_options(
     resolved: &AtlasResolvedMap,
     output_dir: impl AsRef<Path>,
     options: AtlasDebugOptions,
+) -> Result<Vec<PathBuf>, AtlasDebugError> {
+    write_debug_images_with_options_and_tuning(
+        fields,
+        resolved,
+        output_dir,
+        options,
+        &AtlasTuning::default(),
+    )
+}
+
+pub fn write_debug_images_with_options_and_tuning(
+    fields: &AtlasFieldMap,
+    resolved: &AtlasResolvedMap,
+    output_dir: impl AsRef<Path>,
+    options: AtlasDebugOptions,
+    tuning: &AtlasTuning,
 ) -> Result<Vec<PathBuf>, AtlasDebugError> {
     let output_dir = output_dir.as_ref();
     fs::create_dir_all(output_dir)?;
@@ -75,7 +98,10 @@ pub fn write_debug_images_with_options(
         ("04_temperature.png", render_temperature(fields, resolved, options)),
         ("05_humidity.png", render_humidity(fields, resolved, options)),
         ("06_overlay.png", render_overlay(fields, resolved, options)),
-        ("07_biome_preview.png", render_biome_preview(fields, resolved, options)),
+        (
+            "07_biome_preview.png",
+            render_biome_preview(fields, resolved, options, tuning),
+        ),
         ("08_ecotone.png", render_ecotone(fields, options)),
     ];
 
@@ -210,10 +236,11 @@ fn render_biome_preview(
     fields: &AtlasFieldMap,
     resolved: &AtlasResolvedMap,
     options: AtlasDebugOptions,
+    tuning: &AtlasTuning,
 ) -> RgbImage {
     render_map_with_resolved(fields, resolved, options, |cell, resolved, _, _| {
-        let signed_height = preview_signed_height(cell);
-        biome_preview_color(cell, resolved.biome, signed_height)
+        let signed_height = preview_signed_height(cell, tuning);
+        biome_preview_color(cell, resolved.biome, signed_height, tuning)
     })
 }
 
@@ -269,52 +296,127 @@ fn render_map_with_resolved(
     image
 }
 
-fn biome_preview_color(cell: &AtlasCell, biome: BiomePreview, signed_height: f32) -> [u8; 3] {
+fn biome_preview_color(
+    cell: &AtlasCell,
+    biome: BiomePreview,
+    signed_height: f32,
+    tuning: &AtlasTuning,
+) -> [u8; 3] {
+    let preview = tuning.preview;
     let abs_height = signed_height.abs().clamp(0.0, 1.0);
     let color = match biome {
-        BiomePreview::Ocean => depth_shaded_blue(abs_height),
-        BiomePreview::Coast => shade_from_height([244, 232, 176], [214, 196, 126], abs_height, 0.52),
-        BiomePreview::PolarTundra => shade_from_height([250, 250, 246], [214, 222, 228], abs_height, 0.40),
-        BiomePreview::Desert => shade_from_height([238, 150, 64], [166, 88, 26], abs_height, 0.62),
-        BiomePreview::Wetland => shade_from_height([82, 138, 98], [40, 86, 66], abs_height, 0.70),
-        BiomePreview::Riverplain => shade_from_height([98, 164, 114], [48, 98, 78], abs_height, 0.60),
-        BiomePreview::Alpine => shade_from_height([126, 156, 134], [62, 94, 78], abs_height, 0.78),
-        BiomePreview::Mountain => shade_from_height([92, 138, 82], [28, 62, 32], abs_height, 0.86),
-        BiomePreview::Steppe => shade_from_height([142, 156, 92], [78, 96, 40], abs_height, 0.66),
-        BiomePreview::Grassland => shade_from_height([112, 172, 92], [44, 96, 34], abs_height, 0.68),
-        BiomePreview::TemperateForest => shade_from_height([74, 136, 72], [20, 58, 24], abs_height, 0.76),
-        BiomePreview::BorealForest => shade_from_height([72, 118, 94], [26, 56, 42], abs_height, 0.74),
-        BiomePreview::TropicalForest => shade_from_height([46, 154, 82], [12, 68, 30], abs_height, 0.72),
+        BiomePreview::Ocean => shade_from_height(
+            preview.ocean_light,
+            preview.ocean_dark,
+            abs_height,
+            preview.ocean_shade_strength,
+        ),
+        BiomePreview::Coast => shade_from_height(
+            preview.coast_light,
+            preview.coast_dark,
+            abs_height,
+            preview.coast_shade_strength,
+        ),
+        BiomePreview::PolarTundra => shade_from_height(
+            preview.polar_light,
+            preview.polar_dark,
+            abs_height,
+            preview.polar_shade_strength,
+        ),
+        BiomePreview::Desert => shade_from_height(
+            preview.desert_light,
+            preview.desert_dark,
+            abs_height,
+            preview.desert_shade_strength,
+        ),
+        BiomePreview::Wetland => shade_from_height(
+            preview.wetland_light,
+            preview.wetland_dark,
+            abs_height,
+            preview.wetland_shade_strength,
+        ),
+        BiomePreview::Riverplain => shade_from_height(
+            preview.riverplain_light,
+            preview.riverplain_dark,
+            abs_height,
+            preview.riverplain_shade_strength,
+        ),
+        BiomePreview::Alpine => shade_from_height(
+            preview.alpine_light,
+            preview.alpine_dark,
+            abs_height,
+            preview.alpine_shade_strength,
+        ),
+        BiomePreview::Mountain => shade_from_height(
+            preview.mountain_light,
+            preview.mountain_dark,
+            abs_height,
+            preview.mountain_shade_strength,
+        ),
+        BiomePreview::Steppe => shade_from_height(
+            preview.steppe_light,
+            preview.steppe_dark,
+            abs_height,
+            preview.steppe_shade_strength,
+        ),
+        BiomePreview::Grassland => shade_from_height(
+            preview.grassland_light,
+            preview.grassland_dark,
+            abs_height,
+            preview.grassland_shade_strength,
+        ),
+        BiomePreview::TemperateForest => shade_from_height(
+            preview.temperate_forest_light,
+            preview.temperate_forest_dark,
+            abs_height,
+            preview.temperate_forest_shade_strength,
+        ),
+        BiomePreview::BorealForest => shade_from_height(
+            preview.boreal_forest_light,
+            preview.boreal_forest_dark,
+            abs_height,
+            preview.boreal_forest_shade_strength,
+        ),
+        BiomePreview::TropicalForest => shade_from_height(
+            preview.tropical_forest_light,
+            preview.tropical_forest_dark,
+            abs_height,
+            preview.tropical_forest_shade_strength,
+        ),
     };
 
     if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::Desert | BiomePreview::PolarTundra) {
         color
-    } else if cell.overlay.riverine > 0.56 {
-        mix(color, [70, 142, 186], (cell.overlay.riverine * 0.18).clamp(0.0, 0.18))
+    } else if cell.overlay.riverine > preview.river_tint_threshold {
+        mix(
+            color,
+            preview.river_tint,
+            (cell.overlay.riverine * preview.river_tint_strength)
+                .clamp(0.0, preview.river_tint_strength),
+        )
     } else {
         color
     }
 }
 
-fn preview_signed_height(cell: &AtlasCell) -> f32 {
+fn preview_signed_height(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
+    let preview = tuning.preview;
     if cell.overlay.ocean > 0.5 {
-        let depth = (cell.coast_distance * 0.72 + (1.0 - cell.landness) * 0.28).clamp(0.0, 1.0);
+        let depth = (cell.coast_distance * preview.ocean_depth_coast_weight
+            + (1.0 - cell.landness) * preview.ocean_depth_landness_weight)
+            .clamp(0.0, 1.0);
         -depth
     } else {
         let height = (
-            cell.macro_elevation * 0.56
-                + cell.mountain_mass * 0.26
-                + cell.ruggedness * 0.12
-                + cell.alpine_factor * 0.06
-                - cell.coast_factor * 0.22
+            cell.macro_elevation * preview.land_height_macro_weight
+                + cell.mountain_mass * preview.land_height_mountain_weight
+                + cell.ruggedness * preview.land_height_ruggedness_weight
+                + cell.alpine_factor * preview.land_height_alpine_weight
+                - cell.coast_factor * preview.land_height_coast_penalty
         )
         .clamp(0.0, 1.0);
         height
     }
-}
-
-fn depth_shaded_blue(depth: f32) -> [u8; 3] {
-    shade_from_height([106, 176, 232], [8, 38, 102], depth, 0.88)
 }
 
 fn shade_from_height(light: [u8; 3], dark: [u8; 3], height: f32, strength: f32) -> [u8; 3] {
