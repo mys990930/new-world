@@ -45,6 +45,7 @@
 - 플레이어가 deadzone 밖으로 벗어나면 카메라는 플레이어를 deadzone 안쪽으로 되돌릴 만큼만 target을 갱신한다
 - target 갱신은 hard snap이 아니라 부드러운 follow smoothing으로 접근한다
 - 진행 방향 bias는 현재 `MoveWorldIntent` 기준으로 작게만 적용된다
+- 진행 방향 bias는 플레이어를 화면에서 진행 방향 쪽으로 약간 치우치게 두어, 진행 앞쪽 월드를 더 많이 보여주는 방향으로 적용한다
 - 진행 방향 bias는 player center를 대체하지 않고, 정지하거나 방향이 바뀌면 다시 약해진다
 - `Y`는 회전값을 바꾸지 않고, 카메라를 player-centered anchor 쪽으로 부드럽게 lerp 복귀시키는 recenter 요청이다
 - selection과 render는 같은 프레임에 같은 smoothed target과 basis를 사용해야 한다
@@ -84,4 +85,5 @@
 
 - 이 문서는 편안한 추적 카메라의 목표 계약을 정의한다.
 - 현재 코드는 아직 `quarter_turns`와 raw player-centered target 기반의 단순 쿼터뷰 카메라만 구현한 상태다.
+- orthographic framing은 플레이 공간을 조금 더 넓게 읽을 수 있도록 너무 타이트하지 않게 유지한다.
 - 구현은 `CameraState`와 shared follow pose helper를 확장하는 방향으로 맞추고, gameplay camera 규칙을 renderer 쪽으로 밀어 넣지 않는다.

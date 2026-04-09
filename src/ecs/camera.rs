@@ -28,13 +28,13 @@ pub struct QuarterViewCameraPose {
     pub basis: QuarterViewBasis,
 }
 
-pub const QUARTER_VIEW_CAMERA_DISTANCE: f32 = 400.0;
-pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 5.0;
+pub const QUARTER_VIEW_CAMERA_DISTANCE: f32 = 520.0;
+pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 6.0;
 const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
 const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 const CAMERA_DEADZONE_HALF_WIDTH: f32 = 0.75;
 const CAMERA_DEADZONE_HALF_HEIGHT: f32 = 0.45;
-const CAMERA_MOVE_BIAS_DISTANCE: f32 = 0.4;
+const CAMERA_MOVE_BIAS_DISTANCE: f32 = 0.6;
 const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0;
 const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
@@ -239,11 +239,11 @@ fn movement_bias_offset(
     add3(
         scale3(
             basis.right,
-            screen_right * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
+            -screen_right * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
         ),
         scale3(
             basis.up,
-            screen_up * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
+            -screen_up * inv_length * CAMERA_MOVE_BIAS_DISTANCE,
         ),
     )
 }
@@ -334,8 +334,8 @@ mod tests {
             basis,
         );
 
-        assert!(dot3(bias, basis.right) > 0.0);
-        assert!(dot3(bias, basis.up) < 0.0);
+        assert!(dot3(bias, basis.right) < 0.0);
+        assert!(dot3(bias, basis.up) > 0.0);
     }
 
     #[test]
