@@ -280,7 +280,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::world::{BlockFace, LocalBlockCoord, generate_chunk};
+    use crate::world::{BlockFace, CHUNK_EDGE, LocalBlockCoord, generate_chunk};
 
     fn test_registry() -> Arc<BlockRegistry> {
         Arc::new(BlockRegistry::load_default().expect("default registry should load"))
@@ -304,9 +304,11 @@ mod tests {
         let mut world = WorldCore::new(WorldMeta::default(), test_registry());
         let coord = ChunkCoord(0, 0, 0);
         world.insert_chunk(coord, ChunkData::new_empty(coord));
+        let edge = CHUNK_EDGE as i32 - 1;
+        let local_edge = LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 0, 0).unwrap();
 
         let result = world.apply_edit(WorldEdit::SetBlock {
-            pos: WorldBlockCoord(15, 0, 0),
+            pos: WorldBlockCoord(edge, 0, 0),
             block: BlockId::STONE,
         });
 
@@ -319,7 +321,7 @@ mod tests {
         assert_eq!(
             world
                 .get_chunk(coord)
-                .and_then(|chunk| chunk.get_block(LocalBlockCoord::new(15, 0, 0).unwrap())),
+                .and_then(|chunk| chunk.get_block(local_edge)),
             Some(BlockId::STONE)
         );
     }

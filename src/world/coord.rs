@@ -1,4 +1,4 @@
-pub const CHUNK_EDGE: usize = 16;
+pub const CHUNK_EDGE: usize = 32;
 pub const CHUNK_EDGE_I32: i32 = CHUNK_EDGE as i32;
 pub const CHUNK_VOLUME: usize = CHUNK_EDGE * CHUNK_EDGE * CHUNK_EDGE;
 
@@ -71,8 +71,8 @@ mod tests {
             WorldBlockCoord(-16, 0, 15),
             WorldBlockCoord(-1, 31, 32),
             WorldBlockCoord(0, 0, 0),
-            WorldBlockCoord(15, 15, 15),
-            WorldBlockCoord(16, 16, 16),
+            WorldBlockCoord(31, 31, 31),
+            WorldBlockCoord(32, 32, 32),
         ];
 
         for sample in samples {

@@ -232,7 +232,7 @@ fn faces() -> [BlockFace; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{BlockRegistry, ChunkData};
+    use crate::world::{BlockRegistry, CHUNK_EDGE, ChunkData};
 
     fn test_registry() -> BlockRegistry {
         BlockRegistry::load_default().expect("default registry should load")
@@ -256,7 +256,7 @@ mod tests {
             mesh.bounds,
             Some(RenderBounds {
                 min: [0.0, 0.0, 0.0],
-                max: [16.0, 1.0, 16.0],
+                max: [CHUNK_EDGE as f32, 1.0, CHUNK_EDGE as f32],
             })
         );
     }
@@ -265,7 +265,7 @@ mod tests {
     fn fully_occluded_face_is_removed_by_neighbor_snapshot() {
         let mut center = ChunkData::new_empty(ChunkCoord(0, 0, 0));
         let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
-        let center_local = LocalBlockCoord::new(15, 0, 0).unwrap();
+        let center_local = LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 0, 0).unwrap();
         let east_local = LocalBlockCoord::new(0, 0, 0).unwrap();
         center.set_block(center_local, BlockId::GRASS).unwrap();
         east.set_block(east_local, BlockId::GRASS).unwrap();

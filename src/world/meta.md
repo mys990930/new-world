@@ -61,3 +61,4 @@
 
 - block registry ownership은 여기서 정의하지 않는다.
 - `WorldMeta`는 world가 소유하지만, generation / storage는 이를 읽기 전용으로 참조한다.
+- 현재 구현의 `save_format_version`은 `2`이며, uniform chunk storage encoding을 포함하는 포맷을 기준으로 한다.

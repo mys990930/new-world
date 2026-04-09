@@ -24,7 +24,8 @@
 - `ChunkCoord`
 - `LocalBlockCoord`
 - `WorldBlockCoord`
-- `CHUNK_SIZE`
+- `CHUNK_EDGE`
+- `CHUNK_VOLUME`
 
 ## 입력
 
@@ -40,8 +41,8 @@
 
 ## 변환 규칙
 
-1. world 좌표를 청크로 나눌 때는 고정 `CHUNK_SIZE` 기준의 결정적 규칙을 사용한다.
-2. local 좌표는 항상 `0..CHUNK_SIZE` 범위로 정규화된다.
+1. world 좌표를 청크로 나눌 때는 고정 `CHUNK_EDGE` 기준의 결정적 규칙을 사용한다.
+2. local 좌표는 항상 `0..CHUNK_EDGE` 범위로 정규화된다.
 3. `ChunkCoord + LocalBlockCoord -> WorldBlockCoord`는 역변환 가능해야 한다.
 4. 음수 world 좌표도 같은 규칙으로 안정적으로 분해되어야 한다.
 
@@ -71,3 +72,5 @@ is_local_in_bounds(local: LocalBlockCoord) -> bool
 ## 메모
 
 - 좌표계 규칙은 world 내부의 가장 낮은 수준 계약이므로, 다른 leaf가 자체 규칙을 만들면 안 된다.
+- 현재 구현의 `CHUNK_EDGE`는 `32`이고, 따라서 `CHUNK_VOLUME`은 `32 * 32 * 32 = 32768`이다.
+- 목표 block 스케일을 `0.5m`로 보면 청크 한 변은 개념적으로 `16m` 범위를 담당한다.

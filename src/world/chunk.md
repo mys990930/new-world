@@ -29,6 +29,8 @@
 
 - `coord`
 - block storage
+  - uniform single-block fast path
+  - dense `BlockId` array payload
 - optional raw metadata
 - future light/raw block-state payloads
 
@@ -36,6 +38,8 @@
 
 - `coord`
 - immutable block/raw metadata view or copy
+  - uniform single-block fast path
+  - dense immutable block array
 - jobs / simulation / meshing 전달용 read-only payload
 
 ## 입력
@@ -56,10 +60,13 @@
 - `ChunkSnapshot`은 생성 시점의 청크 의미를 고정한다.
 - snapshot 생성 이후의 `ChunkData` 변화는 기존 snapshot에 역으로 반영되지 않는다.
 - 블록의 gameplay/render 의미는 `BlockRegistry`가 해석하고, 청크는 raw `BlockId`만 보관한다.
+- empty/all-same chunk는 uniform 표현으로 유지할 수 있고, 첫 heterogeneous write 시 dense 표현으로 materialize된다.
 
 ## 공개 인터페이스
 
 ```rust
+ChunkData::new_empty(coord: ChunkCoord) -> ChunkData
+ChunkData::new_filled(coord: ChunkCoord, block: BlockId) -> ChunkData
 ChunkData::get_block(local: LocalBlockCoord) -> Option<BlockId>
 ChunkData::set_block(local: LocalBlockCoord, block: BlockId) -> Result<BlockId, ChunkWriteError>
 ChunkData::snapshot(&self) -> ChunkSnapshot
@@ -70,6 +77,7 @@ ChunkData::snapshot(&self) -> ChunkSnapshot
 - 청크 크기는 고정이다.
 - `ChunkData`는 원본 월드 데이터만 가진다.
 - `ChunkData`는 텍스처 경로나 렌더 옵션을 직접 저장하지 않고 `BlockId`만 저장한다.
+- 논리적으로는 모든 local 좌표가 항상 하나의 `BlockId`를 가진다.
 - renderer 전용 메쉬나 transient gameplay state는 `ChunkData`에 들어가지 않는다.
 - `ChunkSnapshot`은 읽기 전용이며 jobs/simulation으로 안전하게 전달 가능해야 한다.
 
@@ -85,5 +93,6 @@ ChunkData::snapshot(&self) -> ChunkSnapshot
 ## 메모
 
 - light, raw metadata, block state payload는 필요해질 때 추가할 수 있지만, 여전히 "원본 월드 데이터" 범위를 벗어나면 안 된다.
-- 현재 최소 구현의 `ChunkSnapshot`은 block 배열을 clone한 immutable value payload다.
+- 현재 구현은 empty chunk를 uniform `AIR`로 보관하고, dense block array는 실제로 서로 다른 block이 섞일 때만 사용한다.
+- `ChunkSnapshot`도 uniform fast path를 유지하므로 save/load/jobs 전달 시 all-air chunk를 불필요하게 materialize하지 않는다.
 - 현재 `BlockId::AIR`, `BlockId::GRASS`, `BlockId::DIRT`, `BlockId::STONE` 상수는 기본 registry와 맞춘 편의값이지만, block의 실제 의미는 `registry.md` 계약으로 해석된다.
