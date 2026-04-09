@@ -338,7 +338,7 @@ pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap
 fn sample_landness(seed: u64, coord: AtlasCoord) -> f32 {
     let x = coord.x as f64;
     let z = coord.z as f64;
-    let (wx, wz) = domain_warp(seed, x / 96.0, z / 96.0, 0.85, 6.5);
+    let (wx, wz) = domain_warp(seed, x, z, 1.0 / 96.0, 6.5);
     let primary = fbm(seed, wx / 96.0, wz / 96.0, 5, 2.0, 0.55, SALT_CONTINENT_PRIMARY);
     let secondary = fbm(seed, wx / 28.0, wz / 28.0, 4, 2.1, 0.55, SALT_CONTINENT_SECONDARY);
     let islands = fbm(seed, x / 14.0, z / 14.0, 3, 2.0, 0.5, SALT_DETAIL);
@@ -350,7 +350,7 @@ fn sample_landness(seed: u64, coord: AtlasCoord) -> f32 {
 fn sample_ridge_factor(seed: u64, coord: AtlasCoord) -> f32 {
     let x = coord.x as f64;
     let z = coord.z as f64;
-    let (wx, wz) = domain_warp(seed, x / 18.0, z / 18.0, 1.2, 2.6);
+    let (wx, wz) = domain_warp(seed, x, z, 1.0 / 18.0, 2.6);
     let primary = ridged_fbm(seed, wx / 18.0, wz / 18.0, 5, 2.03, 0.53, SALT_RIDGE_PRIMARY);
     let secondary = ridged_fbm(seed, wx / 42.0, wz / 42.0, 3, 2.0, 0.5, SALT_RIDGE_SECONDARY);
 
@@ -783,5 +783,25 @@ mod tests {
                 assert!((0.0..=1.0).contains(&value));
             }
         }
+    }
+
+    #[test]
+    fn reference_seed_area_contains_both_land_and_ocean() {
+        let meta = WorldMeta::new(42);
+        let area = AtlasArea::new(AtlasCoord::new(-32, -32), 64, 64).unwrap();
+        let atlas = generate_atlas_fields(&meta, area);
+
+        let land_cells = atlas
+            .cells()
+            .values()
+            .iter()
+            .filter(|cell| cell.landness >= LAND_THRESHOLD)
+            .count();
+
+        assert!(land_cells > 0, "reference preview should contain some land");
+        assert!(
+            land_cells < atlas.cells().values().len(),
+            "reference preview should contain some ocean"
+        );
     }
 }
