@@ -41,10 +41,11 @@
 - `platform -> ecs` only maps raw transient/held input into frame input resources
 - `ecs -> renderer` only maps camera pose, visibility, and draw-ready instances
 - Renderer does not query ECS `Transform` or local player entities directly
-- Quarter-view direction rules are defined once in `ecs::camera` helper functions and reused by the bridge so movement, selection, and rendering stay aligned:
+- Quarter-view direction rules and follow pose rules are defined once in `ecs::camera` and reused by the bridge so movement, selection, and rendering stay aligned:
   - east projects to screen bottom-right
   - north projects to screen top-right
   - world up projects upward on screen
+- bridge는 local player transform만 보고 독자적인 follow camera를 다시 계산하지 않는다
 
 ## Related Modules
 
@@ -64,4 +65,5 @@
   - the white local player cube
   - a thin dark ground shadow slab
   - a thin yellow face-highlight slab generated from `SelectionState`
-- The current prototype uses an explicit 45-degree downward quarter-view basis plus orthographic projection so the renderer can receive a stable render-only camera pose
+- renderer는 여전히 explicit 45-degree downward quarter-view orthographic pose만 받지만, 그 pose의 loose follow / deadzone / bias / recenter 해석은 ECS camera state 쪽에서 끝나 있어야 한다
+- 현재 코드는 아직 camera pose를 local player transform에서 직접 재구성하지만, 목표 구조에서는 ECS가 만든 camera snapshot을 bridge가 그대로 번역한다

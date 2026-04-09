@@ -70,3 +70,4 @@
 ## 메모
 
 - 현재 최소 구현에서 input 단계는 discrete command만 `PlayerCommandBuffer`에 넣는다.
+- `RecenterCamera`의 실제 smoothing 규칙은 input이 아니라 `camera.rs`가 소유한다.

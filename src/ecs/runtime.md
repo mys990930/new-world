@@ -26,6 +26,7 @@
 - 갱신된 ECS world/resource 상태
 - discrete command buffer
 - `MoveWorldIntent`
+- current camera state / follow snapshot
 - `SelectionState`
 - app bridge가 읽을 수 있는 최소 gameplay snapshot
 
@@ -50,11 +51,12 @@
   - `ChunkStates`
   - `SelectionState`
 - 현재 frame update 순서는:
-  - pre: command buffer clear, camera one-shot impulse clear
-  - update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영 -> local player transform 적분
+  - pre: command buffer clear, frame 단위 camera request 정리
+  - target update: input interpretation -> camera command 적용 -> move world intent 생성 -> local player velocity 반영 -> local player transform 적분 -> camera follow state 갱신
 - current selection update는 bevy system이 아니라 runtime helper로 분리되어 있다.
   - 이유: world source-of-truth는 ECS 내부가 아니라 app가 소유하므로, `WorldCore` 참조를 직접 받는 지점이 필요하다.
-- app bridge는 runtime helper를 통해 현재 `CameraState`, local player `Transform`, `SelectionState`, visible chunk 목록을 읽어 renderer DTO를 만든다.
+- app bridge는 runtime helper를 통해 현재 `CameraState`, `SelectionState`, visible chunk 목록을 읽어 renderer DTO를 만든다.
+- selection은 render와 같은 camera follow pose를 공유해야 하므로, camera 갱신이 끝난 뒤의 snapshot을 읽는다.
 
 ## 공개 인터페이스
 
@@ -103,6 +105,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - gameplay 해석 자체는 하위 시스템이 담당한다
 - frame phase와 fixed phase는 분리 유지한다
 - world source-of-truth를 직접 읽는 selection update는 app 오케스트레이션 이후에만 실행된다
+- runtime이 노출하는 camera snapshot은 selection과 render bridge가 같은 프레임 해석을 공유하도록 유지되어야 한다
 
 ## 비책임
 
@@ -124,3 +127,5 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 
 - 현재 `fixed_update`는 문서상 슬롯만 있고 gameplay 내용은 아직 비어 있다.
 - 현재 chunk/job 관련 흐름은 player가 서 있는 청크 하나를 deterministic interest 대상으로 삼는 최소 vertical slice다.
+- 현재 코드는 아직 dedicated camera follow update 단계가 없고, selection/render camera를 raw player transform 쪽에서 재구성한다.
+- 다음 구현은 camera follow 상태를 ECS runtime 쪽에서 갱신하고, bridge/selection은 그 결과를 읽도록 정렬한다.

@@ -77,11 +77,13 @@
   - 따라서 화면 기준 이동은 world axis로 투영한 뒤 사용한다
 - 카메라 상태 갱신
   - 4방향 쿼터뷰 회전
-  - `Y`나 좌/우클릭 상호작용 시 1회성 fast recenter boost 신호
-  - slow tracking / bias / deadzone은 향후 camera 시스템이 확장한다
+  - 플레이어 중심의 느슨한 follow
+  - quarter-view plane 기준 deadzone
+  - 현재 `MoveWorldIntent` 기준의 약한 진행 방향 bias
+  - `Y`는 회전값을 유지한 채 player-centered anchor로 부드럽게 복귀시키는 smooth recenter 요청
 - 커서 기반 selection 갱신
   - app가 프레임마다 mouse position과 viewport를 전달한다
-  - ECS는 current camera basis와 local player transform을 기준으로 orthographic ray를 만든다
+  - ECS는 current camera basis와 smoothed follow pose를 기준으로 orthographic ray를 만든다
   - world raycast 결과를 `SelectionState`로 저장한다
   - app bridge는 그 상태를 노란 face highlight 렌더 입력으로 바꾼다
 
@@ -130,6 +132,7 @@ NOT:
 4. 화면 기준 입력과 world 기준 intent는 별도 경계로 유지한다.
 5. 같은 프레임의 회전은 그 프레임 이동 intent 계산에 먼저 반영된다.
 6. selection policy는 ECS가 소유하지만 실제 블록 step/raycast는 world query를 사용한다.
+7. render용 카메라 pose는 ECS camera state에서 결정되고, app/renderer는 그 결과만 소비한다.
 
 ### 하위 모듈 목록 및 역할
 - mod.rs: public facade, re-export
@@ -137,7 +140,7 @@ NOT:
 - input.rs: `EcsInputSnapshot`, frame 입력 resource, discrete command 후보 생성
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS 내부 command/request buffer 정의
 - player.rs: `Player`/`Transform`/`Velocity`, local player spawn, 화면 기준 이동 상태를 world 기준 이동 intent로 변환
-- camera.rs: `CameraState`, 4방향 쿼터뷰 회전 상태, recenter one-shot boost 신호, shared quarter-view basis helper
+- camera.rs: `CameraState`, 4방향 쿼터뷰 follow 상태, deadzone/bias/recenter policy, shared quarter-view basis/follow pose helper
 - selection.rs: world raycast 기반 hover target 상태 정의와 최소 selection update 규칙
 - chunk.rs: player 기준 interest / camera 기준 visible chunk meta 상태 정의
 - jobs.rs: jobs 결과 반영과 후속 요청 생성 규칙
@@ -150,5 +153,6 @@ NOT:
 - `MoveWorldIntent`는 local player `Velocity`에 반영된다.
 - local player `Velocity`는 같은 frame의 `FrameDeltaSeconds`를 사용해 `Transform.translation`에 적분된다.
 - 기본 local player는 bootstrap 시점에 1회 spawn된다.
-- 현재 selection은 `EcsInputSnapshot.cursor_screen_pos`와 current quarter-view camera basis를 바탕으로 world raycast를 수행해 `hovered_block`, `hovered_face`, `hit_point`를 채운다.
+- 목표 설계에서는 카메라가 quarter-view 고정 preset 위에 loose follow, deadzone, 약한 진행 방향 bias, smooth recenter를 가진다.
+- 현재 코드는 아직 selection과 render camera를 raw player transform 기준으로 만들고 있으므로, follow camera 계약은 다음 구현에서 맞춰야 한다.
 - 앞/뒤 타겟 전환, 배치 프리뷰 위치 분리, hover `0.3s` 규칙은 아직 future work다.

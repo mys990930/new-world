@@ -71,4 +71,5 @@
 ## 메모
 
 - 현재 최소 구현은 플레이어가 위치한 청크 하나를 interest 대상으로 삼아 `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` 경로를 순차적으로 연결한다.
-- render bridge는 quarter-view camera, render-ready visible chunk coord 목록, local player 큐브, 얇은 ground shadow slab, 그리고 hovered face 위의 노란 highlight slab을 렌더 입력으로 만든다.
+- 목표 구조에서 render bridge는 ECS가 계산한 quarter-view follow camera snapshot, render-ready visible chunk coord 목록, local player 큐브, 얇은 ground shadow slab, 그리고 hovered face 위의 노란 highlight slab을 렌더 입력으로 만든다.
+- 현재 코드는 아직 quarter-view camera를 local player transform 기준으로 즉석 생성하므로, follow/deadzone/recenter 구현 시 이 단계도 함께 정렬해야 한다.

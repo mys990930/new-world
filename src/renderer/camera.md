@@ -50,6 +50,7 @@
 
 ## Notes
 
-- The current prototype uses orthographic 45-degree quarter-view rendering through an explicit basis override
+- Renderer expects an orthographic 45-degree quarter-view pose through an explicit basis override
+- Loose follow, deadzone, movement bias, and smooth recenter are resolved upstream in ECS/app before the renderer sees the camera DTO
 - This keeps camera rules outside the renderer while still giving the renderer deterministic `eye / target / basis` data
 - Camera uniform upload must not apply an extra transpose; doing so skews the screen axes and collapses the cube into the wrong silhouette

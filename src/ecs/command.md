@@ -42,6 +42,7 @@
 
 - command buffer는 프레임 경계에서 clear된다.
 - 같은 프레임에 생성된 `RotateCamera`는 그 프레임의 `MoveWorldIntent` 계산 전에 반영된다.
+- `RecenterCamera`는 quarter rotation을 바꾸지 않고, camera follow target을 player-centered anchor로 되돌리는 부드러운 recenter 요청이다.
 - `MoveWorldIntent`는 continuous movement state이며 drain 대상이 아니다.
 
 ## 순서 규칙
