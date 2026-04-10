@@ -16,6 +16,14 @@ struct EnvironmentUniform {
     quality_flags: vec4<u32>,
 };
 
+struct SunShadowUniform {
+    light_view_projection: mat4x4<f32>,
+    sun_direction_shadow_strength: vec4<f32>,
+    sun_color_intensity: vec4<f32>,
+    sun_screen_position_radius: vec4<f32>,
+    shadow_params: vec4<f32>,
+};
+
 const MATERIAL_GENERIC_OPAQUE: u32 = 0u;
 const MATERIAL_GRASS: u32 = 1u;
 const MATERIAL_SOIL: u32 = 2u;
@@ -33,6 +41,12 @@ var<uniform> environment: EnvironmentUniform;
 var block_textures: texture_2d_array<f32>;
 @group(2) @binding(1)
 var block_sampler: sampler;
+@group(3) @binding(0)
+var<uniform> sun_shadow: SunShadowUniform;
+@group(3) @binding(1)
+var shadow_map: texture_depth_2d;
+@group(3) @binding(2)
+var shadow_sampler: sampler_comparison;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -67,7 +81,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 }
 
 fn sun_direction() -> vec3<f32> {
-    return normalize(environment.sun_direction_time.xyz);
+    return normalize(sun_shadow.sun_direction_shadow_strength.xyz);
 }
 
 fn luminance(color: vec3<f32>) -> f32 {
@@ -158,6 +172,32 @@ fn resolve_albedo(sampled: vec3<f32>, tint: vec3<f32>, material_kind: u32) -> ve
     return material_color_response(material_kind, contrasted);
 }
 
+fn sample_shadow(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f32>) -> f32 {
+    if sun_shadow.shadow_params.z < 0.5 {
+        return 1.0;
+    }
+
+    let clip = sun_shadow.light_view_projection * vec4<f32>(world_position, 1.0);
+    let inv_w = 1.0 / max(abs(clip.w), 0.0001);
+    let ndc = clip.xyz * inv_w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, -ndc.y * 0.5 + 0.5);
+    let depth = ndc.z;
+
+    if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth <= 0.0 || depth >= 1.0 {
+        return 1.0;
+    }
+
+    let texel = sun_shadow.shadow_params.y;
+    let bias = max(sun_shadow.shadow_params.x * (1.0 - max(dot(normal, to_light), 0.0)), 0.00035);
+    let sample_depth = depth - bias;
+
+    let a = textureSampleCompare(shadow_map, shadow_sampler, uv + vec2<f32>(-texel, -texel), sample_depth);
+    let b = textureSampleCompare(shadow_map, shadow_sampler, uv + vec2<f32>(texel, -texel), sample_depth);
+    let c = textureSampleCompare(shadow_map, shadow_sampler, uv + vec2<f32>(-texel, texel), sample_depth);
+    let d = textureSampleCompare(shadow_map, shadow_sampler, uv + vec2<f32>(texel, texel), sample_depth);
+    return (a + b + c + d) * 0.25;
+}
+
 fn apply_climate_and_weather(color: vec3<f32>, material_kind: u32) -> vec3<f32> {
     var result = color;
 
@@ -230,13 +270,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let to_light = sun_direction();
     let to_eye = normalize(camera.eye_position.xyz - input.world_position);
     let lambert = max(dot(normal, to_light), 0.0);
+    let shadow_visibility = sample_shadow(input.world_position, normal, to_light);
+    let shadow_mix =
+        mix(1.0, 0.22 + shadow_visibility * 0.78, sun_shadow.sun_direction_shadow_strength.w);
     let up_factor = max(normal.y, 0.0);
     let side_factor = 1.0 - up_factor;
     let albedo = resolve_albedo(sampled.rgb, input.color.rgb, input.material_kind);
     let ambient =
         environment.ambient_color_intensity.rgb * environment.ambient_color_intensity.w;
     let sunlight =
-        environment.sun_color_intensity.rgb * environment.sun_color_intensity.w * lambert;
+        sun_shadow.sun_color_intensity.rgb *
+        sun_shadow.sun_color_intensity.w *
+        lambert *
+        shadow_mix;
     let top_boost = 1.0 + up_factor * environment.readability.x * 0.82;
     let side_shadow = 1.0 - side_factor * environment.readability.y * 0.26;
     let warm_side_tint = mix(

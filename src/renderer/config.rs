@@ -29,7 +29,7 @@ pub enum RenderQualityTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShadowQuality {
     Off,
-    ReservedHardSun,
+    HardSun,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -125,7 +125,7 @@ impl RenderQualityConfig {
             color_grading_enabled: true,
             climate_tint_enabled: true,
             weather_tint_enabled: true,
-            shadow_quality: ShadowQuality::Off,
+            shadow_quality: ShadowQuality::HardSun,
         }
     }
 
@@ -136,7 +136,16 @@ impl RenderQualityConfig {
             color_grading_enabled: true,
             climate_tint_enabled: true,
             weather_tint_enabled: true,
-            shadow_quality: ShadowQuality::ReservedHardSun,
+            shadow_quality: ShadowQuality::HardSun,
+        }
+    }
+
+    pub const fn shadow_map_size(self) -> Option<u32> {
+        match (self.tier, self.shadow_quality) {
+            (_, ShadowQuality::Off) => None,
+            (RenderQualityTier::Medium, ShadowQuality::HardSun) => Some(1024),
+            (RenderQualityTier::High, ShadowQuality::HardSun) => Some(2048),
+            (RenderQualityTier::Low, ShadowQuality::HardSun) => Some(768),
         }
     }
 }

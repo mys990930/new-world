@@ -9,13 +9,13 @@
 - Define the `RenderSurfaceTarget` abstraction
 - Support both stub and live window-backed targets
 - Create `wgpu::Instance`, `Surface`, `Adapter`, `Device`, and `Queue`
-- Create and recreate the depth texture on resize
-- Create the camera uniform buffer and bind group
-- Create the environment uniform buffer and bind group
+- Create and recreate the main depth texture on resize
+- Create the shadow-map texture and comparison sampler
+- Create the camera, environment, and sun-shadow uniform buffers and bind groups
 - Create the block-texture bind group layout and GPU texture-array resources
 - Configure and reconfigure the surface
 - Bridge renderer bootstrap time and post-`resumed()` live attach time
-- Build the terrain, dynamic cube, and debug edge pipelines used by the current prototype
+- Build the sun overlay, shadow depth, terrain, dynamic cube, and debug edge pipelines
 
 ## Non-Responsibilities
 
@@ -36,12 +36,13 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 - A renderer created from a stub target may have no live `RendererBackend`
 - Attaching a live window creates the real `wgpu` backend
 - Resize updates `SurfaceState`, camera aspect cache, and live surface configuration together
+- Shadow-map resolution is driven by render quality rather than surface size
 
 ## Invariants
 
 - A zero-sized surface is not configured
 - Real surface configure/present only happens when a live backend exists
-- Terrain and dynamic passes share the same binding contract so the frame encoder can switch pipelines without rebinding ownership data
+- Terrain and dynamic passes share the same binding contract so the frame encoder can switch pipelines without rebinding camera/environment/texture/shadow ownership data
 
 ## Related Modules
 
@@ -51,7 +52,6 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 ## Notes
 
-- The current backend creates the terrain pipeline, dynamic cube pipeline, debug edge pipeline, camera uniform buffer, environment uniform buffer, and block-texture resources during initialization.
-- Depth resources are recreated together with surface resize.
-- When multiple sRGB surface formats are available, the current prototype prefers `Rgba8UnormSrgb` over `Bgra8UnormSrgb` so warm sunset color tuning reads predictably during bring-up.
-- The current environment uniform is the renderer-side expansion point for future day-night, weather, and climate systems.
+- The backend now creates the sun overlay pipeline, shadow depth pipeline, terrain pipeline, dynamic cube pipeline, and debug edge pipeline during initialization.
+- Shadow maps currently use a single `Depth32Float` texture plus comparison sampler.
+- Medium quality uses a smaller hard-sun map than high quality.

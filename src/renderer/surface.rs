@@ -165,6 +165,28 @@ pub(crate) struct EnvironmentUniform {
     pub quality_flags: [u32; 4],
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub(crate) struct SunShadowUniform {
+    pub light_view_projection: [[f32; 4]; 4],
+    pub sun_direction_shadow_strength: [f32; 4],
+    pub sun_color_intensity: [f32; 4],
+    pub sun_screen_position_radius: [f32; 4],
+    pub shadow_params: [f32; 4],
+}
+
+impl SunShadowUniform {
+    pub(crate) fn disabled() -> Self {
+        Self {
+            light_view_projection: super::camera::identity_matrix(),
+            sun_direction_shadow_strength: [0.0, 1.0, 0.0, 0.0],
+            sun_color_intensity: [1.0, 1.0, 1.0, 1.0],
+            sun_screen_position_radius: [0.7, 0.65, 0.08, 0.20],
+            shadow_params: [0.0015, 1.0, 0.0, 0.0],
+        }
+    }
+}
+
 impl EnvironmentUniform {
     pub(crate) fn from_settings(
         environment: &RenderEnvironment,
@@ -219,7 +241,7 @@ impl EnvironmentUniform {
                 environment.climate_temperature_bias,
                 match quality.shadow_quality {
                     super::ShadowQuality::Off => 0.0,
-                    super::ShadowQuality::ReservedHardSun => 1.0,
+                    super::ShadowQuality::HardSun => 1.0,
                 },
             ],
             readability: [
@@ -261,6 +283,60 @@ pub(crate) fn create_environment_bind_group_layout(
             },
             count: None,
         }],
+    })
+}
+
+pub(crate) fn create_shadow_pass_bind_group_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("renderer_shadow_pass_bind_group_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
+}
+
+pub(crate) fn create_shadow_sampling_bind_group_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("renderer_shadow_sampling_bind_group_layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                count: None,
+            },
+        ],
     })
 }
 
@@ -408,8 +484,13 @@ async fn create_backend(
         surface.height().max(1),
         depth_format,
     );
+    let shadow_map_size = config.quality.shadow_map_size().unwrap_or(1);
+    let (shadow_map_texture, shadow_map_view, shadow_map_sampler) =
+        create_shadow_map_resources(&device, shadow_map_size);
     let terrain_shader = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
     let dynamic_shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
+    let shadow_depth_shader = device.create_shader_module(wgpu::include_wgsl!("shadow_depth.wgsl"));
+    let sun_overlay_shader = device.create_shader_module(wgpu::include_wgsl!("sun_overlay.wgsl"));
     let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_camera_buffer"),
         size: std::mem::size_of::<super::camera::CameraUniform>() as u64,
@@ -461,6 +542,45 @@ async fn create_backend(
             resource: environment_buffer.as_entire_binding(),
         }],
     });
+    let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("renderer_sun_shadow_uniform_buffer"),
+        size: std::mem::size_of::<SunShadowUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &shadow_uniform_buffer,
+        0,
+        bytemuck::cast_slice(&[SunShadowUniform::disabled()]),
+    );
+    let shadow_pass_bind_group_layout = create_shadow_pass_bind_group_layout(&device);
+    let shadow_sampling_bind_group_layout = create_shadow_sampling_bind_group_layout(&device);
+    let shadow_pass_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("renderer_shadow_pass_bind_group"),
+        layout: &shadow_pass_bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: shadow_uniform_buffer.as_entire_binding(),
+        }],
+    });
+    let shadow_sampling_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("renderer_shadow_sampling_bind_group"),
+        layout: &shadow_sampling_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: shadow_uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&shadow_map_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&shadow_map_sampler),
+            },
+        ],
+    });
     let block_texture_bind_group_layout = create_block_texture_bind_group_layout(&device);
     let block_textures = create_gpu_block_texture_resources(
         &device,
@@ -468,19 +588,55 @@ async fn create_backend(
         &block_texture_bind_group_layout,
         block_textures,
     );
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("renderer_pipeline_layout"),
+    let main_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("renderer_main_pipeline_layout"),
         bind_group_layouts: &[
             Some(&camera_bind_group_layout),
             Some(&environment_bind_group_layout),
             Some(&block_texture_bind_group_layout),
+            Some(&shadow_sampling_bind_group_layout),
         ],
         immediate_size: 0,
+    });
+    let shadow_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("renderer_shadow_pipeline_layout"),
+        bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
+        immediate_size: 0,
+    });
+    let sun_overlay_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("renderer_sun_overlay_pipeline_layout"),
+        bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
+        immediate_size: 0,
+    });
+    let sun_overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("renderer_sun_overlay_pipeline"),
+        layout: Some(&sun_overlay_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &sun_overlay_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &sun_overlay_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
     });
     let terrain_pipeline = create_render_pipeline(
         &device,
         "renderer_terrain_pipeline",
-        &pipeline_layout,
+        &main_pipeline_layout,
         &terrain_shader,
         surface_config.format,
         Some(depth_format),
@@ -489,16 +645,50 @@ async fn create_backend(
     let dynamic_cube_pipeline = create_render_pipeline(
         &device,
         "renderer_dynamic_cube_pipeline",
-        &pipeline_layout,
+        &main_pipeline_layout,
         &dynamic_shader,
         surface_config.format,
         Some(depth_format),
         wgpu::PrimitiveTopology::TriangleList,
     );
+    let shadow_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("renderer_shadow_depth_pipeline"),
+        layout: Some(&shadow_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shadow_depth_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[super::MeshVertex::vertex_buffer_layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState {
+                constant: 2,
+                slope_scale: 2.0,
+                clamp: 0.0,
+            },
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: None,
+        multiview_mask: None,
+        cache: None,
+    });
     let debug_edge_pipeline = create_render_pipeline(
         &device,
         "renderer_debug_edge_pipeline",
-        &pipeline_layout,
+        &main_pipeline_layout,
         &dynamic_shader,
         surface_config.format,
         None,
@@ -517,10 +707,19 @@ async fn create_backend(
         camera_bind_group,
         environment_buffer,
         environment_bind_group,
+        shadow_uniform_buffer,
+        shadow_pass_bind_group,
+        shadow_sampling_bind_group,
+        _shadow_map_size: shadow_map_size,
+        _shadow_map_texture: shadow_map_texture,
+        shadow_map_view,
+        _shadow_map_sampler: shadow_map_sampler,
         block_texture_bind_group_layout,
         block_textures,
+        sun_overlay_pipeline,
         terrain_pipeline,
         dynamic_cube_pipeline,
+        shadow_depth_pipeline,
         debug_edge_pipeline,
     })
 }
@@ -678,6 +877,42 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+fn create_shadow_map_resources(
+    device: &wgpu::Device,
+    size: u32,
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::Sampler) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("renderer_shadow_map_texture"),
+        size: wgpu::Extent3d {
+            width: size.max(1),
+            height: size.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("renderer_shadow_map_view"),
+        ..Default::default()
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("renderer_shadow_map_sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        compare: Some(wgpu::CompareFunction::LessEqual),
+        ..Default::default()
+    });
+    (texture, view, sampler)
 }
 
 #[cfg(test)]

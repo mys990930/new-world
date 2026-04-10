@@ -2,8 +2,8 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use super::{
-    camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderCameraState,
-    RenderMaterialKind, RenderSurfaceError, Renderer,
+    camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderBounds,
+    RenderCameraState, RenderMaterialKind, RenderSurfaceError, Renderer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -108,6 +108,22 @@ impl Renderer {
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = 0;
 
+        let dynamic_cube_mesh = build_cube_mesh(frame.cube_instances);
+        let debug_edge_mesh = self
+            .config
+            .debug
+            .debug_overlay
+            .then(|| build_cube_edge_mesh(frame.cube_instances, frame.camera))
+            .flatten();
+        let sun_shadow_uniform = build_sun_shadow_uniform(
+            frame.camera,
+            frame.visible_chunks,
+            &self.world,
+            frame.cube_instances,
+            self.environment.current(),
+            &self.config.quality,
+        );
+
         let Some(backend) = self.backend.as_mut() else {
             self.last_stats = stats;
             return Ok(stats);
@@ -129,6 +145,54 @@ impl Renderer {
             0,
             cast_slice(&[environment_uniform]),
         );
+        backend.queue.write_buffer(
+            &backend.shadow_uniform_buffer,
+            0,
+            cast_slice(&[sun_shadow_uniform]),
+        );
+
+        let dynamic_cube_buffers = dynamic_cube_mesh
+            .as_ref()
+            .map(|(vertices, indices)| {
+                let vertex_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_vertex_buffer"),
+                            contents: cast_slice(vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                let index_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_index_buffer"),
+                            contents: cast_slice(indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+                (vertex_buffer, index_buffer, indices.len() as u32)
+            });
+        let debug_edge_buffers = debug_edge_mesh
+            .as_ref()
+            .map(|(vertices, indices)| {
+                let vertex_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_edge_vertex_buffer"),
+                            contents: cast_slice(vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                let index_buffer =
+                    backend
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("renderer_cube_edge_index_buffer"),
+                            contents: cast_slice(indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+                (vertex_buffer, index_buffer, indices.len() as u32)
+            });
 
         let surface_texture = match backend.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture)
@@ -166,6 +230,51 @@ impl Renderer {
                 label: Some("renderer_frame_encoder"),
             });
 
+        if sun_shadow_uniform.shadow_params[2] > 0.5 {
+            let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("renderer_shadow_depth_pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &backend.shadow_map_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            shadow_pass.set_pipeline(&backend.shadow_depth_pipeline);
+            shadow_pass.set_bind_group(0, &backend.shadow_pass_bind_group, &[]);
+
+            for coord in frame.visible_chunks {
+                let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
+                    continue;
+                };
+                let Some(buffers) = chunk_mesh.buffers.as_ref() else {
+                    continue;
+                };
+
+                shadow_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+                shadow_pass.set_index_buffer(
+                    buffers.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                shadow_pass.draw_indexed(0..chunk_mesh.index_count, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
+
+            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref() {
+                shadow_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                shadow_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                shadow_pass.draw_indexed(0..*index_count, 0, 0..1);
+                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+            }
+        }
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("renderer_main_pass"),
@@ -196,9 +305,15 @@ impl Renderer {
                 multiview_mask: None,
             });
 
+            render_pass.set_pipeline(&backend.sun_overlay_pipeline);
+            render_pass.set_bind_group(0, &backend.shadow_pass_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
+            stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+
             render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
             render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
+            render_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
             render_pass.set_pipeline(&backend.terrain_pipeline);
 
             for coord in frame.visible_chunks {
@@ -218,55 +333,21 @@ impl Renderer {
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
-            if let Some((vertices, indices)) = build_cube_mesh(frame.cube_instances) {
-                let vertex_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_vertex_buffer"),
-                            contents: cast_slice(&vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                let index_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_index_buffer"),
-                            contents: cast_slice(&indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
-
+            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref() {
                 render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 render_pass
                     .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                render_pass.draw_indexed(0..*index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
         }
 
         if self.config.debug.debug_overlay {
-            if let Some((edge_vertices, edge_indices)) =
-                build_cube_edge_mesh(frame.cube_instances, frame.camera)
+            if let Some((edge_vertex_buffer, edge_index_buffer, edge_index_count)) =
+                debug_edge_buffers.as_ref()
             {
-            let edge_vertex_buffer =
-                backend
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("renderer_cube_edge_vertex_buffer"),
-                        contents: cast_slice(&edge_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-            let edge_index_buffer =
-                backend
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("renderer_cube_edge_index_buffer"),
-                        contents: cast_slice(&edge_indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-
                 let mut edge_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("renderer_edge_overlay_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -288,10 +369,11 @@ impl Renderer {
                 edge_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
                 edge_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
                 edge_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
+                edge_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
                 edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
                 edge_pass
                     .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                edge_pass.draw_indexed(0..edge_indices.len() as u32, 0, 0..1);
+                edge_pass.draw_indexed(0..*edge_index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
         }
@@ -461,6 +543,389 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
     }
 }
 
+fn build_sun_shadow_uniform(
+    camera: &RenderCameraState,
+    visible_chunks: &[ChunkCoord],
+    world: &super::RenderWorld,
+    cube_instances: &[RenderCubeInstance],
+    environment: &super::RenderEnvironment,
+    quality: &super::RenderQualityConfig,
+) -> super::surface::SunShadowUniform {
+    let Some(shadow_map_size) = quality.shadow_map_size() else {
+        let mut disabled = super::surface::SunShadowUniform::disabled();
+        if let Some((sun_x, sun_y)) = project_sun_to_screen(camera, environment.sun_direction) {
+            disabled.sun_screen_position_radius[0] = sun_x;
+            disabled.sun_screen_position_radius[1] = sun_y;
+        }
+        disabled.sun_color_intensity = [
+            environment.sun_color[0],
+            environment.sun_color[1],
+            environment.sun_color[2],
+            environment.sun_intensity,
+        ];
+        disabled.sun_direction_shadow_strength = [
+            environment.sun_direction[0],
+            environment.sun_direction[1],
+            environment.sun_direction[2],
+            0.0,
+        ];
+        return disabled;
+    };
+
+    let sun_direction = normalize3(environment.sun_direction);
+    let scene_bounds =
+        scene_bounds_from_visible_geometry(visible_chunks, world, cube_instances)
+            .unwrap_or_else(|| fallback_bounds_from_camera(camera));
+    let center = [
+        (scene_bounds.min[0] + scene_bounds.max[0]) * 0.5,
+        (scene_bounds.min[1] + scene_bounds.max[1]) * 0.5,
+        (scene_bounds.min[2] + scene_bounds.max[2]) * 0.5,
+    ];
+    let extents = [
+        (scene_bounds.max[0] - scene_bounds.min[0]) * 0.5,
+        (scene_bounds.max[1] - scene_bounds.min[1]) * 0.5,
+        (scene_bounds.max[2] - scene_bounds.min[2]) * 0.5,
+    ];
+    let radius = extents[0].max(extents[1]).max(extents[2]).max(4.0);
+    let light_eye = add3(center, scale3(sun_direction, radius * 3.0 + 24.0));
+    let light_up = choose_light_up(sun_direction);
+    let light_view = look_at_rh(light_eye, center, light_up);
+    let mut light_space_bounds = transformed_bounds(scene_bounds, light_view);
+    let xy_padding = radius * 0.35 + 2.0;
+    light_space_bounds.min[0] -= xy_padding;
+    light_space_bounds.max[0] += xy_padding;
+    light_space_bounds.min[1] -= xy_padding;
+    light_space_bounds.max[1] += xy_padding;
+
+    let near_plane = (-light_space_bounds.max[2]).max(0.1);
+    let far_plane = (-light_space_bounds.min[2]).max(near_plane + 0.1) + radius * 2.0;
+    let light_projection = orthographic_bounds_rh(
+        light_space_bounds.min[0],
+        light_space_bounds.max[0],
+        light_space_bounds.min[1],
+        light_space_bounds.max[1],
+        near_plane,
+        far_plane,
+    );
+    let light_view_projection = multiply_matrix4(light_view, light_projection);
+    let (sun_screen_x, sun_screen_y) =
+        project_sun_to_screen(camera, sun_direction).unwrap_or((0.72, 0.66));
+    let shadow_strength = match quality.tier {
+        super::RenderQualityTier::Low => 0.0,
+        super::RenderQualityTier::Medium => 0.62,
+        super::RenderQualityTier::High => 0.78,
+    };
+    let sun_radius = match quality.tier {
+        super::RenderQualityTier::Low => 0.06,
+        super::RenderQualityTier::Medium => 0.075,
+        super::RenderQualityTier::High => 0.085,
+    };
+    let halo_radius = sun_radius * 2.6;
+
+    super::surface::SunShadowUniform {
+        light_view_projection,
+        sun_direction_shadow_strength: [
+            sun_direction[0],
+            sun_direction[1],
+            sun_direction[2],
+            shadow_strength,
+        ],
+        sun_color_intensity: [
+            environment.sun_color[0],
+            environment.sun_color[1],
+            environment.sun_color[2],
+            environment.sun_intensity,
+        ],
+        sun_screen_position_radius: [sun_screen_x, sun_screen_y, sun_radius, halo_radius],
+        shadow_params: [0.0015, 1.0 / shadow_map_size as f32, 1.0, shadow_map_size as f32],
+    }
+}
+
+fn scene_bounds_from_visible_geometry(
+    visible_chunks: &[ChunkCoord],
+    world: &super::RenderWorld,
+    cube_instances: &[RenderCubeInstance],
+) -> Option<RenderBounds> {
+    let mut bounds = None;
+
+    for coord in visible_chunks {
+        let Some(chunk_mesh) = world.chunk_mesh(*coord) else {
+            continue;
+        };
+        let Some(chunk_bounds) = chunk_mesh.bounds else {
+            continue;
+        };
+        expand_bounds(&mut bounds, chunk_bounds);
+    }
+
+    for cube in cube_instances {
+        let min = [
+            cube.center[0] - cube.half_extents[0],
+            cube.center[1] - cube.half_extents[1],
+            cube.center[2] - cube.half_extents[2],
+        ];
+        let max = [
+            cube.center[0] + cube.half_extents[0],
+            cube.center[1] + cube.half_extents[1],
+            cube.center[2] + cube.half_extents[2],
+        ];
+        expand_bounds(
+            &mut bounds,
+            RenderBounds {
+                min,
+                max,
+            },
+        );
+    }
+
+    bounds
+}
+
+fn fallback_bounds_from_camera(camera: &RenderCameraState) -> RenderBounds {
+    RenderBounds {
+        min: [
+            camera.target[0] - 8.0,
+            camera.target[1] - 2.0,
+            camera.target[2] - 8.0,
+        ],
+        max: [
+            camera.target[0] + 8.0,
+            camera.target[1] + 10.0,
+            camera.target[2] + 8.0,
+        ],
+    }
+}
+
+fn project_sun_to_screen(camera: &RenderCameraState, sun_direction: [f32; 3]) -> Option<(f32, f32)> {
+    let view_projection = camera_view_projection(camera)?;
+    let sun_anchor = add3(camera.target, scale3(normalize3(sun_direction), 96.0));
+    let clip = multiply_row_vector(
+        [sun_anchor[0], sun_anchor[1], sun_anchor[2], 1.0],
+        view_projection,
+    );
+    let w = if clip[3].abs() <= f32::EPSILON { 1.0 } else { clip[3] };
+    Some((clip[0] / w, clip[1] / w))
+}
+
+fn camera_view_projection(camera: &RenderCameraState) -> Option<[[f32; 4]; 4]> {
+    let aspect = camera.aspect_override.unwrap_or(1.0).max(0.0001);
+    let view = match camera.basis_override {
+        Some(basis) => view_from_basis(camera.eye, basis)?,
+        None => look_at_rh(camera.eye, camera.target, camera.up),
+    };
+    let projection = match camera.projection_mode {
+        super::RenderProjectionMode::Perspective => perspective_rh(
+            std::f32::consts::FRAC_PI_3,
+            aspect,
+            0.1,
+            1_000.0,
+        )?,
+        super::RenderProjectionMode::Orthographic {
+            vertical_world_size,
+        } => orthographic_symmetric_rh(aspect, vertical_world_size, 0.1, 1_000.0)?,
+    };
+    Some(multiply_matrix4(view, projection))
+}
+
+fn expand_bounds(bounds: &mut Option<RenderBounds>, next: RenderBounds) {
+    match bounds {
+        Some(bounds) => {
+            bounds.min[0] = bounds.min[0].min(next.min[0]);
+            bounds.min[1] = bounds.min[1].min(next.min[1]);
+            bounds.min[2] = bounds.min[2].min(next.min[2]);
+            bounds.max[0] = bounds.max[0].max(next.max[0]);
+            bounds.max[1] = bounds.max[1].max(next.max[1]);
+            bounds.max[2] = bounds.max[2].max(next.max[2]);
+        }
+        None => *bounds = Some(next),
+    }
+}
+
+fn transformed_bounds(bounds: RenderBounds, matrix: [[f32; 4]; 4]) -> RenderBounds {
+    let mut transformed = None;
+    for corner in bounds_corners(bounds) {
+        let point = multiply_row_vector([corner[0], corner[1], corner[2], 1.0], matrix);
+        expand_bounds(
+            &mut transformed,
+            RenderBounds {
+                min: [point[0], point[1], point[2]],
+                max: [point[0], point[1], point[2]],
+            },
+        );
+    }
+    transformed.expect("bounds corners should produce a transformed bound")
+}
+
+fn bounds_corners(bounds: RenderBounds) -> [[f32; 3]; 8] {
+    let [min_x, min_y, min_z] = bounds.min;
+    let [max_x, max_y, max_z] = bounds.max;
+    [
+        [min_x, min_y, min_z],
+        [max_x, min_y, min_z],
+        [min_x, max_y, min_z],
+        [max_x, max_y, min_z],
+        [min_x, min_y, max_z],
+        [max_x, min_y, max_z],
+        [min_x, max_y, max_z],
+        [max_x, max_y, max_z],
+    ]
+}
+
+fn choose_light_up(direction: [f32; 3]) -> [f32; 3] {
+    if direction[1].abs() > 0.94 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    }
+}
+
+fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+fn subtract3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn multiply_row_vector(vector: [f32; 4], matrix: [[f32; 4]; 4]) -> [f32; 4] {
+    let mut result = [0.0; 4];
+    for column in 0..4 {
+        result[column] = (0..4).map(|index| vector[index] * matrix[index][column]).sum();
+    }
+    result
+}
+
+fn multiply_matrix4(left: [[f32; 4]; 4], right: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut result = [[0.0; 4]; 4];
+    for row in 0..4 {
+        for col in 0..4 {
+            result[row][col] = (0..4).map(|idx| left[row][idx] * right[idx][col]).sum();
+        }
+    }
+    result
+}
+
+fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
+    let forward = normalize3(subtract3(target, eye));
+    let right = normalize3(cross3(forward, up));
+    let recalculated_up = cross3(right, forward);
+
+    [
+        [right[0], recalculated_up[0], -forward[0], 0.0],
+        [right[1], recalculated_up[1], -forward[1], 0.0],
+        [right[2], recalculated_up[2], -forward[2], 0.0],
+        [
+            -dot3(right, eye),
+            -dot3(recalculated_up, eye),
+            dot3(forward, eye),
+            1.0,
+        ],
+    ]
+}
+
+fn view_from_basis(
+    eye: [f32; 3],
+    basis: super::RenderViewBasis,
+) -> Option<[[f32; 4]; 4]> {
+    let right = normalize3(basis.right);
+    let up = normalize3(basis.up);
+    let forward = normalize3(basis.forward);
+
+    Some([
+        [right[0], up[0], -forward[0], 0.0],
+        [right[1], up[1], -forward[1], 0.0],
+        [right[2], up[2], -forward[2], 0.0],
+        [
+            -dot3(right, eye),
+            -dot3(up, eye),
+            dot3(forward, eye),
+            1.0,
+        ],
+    ])
+}
+
+fn perspective_rh(
+    vertical_fov_radians: f32,
+    aspect_ratio: f32,
+    near_plane: f32,
+    far_plane: f32,
+) -> Option<[[f32; 4]; 4]> {
+    if vertical_fov_radians <= 0.0
+        || aspect_ratio <= 0.0
+        || near_plane <= 0.0
+        || far_plane <= near_plane
+    {
+        return None;
+    }
+
+    let focal_length = 1.0 / (vertical_fov_radians * 0.5).tan();
+    Some([
+        [focal_length / aspect_ratio, 0.0, 0.0, 0.0],
+        [0.0, focal_length, 0.0, 0.0],
+        [0.0, 0.0, far_plane / (near_plane - far_plane), -1.0],
+        [0.0, 0.0, (near_plane * far_plane) / (near_plane - far_plane), 0.0],
+    ])
+}
+
+fn orthographic_symmetric_rh(
+    aspect_ratio: f32,
+    vertical_world_size: f32,
+    near_plane: f32,
+    far_plane: f32,
+) -> Option<[[f32; 4]; 4]> {
+    if aspect_ratio <= 0.0
+        || vertical_world_size <= 0.0
+        || near_plane <= 0.0
+        || far_plane <= near_plane
+    {
+        return None;
+    }
+
+    let half_height = vertical_world_size * 0.5;
+    let half_width = half_height * aspect_ratio;
+    Some(orthographic_bounds_rh(
+        -half_width,
+        half_width,
+        -half_height,
+        half_height,
+        near_plane,
+        far_plane,
+    ))
+}
+
+fn orthographic_bounds_rh(
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    near_plane: f32,
+    far_plane: f32,
+) -> [[f32; 4]; 4] {
+    [
+        [2.0 / (right - left), 0.0, 0.0, 0.0],
+        [0.0, 2.0 / (top - bottom), 0.0, 0.0],
+        [0.0, 0.0, 1.0 / (near_plane - far_plane), 0.0],
+        [
+            -(right + left) / (right - left),
+            -(top + bottom) / (top - bottom),
+            near_plane / (near_plane - far_plane),
+            1.0,
+        ],
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -471,7 +936,8 @@ mod tests {
     use super::*;
     use crate::renderer::{
         surface::{
-            create_environment_bind_group_layout, default_environment_uniform, EnvironmentUniform,
+            create_environment_bind_group_layout, create_shadow_sampling_bind_group_layout,
+            default_environment_uniform, EnvironmentUniform, SunShadowUniform,
         },
         CameraGpuState, CameraProjectionConfig, RenderProjectionMode, RenderViewBasis,
     };
@@ -619,6 +1085,61 @@ mod tests {
                 resource: environment_buffer.as_entire_binding(),
             }],
         });
+        let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("offscreen_shadow_uniform_buffer"),
+            size: std::mem::size_of::<SunShadowUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &shadow_uniform_buffer,
+            0,
+            cast_slice(&[SunShadowUniform::disabled()]),
+        );
+        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen_shadow_texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let shadow_bind_group_layout = create_shadow_sampling_bind_group_layout(&device);
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("offscreen_shadow_bind_group"),
+            layout: &shadow_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: shadow_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
         let block_texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("offscreen_block_texture_bind_group_layout"),
@@ -704,6 +1225,7 @@ mod tests {
                 Some(&camera_bind_group_layout),
                 Some(&environment_bind_group_layout),
                 Some(&block_texture_bind_group_layout),
+                Some(&shadow_bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -842,6 +1364,7 @@ mod tests {
             render_pass.set_bind_group(0, &camera_bind_group, &[]);
             render_pass.set_bind_group(1, &environment_bind_group, &[]);
             render_pass.set_bind_group(2, &block_texture_bind_group, &[]);
+            render_pass.set_bind_group(3, &shadow_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);

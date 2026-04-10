@@ -10,8 +10,11 @@
 - update GPU camera state
 - upload the camera uniform
 - upload the environment uniform
+- upload the sun-shadow uniform
 - acquire the surface texture
+- render the shadow depth pass
 - clear and use the depth buffer
+- draw the visible sun overlay
 - bind the block texture array
 - draw uploaded chunk meshes for the current `visible_chunks`
 - expand `cube_instances` into a cube mesh with per-face normals
@@ -41,16 +44,19 @@
 1. Update frame index and stats.
 2. Update `RenderCameraState` into `CameraGpuState`.
 3. Resolve the clear color from the active renderer environment unless the app overrides it.
-4. Upload camera and environment uniforms.
-5. Draw terrain chunk meshes with texture layers plus material kinds.
-6. Draw dynamic cube instances with renderer material kinds such as actor, shadow, and highlight.
-7. Submit and present.
+4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds.
+5. Upload camera, environment, and sun-shadow uniforms.
+6. Render the shadow map when the active quality preset enables it.
+7. Begin the main color pass, draw the visible sun overlay, then draw terrain and dynamic cubes.
+8. Optionally draw the debug edge overlay pass.
+9. Submit and present.
 
 ## Invariants
 
 - renderer only sees render-ready DTOs such as `RenderCubeInstance`
 - if there is no live backend or the surface is not configured, nothing is presented
 - terrain and dynamic cubes share bind groups but not shader logic
+- visible-sun and shadow-map calculations are renderer-local and derive from current render state only
 
 ## Related Modules
 
@@ -60,5 +66,6 @@
 
 ## Notes
 
-- The terrain shader now tries to preserve texture readability before atmosphere/fog grading is applied.
-- Dynamic cube instances can be tagged as `Actor`, `Shadow`, or `Highlight` so they no longer all shade as the same generic white cube.
+- The current shadow solution is a single directional hard-sun map fit to visible terrain/cube bounds.
+- The visible sun is a full-screen overlay pass positioned from the current sun direction projected into the active camera.
+- Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.

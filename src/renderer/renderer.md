@@ -10,10 +10,11 @@
 - Renderer bootstrap and GPU context setup
 - Stub surface state and live window surface attach
 - Surface configure / resize handling
-- Render pipeline, shader, camera uniform, and environment uniform management
+- Render pipeline, shader, camera uniform, environment uniform, and sun-shadow uniform management
 - Block texture array decoding policy and GPU bind-group management
+- Visible sun overlay and directional shadow-map rendering
 - Consume renderer material kinds and run material-aware shading
-- Depth buffer creation and recreation
+- Depth buffer and shadow-map creation/recreation
 - CPU render DTO -> GPU draw command conversion
 - Submit / present / recoverable render error propagation
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
@@ -53,7 +54,7 @@
 - environment tuning
   - swap the current sunset / weather / climate values without changing app-facing DTO shape
 - frame render
-  - accept `RenderFrameInput`, update camera and environment uniforms, draw terrain chunks plus dynamic cubes, and present
+  - accept `RenderFrameInput`, update camera / environment / sun-shadow uniforms, render the shadow map, draw the visible sun, draw terrain and dynamic cubes, and present
 
 ### Public Interface
 
@@ -89,11 +90,14 @@ NOT:
 3. GPU resource creation and destruction happen only inside the renderer.
 4. Block textures are uploaded as a same-size `texture_2d_array`, and mesh vertices address them by `texture_layer`.
 5. Mesh vertices also carry `material_kind`, but the renderer only interprets renderer-side shading enums and never queries world block definitions directly.
-6. Terrain and dynamic cubes use different shader modules while sharing the same camera / environment / texture binding contract.
+6. The visible sun and shadow-map logic are renderer-owned visualizations of the current environment state, not gameplay-owned world objects.
 
 ### Current Implementation Notes
 
-- Uploaded chunk terrain now includes material classification from the world registry.
-- The terrain shader preserves more raw texture detail before fog and color grading, so dirt/grass/stone read more clearly in quarter view.
-- Dynamic cube instances now distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
-- The default environment is still a fixed sunset quarter-view preset with low/medium/high quality flags for future extension.
+- Uploaded chunk terrain includes material classification from the world registry.
+- The terrain shader preserves more raw texture detail before atmosphere/fog grading, so dirt/grass/stone read more clearly in quarter view.
+- A visible sun overlay is now drawn from the current `sun_direction`.
+- Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
+- The current shadow solution is a single hard-sun shadow map sized by quality tier.
+- Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
+- The default environment is still a fixed sunset quarter-view preset, but medium/high quality now enable the shadow-map path.
