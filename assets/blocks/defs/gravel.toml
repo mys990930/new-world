@@ -1,0 +1,9 @@
+id = 5
+key = "gravel"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "gravel"
+bottom = "gravel"
+side = "gravel"

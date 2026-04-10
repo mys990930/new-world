@@ -134,5 +134,6 @@ NOT:
 
 - The default block registry is loaded from `assets/blocks/index.toml`.
 - Registry entries now carry an explicit or inferred `BlockMaterialKind` in addition to face textures and tint.
+- Chunk generation now consumes atlas fields inside `world::generation` and realizes a first-pass layered terrain model around fixed sea level `y = 0`.
 - Meshing emits `material_kind` per vertex so renderer shaders can react differently to grass, soil, stone, and future categories without the renderer owning block semantics.
 - Renderer conversion still happens through `jobs/app::bridge`; world does not upload directly to the GPU.

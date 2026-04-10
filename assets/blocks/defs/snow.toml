@@ -1,0 +1,9 @@
+id = 7
+key = "snow"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "snow"
+bottom = "snow"
+side = "snow"

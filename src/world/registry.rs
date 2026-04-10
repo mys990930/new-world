@@ -457,5 +457,10 @@ mod tests {
             registry.block_or_missing(BlockId::STONE).material,
             BlockMaterialKind::Stone
         );
+        assert!(registry.block_id("sand").is_some());
+        assert!(registry.block_id("gravel").is_some());
+        assert!(registry.block_id("mud").is_some());
+        assert!(registry.block_id("snow").is_some());
+        assert!(registry.block_id("water").is_some());
     }
 }

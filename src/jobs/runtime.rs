@@ -123,17 +123,18 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::world::{BlockId, BlockRegistry, ChunkCoord, LocalBlockCoord, NeighborChunks, WorldMeta};
+    use crate::world::{BlockRegistry, ChunkCoord, LocalBlockCoord, NeighborChunks, WorldMeta};
 
     fn test_registry() -> Arc<BlockRegistry> {
         Arc::new(BlockRegistry::load_default().expect("default registry should load"))
     }
 
     #[test]
-    fn generate_then_mesh_jobs_produce_plane_chunk_outputs() {
+    fn generate_then_mesh_jobs_produce_chunk_outputs() {
         let mut jobs = JobSystem::new(JobConfig::default());
-        let coord = ChunkCoord(0, 0, 0);
+        let coord = ChunkCoord(0, -8, 0);
         let registry = test_registry();
+        let stone = registry.block_id("stone").expect("stone block should exist");
 
         assert_eq!(
             jobs.submit(JobRequest::GenerateChunk {
@@ -151,11 +152,11 @@ mod tests {
                 assert_eq!(found, coord);
                 assert_eq!(
                     chunk.get_block(LocalBlockCoord::new(3, 0, 5).unwrap()),
-                    Some(BlockId::GRASS)
+                    Some(stone)
                 );
                 assert_eq!(
-                    chunk.get_block(LocalBlockCoord::new(3, 1, 5).unwrap()),
-                    Some(BlockId::AIR)
+                    chunk.get_block(LocalBlockCoord::new(3, 31, 5).unwrap()),
+                    Some(stone)
                 );
                 chunk
             }

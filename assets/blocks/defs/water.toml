@@ -1,0 +1,9 @@
+id = 8
+key = "water"
+solid = false
+opaque = false
+render = "cube"
+material = "water"
+top = "water"
+bottom = "water"
+side = "water"

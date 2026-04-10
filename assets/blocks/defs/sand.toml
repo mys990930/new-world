@@ -1,0 +1,9 @@
+id = 4
+key = "sand"
+solid = true
+opaque = true
+render = "cube"
+material = "sand"
+top = "sand"
+bottom = "sand"
+side = "sand"

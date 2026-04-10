@@ -1,0 +1,9 @@
+id = 6
+key = "mud"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "mud"
+bottom = "mud"
+side = "mud"

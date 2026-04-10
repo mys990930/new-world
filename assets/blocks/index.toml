@@ -10,6 +10,11 @@ block_files = [
   "defs/grass.toml",
   "defs/dirt.toml",
   "defs/stone.toml",
+  "defs/sand.toml",
+  "defs/gravel.toml",
+  "defs/mud.toml",
+  "defs/snow.toml",
+  "defs/water.toml",
 ]
 
 [[textures]]
@@ -27,3 +32,23 @@ path = "textures/dirt.png"
 [[textures]]
 key = "stone"
 path = "textures/stone.png"
+
+[[textures]]
+key = "sand"
+path = "textures/sand.png"
+
+[[textures]]
+key = "gravel"
+path = "textures/gravel.png"
+
+[[textures]]
+key = "mud"
+path = "textures/mud.png"
+
+[[textures]]
+key = "snow"
+path = "textures/snow.png"
+
+[[textures]]
+key = "water"
+path = "textures/water.png"

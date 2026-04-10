@@ -34,7 +34,7 @@ pub use core::WorldCore;
 #[allow(unused_imports)]
 pub use edit::{EditError, EditResult, WorldEdit};
 #[allow(unused_imports)]
-pub use generation::{FLAT_WORLD_SURFACE_Y, generate_chunk};
+pub use generation::{FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, WORLD_FLOOR_Y, generate_chunk};
 #[allow(unused_imports)]
 pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
 #[allow(unused_imports)]

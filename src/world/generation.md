@@ -1,46 +1,38 @@
 # generation
 
-## 역할
+## Role
 
-- 월드 seed와 좌표를 바탕으로 새 청크의 원본 데이터를 계산한다.
-- 절차 생성 결과를 `ChunkData`로 표현하는 계약을 정의한다.
-- atlas가 도입된 이후에는 atlas-scale 환경 해석 결과를 chunk realization 입력으로 소비하는 확장 지점을 가진다.
+- Turn `WorldMeta.seed`, chunk coordinates, and atlas-scale macro inputs into deterministic `ChunkData`.
+- Own chunk realization rules such as surface height, water fill, and block-layer composition.
+- Consume atlas fields as input, but remain the module that decides actual block placement.
 
-## 책임
+## Responsibilities
 
-- `ChunkCoord` 기준 생성 진입점 정의
-- terrain/biome/block 배치 결과 계산
-- 생성 결과를 `ChunkData`로 구성
-- deterministic generation 보장
+- Define the chunk-generation entry point and its deterministic contract.
+- Sample atlas-scale macro environment data needed for chunk realization.
+- Convert atlas fields into per-column surface elevation around a fixed sea level.
+- Fill stone core, sediment/topsoil layers, and sea water blocks into `ChunkData`.
+- Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
 
-## 비책임
+## Non-Responsibilities
 
-- loaded chunk map 삽입
-- save/load
-- async scheduling
-- meshing
-- gameplay rule 계산
+- Owning atlas field generation itself
+- Mutating live world storage
+- Async worker orchestration
+- Meshing
+- Vegetation, trees, grass props, or ecology placement
 
-## 입력
+## Inputs
 
 - `ChunkCoord`
 - `WorldMeta`
 - `BlockRegistry`
 
-## 출력
+## Outputs
 
-- 새 `ChunkData`
+- `ChunkData`
 
-## 처리 흐름
-
-1. `WorldMeta.seed`와 청크 좌표를 바탕으로 생성 입력을 만든다.
-2. 장기적으로는 atlas/biome resolver 결과를 조회해 chunk-level realization 입력을 만든다.
-3. registry에서 필요한 block id를 조회한다.
-4. 현재 최소 구현은 청크의 world-space `y = 0` layer 중 로컬 `(1..=5, 1..=5)` 범위만 채우는 flat patch 규칙을 사용한다.
-5. 각 로컬 블록 상태를 계산해 `ChunkData`에 채운다.
-6. 완성된 청크를 반환한다.
-
-## 공개 인터페이스
+## Public Interface
 
 ```rust
 generation::generate_chunk(
@@ -50,26 +42,49 @@ generation::generate_chunk(
 ) -> ChunkData
 ```
 
-## 불변식
+## Current First-Pass Realization Contract
 
-- 같은 `(seed, generator_version, coord)` 입력이면 같은 `ChunkData`가 나와야 한다.
-- 생성 결과는 청크 크기와 좌표 규칙을 위반하면 안 된다.
-- generation은 loaded world state를 직접 mutate하지 않는다.
-- 생성 결과는 renderer용 메쉬가 아니라 원본 월드 데이터다.
-- generation은 block 정의를 registry에서 읽고, texture 파일을 직접 열지 않는다.
+- Sea level is fixed at world-space `y = 0`.
+- The generator treats atlas as macro input and performs block placement inside `world::generation`.
+- For each `(x, z)` column in the chunk:
+  1. Sample atlas-derived macro inputs and convert them into a signed surface elevation.
+  2. Pick a stone-core ceiling at `surface_y - random(8..=16)`.
+  3. Fill `stone` from world `y = -256` up through that ceiling.
+  4. Fill the layer above the stone core up to `surface_y` using material rules:
+     - deep ocean floor: `mud`
+     - shallow ocean floor: `sand` and `mud`, with extra `gravel` when it is not river-connected
+     - river headwaters: `gravel`
+     - river middle reaches: `gravel` and `sand`
+     - river lower reaches: `mud` and `sand`
+     - coast: `sand`
+     - desert: `sand`
+     - alpine or polar terrain: `snow`
+     - otherwise: `dirt`, with `grass` on the surface block
+  5. If `surface_y < 0`, fill `water` from `surface_y + 1` through sea level.
+- Tree, grass, and ecology placement are explicitly out of scope for this first pass.
 
-## 관련 모듈
+## Processing Flow
+
+1. Map the target chunk to the atlas neighborhood needed for macro sampling.
+2. Generate atlas fields for that neighborhood.
+3. Interpolate the atlas signals per block column inside the chunk.
+4. Convert atlas signals into signed surface elevation and sediment profile selection.
+5. Write block ids into `ChunkData`.
+6. Return the finished chunk without mutating any live world state.
+
+## Invariants
+
+1. The same `(seed, generator_version, coord)` must always produce the same `ChunkData`.
+2. `world::generation` owns block placement; `world::atlas` does not place blocks directly.
+3. Sea level remains fixed at world-space `y = 0` for this generator version.
+4. Blocks below world-space `y = -256` are outside the current generated volume.
+5. Generation reads block meaning through `BlockRegistry`; it does not own texture or renderer policy.
+
+## Related Modules
 
 - `meta.md`
 - `coord.md`
 - `chunk.md`
-- `core.md`
 - `registry.md`
 - `atlas/atlas.md`
-- `jobs`
-
-## 메모
-
-- 현재 최소 구현은 registry에 `"grass"` key가 있으면 `world y = 0`에 로컬 `(1,1)`부터 `(5,5)`까지의 grass block patch만 생성한다.
-- 기본 manifest에서 `"grass"`가 빠지면 generator는 조용히 empty chunk를 반환한다.
-- atlas prototype은 먼저 별도 debug binary에서 거시 필드와 biome preview를 검증하고, chunk realization 연결은 후속 단계에서 붙인다.
+- `jobs/jobs.md`
