@@ -10,8 +10,9 @@
 - sample atlas inputs
 - resolve the terrain profile
 - compute `surface_y`
-- write `stone` through the surface
+- write the pre-material terrain scaffold through the surface
 
 ## Notes
 
 - The realization pass is still intentionally simple above the surface: everything above `surface_y` is air until later material and fluid passes are added.
+- The filled block is currently `terrain_debug`, a neutral placeholder for pre-material terrain inspection.

@@ -32,7 +32,7 @@
 - `generator_version = 4` corresponds to the current profile-driven atlas relief pass with:
   - fixed sea level at world `y = 0`
   - generation-side terrain profile resolution (`DeepOcean`, `Shelf`, `Coast`, `Plain`, `Upland`, `Ridge`)
-  - solid `stone` terrain from world `y = -256` through profile-shaped `surface_y`
+  - solid pre-material `terrain_debug` scaffold from world `y = -256` through profile-shaped `surface_y`
   - air above the surface, including negative-height sea basins
   - no water, soil, sand, snow, vegetation, or ecology placement yet
 - `save_format_version` is still `1`.

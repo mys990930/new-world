@@ -1,0 +1,10 @@
+id = 9
+key = "terrain_debug"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "__white"
+bottom = "__white"
+side = "__white"
+tint = [162, 172, 184, 255]

@@ -10,6 +10,7 @@ block_files = [
   "defs/grass.toml",
   "defs/dirt.toml",
   "defs/stone.toml",
+  "defs/terrain_debug.toml",
   "defs/sand.toml",
   "defs/gravel.toml",
   "defs/mud.toml",

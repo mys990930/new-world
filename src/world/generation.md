@@ -52,10 +52,10 @@ generation::generate_chunk(
   1. Sample and bilerp atlas-derived macro inputs from the surrounding atlas cells.
   2. Resolve a generation-side `TerrainProfile`.
   3. Use the profile's surface shaper plus block-scale deterministic relief noise to compute a signed `surface_y`.
-  4. Fill `stone` from world `y = -256` through `surface_y`.
+  4. Fill the pre-material `terrain_debug` scaffold block from world `y = -256` through `surface_y`.
   5. Leave everything above `surface_y` as air, including ocean space above negative-height seabeds.
 - This phase intentionally does not place `water`, `grass`, `dirt`, `sand`, `mud`, `snow`, trees, or ecology.
-- The purpose of this phase is to verify that atlas-driven macro relief such as sea basins, coasts, rivers, and ridges reads well in raw stone form before material layering begins.
+- The purpose of this phase is to verify that atlas-driven macro relief such as sea basins, coasts, rivers, and ridges reads well before material layering begins.
 
 ## Processing Flow
 
@@ -73,7 +73,7 @@ generation::generate_chunk(
 2. `world::generation` owns block placement; `world::atlas` does not place blocks directly.
 3. Sea level remains fixed at world-space `y = 0` for this generator version.
 4. Blocks below world-space `y = -256` are outside the current generated volume.
-5. The current generator version emits only `stone` and `air`.
+5. The current generator version emits only `terrain_debug` and `air`.
 6. Generation reads block meaning through `BlockRegistry`; it does not own texture or renderer policy.
 
 ## Internal Submodules

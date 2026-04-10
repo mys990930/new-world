@@ -291,13 +291,15 @@ mod tests {
         let meta = WorldMeta::new(42);
         let coord = ChunkCoord(0, -8, 0);
         let registry = test_registry();
-        let stone = registry.block_id("stone").expect("stone block should exist");
+        let terrain = registry
+            .block_id("terrain_debug")
+            .expect("terrain_debug block should exist");
         let chunk = generate_chunk(coord, &meta, registry.as_ref());
         let mut world = WorldCore::new(meta, registry);
         world.insert_chunk(coord, chunk);
 
-        assert_eq!(world.get_block(WorldBlockCoord(2, -256, 3)), Some(stone));
-        assert_eq!(world.get_block(WorldBlockCoord(2, -225, 3)), Some(stone));
+        assert_eq!(world.get_block(WorldBlockCoord(2, -256, 3)), Some(terrain));
+        assert_eq!(world.get_block(WorldBlockCoord(2, -225, 3)), Some(terrain));
     }
 
     #[test]

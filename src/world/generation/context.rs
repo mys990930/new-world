@@ -4,13 +4,16 @@ use super::super::registry::BlockRegistry;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GenerationPalette {
-    pub stone: BlockId,
+    pub terrain: BlockId,
 }
 
 impl GenerationPalette {
     pub(super) fn from_registry(registry: &BlockRegistry) -> Self {
         Self {
-            stone: registry.block_id("stone").unwrap_or(BlockId::STONE),
+            terrain: registry
+                .block_id("terrain_debug")
+                .or_else(|| registry.block_id("stone"))
+                .unwrap_or(BlockId::STONE),
         }
     }
 }

@@ -41,16 +41,18 @@ mod tests {
     fn generation_fills_world_floor_chunk_with_stone() {
         let meta = WorldMeta::new(7);
         let registry = test_registry();
-        let stone = registry.block_id("stone").expect("stone block should exist");
+        let terrain = registry
+            .block_id("terrain_debug")
+            .expect("terrain_debug block should exist");
         let chunk = generate_chunk(ChunkCoord(0, -8, 0), &meta, &registry);
 
         assert_eq!(
             chunk.get_block(LocalBlockCoord::new(0, 0, 0).unwrap()),
-            Some(stone)
+            Some(terrain)
         );
         assert_eq!(
             chunk.get_block(LocalBlockCoord::new(31, 31, 31).unwrap()),
-            Some(stone)
+            Some(terrain)
         );
     }
 
@@ -63,9 +65,9 @@ mod tests {
             profile: TerrainProfile::Plain,
         };
 
-        assert_eq!(block_for_world_y(4, column, palette), palette.stone);
-        assert_eq!(block_for_world_y(3, column, palette), palette.stone);
-        assert_eq!(block_for_world_y(-6, column, palette), palette.stone);
+        assert_eq!(block_for_world_y(4, column, palette), palette.terrain);
+        assert_eq!(block_for_world_y(3, column, palette), palette.terrain);
+        assert_eq!(block_for_world_y(-6, column, palette), palette.terrain);
         assert_eq!(block_for_world_y(5, column, palette), BlockId::AIR);
     }
 
@@ -78,8 +80,8 @@ mod tests {
             profile: TerrainProfile::DeepOcean,
         };
 
-        assert_eq!(block_for_world_y(-24, column, palette), palette.stone);
-        assert_eq!(block_for_world_y(-18, column, palette), palette.stone);
+        assert_eq!(block_for_world_y(-24, column, palette), palette.terrain);
+        assert_eq!(block_for_world_y(-18, column, palette), palette.terrain);
         assert_eq!(block_for_world_y(-17, column, palette), BlockId::AIR);
         assert_eq!(block_for_world_y(0, column, palette), BlockId::AIR);
     }

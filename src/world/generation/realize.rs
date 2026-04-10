@@ -50,7 +50,7 @@ pub(super) fn block_for_world_y(
     }
 
     if world_y <= column.surface_y {
-        return palette.stone;
+        return palette.terrain;
     }
 
     BlockId::AIR
