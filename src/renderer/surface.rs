@@ -618,7 +618,13 @@ async fn create_backend(
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &sun_overlay_shader,
