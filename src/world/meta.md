@@ -29,8 +29,9 @@
 
 ## Current Notes
 
-- `generator_version = 2` corresponds to the first atlas-driven chunk realization pass with:
+- `generator_version = 3` corresponds to the current atlas-driven relief-inspection pass with:
   - fixed sea level at world `y = 0`
-  - stone core from world `y = -256`
-  - layered ocean, river, coast, desert, alpine/polar, and default soil fill rules
+  - solid `stone` terrain from world `y = -256` through atlas-derived `surface_y`
+  - air above the surface, including negative-height sea basins
+  - no water, soil, sand, snow, vegetation, or ecology placement yet
 - `save_format_version` is still `1`.

@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use new_world::ecs::{
@@ -13,19 +13,26 @@ use new_world::renderer::{
     RenderViewBasis, render_offscreen, write_offscreen_png,
 };
 use new_world::world::{
-    BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, SEA_LEVEL_Y, TextureTileSource,
-    WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta, build_chunk_mesh, generate_chunk,
+    BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, TextureTileSource, WORLD_FLOOR_Y,
+    WorldCore, WorldMeta, build_chunk_mesh, generate_chunk,
 };
+
+#[path = "shared/world_dump_common.rs"]
+mod world_dump_common;
+
+use world_dump_common::{BakedWorldManifest, load_chunk_from_dump, read_manifest};
 
 const DEFAULT_RENDER_RADIUS: i32 = 4;
 const DEFAULT_RENDER_PADDING: i32 = 2;
 const DEFAULT_IMAGE_WIDTH: u32 = 1600;
 const DEFAULT_IMAGE_HEIGHT: u32 = 900;
-const DEFAULT_RENDER_MIN_Y_CHUNK: i32 = -2;
-const DEFAULT_RENDER_MAX_Y_CHUNK: i32 = 3;
-const AUTO_SEARCH_MIN_CHUNK: i32 = -256;
-const AUTO_SEARCH_MAX_CHUNK: i32 = 256;
-const AUTO_SEARCH_STEP: i32 = 16;
+const DEFAULT_MAX_Y_CHUNK: i32 = 3;
+
+#[derive(Debug, Clone)]
+enum PreviewSource {
+    Seed(u64),
+    BakedWorld(PathBuf),
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
@@ -33,7 +40,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(cli_error(usage()));
     }
 
-    let seed = parse_required::<u64>(&mut args, "seed")?;
+    let source = if args.first().map(String::as_str) == Some("--world-dir") {
+        args.remove(0);
+        PreviewSource::BakedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
+    } else {
+        PreviewSource::Seed(parse_required::<u64>(&mut args, "seed")?)
+    };
+
     let mut center_x = 0_i32;
     let mut center_z = 0_i32;
     let mut center_explicit = false;
@@ -41,9 +54,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut quarter_turns = 0_u8;
     let mut width = DEFAULT_IMAGE_WIDTH;
     let mut height = DEFAULT_IMAGE_HEIGHT;
-    let mut output = PathBuf::from(format!(
-        "target/chunk-preview/seed_{seed}_cx0_cz0_r{DEFAULT_RENDER_RADIUS}.png"
-    ));
+    let mut min_y_chunk = WORLD_FLOOR_Y.div_euclid(CHUNK_EDGE_I32);
+    let mut max_y_chunk = DEFAULT_MAX_Y_CHUNK;
+    let mut output: Option<PathBuf> = None;
 
     while let Some(flag) = args.first().cloned() {
         args.remove(0);
@@ -60,7 +73,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--quarter-turns" => quarter_turns = parse_required::<u8>(&mut args, "quarter-turns")?,
             "--width" => width = parse_required::<u32>(&mut args, "width")?,
             "--height" => height = parse_required::<u32>(&mut args, "height")?,
-            "--output" => output = PathBuf::from(parse_required::<String>(&mut args, "output")?),
+            "--min-y-chunk" => min_y_chunk = parse_required::<i32>(&mut args, "min-y-chunk")?,
+            "--max-y-chunk" => max_y_chunk = parse_required::<i32>(&mut args, "max-y-chunk")?,
+            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -68,62 +83,82 @@ fn main() -> Result<(), Box<dyn Error>> {
     if radius < 0 {
         return Err(cli_error("radius must be non-negative"));
     }
-
-    if output == PathBuf::from(format!(
-        "target/chunk-preview/seed_{seed}_cx0_cz0_r{DEFAULT_RENDER_RADIUS}.png"
-    )) {
-        output = PathBuf::from(format!(
-            "target/chunk-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}.png"
-        ));
+    if min_y_chunk > max_y_chunk {
+        return Err(cli_error("min-y-chunk must be <= max-y-chunk"));
     }
 
     let block_registry = Arc::new(
         BlockRegistry::load_default()
             .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?,
     );
-    let meta = WorldMeta::new(seed);
-    let auto_selected_center = if center_explicit {
-        None
-    } else {
-        find_auto_preview_center(&meta, block_registry.as_ref())
+
+    let (meta, baked_world_dir, baked_manifest) = match &source {
+        PreviewSource::Seed(seed) => (WorldMeta::new(*seed), None, None),
+        PreviewSource::BakedWorld(world_dir) => {
+            let manifest = read_manifest(world_dir)?;
+            let meta = WorldMeta {
+                seed: manifest.seed,
+                world_version: WorldMeta::CURRENT_WORLD_VERSION,
+                generator_version: manifest.generator_version,
+                save_format_version: manifest.save_format_version,
+            };
+            (meta, Some(world_dir.clone()), Some(manifest))
+        }
     };
-    if let Some((auto_x, auto_z)) = auto_selected_center {
-        center_x = auto_x;
-        center_z = auto_z;
-    }
+
+    let requested_center = if center_explicit {
+        (center_x, center_z)
+    } else if let Some(manifest) = baked_manifest.as_ref() {
+        choose_baked_center(manifest, radius, min_y_chunk, max_y_chunk)?
+    } else {
+        (center_x, center_z)
+    };
+    center_x = requested_center.0;
+    center_z = requested_center.1;
+
+    let output = output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius));
+    let generation_radius = radius + DEFAULT_RENDER_PADDING;
     let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-    let generation_radius = radius + DEFAULT_RENDER_PADDING;
-    let generation_min_y = WORLD_FLOOR_Y.div_euclid(CHUNK_EDGE_I32);
-    let generation_max_y = DEFAULT_RENDER_MAX_Y_CHUNK;
-
-    for y in generation_min_y..=generation_max_y {
-        for z in (center_z - generation_radius)..=(center_z + generation_radius) {
-            for x in (center_x - generation_radius)..=(center_x + generation_radius) {
-                let coord = ChunkCoord(x, y, z);
-                let chunk = generate_chunk(coord, world.meta(), block_registry.as_ref());
-                world.insert_chunk(coord, chunk);
-            }
+    match baked_world_dir.as_deref() {
+        Some(world_dir) => {
+            let manifest = baked_manifest
+                .as_ref()
+                .expect("baked preview metadata should exist");
+            ensure_baked_bounds_cover_request(
+                manifest.min_chunk_coord(),
+                manifest.max_chunk_coord(),
+                center_x,
+                center_z,
+                radius,
+                min_y_chunk,
+                max_y_chunk,
+            )?;
+            load_baked_preview_chunks(
+                &mut world,
+                world_dir,
+                manifest.min_chunk_coord(),
+                manifest.max_chunk_coord(),
+                center_x,
+                center_z,
+                generation_radius,
+                min_y_chunk,
+                max_y_chunk,
+            )?;
         }
+        None => generate_preview_chunks(
+            &mut world,
+            block_registry.as_ref(),
+            center_x,
+            center_z,
+            generation_radius,
+            min_y_chunk,
+            max_y_chunk,
+        ),
     }
 
-    let mut render_meshes = Vec::new();
-    for y in DEFAULT_RENDER_MIN_Y_CHUNK..=DEFAULT_RENDER_MAX_Y_CHUNK {
-        for z in (center_z - radius)..=(center_z + radius) {
-            for x in (center_x - radius)..=(center_x + radius) {
-                let coord = ChunkCoord(x, y, z);
-                let Some(snapshot) = world.snapshot_chunk(coord) else {
-                    continue;
-                };
-                let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), block_registry.as_ref());
-                if mesh.vertices.is_empty() || mesh.indices.is_empty() {
-                    continue;
-                }
-                render_meshes.push(world_mesh_to_render(mesh));
-            }
-        }
-    }
-
+    let render_meshes =
+        collect_render_meshes(&world, block_registry.as_ref(), center_x, center_z, radius, min_y_chunk, max_y_chunk);
     if render_meshes.is_empty() {
         return Err(cli_error("no visible meshes were produced for the requested preview area"));
     }
@@ -142,20 +177,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     })?;
     write_offscreen_png(&output, &image)?;
 
-    println!("preview seed: {seed}");
-    println!("center chunk: ({center_x}, {center_z})");
-    if let Some((auto_x, auto_z)) = auto_selected_center {
-        println!("auto-selected preview center: ({auto_x}, {auto_z})");
+    match &source {
+        PreviewSource::Seed(seed) => println!("preview source: generated from seed {seed}"),
+        PreviewSource::BakedWorld(world_dir) => {
+            println!("preview source: baked world {}", world_dir.display())
+        }
     }
+    println!("center chunk: ({center_x}, {center_z})");
     println!(
         "render footprint: xz radius={}, y={}..{}",
-        radius, DEFAULT_RENDER_MIN_Y_CHUNK, DEFAULT_RENDER_MAX_Y_CHUNK
+        radius, min_y_chunk, max_y_chunk
     );
-    println!(
-        "generated support footprint: xz radius={}, y={}..{}",
-        generation_radius, generation_min_y, generation_max_y
-    );
-    println!("sea level: y={SEA_LEVEL_Y}");
     println!("output: {}", output.display());
     println!(
         "image: {}x{}, meshes={}, draw_calls={}",
@@ -168,27 +200,169 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn find_auto_preview_center(meta: &WorldMeta, registry: &BlockRegistry) -> Option<(i32, i32)> {
-    let mut best: Option<AutoPreviewCandidate> = None;
+fn default_output_path(source: &PreviewSource, center_x: i32, center_z: i32, radius: i32) -> PathBuf {
+    match source {
+        PreviewSource::Seed(seed) => PathBuf::from(format!(
+            "target/chunk-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}.png"
+        )),
+        PreviewSource::BakedWorld(world_dir) => world_dir.join(format!(
+            "preview_cx{center_x}_cz{center_z}_r{radius}.png"
+        )),
+    }
+}
 
-    for center_z in (AUTO_SEARCH_MIN_CHUNK..=AUTO_SEARCH_MAX_CHUNK).step_by(AUTO_SEARCH_STEP as usize) {
-        for center_x in (AUTO_SEARCH_MIN_CHUNK..=AUTO_SEARCH_MAX_CHUNK).step_by(AUTO_SEARCH_STEP as usize) {
-            let candidate = evaluate_preview_center(meta, registry, center_x, center_z);
-            if !candidate.has_non_water_surface {
-                continue;
-            }
+fn ensure_baked_bounds_cover_request(
+    min_chunk: ChunkCoord,
+    max_chunk: ChunkCoord,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Result<(), Box<dyn Error>> {
+    let requested_min = ChunkCoord(center_x - radius, min_y_chunk, center_z - radius);
+    let requested_max = ChunkCoord(center_x + radius, max_y_chunk, center_z + radius);
+    if requested_min.0 < min_chunk.0
+        || requested_min.1 < min_chunk.1
+        || requested_min.2 < min_chunk.2
+        || requested_max.0 > max_chunk.0
+        || requested_max.1 > max_chunk.1
+        || requested_max.2 > max_chunk.2
+    {
+        return Err(cli_error(format!(
+            "requested preview area x={}..{}, y={}..{}, z={}..{} is outside baked bounds x={}..{}, y={}..{}, z={}..{}",
+            requested_min.0,
+            requested_max.0,
+            requested_min.1,
+            requested_max.1,
+            requested_min.2,
+            requested_max.2,
+            min_chunk.0,
+            max_chunk.0,
+            min_chunk.1,
+            max_chunk.1,
+            min_chunk.2,
+            max_chunk.2
+        )));
+    }
 
-            let replace = match best {
-                Some(current) => candidate.score() > current.score(),
-                None => true,
-            };
-            if replace {
-                best = Some(candidate);
+    Ok(())
+}
+
+fn load_baked_preview_chunks(
+    world: &mut WorldCore,
+    world_dir: &Path,
+    min_chunk: ChunkCoord,
+    max_chunk: ChunkCoord,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Result<(), Box<dyn Error>> {
+    let load_min_x = (center_x - generation_radius).max(min_chunk.0);
+    let load_max_x = (center_x + generation_radius).min(max_chunk.0);
+    let load_min_y = min_y_chunk.max(min_chunk.1);
+    let load_max_y = max_y_chunk.min(max_chunk.1);
+    let load_min_z = (center_z - generation_radius).max(min_chunk.2);
+    let load_max_z = (center_z + generation_radius).min(max_chunk.2);
+
+    for chunk_y in load_min_y..=load_max_y {
+        for chunk_z in load_min_z..=load_max_z {
+            for chunk_x in load_min_x..=load_max_x {
+                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
+                let chunk = load_chunk_from_dump(world_dir, coord)?;
+                world.insert_chunk(coord, chunk);
             }
         }
     }
 
-    best.map(|candidate| (candidate.center_x, candidate.center_z))
+    Ok(())
+}
+
+fn choose_baked_center(
+    manifest: &BakedWorldManifest,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Result<(i32, i32), Box<dyn Error>> {
+    let min_chunk = manifest.min_chunk_coord();
+    let max_chunk = manifest.max_chunk_coord();
+
+    for summary in &manifest.stacks {
+        let requested_min = ChunkCoord(summary.center_x - radius, min_y_chunk, summary.center_z - radius);
+        let requested_max = ChunkCoord(summary.center_x + radius, max_y_chunk, summary.center_z + radius);
+        if requested_min.0 >= min_chunk.0
+            && requested_min.1 >= min_chunk.1
+            && requested_min.2 >= min_chunk.2
+            && requested_max.0 <= max_chunk.0
+            && requested_max.1 <= max_chunk.1
+            && requested_max.2 <= max_chunk.2
+        {
+            return Ok((summary.center_x, summary.center_z));
+        }
+    }
+
+    Err(cli_error(format!(
+        "no baked preview center fits radius {} inside baked bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
+        radius,
+        min_chunk.0,
+        max_chunk.0,
+        min_chunk.1,
+        max_chunk.1,
+        min_chunk.2,
+        max_chunk.2
+    )))
+}
+
+fn generate_preview_chunks(
+    world: &mut WorldCore,
+    registry: &BlockRegistry,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) {
+    for chunk_y in min_y_chunk..=max_y_chunk {
+        for chunk_z in (center_z - generation_radius)..=(center_z + generation_radius) {
+            for chunk_x in (center_x - generation_radius)..=(center_x + generation_radius) {
+                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
+                let chunk = generate_chunk(coord, world.meta(), registry);
+                world.insert_chunk(coord, chunk);
+            }
+        }
+    }
+}
+
+fn collect_render_meshes(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Vec<RenderCpuMesh> {
+    let mut render_meshes = Vec::new();
+
+    for chunk_y in min_y_chunk..=max_y_chunk {
+        for chunk_z in (center_z - radius)..=(center_z + radius) {
+            for chunk_x in (center_x - radius)..=(center_x + radius) {
+                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
+                let Some(snapshot) = world.snapshot_chunk(coord) else {
+                    continue;
+                };
+                let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), registry);
+                if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+                    continue;
+                }
+                render_meshes.push(world_mesh_to_render(mesh));
+            }
+        }
+    }
+
+    render_meshes
 }
 
 fn build_preview_camera(
@@ -293,9 +467,7 @@ fn render_material_kind_from_world(kind: BlockMaterialKind) -> new_world::render
     }
 }
 
-fn combined_render_bounds(
-    meshes: &[RenderCpuMesh],
-) -> Option<new_world::renderer::RenderBounds> {
+fn combined_render_bounds(meshes: &[RenderCpuMesh]) -> Option<new_world::renderer::RenderBounds> {
     let mut combined: Option<new_world::renderer::RenderBounds> = None;
 
     for mesh in meshes {
@@ -320,45 +492,6 @@ fn combined_render_bounds(
     }
 
     combined
-}
-
-fn evaluate_preview_center(
-    meta: &WorldMeta,
-    registry: &BlockRegistry,
-    center_x: i32,
-    center_z: i32,
-) -> AutoPreviewCandidate {
-    let registry = Arc::new(registry.clone());
-    let mut world = WorldCore::new(*meta, Arc::clone(&registry));
-    for y in -8..=3 {
-        let coord = ChunkCoord(center_x, y, center_z);
-        let chunk = generate_chunk(coord, world.meta(), registry.as_ref());
-        world.insert_chunk(coord, chunk);
-    }
-
-    let mut candidate = AutoPreviewCandidate {
-        center_x,
-        center_z,
-        has_non_water_surface: false,
-        non_water_columns: 0,
-        max_surface_y: i32::MIN,
-    };
-
-    for local_z in 0..CHUNK_EDGE_I32 {
-        for local_x in 0..CHUNK_EDGE_I32 {
-            let world_x = center_x * CHUNK_EDGE_I32 + local_x;
-            let world_z = center_z * CHUNK_EDGE_I32 + local_z;
-            if let Some((top_y, key)) = topmost_block_key(&world, registry.as_ref(), world_x, world_z) {
-                candidate.max_surface_y = candidate.max_surface_y.max(top_y);
-                if key != "water" {
-                    candidate.has_non_water_surface = true;
-                    candidate.non_water_columns += 1;
-                }
-            }
-        }
-    }
-
-    candidate
 }
 
 fn preview_environment() -> RenderEnvironment {
@@ -414,38 +547,6 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
     }
 }
 
-fn topmost_block_key(
-    world: &WorldCore,
-    registry: &BlockRegistry,
-    world_x: i32,
-    world_z: i32,
-) -> Option<(i32, String)> {
-    for world_y in (WORLD_FLOOR_Y..=64).rev() {
-        if let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z)) {
-            if !block.is_air() {
-                return Some((world_y, registry.block_or_missing(block).key.clone()));
-            }
-        }
-    }
-
-    None
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AutoPreviewCandidate {
-    center_x: i32,
-    center_z: i32,
-    has_non_water_surface: bool,
-    non_water_columns: usize,
-    max_surface_y: i32,
-}
-
-impl AutoPreviewCandidate {
-    fn score(self) -> i64 {
-        (self.non_water_columns as i64) * 10_000 + self.max_surface_y as i64
-    }
-}
-
 fn parse_required<T>(args: &mut Vec<String>, label: &str) -> Result<T, Box<dyn Error>>
 where
     T: std::str::FromStr,
@@ -462,7 +563,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--output <path>]"
+    "usage: cargo run --bin chunk_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
