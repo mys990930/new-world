@@ -1,80 +1,82 @@
 # camera
 
-## 역할
+## Role
 
-- gameplay 관점의 편안한 추적 카메라 상태를 정의한다
-- 4방향 고정 쿼터뷰 회전, 느슨한 follow, deadzone, 진행 방향 bias, smooth recenter 규칙을 관리한다
-- movement / selection / render bridge가 공유하는 quarter-view basis와 follow pose helper를 제공한다
+- Own the gameplay-facing quarter-view follow camera state
+- Define the shared quarter-view basis and follow pose used by movement, selection, and render bridging
 
-## 소유 데이터
+## Owned Data
 
-### CameraState
+### `CameraState`
+
 - `quarter_turns`
-- current smoothed follow target
-- current desired follow target
-- recenter 진행 상태 또는 요청 상태
-- deadzone / bias / follow smoothing을 일관되게 유지하는 데 필요한 내부 상태
+- `smoothed_target`
+- `desired_target`
+- `recenter_requested`
+- `recentering`
+- `initialized`
 
-### QuarterViewBasis
+### `QuarterViewBasis`
+
 - `right`
 - `up`
 - `forward`
 
-## 입력
+### `QuarterViewCameraPose`
+
+- `target`
+- `eye`
+- `basis`
+
+## Inputs
 
 - `RotateCamera`
 - `RecenterCamera`
 - local player `Transform`
 - `MoveWorldIntent`
-- 향후 player velocity / interaction context
+- frame delta time
 
-## 출력
+## Outputs
 
-- 현재 카메라 회전 상태와 follow pose
-- `MoveWorldIntent` 계산에 필요한 orientation basis
-- selection ray origin/direction 계산에 필요한 basis
-- app bridge가 renderer용 `RenderCameraState`를 만들 때 쓰는 camera snapshot
+- the current quarter-view follow target
+- the current quarter-view camera pose
+- orientation data used by movement intent remapping
+- orientation data used by selection ray construction
+- a render-ready camera snapshot consumed through `app::bridge`
 
-## 상태 전이 규칙
+## State Transition Rules
 
-- 카메라는 4방향 고정 쿼터뷰 preset만 제공한다
-- RTS식 자유 팬은 제공하지 않는다
-- `Q/E`는 항상 90도 단위 회전이다
-- 같은 프레임의 회전은 그 프레임 이동 intent 계산 전에 적용된다
-- 플레이어는 deadzone 내부에서는 카메라를 바로 끌고 가지 않는다
-- 플레이어가 deadzone 밖으로 벗어나면 카메라는 플레이어를 deadzone 안쪽으로 되돌릴 만큼만 target을 갱신한다
-- target 갱신은 hard snap이 아니라 부드러운 follow smoothing으로 접근한다
-- 진행 방향 bias는 현재 `MoveWorldIntent` 기준으로 작게만 적용된다
-- 진행 방향 bias는 플레이어를 화면에서 진행 반대편으로 밀어 두어, 진행 앞쪽 월드가 더 넓게 보이도록 적용한다
-- 목표 구도는 대략 플레이어 뒤 `35%` / 진행 앞 `65%`에 수렴하는 편안한 follow framing이다
-- 진행 방향 bias는 player center를 대체하지 않고, 정지하거나 방향이 바뀌면 다시 약해진다
-- `Y`는 회전값을 바꾸지 않고, 카메라를 player-centered anchor 쪽으로 부드럽게 lerp 복귀시키는 recenter 요청이다
-- selection과 render는 같은 프레임에 같은 smoothed target과 basis를 사용해야 한다
+- The camera is limited to four quarter-view rotations.
+- `Q/E` rotation applies before the same frame's movement intent is interpreted.
+- The player is followed through a smoothed target rather than a hard snap.
+- Deadzone logic is evaluated in quarter-view screen space defined by `right` and `up`.
+- Forward movement bias shifts framing toward travel direction without replacing the player-centered anchor.
+- Recenter keeps the current rotation and smoothly moves the target back toward the player anchor.
+- Selection and render bridging must consume the same smoothed target and basis in a given frame.
 
-## 좌표계 규칙
+## Coordinate Rules
 
-- 창 기준 좌표계와 world 기준 좌표계는 45도 어긋나 보인다
-- 기본 쿼터뷰에서:
-  - 화면 우측 상단 = world north
-  - 화면 우측 하단 = world east
-- 따라서 player 이동 해석과 selection ray 생성은 camera orientation을 거친 world axis 변환이 필요하다
-- deadzone과 진행 방향 bias는 raw world axis가 아니라 quarter-view의 `right/up` 평면 기준으로 평가되어야 네 방향 회전에서 일관된다
+- Window-space intent does not map 1:1 to world axes; ECS owns that interpretation.
+- The shared quarter-view basis is the source of truth for movement remapping, selection rays, and render camera pose.
+- Orthographic framing is controlled primarily by `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
+- In the current implementation, increasing `QUARTER_VIEW_VERTICAL_WORLD_SIZE` shows more world and makes the camera feel farther away.
+- `QUARTER_VIEW_CAMERA_DISTANCE` controls the eye offset along the quarter-view forward axis. Under orthographic projection it affects eye-space relationships such as fog or shadow math more than visible zoom scale.
 
-## 불변식
+## Invariants
 
-- camera 모듈은 renderer의 GPU matrix를 직접 계산하지 않는다
-- camera orientation과 smoothed follow pose는 selection과 movement intent 변환, render bridge의 공통 기준이 된다
-- app bridge와 selection은 local player transform만으로 별도의 카메라 target을 다시 만들지 않는다
-- `quarter_view_basis()`와 follow pose helper는 movement, selection, render bridge가 같은 방향 규칙을 공유하도록 유지한다
+- ECS owns quarter-view follow policy; renderer only consumes the final pose.
+- `quarter_view_basis()` and `quarter_view_camera_pose()` are shared helpers so movement, selection, and rendering stay aligned.
+- The bridge must not rebuild a separate gameplay camera interpretation from raw player state.
+- Camera tuning should stay in ECS unless the change is purely GPU-side math.
 
-## 비책임
+## Non-Responsibilities
 
-- raw input 수집
-- world edit apply
-- renderer draw matrix 계산
-- 자유 팬/자유 비행 카메라 제공
+- collecting raw OS input
+- mutating world source-of-truth data
+- computing renderer GPU matrices
+- providing a free-fly camera
 
-## 관련 모듈
+## Related Modules
 
 - `command.rs`
 - `player.rs`
@@ -82,9 +84,8 @@
 - `chunk.rs`
 - `app/bridge.rs`
 
-## 메모
+## Notes
 
-- 이 문서는 편안한 추적 카메라의 목표 계약을 정의한다.
-- 현재 코드는 아직 `quarter_turns`와 raw player-centered target 기반의 단순 쿼터뷰 카메라만 구현한 상태다.
-- orthographic framing은 플레이 공간을 조금 더 넓게 읽을 수 있도록 너무 타이트하지 않게 유지한다.
-- 구현은 `CameraState`와 shared follow pose helper를 확장하는 방향으로 맞추고, gameplay camera 규칙을 renderer 쪽으로 밀어 넣지 않는다.
+- The current implementation is still a quarter-view follow camera rather than a full strategy-camera system.
+- The main zoom/framing handle lives in `src/ecs/camera.rs` as `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
+- The default framing now uses a wider orthographic size so the player sees more surrounding terrain at once.

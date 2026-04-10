@@ -28,8 +28,12 @@ pub struct QuarterViewCameraPose {
     pub basis: QuarterViewBasis,
 }
 
+// Under the orthographic quarter-view camera, this is the main "zoom" handle.
+// Larger values show more world and make the camera feel farther away.
+pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 10.0;
+// This controls how far the eye sits from the target along the quarter-view forward axis.
+// In orthographic mode it affects eye-space relationships such as fog/shadow math more than framing scale.
 pub const QUARTER_VIEW_CAMERA_DISTANCE: f32 = 520.0;
-pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 6.0;
 const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
 const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
 const CAMERA_DEADZONE_HALF_WIDTH: f32 = 0.75;
