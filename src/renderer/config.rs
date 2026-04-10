@@ -182,8 +182,8 @@ impl RenderEnvironment {
             ambient_color: [0.46, 0.34, 0.31],
             ambient_intensity: 0.82,
             fog_color: [0.88, 0.62, 0.47],
-            fog_density: 0.022,
-            fog_height_falloff: 0.08,
+            fog_density: 0.016,
+            fog_height_falloff: 0.06,
             sky_color: [0.56, 0.42, 0.54],
             horizon_color: [0.96, 0.62, 0.42],
             overcast: 0.12,
@@ -195,7 +195,7 @@ impl RenderEnvironment {
             top_face_boost: 0.26,
             side_shadow_strength: 0.32,
             silhouette_boost: 0.22,
-            saturation_boost: 0.08,
+            saturation_boost: 0.05,
         }
     }
 

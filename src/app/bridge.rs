@@ -6,12 +6,12 @@ use crate::ecs::{
 };
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
-    RenderCameraState, RenderCubeInstance, RenderProjectionMode, RenderUploadRequest,
-    RenderViewBasis,
+    RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
+    RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
-    BlockFace, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex,
-    WorldBlockCoord,
+    BlockFace, BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
+    MeshVertex as WorldMeshVertex, WorldBlockCoord,
 };
 
 pub struct AppRenderFrameData {
@@ -62,6 +62,7 @@ impl GameApp {
                     center: transform.translation,
                     half_extents: [0.5, 0.5, 0.5],
                     color: [1.0, 1.0, 1.0, 1.0],
+                    material_kind: RenderMaterialKind::Actor,
                 }]
             })
             .unwrap_or_default();
@@ -135,6 +136,7 @@ fn build_ground_shadow_instance(center: [f32; 3]) -> RenderCubeInstance {
         ],
         half_extents: [0.62, 0.01, 0.62],
         color: [0.08, 0.08, 0.10, 1.0],
+        material_kind: RenderMaterialKind::Shadow,
     }
 }
 
@@ -153,31 +155,37 @@ fn build_selection_face_instance(block: WorldBlockCoord, face: BlockFace) -> Ren
             center: [center[0] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
             half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
         BlockFace::PosX => RenderCubeInstance {
             center: [center[0] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
             half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
         BlockFace::NegY => RenderCubeInstance {
             center: [center[0], center[1] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[2]],
             half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
         BlockFace::PosY => RenderCubeInstance {
             center: [center[0], center[1] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[2]],
             half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
         BlockFace::NegZ => RenderCubeInstance {
             center: [center[0], center[1], center[2] - 0.5 - HIGHLIGHT_FACE_OFFSET],
             half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
         BlockFace::PosZ => RenderCubeInstance {
             center: [center[0], center[1], center[2] + 0.5 + HIGHLIGHT_FACE_OFFSET],
             half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
             color: [1.0, 0.92, 0.20, 1.0],
+            material_kind: RenderMaterialKind::Highlight,
         },
     }
 }
@@ -204,6 +212,20 @@ fn world_vertex_to_render(vertex: WorldMeshVertex) -> RenderMeshVertex {
         normal: vertex.normal,
         uv: vertex.uv,
         texture_layer: vertex.texture_layer,
+        material_kind: render_material_kind_from_world(vertex.material_kind).as_u32(),
+    }
+}
+
+fn render_material_kind_from_world(kind: BlockMaterialKind) -> RenderMaterialKind {
+    match kind {
+        BlockMaterialKind::GenericOpaque => RenderMaterialKind::GenericOpaque,
+        BlockMaterialKind::Grass => RenderMaterialKind::Grass,
+        BlockMaterialKind::Soil => RenderMaterialKind::Soil,
+        BlockMaterialKind::Stone => RenderMaterialKind::Stone,
+        BlockMaterialKind::Sand => RenderMaterialKind::Sand,
+        BlockMaterialKind::Foliage => RenderMaterialKind::Foliage,
+        BlockMaterialKind::Water => RenderMaterialKind::Water,
+        BlockMaterialKind::Emissive => RenderMaterialKind::Emissive,
     }
 }
 

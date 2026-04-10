@@ -32,6 +32,25 @@ pub enum BlockRenderKind {
     Cube,
 }
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockMaterialKind {
+    GenericOpaque = 0,
+    Grass = 1,
+    Soil = 2,
+    Stone = 3,
+    Sand = 4,
+    Foliage = 5,
+    Water = 6,
+    Emissive = 7,
+}
+
+impl BlockMaterialKind {
+    pub const fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FaceTextureSet {
     pub top: TextureTileId,
@@ -62,6 +81,7 @@ pub struct BlockDef {
     pub solid: bool,
     pub opaque: bool,
     pub render_kind: BlockRenderKind,
+    pub material: BlockMaterialKind,
     pub face_textures: FaceTextureSet,
     pub tint: [u8; 4],
 }
@@ -178,6 +198,10 @@ impl BlockRegistry {
                     side: lookup_texture(&textures_by_key, &block.side)?,
                 },
             };
+            let material = block
+                .material
+                .map(BlockMaterialKind::from_manifest)
+                .unwrap_or_else(|| infer_block_material_kind(&block.key, render_kind));
 
             let tint = block.tint.unwrap_or([255, 255, 255, 255]);
             let def = BlockDef {
@@ -186,6 +210,7 @@ impl BlockRegistry {
                 solid: block.solid,
                 opaque: block.opaque,
                 render_kind,
+                material,
                 face_textures,
                 tint,
             };
@@ -209,6 +234,7 @@ impl BlockRegistry {
                 solid: true,
                 opaque: true,
                 render_kind: BlockRenderKind::Cube,
+                material: BlockMaterialKind::GenericOpaque,
                 face_textures: FaceTextureSet::WHITE,
                 tint: [255, 0, 255, 255],
             },
@@ -280,6 +306,31 @@ fn lookup_texture(
         .ok_or_else(|| BlockRegistryError::UnknownTextureKey(key.to_string()))
 }
 
+fn infer_block_material_kind(key: &str, render_kind: BlockRenderKind) -> BlockMaterialKind {
+    if matches!(render_kind, BlockRenderKind::Empty) {
+        return BlockMaterialKind::GenericOpaque;
+    }
+
+    let key = key.to_ascii_lowercase();
+    if key.contains("grass") || key.contains("moss") {
+        BlockMaterialKind::Grass
+    } else if key.contains("dirt") || key.contains("soil") || key.contains("mud") || key.contains("clay") {
+        BlockMaterialKind::Soil
+    } else if key.contains("stone") || key.contains("rock") || key.contains("ore") || key.contains("slate") {
+        BlockMaterialKind::Stone
+    } else if key.contains("sand") {
+        BlockMaterialKind::Sand
+    } else if key.contains("leaf") || key.contains("leaves") || key.contains("foliage") || key.contains("vine") {
+        BlockMaterialKind::Foliage
+    } else if key.contains("water") || key.contains("ice") {
+        BlockMaterialKind::Water
+    } else if key.contains("lava") || key.contains("lamp") || key.contains("lantern") || key.contains("glow") {
+        BlockMaterialKind::Emissive
+    } else {
+        BlockMaterialKind::GenericOpaque
+    }
+}
+
 pub fn default_manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
@@ -332,6 +383,34 @@ pub enum ManifestRenderKind {
     Cube,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestBlockMaterialKind {
+    GenericOpaque,
+    Grass,
+    Soil,
+    Stone,
+    Sand,
+    Foliage,
+    Water,
+    Emissive,
+}
+
+impl BlockMaterialKind {
+    fn from_manifest(material: ManifestBlockMaterialKind) -> Self {
+        match material {
+            ManifestBlockMaterialKind::GenericOpaque => Self::GenericOpaque,
+            ManifestBlockMaterialKind::Grass => Self::Grass,
+            ManifestBlockMaterialKind::Soil => Self::Soil,
+            ManifestBlockMaterialKind::Stone => Self::Stone,
+            ManifestBlockMaterialKind::Sand => Self::Sand,
+            ManifestBlockMaterialKind::Foliage => Self::Foliage,
+            ManifestBlockMaterialKind::Water => Self::Water,
+            ManifestBlockMaterialKind::Emissive => Self::Emissive,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ManifestBlockDef {
     pub id: u16,
@@ -339,6 +418,8 @@ pub struct ManifestBlockDef {
     pub solid: bool,
     pub opaque: bool,
     pub render: ManifestRenderKind,
+    #[serde(default)]
+    pub material: Option<ManifestBlockMaterialKind>,
     #[serde(default)]
     pub top: String,
     #[serde(default)]
@@ -363,6 +444,18 @@ mod tests {
         assert_eq!(
             registry.block_or_missing(BlockId::GRASS).texture_for_face(BlockFace::PosY),
             registry.texture_id("grass_top").unwrap()
+        );
+        assert_eq!(
+            registry.block_or_missing(BlockId::GRASS).material,
+            BlockMaterialKind::Grass
+        );
+        assert_eq!(
+            registry.block_or_missing(BlockId::DIRT).material,
+            BlockMaterialKind::Soil
+        );
+        assert_eq!(
+            registry.block_or_missing(BlockId::STONE).material,
+            BlockMaterialKind::Stone
         );
     }
 }

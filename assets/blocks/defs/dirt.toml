@@ -3,6 +3,7 @@ key = "dirt"
 solid = true
 opaque = true
 render = "cube"
+material = "soil"
 top = "dirt"
 bottom = "dirt"
 side = "dirt"

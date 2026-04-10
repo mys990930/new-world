@@ -12,6 +12,7 @@
 - Surface configure / resize handling
 - Render pipeline, shader, camera uniform, and environment uniform management
 - Block texture array decoding policy and GPU bind-group management
+- Consume renderer material kinds and run material-aware shading
 - Depth buffer creation and recreation
 - CPU render DTO -> GPU draw command conversion
 - Submit / present / recoverable render error propagation
@@ -31,6 +32,7 @@
 - `RenderQualityConfig`
 - `RenderEnvironment`
 - `RenderEnvironmentState`
+- `RenderMaterialKind`
 - `Renderer`
 - `SurfaceState`
 - `PipelineSet`
@@ -66,13 +68,6 @@ Renderer::apply_upload(request: RenderUploadRequest) -> Result<(), RenderUploadE
 Renderer::remove_chunk_mesh(coord: ChunkCoord)
 
 Renderer::render(frame: RenderFrameInput<'_>) -> Result<RenderStats, RenderError>
-
-struct RenderFrameInput<'a> {
-    camera: &'a RenderCameraState,
-    visible_chunks: &'a [ChunkCoord],
-    cube_instances: &'a [RenderCubeInstance],
-    clear_color_override: Option<[f32; 4]>,
-}
 ```
 
 ### Dependencies
@@ -93,28 +88,12 @@ NOT:
 2. During bootstrap, a stub renderer may exist without a live backend, but real draw/present only happens after a live backend is attached.
 3. GPU resource creation and destruction happen only inside the renderer.
 4. Block textures are uploaded as a same-size `texture_2d_array`, and mesh vertices address them by `texture_layer`.
-5. Terrain and dynamic cubes now use different shader modules but share the same camera / environment / texture binding contract.
-6. The current environment state lives inside the renderer so future day-night, weather, and climate systems can drive it without moving lighting policy into the world or app layers.
+5. Mesh vertices also carry `material_kind`, but the renderer only interprets renderer-side shading enums and never queries world block definitions directly.
+6. Terrain and dynamic cubes use different shader modules while sharing the same camera / environment / texture binding contract.
 
 ### Current Implementation Notes
 
-- The current vertical slice renders uploaded chunk terrain plus dynamic cube instances through separate terrain and dynamic pipelines.
-- Block textures are loaded from PNG files into an `Rgba8UnormSrgb` texture array with nearest filtering.
-- Dynamic cube instances currently include the white player cube, a thin dark ground shadow slab, and a thin yellow hovered-face highlight slab.
-- The default environment is a fixed sunset quarter-view preset with fog, warm horizon tint, and readability boosts for top faces and silhouettes.
-- Render quality is organized as low / medium / high presets. The current implementation uses them to gate fog, color grading, climate tint, and weather tint while reserving shadow quality for a later pass.
-- Both chunk meshes and dynamic cubes use depth test/write so the plane/cube layering reads as solid volume.
-- The renderer caches CPU chunk mesh payloads and builds GPU vertex/index buffers when a live backend exists.
-- Texture layer `0` is reserved for the built-in white tile used by debug cubes and tint-only draws.
-
-### Submodules
-
-- `mod.rs`: public facade and re-exports
-- `config.rs`: `RenderConfig`, quality presets, and fixed environment settings
-- `state.rs`: `Renderer`, `RenderEnvironmentState`, `RenderWorld`, optional `RendererBackend`
-- `surface.rs`: device / queue / surface initialization, live surface attach, resize management, environment uniform setup, pipeline creation
-- `pipeline.rs`: renderer pipeline metadata and rebuild generations
-- `camera.rs`: `RenderCameraState` -> `CameraGpuState` / `CameraUniform`
-- `texture.rs`: block texture source DTOs, PNG decode/validation, texture-array upload helpers
-- `upload.rs`: mesh/upload DTOs and shared vertex layout definitions
-- `frame.rs`: frame render pass encode, terrain draw, dynamic cube draw, submit, present
+- Uploaded chunk terrain now includes material classification from the world registry.
+- The terrain shader preserves more raw texture detail before fog and color grading, so dirt/grass/stone read more clearly in quarter view.
+- Dynamic cube instances now distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
+- The default environment is still a fixed sunset quarter-view preset with low/medium/high quality flags for future extension.

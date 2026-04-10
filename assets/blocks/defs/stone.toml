@@ -3,6 +3,7 @@ key = "stone"
 solid = true
 opaque = true
 render = "cube"
+material = "stone"
 top = "stone"
 bottom = "stone"
 side = "stone"

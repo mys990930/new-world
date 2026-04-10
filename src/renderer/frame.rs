@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 use super::{
     camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderCameraState,
-    RenderSurfaceError, Renderer,
+    RenderMaterialKind, RenderSurfaceError, Renderer,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -11,6 +11,7 @@ pub struct RenderCubeInstance {
     pub center: [f32; 3],
     pub half_extents: [f32; 3],
     pub color: [f32; 4],
+    pub material_kind: RenderMaterialKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -346,6 +347,7 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
                     normal: face_normal,
                     uv,
                     texture_layer: 0,
+                    material_kind: cube.material_kind.as_u32(),
                 });
             }
 
@@ -396,6 +398,7 @@ fn build_cube_edge_mesh(
             normal: [0.0, 1.0, 0.0],
             uv: [0.0, 0.0],
             texture_layer: 0,
+            material_kind: RenderMaterialKind::Highlight.as_u32(),
         }));
         let view_to_eye = view_direction_towards_eye(camera);
         let edge_pairs = visible_edge_pairs(view_to_eye);
@@ -782,6 +785,7 @@ mod tests {
             center: [0.0, 0.5, 0.0],
             half_extents: [0.5, 0.5, 0.5],
             color: [1.0, 1.0, 1.0, 1.0],
+            material_kind: RenderMaterialKind::Actor,
         }])
         .ok_or_else(|| "expected cube mesh".to_string())?;
 

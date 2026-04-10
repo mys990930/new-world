@@ -43,8 +43,8 @@ pub use meta::WorldMeta;
 pub use query::{NeighborChunks, Ray3, RaycastHit};
 #[allow(unused_imports)]
 pub use registry::{
-    BlockDef, BlockRegistry, BlockRegistryError, BlockRenderKind, FaceTextureSet, TextureTileDef,
-    TextureTileId, TextureTileSource,
+    BlockDef, BlockMaterialKind, BlockRegistry, BlockRegistryError, BlockRenderKind,
+    FaceTextureSet, TextureTileDef, TextureTileId, TextureTileSource,
 };
 #[allow(unused_imports)]
 pub use storage::{StorageError, load_chunk, save_chunk};

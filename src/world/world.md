@@ -1,12 +1,12 @@
 ## world
 
-### 역할
+### Role
 
-- 게임 세계의 원본 블록/청크 데이터와 정합성 있는 질의/수정 연산을 소유한다.
-- 블록 정의/텍스처 카탈로그를 `BlockRegistry`로 해석하는 world-side 계약을 소유한다.
-- 외부 모듈이 월드 내부 표현을 직접 수정하지 않도록 공용 API와 결과 타입을 정의한다.
+- Own the source-of-truth block and chunk data for the game world
+- Interpret block definitions, texture-tile lookup, and block material classification through `BlockRegistry`
+- Expose read/write APIs and read-only snapshot/query surfaces without leaking raw storage ownership
 
-### 책임
+### Responsibilities
 
 - loaded chunk storage
 - world metadata storage
@@ -18,11 +18,12 @@
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
 - block definition / texture-tile lookup contract
+- block visual-material lookup contract
 - save/load serialization contract
 - meshing input provision from chunk snapshot bundle
 - block-grid raycast query provision
 
-### 비책임
+### Non-Responsibilities
 
 - visible chunk calculation
 - gameplay command interpretation
@@ -30,12 +31,13 @@
 - async worker orchestration
 - gpu buffer init / draw call
 
-### 소유 데이터
+### Owned Data
 
 - `WorldMeta`
 - `ChunkCoord`, `LocalBlockCoord`, `WorldBlockCoord`
 - `BlockId`, `BlockFace`
 - `BlockDef`, `BlockRegistry`
+- `BlockMaterialKind`
 - `TextureTileId`, `TextureTileDef`, `TextureTileSource`
 - `ChunkData`, `ChunkSnapshot`
 - `AtlasCoord`, `AtlasArea`
@@ -46,7 +48,7 @@
 - `Ray3`, `RaycastHit`
 - `WorldCore`
 
-### 공개 인터페이스
+### Public Interface
 
 ```rust
 BlockRegistry::load_default() -> Result<BlockRegistry, BlockRegistryError>
@@ -95,7 +97,7 @@ meshing::build_chunk_mesh(
 ) -> CpuMesh
 ```
 
-### 의존성
+### Dependencies
 
 - save format config
 
@@ -106,46 +108,31 @@ NOT:
 - `renderer`
 - `platform`
 
-### 불변식
+### Invariants
 
-1. 블록은 반드시 어떤 청크 내부에만 존재한다.
-2. 월드 좌표는 항상 `ChunkCoord + LocalBlockCoord`로 결정적으로 변환 가능하다.
-3. `ChunkData`는 원본 월드 데이터만 가진다.
-4. 모든 블록 수정은 world API를 통해서만 일어난다.
-5. 청크 크기는 고정이다.
-6. 없는 청크에 대한 블록 읽기/쓰기 규칙은 명확해야 한다.
-   - 읽기: `None`
-   - 쓰기: 실패
-7. 편집 결과는 영향받은 청크 정보를 정확히 반환해야 한다.
-8. 원본 월드 데이터와 렌더용 메시는 분리된다.
-9. `BlockId`의 solid/render/texture 의미는 registry가 해석하고, 청크는 raw id만 저장한다.
-10. 논리적으로는 `AIR`를 포함한 full block grid를 유지하되, 물리 저장 표현은 uniform 또는 dense로 최적화할 수 있다.
-11. 직렬화/역직렬화는 raw block id 의미를 보존해야 한다.
-12. raycast는 loaded world state와 registry의 solid 규칙만 기준으로 first solid hit를 판정한다.
+1. Block and chunk mutations only happen through world-owned APIs.
+2. Raw chunk storage keeps ids, while render and gameplay meaning is interpreted through `BlockRegistry`.
+3. `BlockRegistry` owns face-texture lookup and visual material lookup for each block definition.
+4. World meshing produces CPU-side mesh data only; it does not own GPU resources.
+5. World-owned mesh vertices may carry render-facing metadata such as `uv`, `texture_layer`, and `material_kind`, but the renderer still owns GPU formats and shading policy.
 
-### 하위 모듈 목록 및 역할
+### Submodules
 
-- `meta.md`: `WorldMeta`와 버전/seed 계약
-- `coord.md`: 월드/청크/로컬 좌표계와 변환 규칙
-- `chunk.md`: `ChunkData` / `ChunkSnapshot` 구조와 청크 데이터 불변식
-- `core.md`: `WorldCore` 소유 구조와 top-level API
-- `edit.md`: `WorldEdit` / `EditResult` 기반 명시적 mutation 계약
-- `query.md`: read-only block/chunk/region/raycast query surface
-- `registry.md`: 데이터 기반 블록 정의/텍스처 타일 카탈로그 계약
-- `generation.md`: 절차 생성 결과를 `ChunkData`로 표현하는 규칙
-- `atlas/atlas.md`: 청크 이전 단계의 거시 atlas 필드와 디버그 출력 계약
-- `storage.md`: 청크 직렬화/역직렬화와 save/load 계약
-- `meshing.md`: 청크 스냅샷 기반 CPU mesh 입력 제공 계약
+- `meta.md`: `WorldMeta` seed and version contract
+- `coord.md`: world/chunk/local coordinate conversion rules
+- `chunk.md`: `ChunkData` / `ChunkSnapshot` structure and invariants
+- `core.md`: `WorldCore` ownership and top-level API
+- `edit.md`: `WorldEdit` / `EditResult` mutation contract
+- `query.md`: read-only block/chunk/region/raycast surface
+- `registry.md`: data-driven block definition, texture tile, and block material contract
+- `generation.md`: chunk generation rules
+- `atlas/atlas.md`: atlas prototype contracts
+- `storage.md`: serialization contract
+- `meshing.md`: snapshot-to-CPU-mesh contract
 
-### 현재 구현 메모
+### Current Implementation Notes
 
-- 현재 최소 구현은 `mod.rs + leaf.rs` 구조까지 추가되어 있다.
-- 현재 고정 청크 크기는 `32 x 32 x 32` block이다.
-- 기본 block registry는 `assets/blocks/index.toml`에서 로드되고, 텍스처/블럭 정의 경로는 그 index 기준 상대 경로로 해석된다.
-- generation은 `WorldMeta`, `ChunkCoord`, `BlockRegistry`를 받아 `world y = 0`에서 로컬 `(1..=5, 1..=5)` 범위만 grass로 채우는 deterministic patch generator만 제공한다.
-- meshing은 world-owned `CpuMesh` / `MeshVertex`를 만들고, 각 vertex에 `uv`와 `texture_layer`를 넣는다.
-- empty chunk는 memory에서 uniform `AIR` 표현으로 유지되다가 첫 non-air write 시 dense block array로 materialize된다.
-- storage는 current save format v1에서 uniform chunk를 compact payload로 저장하고, dense chunk는 full payload로 저장한다.
-- renderer 타입으로의 변환은 jobs/app bridge 단계에서 계속 분리되어 있다.
-- 현재 raycast는 voxel DDA 방식으로 loaded chunk 위의 first solid block과 hit face / hit point / travel distance를 계산한다.
-- atlas prototype은 `src/world/atlas/*`와 `src/bin/atlas_proto.rs`에서 먼저 오프라인 2D 필드/PNG 출력으로 검증하고, chunk generation 본 연결은 이후 단계에서 확장한다.
+- The default block registry is loaded from `assets/blocks/index.toml`.
+- Registry entries now carry an explicit or inferred `BlockMaterialKind` in addition to face textures and tint.
+- Meshing emits `material_kind` per vertex so renderer shaders can react differently to grass, soil, stone, and future categories without the renderer owning block semantics.
+- Renderer conversion still happens through `jobs/app::bridge`; world does not upload directly to the GPU.

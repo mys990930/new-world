@@ -1,7 +1,7 @@
 use super::chunk::{BlockFace, BlockId, ChunkSnapshot};
 use super::coord::{ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world};
 use super::query::NeighborChunks;
-use super::registry::BlockRegistry;
+use super::registry::{BlockMaterialKind, BlockRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderBounds {
@@ -16,6 +16,7 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     pub uv: [f32; 2],
     pub texture_layer: u32,
+    pub material_kind: BlockMaterialKind,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -115,6 +116,7 @@ fn append_face(
     let normal = face_normal(face);
     let uv = face_uvs();
     let texture_layer = u32::from(block_def.texture_for_face(face).0);
+    let material_kind = block_def.material;
 
     extend_bounds(&mut mesh.bounds, &positions);
 
@@ -125,6 +127,7 @@ fn append_face(
             normal,
             uv,
             texture_layer,
+            material_kind,
         });
     }
 
@@ -252,6 +255,10 @@ mod tests {
 
         assert!(!mesh.is_empty());
         assert!(mesh.triangle_count() > 0);
+        assert!(mesh
+            .vertices
+            .iter()
+            .all(|vertex| vertex.material_kind == BlockMaterialKind::Grass));
         assert_eq!(
             mesh.bounds,
             Some(RenderBounds {

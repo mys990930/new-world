@@ -2,32 +2,34 @@
 
 ## Role
 
-- Define renderer mesh/upload DTOs and shared vertex layout
+- Define renderer mesh/upload DTOs and the shared vertex layout
 
 ## Responsibilities
 
 - `ChunkCoord`
 - `RenderBounds`
+- `RenderMaterialKind`
 - `MeshVertex`
 - `CpuMesh`
 - `GpuChunkMesh`
 - `RenderUploadRequest`
 - `RenderUploadError`
-- Chunk mesh bookkeeping API
+- chunk mesh bookkeeping API
 
 ## Non-Responsibilities
 
-- Meshing algorithms
-- Frame draw encoding
-- Gameplay state ownership
+- meshing algorithms
+- frame draw encoding
+- gameplay state ownership
 
 ## Invariants
 
 - `MeshVertex` uses `#[repr(C)]` plus `Pod`/`Zeroable` so it can be written directly to GPU buffers
-- `MeshVertex::vertex_buffer_layout()` is the shared baseline layout for the player-cube pipeline and future chunk pipelines
-- `MeshVertex` currently carries `position`, `color`, `normal`, `uv`, and `texture_layer`
+- `MeshVertex::vertex_buffer_layout()` is the shared baseline layout for terrain and dynamic pipelines
+- `MeshVertex` now carries `position`, `color`, `normal`, `uv`, `texture_layer`, and `material_kind`
+- `RenderMaterialKind` is renderer-owned shading meaning, separate from world-owned `BlockMaterialKind`
 - `RenderUploadRequest::UpsertChunkMesh` validates the CPU mesh and stores enough data to rebuild GPU buffers after live surface attach
-- If there is no live backend yet, the renderer may cache the CPU mesh first and build GPU buffers later
+- if there is no live backend yet, the renderer may cache the CPU mesh first and build GPU buffers later
 
 ## Related Modules
 
@@ -38,5 +40,6 @@
 
 ## Notes
 
-- The current vertical slice uses `RenderUploadRequest` to move generated chunk plane meshes into the renderer cache before `frame.rs` draws them.
-- `texture_layer` indexes the renderer-owned block texture array, and dynamic cubes currently use layer `0` with tint color.
+- `texture_layer` indexes the renderer-owned block texture array
+- `material_kind` lets shaders branch on grass / soil / stone / actor / shadow / highlight behavior without querying gameplay state
+- dynamic cubes still use texture layer `0` today, but their material kind now carries more of the visual meaning

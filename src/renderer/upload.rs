@@ -5,6 +5,28 @@ use bytemuck::{Pod, Zeroable};
 
 use super::Renderer;
 
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderMaterialKind {
+    GenericOpaque = 0,
+    Grass = 1,
+    Soil = 2,
+    Stone = 3,
+    Sand = 4,
+    Foliage = 5,
+    Water = 6,
+    Emissive = 7,
+    Actor = 8,
+    Shadow = 9,
+    Highlight = 10,
+}
+
+impl RenderMaterialKind {
+    pub const fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkCoord(pub i32, pub i32, pub i32);
 
@@ -22,6 +44,7 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     pub uv: [f32; 2],
     pub texture_layer: u32,
+    pub material_kind: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -39,12 +62,13 @@ impl CpuMesh {
 
 impl MeshVertex {
     pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
+        const ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
             0 => Float32x3,
             1 => Float32x4,
             2 => Float32x3,
             3 => Float32x2,
-            4 => Uint32
+            4 => Uint32,
+            5 => Uint32
         ];
 
         wgpu::VertexBufferLayout {
@@ -209,13 +233,14 @@ mod tests {
     fn mesh_vertex_layout_matches_repr_c_memory() {
         let layout = MeshVertex::vertex_buffer_layout();
 
-        assert_eq!(std::mem::size_of::<MeshVertex>(), 52);
-        assert_eq!(layout.array_stride, 52);
-        assert_eq!(layout.attributes.len(), 5);
+        assert_eq!(std::mem::size_of::<MeshVertex>(), 56);
+        assert_eq!(layout.array_stride, 56);
+        assert_eq!(layout.attributes.len(), 6);
         assert_eq!(layout.attributes[0].offset, 0);
         assert_eq!(layout.attributes[1].offset, 12);
         assert_eq!(layout.attributes[2].offset, 28);
         assert_eq!(layout.attributes[3].offset, 40);
         assert_eq!(layout.attributes[4].offset, 48);
+        assert_eq!(layout.attributes[5].offset, 52);
     }
 }

@@ -34,6 +34,6 @@ pub use texture::{
 };
 #[allow(unused_imports)]
 pub use upload::{
-    ChunkCoord, CpuMesh, GpuChunkMesh, MeshVertex, RenderBounds, RenderUploadError,
-    RenderUploadRequest,
+    ChunkCoord, CpuMesh, GpuChunkMesh, MeshVertex, RenderBounds, RenderMaterialKind,
+    RenderUploadError, RenderUploadRequest,
 };
