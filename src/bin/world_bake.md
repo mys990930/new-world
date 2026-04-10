@@ -26,3 +26,7 @@
 4. Save each chunk through `world::storage`.
 5. Summarize the stack relief and record it in the manifest.
 6. Pick the highest-scoring stack as the default preview center.
+
+## Default Vertical Window
+
+- The current default bake window is chunk `y = -2..3`, matching the surface-inspection focus on roughly world `y > -40`.

@@ -13,8 +13,8 @@ use new_world::renderer::{
     RenderViewBasis, render_offscreen, write_offscreen_png,
 };
 use new_world::world::{
-    BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, TextureTileSource, WORLD_FLOOR_Y,
-    WorldCore, WorldMeta, build_chunk_mesh, generate_chunk,
+    BlockMaterialKind, BlockRegistry, ChunkCoord, TextureTileSource, WorldCore, WorldMeta,
+    build_chunk_mesh, generate_chunk,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -26,6 +26,7 @@ const DEFAULT_RENDER_RADIUS: i32 = 4;
 const DEFAULT_RENDER_PADDING: i32 = 2;
 const DEFAULT_IMAGE_WIDTH: u32 = 1600;
 const DEFAULT_IMAGE_HEIGHT: u32 = 900;
+const DEFAULT_MIN_Y_CHUNK: i32 = -2;
 const DEFAULT_MAX_Y_CHUNK: i32 = 3;
 
 #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut quarter_turns = 0_u8;
     let mut width = DEFAULT_IMAGE_WIDTH;
     let mut height = DEFAULT_IMAGE_HEIGHT;
-    let mut min_y_chunk = WORLD_FLOOR_Y.div_euclid(CHUNK_EDGE_I32);
+    let mut min_y_chunk = DEFAULT_MIN_Y_CHUNK;
     let mut max_y_chunk = DEFAULT_MAX_Y_CHUNK;
     let mut output: Option<PathBuf> = None;
 

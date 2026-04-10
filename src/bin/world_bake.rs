@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use new_world::world::{
-    CHUNK_EDGE_I32, ChunkCoord, WORLD_FLOOR_Y, WorldCore, WorldMeta, BlockRegistry, generate_chunk,
+    ChunkCoord, WorldCore, WorldMeta, BlockRegistry, generate_chunk,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -16,6 +16,7 @@ use world_dump_common::{BakedStackSummary, BakedWorldManifest, save_chunk_to_dum
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
 const DEFAULT_RADIUS: i32 = 16;
+const DEFAULT_MIN_Y_CHUNK: i32 = -2;
 const DEFAULT_MAX_Y_CHUNK: i32 = 3;
 const DEFAULT_TOP_RESULTS: usize = 8;
 
@@ -29,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut center_x = DEFAULT_CENTER_X;
     let mut center_z = DEFAULT_CENTER_Z;
     let mut radius = DEFAULT_RADIUS;
-    let mut min_y_chunk = WORLD_FLOOR_Y.div_euclid(CHUNK_EDGE_I32);
+    let mut min_y_chunk = DEFAULT_MIN_Y_CHUNK;
     let mut max_y_chunk = DEFAULT_MAX_Y_CHUNK;
     let mut output: Option<PathBuf> = None;
 
