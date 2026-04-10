@@ -51,6 +51,11 @@ generation::probe_column(
     local_z: u8,
     meta: &WorldMeta,
 ) -> ColumnGenerationProbe
+generation::sample_chunk_surface_lod(
+    coord: ChunkCoord,
+    step_blocks: u8,
+    meta: &WorldMeta,
+) -> ChunkSurfaceLodGrid
 ```
 
 ## Current First-Pass Realization Contract
@@ -60,11 +65,26 @@ generation::probe_column(
 - For each `(x, z)` column in the chunk:
   1. Sample and bilerp atlas-derived macro inputs from the surrounding atlas cells.
   2. Resolve a generation-side `TerrainProfile`.
-  3. Use the profile's surface shaper plus block-scale deterministic relief noise to compute a signed `surface_y`.
-  4. Fill the pre-material `terrain_debug` scaffold block from world `y = -256` through `surface_y`.
-  5. Leave everything above `surface_y` as air, including ocean space above negative-height seabeds.
-- This phase intentionally does not place `water`, `grass`, `dirt`, `sand`, `mud`, `snow`, trees, or ecology.
-- The purpose of this phase is to verify that atlas-driven macro relief such as sea basins, coasts, rivers, and ridges reads well before material layering begins.
+  3. Use the profile's surface shaper plus block-scale deterministic relief noise to compute a base signed `surface_y`.
+  4. Resolve a column material profile, with coast classification taking priority over river-bed classification near sea level so beaches remain visible.
+  5. Optionally carve river floodplains/channels out of the base surface and assign a `water_top_y` for inland rivers or sea water.
+  6. Pick a stone-core ceiling at `surface_y - random(8..=16)` from the carved final ground surface.
+  7. Fill `stone` from world `y = -256` through that ceiling.
+  8. Fill the layer above the stone core through `surface_y` using atlas-informed material rules:
+     - deep ocean floor: `mud`
+     - shallow ocean floor: `sand` / `mud`, with extra `gravel` when not river-connected
+     - river headwaters: `gravel` bed, with exposed land banks still becoming `grass`
+     - river middle reaches: `gravel` / `sand` bed, with exposed land banks still becoming `grass`
+     - river lower reaches: `mud` / `sand` bed, with exposed land banks still becoming `grass`
+     - coast: `sand`
+     - desert: `sand`
+     - alpine or polar terrain: `snow`
+     - otherwise: `dirt`, with `grass` on the surface block
+  9. Any exposed land surface that is not classified as `sand` or `snow` uses `grass` as the top block.
+  10. If a column has `water_top_y`, fill `water` from `surface_y + 1` through that water top:
+     - ocean/shelf columns use sea level `y = 0`
+     - inland river columns can carry water above sea level
+- Trees, tall grass, and ecology are still intentionally out of scope for this pass.
 
 ## Processing Flow
 
@@ -73,8 +93,9 @@ generation::probe_column(
 3. Interpolate the atlas signals per block column inside the chunk.
 4. Resolve a terrain profile from the sampled column context.
 5. Dispatch to the profile-specific surface function.
-6. Write block ids into `ChunkData`.
-7. Return the finished chunk without mutating any live world state.
+6. Apply hydrology-aware carving and water-top resolution.
+7. Write block ids into `ChunkData`.
+8. Return the finished chunk without mutating any live world state.
 
 ## Invariants
 
@@ -82,7 +103,7 @@ generation::probe_column(
 2. `world::generation` owns block placement; `world::atlas` does not place blocks directly.
 3. Sea level remains fixed at world-space `y = 0` for this generator version.
 4. Blocks below world-space `y = -256` are outside the current generated volume.
-5. The current generator version emits only `terrain_debug` and `air`.
+5. The current generator version emits layered terrain materials plus sea water and inland river water, but still no vegetation or ecology.
 6. Generation reads block meaning through `BlockRegistry`; it does not own texture or renderer policy.
 
 ## Internal Submodules
@@ -93,7 +114,7 @@ generation::probe_column(
 - `noise.md`: deterministic block-scale relief noise helpers
 - `probe.md`: deterministic terrain inspection helpers
 - `profiles/profiles.md`: profile-specific surface shaping modules
-- `realize.md`: chunk fill loop and stone-only realization
+- `realize.md`: chunk fill loop and layered terrain realization
 
 ## Related Modules
 

@@ -88,6 +88,11 @@ generation::probe_column(
     local_z: u8,
     meta: &WorldMeta,
 ) -> ColumnGenerationProbe
+generation::sample_chunk_surface_lod(
+    coord: ChunkCoord,
+    step_blocks: u8,
+    meta: &WorldMeta,
+) -> ChunkSurfaceLodGrid
 
 atlas::generate_atlas_fields(
     meta: &WorldMeta,
@@ -143,6 +148,7 @@ NOT:
 
 - The default block registry is loaded from `assets/blocks/index.toml`.
 - Registry entries now carry an explicit or inferred `BlockMaterialKind` in addition to face textures and tint.
-- Chunk generation now consumes atlas fields inside `world::generation`, resolves terrain profiles, and realizes a pre-material first-pass relief scaffold around fixed sea level `y = 0`.
+- Chunk generation now consumes atlas fields inside `world::generation`, resolves terrain profiles, and realizes a first-pass layered terrain volume around fixed sea level `y = 0`.
+- The current layered pass places `stone`, `dirt`, `grass`, `sand`, `gravel`, `mud`, `snow`, sea `water`, and inland river `water`, but still defers trees, tall grass, and ecology.
 - Meshing emits `material_kind` per vertex so renderer shaders can react differently to grass, soil, stone, and future categories without the renderer owning block semantics.
 - Renderer conversion still happens through `jobs/app::bridge`; world does not upload directly to the GPU.

@@ -8,7 +8,7 @@ pub struct WorldMeta {
 
 impl WorldMeta {
     pub const CURRENT_WORLD_VERSION: u32 = 1;
-    pub const CURRENT_GENERATOR_VERSION: u32 = 5;
+    pub const CURRENT_GENERATOR_VERSION: u32 = 8;
     pub const CURRENT_SAVE_FORMAT_VERSION: u32 = 1;
 
     pub const fn new(seed: u64) -> Self {
