@@ -18,8 +18,8 @@ impl GenerationPalette {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct ColumnAtlasSample {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ColumnAtlasSample {
     pub landness: f32,
     pub ocean_distance: f32,
     pub coast_factor: f32,

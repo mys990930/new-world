@@ -14,6 +14,7 @@
 - Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
 - Convert atlas fields into per-column surface elevation around a fixed sea level.
 - Fill solid terrain mass into `ChunkData` for relief inspection.
+- Expose deterministic debug probes for chunk/profile/surface inspection while tuning generation.
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
 
 ## Non-Responsibilities
@@ -42,6 +43,14 @@ generation::generate_chunk(
     meta: &WorldMeta,
     registry: &BlockRegistry,
 ) -> ChunkData
+
+generation::probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe
+generation::probe_column(
+    coord: ChunkCoord,
+    local_x: u8,
+    local_z: u8,
+    meta: &WorldMeta,
+) -> ColumnGenerationProbe
 ```
 
 ## Current First-Pass Realization Contract
@@ -82,6 +91,7 @@ generation::generate_chunk(
 - `sampler.md`: chunk-to-atlas neighborhood lookup and bilerp sampling
 - `profile.md`: generation-side terrain profile resolution
 - `noise.md`: deterministic block-scale relief noise helpers
+- `probe.md`: deterministic terrain inspection helpers
 - `profiles/profiles.md`: profile-specific surface shaping modules
 - `realize.md`: chunk fill loop and stone-only realization
 

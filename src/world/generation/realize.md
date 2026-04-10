@@ -16,3 +16,4 @@
 
 - The realization pass is still intentionally simple above the surface: everything above `surface_y` is air until later material and fluid passes are added.
 - The filled block is currently `terrain_debug`, a neutral placeholder for pre-material terrain inspection.
+- Probe helpers stop before block fill and let tooling inspect the same `sample -> profile -> surface_y` path without generating a full preview image.

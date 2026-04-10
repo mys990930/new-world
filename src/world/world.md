@@ -42,6 +42,7 @@
 - `ChunkData`, `ChunkSnapshot`
 - `AtlasCoord`, `AtlasArea`
 - `AtlasFieldMap`, `AtlasResolvedMap`
+- `ChunkGenerationProbe`, `ColumnGenerationProbe`
 - `WorldEdit`, `EditResult`
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
 - `NeighborChunks`
@@ -79,6 +80,14 @@ generation::generate_chunk(
     meta: &WorldMeta,
     registry: &BlockRegistry,
 ) -> ChunkData
+
+generation::probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe
+generation::probe_column(
+    coord: ChunkCoord,
+    local_x: u8,
+    local_z: u8,
+    meta: &WorldMeta,
+) -> ColumnGenerationProbe
 
 atlas::generate_atlas_fields(
     meta: &WorldMeta,

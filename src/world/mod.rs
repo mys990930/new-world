@@ -26,8 +26,9 @@ pub use atlas::{
 pub use chunk::{BlockFace, BlockId, ChunkData, ChunkSnapshot, ChunkWriteError};
 #[allow(unused_imports)]
 pub use coord::{
-    CHUNK_EDGE, CHUNK_EDGE_I32, CHUNK_VOLUME, ChunkCoord, LocalBlockCoord, WorldBlockCoord,
-    chunk_local_to_world, is_local_in_bounds, world_to_chunk_local,
+    BLOCK_SIZE_M, BLOCKS_PER_METER, CHUNK_EDGE, CHUNK_EDGE_I32, CHUNK_EDGE_M, CHUNK_VOLUME,
+    ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world, is_local_in_bounds,
+    world_to_chunk_local,
 };
 #[allow(unused_imports)]
 pub use core::WorldCore;
@@ -35,6 +36,11 @@ pub use core::WorldCore;
 pub use edit::{EditError, EditResult, WorldEdit};
 #[allow(unused_imports)]
 pub use generation::{FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, WORLD_FLOOR_Y, generate_chunk};
+#[allow(unused_imports)]
+pub use generation::{
+    ChunkGenerationProbe, ColumnAtlasSample, ColumnGenerationProbe, TerrainProfile,
+    TerrainProfileCounts, probe_chunk, probe_column,
+};
 #[allow(unused_imports)]
 pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
 #[allow(unused_imports)]

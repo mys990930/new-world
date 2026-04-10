@@ -11,6 +11,8 @@ use super::seed::{
 };
 use super::tuning::AtlasTuning;
 
+const NO_SOURCE_DISTANCE: u32 = 1_000_000_000;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ThermalWeights {
     pub polar: f32,
@@ -792,7 +794,7 @@ fn compute_distance_to_value(mask: &[bool], width: u32, height: u32, source_valu
     }
 
     if source_count == 0 {
-        return vec![0_u32; len];
+        return vec![NO_SOURCE_DISTANCE; len];
     }
 
     while let Some((Reverse(cost), index)) = queue.pop() {
@@ -1013,5 +1015,12 @@ mod tests {
             land_cells < atlas.cells().values().len(),
             "reference preview should contain some ocean"
         );
+    }
+
+    #[test]
+    fn distance_without_source_stays_far_instead_of_collapsing_to_zero() {
+        let distances = compute_distance_to_value(&[true, true, true, true], 2, 2, false);
+
+        assert!(distances.iter().all(|distance| *distance == NO_SOURCE_DISTANCE));
     }
 }

@@ -1,10 +1,10 @@
 # atlas_fields
 
-## 역할
+## Role
 
-- atlas raw field와 derived factor를 계산한다.
+- Compute raw atlas fields and derived macro-environment factors.
 
-## 책임
+## Responsibilities
 
 - land / ocean mask
 - continent id / continent core factor
@@ -14,18 +14,18 @@
 - aridity / wetness / polar / alpine / ecotone factor
 - climate / moisture / form / overlay / cover weights
 
-## 처리 순서
+## Processing Order
 
-1. landness와 continent structure 계산
-2. ocean/coast distance와 continent metadata 계산
-3. elevation / ridge / mountain structure 계산
-4. drainage / river / lake field 계산
-5. temperature / humidity / inlandness 계산
-6. derived factor와 axis weight 계산
+1. compute landness and continent structure
+2. compute ocean/coast distance and continent metadata
+3. compute elevation, ridge, and mountain structure
+4. compute drainage, river, and lake fields
+5. compute temperature, humidity, and inlandness
+6. compute derived factors and axis weights
 
-## 불변식
+## Invariants
 
-1. scalar field는 명시적으로 정규화된 범위를 가져야 한다.
-2. hydrology는 ocean/land 구조와 모순되면 안 된다.
-3. preview tuning 단계에서도 field 이름과 의미는 문서 기준으로 유지한다.
-4. 기본 tuning 값은 `tuning.rs`에서 읽고, 계산식은 그 값을 조합해 사용한다.
+1. Scalar fields must stay within documented normalized ranges.
+2. Hydrology must remain coherent with land/ocean structure.
+3. Distance-style fields must not collapse to zero just because a small sampled area lacks a local source cell.
+4. Default tuning values live in `tuning.rs`, and field generation composes them rather than hard-coding alternate defaults elsewhere.

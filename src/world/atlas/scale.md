@@ -1,24 +1,28 @@
 # scale
 
-## 역할
+## Role
 
-- atlas 계층에서 사용하는 좌표와 하드 스케일 타입을 정의한다.
+- Define atlas-space coordinate and hard-scale rules.
 
-## 책임
+## Responsibilities
 
-- `AtlasCoord`
-- `AtlasArea`
-- atlas cell 크기와 region/chunk 관계 상수
-- atlas grid index 규칙
+- define `AtlasCoord`
+- define `AtlasArea`
+- define atlas cell size in chunk, region, and metric units
+- keep atlas indexing deterministic
 
-## 하드 스케일
+## Hard Scale
 
-- `1 atlas cell = 256m x 256m`
+- `1 block = 0.5m`
+- `1 chunk = 32 x 32 x 32 blocks`
+- `1 chunk side = 16m`
 - `1 atlas cell = 16 x 16 chunk columns`
+- `1 atlas cell = 512 x 512 block columns`
+- `1 atlas cell = 256m x 256m`
 - `1 atlas cell = 2 x 2 regions`
 
-## 불변식
+## Invariants
 
-1. atlas area의 width / height는 0보다 커야 한다.
-2. atlas grid index는 `(x, z)`에서 결정적으로 계산 가능해야 한다.
-3. atlas 좌표는 chunk generation 여부와 무관하게 독립 조회 가능해야 한다.
+1. Atlas area width and height must both be greater than zero.
+2. Atlas grid indexing must be deterministic from `(x, z)`.
+3. Atlas coordinates must be stable enough for chunk generation to sample them repeatedly.

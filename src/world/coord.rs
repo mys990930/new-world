@@ -1,6 +1,9 @@
 pub const CHUNK_EDGE: usize = 32;
 pub const CHUNK_EDGE_I32: i32 = CHUNK_EDGE as i32;
 pub const CHUNK_VOLUME: usize = CHUNK_EDGE * CHUNK_EDGE * CHUNK_EDGE;
+pub const BLOCKS_PER_METER: u32 = 2;
+pub const BLOCK_SIZE_M: f32 = 0.5;
+pub const CHUNK_EDGE_M: f32 = CHUNK_EDGE as f32 * BLOCK_SIZE_M;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ChunkCoord(pub i32, pub i32, pub i32);
@@ -80,5 +83,12 @@ mod tests {
             assert_eq!(chunk_local_to_world(chunk, local), sample);
             assert!(is_local_in_bounds(local));
         }
+    }
+
+    #[test]
+    fn chunk_metric_width_matches_half_meter_block_scale() {
+        assert_eq!(BLOCKS_PER_METER, 2);
+        assert!((BLOCK_SIZE_M - 0.5).abs() <= f32::EPSILON);
+        assert!((CHUNK_EDGE_M - 16.0).abs() <= f32::EPSILON);
     }
 }

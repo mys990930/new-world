@@ -1,6 +1,7 @@
 mod context;
 mod noise;
 mod profile;
+mod probe;
 mod profiles;
 mod realize;
 mod sampler;
@@ -11,6 +12,9 @@ pub const WORLD_FLOOR_Y: i32 = -256;
 #[allow(dead_code)]
 pub const FLAT_WORLD_SURFACE_Y: i32 = SEA_LEVEL_Y;
 
+pub use context::ColumnAtlasSample;
+pub use probe::{ChunkGenerationProbe, ColumnGenerationProbe, TerrainProfileCounts, probe_chunk, probe_column};
+pub use profile::TerrainProfile;
 pub use realize::generate_chunk;
 
 #[cfg(test)]
@@ -38,7 +42,7 @@ mod tests {
     }
 
     #[test]
-    fn generation_fills_world_floor_chunk_with_stone() {
+    fn generation_fills_world_floor_chunk_with_terrain_scaffold() {
         let meta = WorldMeta::new(7);
         let registry = test_registry();
         let terrain = registry
@@ -57,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn surface_and_subsurface_are_stone_only() {
+    fn surface_and_subsurface_are_terrain_scaffold_only() {
         let registry = test_registry();
         let palette = GenerationPalette::from_registry(&registry);
         let column = ColumnRealization {
@@ -196,5 +200,14 @@ mod tests {
 
         assert_ne!(a, b);
         assert!((a - b).abs() >= 2);
+    }
+
+    #[test]
+    fn chunk_probe_summarizes_profiles_and_surface_range() {
+        let meta = WorldMeta::new(42);
+        let probe = probe_chunk(ChunkCoord(5, 0, -8), &meta);
+
+        assert_eq!(probe.profile_counts.total(), 1024);
+        assert!(probe.surface_min_y <= probe.surface_max_y);
     }
 }

@@ -17,3 +17,4 @@
 
 - These profiles are generation-owned realization categories, not authoritative final biome ids.
 - Atlas stays responsible for macro scalar fields and biome tendencies; generation decides which surface shaper to invoke for actual chunk terrain.
+- The same `TerrainProfile` enum is surfaced through generation probe APIs so debug tooling can report which shaper dominated a chunk or column.
