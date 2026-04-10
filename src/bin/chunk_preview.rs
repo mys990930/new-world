@@ -14,7 +14,7 @@ use new_world::renderer::{
 };
 use new_world::world::{
     BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, SEA_LEVEL_Y, TextureTileSource,
-    WORLD_FLOOR_Y, WorldCore, WorldMeta, build_chunk_mesh, generate_chunk,
+    WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta, build_chunk_mesh, generate_chunk,
 };
 
 const DEFAULT_RENDER_RADIUS: i32 = 4;
@@ -23,6 +23,9 @@ const DEFAULT_IMAGE_WIDTH: u32 = 1600;
 const DEFAULT_IMAGE_HEIGHT: u32 = 900;
 const DEFAULT_RENDER_MIN_Y_CHUNK: i32 = -2;
 const DEFAULT_RENDER_MAX_Y_CHUNK: i32 = 3;
+const AUTO_SEARCH_MIN_CHUNK: i32 = -256;
+const AUTO_SEARCH_MAX_CHUNK: i32 = 256;
+const AUTO_SEARCH_STEP: i32 = 16;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
@@ -33,6 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let seed = parse_required::<u64>(&mut args, "seed")?;
     let mut center_x = 0_i32;
     let mut center_z = 0_i32;
+    let mut center_explicit = false;
     let mut radius = DEFAULT_RENDER_RADIUS;
     let mut quarter_turns = 0_u8;
     let mut width = DEFAULT_IMAGE_WIDTH;
@@ -44,8 +48,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     while let Some(flag) = args.first().cloned() {
         args.remove(0);
         match flag.as_str() {
-            "--center-x" => center_x = parse_required::<i32>(&mut args, "center-x")?,
-            "--center-z" => center_z = parse_required::<i32>(&mut args, "center-z")?,
+            "--center-x" => {
+                center_x = parse_required::<i32>(&mut args, "center-x")?;
+                center_explicit = true;
+            }
+            "--center-z" => {
+                center_z = parse_required::<i32>(&mut args, "center-z")?;
+                center_explicit = true;
+            }
             "--radius" => radius = parse_required::<i32>(&mut args, "radius")?,
             "--quarter-turns" => quarter_turns = parse_required::<u8>(&mut args, "quarter-turns")?,
             "--width" => width = parse_required::<u32>(&mut args, "width")?,
@@ -72,6 +82,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?,
     );
     let meta = WorldMeta::new(seed);
+    let auto_selected_center = if center_explicit {
+        None
+    } else {
+        find_auto_preview_center(&meta, block_registry.as_ref())
+    };
+    if let Some((auto_x, auto_z)) = auto_selected_center {
+        center_x = auto_x;
+        center_z = auto_z;
+    }
     let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
     let generation_radius = radius + DEFAULT_RENDER_PADDING;
@@ -125,6 +144,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("preview seed: {seed}");
     println!("center chunk: ({center_x}, {center_z})");
+    if let Some((auto_x, auto_z)) = auto_selected_center {
+        println!("auto-selected preview center: ({auto_x}, {auto_z})");
+    }
     println!(
         "render footprint: xz radius={}, y={}..{}",
         radius, DEFAULT_RENDER_MIN_Y_CHUNK, DEFAULT_RENDER_MAX_Y_CHUNK
@@ -144,6 +166,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     Ok(())
+}
+
+fn find_auto_preview_center(meta: &WorldMeta, registry: &BlockRegistry) -> Option<(i32, i32)> {
+    let mut best: Option<AutoPreviewCandidate> = None;
+
+    for center_z in (AUTO_SEARCH_MIN_CHUNK..=AUTO_SEARCH_MAX_CHUNK).step_by(AUTO_SEARCH_STEP as usize) {
+        for center_x in (AUTO_SEARCH_MIN_CHUNK..=AUTO_SEARCH_MAX_CHUNK).step_by(AUTO_SEARCH_STEP as usize) {
+            let candidate = evaluate_preview_center(meta, registry, center_x, center_z);
+            if !candidate.has_non_water_surface {
+                continue;
+            }
+
+            let replace = match best {
+                Some(current) => candidate.score() > current.score(),
+                None => true,
+            };
+            if replace {
+                best = Some(candidate);
+            }
+        }
+    }
+
+    best.map(|candidate| (candidate.center_x, candidate.center_z))
 }
 
 fn build_preview_camera(
@@ -277,6 +322,45 @@ fn combined_render_bounds(
     combined
 }
 
+fn evaluate_preview_center(
+    meta: &WorldMeta,
+    registry: &BlockRegistry,
+    center_x: i32,
+    center_z: i32,
+) -> AutoPreviewCandidate {
+    let registry = Arc::new(registry.clone());
+    let mut world = WorldCore::new(*meta, Arc::clone(&registry));
+    for y in -8..=3 {
+        let coord = ChunkCoord(center_x, y, center_z);
+        let chunk = generate_chunk(coord, world.meta(), registry.as_ref());
+        world.insert_chunk(coord, chunk);
+    }
+
+    let mut candidate = AutoPreviewCandidate {
+        center_x,
+        center_z,
+        has_non_water_surface: false,
+        non_water_columns: 0,
+        max_surface_y: i32::MIN,
+    };
+
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            let world_x = center_x * CHUNK_EDGE_I32 + local_x;
+            let world_z = center_z * CHUNK_EDGE_I32 + local_z;
+            if let Some((top_y, key)) = topmost_block_key(&world, registry.as_ref(), world_x, world_z) {
+                candidate.max_surface_y = candidate.max_surface_y.max(top_y);
+                if key != "water" {
+                    candidate.has_non_water_surface = true;
+                    candidate.non_water_columns += 1;
+                }
+            }
+        }
+    }
+
+    candidate
+}
+
 fn preview_environment() -> RenderEnvironment {
     let mut environment = RenderEnvironment::sunset_quarter_view();
     environment.time_of_day_hours = 14.0;
@@ -327,6 +411,38 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
             vector[1] * inv_length,
             vector[2] * inv_length,
         ]
+    }
+}
+
+fn topmost_block_key(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    world_x: i32,
+    world_z: i32,
+) -> Option<(i32, String)> {
+    for world_y in (WORLD_FLOOR_Y..=64).rev() {
+        if let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z)) {
+            if !block.is_air() {
+                return Some((world_y, registry.block_or_missing(block).key.clone()));
+            }
+        }
+    }
+
+    None
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AutoPreviewCandidate {
+    center_x: i32,
+    center_z: i32,
+    has_non_water_surface: bool,
+    non_water_columns: usize,
+    max_surface_y: i32,
+}
+
+impl AutoPreviewCandidate {
+    fn score(self) -> i64 {
+        (self.non_water_columns as i64) * 10_000 + self.max_surface_y as i64
     }
 }
 
