@@ -1,6 +1,7 @@
 mod camera;
 mod config;
 mod frame;
+mod offscreen;
 mod pipeline;
 mod state;
 mod surface;
@@ -20,6 +21,11 @@ pub use config::{
 };
 #[allow(unused_imports)]
 pub use frame::{RenderCubeInstance, RenderError, RenderFrameInput, RenderStats};
+#[allow(unused_imports)]
+pub use offscreen::{
+    OffscreenRenderError, OffscreenRenderOutput, OffscreenRenderRequest, render_offscreen,
+    write_offscreen_png,
+};
 #[allow(unused_imports)]
 pub use pipeline::{PipelineKind, PipelineSet, PipelineState};
 pub use state::{RenderEnvironmentState, RenderWorld, Renderer};

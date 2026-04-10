@@ -17,6 +17,7 @@
 - Depth buffer and shadow-map creation/recreation
 - CPU render DTO -> GPU draw command conversion
 - Submit / present / recoverable render error propagation
+- Offscreen terrain preview rendering for debug binaries
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
 
 ### Non-Responsibilities
@@ -55,6 +56,8 @@
   - swap the current sunset / weather / climate values without changing app-facing DTO shape
 - frame render
   - accept `RenderFrameInput`, update camera / environment / sun-shadow uniforms, render the shadow map, draw the visible sun, draw terrain and dynamic cubes, and present
+- offscreen preview render
+  - accept renderer-ready meshes and render them into a PNG-friendly RGBA image without a live surface
 
 ### Public Interface
 
@@ -69,6 +72,9 @@ Renderer::apply_upload(request: RenderUploadRequest) -> Result<(), RenderUploadE
 Renderer::remove_chunk_mesh(coord: ChunkCoord)
 
 Renderer::render(frame: RenderFrameInput<'_>) -> Result<RenderStats, RenderError>
+
+render_offscreen(request: OffscreenRenderRequest) -> Result<OffscreenRenderOutput, OffscreenRenderError>
+write_offscreen_png(path, image: &OffscreenRenderOutput) -> Result<(), OffscreenRenderError>
 ```
 
 ### Dependencies
@@ -101,3 +107,4 @@ NOT:
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
 - Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
 - The default environment is still a fixed sunset quarter-view preset, but medium/high quality now enable the shadow-map path.
+- Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
