@@ -8,6 +8,7 @@
 
 - dispatch from `TerrainProfile` to the matching surface function
 - keep ocean, coast, inland, and ridge shaping logic isolated
+- expose blended profile surface evaluation so neighboring profiles can ease into each other instead of creating hard height seams
 
 ## Current Modules
 
@@ -20,4 +21,6 @@
 ## Notes
 
 - Each profile module turns the same sampled atlas signals into a different height curve and relief pattern.
+- Generation can now blend several of those curves together near boundaries, while still reporting a dominant profile for debug and fill heuristics.
 - This keeps future material, vegetation, and structure generation aligned around the same profile boundary.
+- `upland` now owns broken highland relief, while `ridge` is expected to exaggerate crags, escarpments, and sharper vertical transitions instead of reading like a taller plain.

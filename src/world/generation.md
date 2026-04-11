@@ -12,7 +12,7 @@
 - Define the chunk-generation entry point and its deterministic contract.
 - Sample atlas-scale macro environment data needed for chunk realization.
 - Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
-- Convert atlas fields into per-column surface elevation around a fixed sea level.
+- Convert atlas fields into per-column surface elevation around a fixed sea level using blended profile surfaces rather than a single hard profile switch.
 - Fill solid terrain mass into `ChunkData` for relief inspection.
 - Expose deterministic debug probes for chunk/profile/surface inspection while tuning generation.
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
@@ -64,8 +64,8 @@ generation::sample_chunk_surface_lod(
 - The generator treats atlas as macro input and performs block placement inside `world::generation`.
 - For each `(x, z)` column in the chunk:
   1. Sample and bilerp atlas-derived macro inputs from the surrounding atlas cells.
-  2. Resolve a generation-side `TerrainProfile`.
-  3. Use the profile's surface shaper plus block-scale deterministic relief noise to compute a base signed `surface_y`.
+  2. Resolve a dominant generation-side `TerrainProfile` for debug and material heuristics.
+  3. Blend the profile surface shapers plus block-scale deterministic relief noise into a base signed `surface_y`.
   4. Resolve a column material profile, with coast classification taking priority over river-bed classification near sea level so beaches remain visible.
   5. Optionally carve river floodplains/channels out of the base surface and assign a `water_top_y` for inland rivers or sea water.
   6. Pick a stone-core ceiling at `surface_y - random(8..=16)` from the carved final ground surface.
@@ -91,8 +91,8 @@ generation::sample_chunk_surface_lod(
 1. Map the target chunk to the atlas neighborhood needed for macro sampling.
 2. Generate atlas fields for that neighborhood.
 3. Interpolate the atlas signals per block column inside the chunk.
-4. Resolve a terrain profile from the sampled column context.
-5. Dispatch to the profile-specific surface function.
+4. Resolve a dominant terrain profile from the sampled column context.
+5. Blend the profile-specific surface functions into a single surface height.
 6. Apply hydrology-aware carving and water-top resolution.
 7. Write block ids into `ChunkData`.
 8. Return the finished chunk without mutating any live world state.

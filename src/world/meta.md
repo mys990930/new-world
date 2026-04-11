@@ -29,17 +29,18 @@
 
 ## Current Notes
 
-- `generator_version = 8` corresponds to the current profile-driven atlas relief and first-pass material layering with:
+- `generator_version = 9` corresponds to the current profile-driven atlas relief and first-pass material layering with:
   - fixed sea level at world `y = 0`
   - generation-side terrain profile resolution (`DeepOcean`, `Shelf`, `Coast`, `Plain`, `Upland`, `Ridge`)
+  - blended profile surface evaluation so neighboring macro profiles ease into one another instead of producing abrupt height seams
   - a stone core from world `y = -256` through `surface_y - random(8..=16)`
   - atlas-informed sediment/topsoil selection above the stone core (`mud`, `sand`, `gravel`, `snow`, `dirt`, `grass`)
   - coast-first fill classification near sea level so beach sand remains visible even when river signals are nearby
-  - river floodplain/channel carving on top of the profile-shaped terrain surface
+  - smoother river floodplain/channel carving on top of the blended terrain surface
   - sea water fill from negative-height seabeds up through `y = 0`
   - inland river water fill above sea level when a carved channel resolves a `water_top_y`
   - atlas distance fields that stay "far" instead of collapsing to zero when a tiny sampled neighborhood has no local ocean or river source
   - a padded generation atlas neighborhood so local chunk realization sees more macro context than a bare 2x2 atlas slice
-  - stronger mountain/ridge promotion and more severe upland/ridge relief shaping for prototype terrain inspection
+  - stronger mountain/ridge promotion and more severe upland/ridge relief shaping for prototype terrain inspection, including more aggressive ridge cliffs and couloirs
   - no vegetation or ecology placement yet
 - `save_format_version` is still `1`.

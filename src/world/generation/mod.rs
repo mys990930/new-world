@@ -25,8 +25,9 @@ mod tests {
     use super::context::{
         ColumnAtlasSample, ColumnFillProfile, ColumnRealization, GenerationPalette, RiverStage,
     };
+    use super::profile::surface_profile_blend;
     use super::profile::TerrainProfile;
-    use super::profiles::surface_y_for_profile;
+    use super::profiles::{surface_y_for_profile, surface_y_for_sample};
     use super::realize::block_for_world_y;
     use super::*;
     use crate::world::{BlockId, BlockRegistry, ChunkCoord, LocalBlockCoord, WorldMeta};
@@ -393,5 +394,76 @@ mod tests {
 
         let profile = super::profile::resolve_profile(sample, 0.53);
         assert_eq!(profile, TerrainProfile::Ridge);
+    }
+
+    #[test]
+    fn surface_profile_blend_normalizes_and_uses_multiple_weights_near_boundaries() {
+        let sample = ColumnAtlasSample {
+            landness: 0.55,
+            ocean_distance: 0.22,
+            coast_factor: 0.36,
+            continent_core_factor: 0.22,
+            macro_elevation: 0.31,
+            ridge_factor: 0.20,
+            mountain_mass: 0.24,
+            ruggedness: 0.24,
+            river_source_potential: 0.10,
+            river_flow_potential: 0.22,
+            riverine_factor: 0.18,
+            lake_potential: 0.08,
+            temperature: 0.52,
+            humidity: 0.48,
+            aridity: 0.26,
+            wetness: 0.28,
+            polar_factor: 0.04,
+            alpine_factor: 0.08,
+        };
+
+        let blend = surface_profile_blend(sample, 0.53);
+        let total =
+            blend.deep_ocean + blend.shelf + blend.coast + blend.plain + blend.upland + blend.ridge;
+
+        assert!((total - 1.0).abs() < 0.001);
+        assert!(blend.coast > 0.0);
+        assert!(blend.plain > 0.0);
+        assert!(blend.upland > 0.0 || blend.ridge > 0.0);
+    }
+
+    #[test]
+    fn blended_surface_softens_plain_to_ridge_transition() {
+        let ridgeish = ColumnAtlasSample {
+            landness: 0.59,
+            ocean_distance: 0.16,
+            coast_factor: 0.06,
+            continent_core_factor: 0.24,
+            macro_elevation: 0.32,
+            ridge_factor: 0.21,
+            mountain_mass: 0.34,
+            ruggedness: 0.30,
+            river_source_potential: 0.16,
+            river_flow_potential: 0.34,
+            riverine_factor: 0.20,
+            lake_potential: 0.04,
+            temperature: 0.46,
+            humidity: 0.48,
+            aridity: 0.20,
+            wetness: 0.24,
+            polar_factor: 0.06,
+            alpine_factor: 0.20,
+        };
+        let plainish = ColumnAtlasSample {
+            ridge_factor: 0.12,
+            mountain_mass: 0.18,
+            ruggedness: 0.18,
+            macro_elevation: 0.22,
+            alpine_factor: 0.04,
+            ..ridgeish
+        };
+
+        let ridge_surface = surface_y_for_sample(17, 0, 0, ridgeish, 0.53);
+        let plain_surface = surface_y_for_sample(17, 32, 0, plainish, 0.53);
+
+        assert!((ridge_surface - plain_surface).abs() <= 18);
+        assert!(ridge_surface > plain_surface);
     }
 }

@@ -3,6 +3,8 @@ const HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const HASH_K3: u64 = 0x1656_67B1_9E37_79F9;
 
 pub(super) const SURFACE_JITTER_SALT: u64 = 0x9511_1100_0000_0001;
+pub(super) const STONE_DEPTH_SALT: u64 = 0x9511_1100_0000_0002;
+pub(super) const MATERIAL_BLEND_SALT: u64 = 0x9511_1100_0000_0003;
 pub(super) const OCEAN_FLOOR_SALT: u64 = 0x9511_1100_0000_0101;
 pub(super) const ROLLING_RELIEF_SALT: u64 = 0x9511_1100_0000_0102;
 pub(super) const DETAIL_RELIEF_SALT: u64 = 0x9511_1100_0000_0103;
@@ -61,6 +63,29 @@ pub(super) fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 
 pub(super) fn clamp01(value: f32) -> f32 {
     value.clamp(0.0, 1.0)
+}
+
+pub(super) fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+pub(super) fn hash01_2d(seed: u64, x: i32, z: i32, salt: u64) -> f32 {
+    noise01_2d(seed, x, z, salt)
+}
+
+pub(super) fn hash01_3d(seed: u64, x: i32, y: i32, z: i32, salt: u64) -> f32 {
+    let mut value = seed ^ salt;
+    value ^= (x as u64).wrapping_mul(HASH_K1);
+    value ^= (y as u64).wrapping_mul(0xC6BC_2796_92B5_CC83);
+    value ^= (z as u64).wrapping_mul(HASH_K2);
+    let bits = splitmix64(value) >> 11;
+    let max = ((1_u64 << 53) - 1) as f64;
+    (bits as f64 / max) as f32
 }
 
 fn splitmix64(mut value: u64) -> u64 {

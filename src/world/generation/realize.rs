@@ -6,7 +6,7 @@ use super::noise::{
     lerp_f32,
 };
 use super::profile::resolve_profile;
-use super::profiles::surface_y_for_profile;
+use super::profiles::surface_height_for_sample;
 use super::sampler::{generate_chunk_atlas_fields, sample_column_atlas};
 use super::super::atlas::AtlasTuning;
 use super::super::chunk::{BlockId, ChunkData};
@@ -22,8 +22,8 @@ const RIVER_CHANNEL_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x410
 
 #[derive(Debug, Clone, Copy)]
 struct HydrologyRealization {
-    surface_y: i32,
-    water_top_y: Option<i32>,
+    surface_y: f32,
+    water_top_y: Option<f32>,
 }
 
 pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegistry) -> ChunkData {
@@ -41,9 +41,9 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
             let atlas_sample = sample_column_atlas(&atlas_fields, world_x, world_z);
             let profile = resolve_profile(atlas_sample, land_threshold);
             let base_surface_y =
-                surface_y_for_profile(meta.seed, world_x, world_z, atlas_sample, profile);
+                surface_height_for_sample(meta.seed, world_x, world_z, atlas_sample, land_threshold);
             let fill_profile =
-                classify_fill_profile(atlas_sample, base_surface_y, land_threshold, profile);
+                classify_fill_profile(atlas_sample, base_surface_y.round() as i32, land_threshold, profile);
             let hydrology = apply_hydrology(
                 meta.seed,
                 world_x,
@@ -53,12 +53,17 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
                 fill_profile,
                 land_threshold,
             );
+            let surface_y = hydrology.surface_y.round() as i32;
+            let water_top_y = hydrology
+                .water_top_y
+                .map(|water_top_y| water_top_y.floor() as i32)
+                .filter(|water_top_y| *water_top_y > surface_y);
             let stone_ceiling_y =
-                compute_stone_ceiling(meta.seed, world_x, world_z, hydrology.surface_y);
+                compute_stone_ceiling(meta.seed, world_x, world_z, surface_y);
             let realization = ColumnRealization {
-                surface_y: hydrology.surface_y,
+                surface_y,
                 stone_ceiling_y,
-                water_top_y: hydrology.water_top_y,
+                water_top_y,
                 fill_profile,
             };
 
@@ -146,7 +151,7 @@ fn apply_hydrology(
     world_x: i32,
     world_z: i32,
     sample: ColumnAtlasSample,
-    base_surface_y: i32,
+    base_surface_y: f32,
     fill_profile: ColumnFillProfile,
     land_threshold: f32,
 ) -> HydrologyRealization {
@@ -158,7 +163,7 @@ fn apply_hydrology(
     let surface_y = inland.map(|realization| realization.surface_y).unwrap_or(base_surface_y);
     let water_top_y = inland
         .and_then(|realization| realization.water_top_y)
-        .or_else(|| (surface_y < SEA_LEVEL_Y).then_some(SEA_LEVEL_Y));
+        .or_else(|| (surface_y < SEA_LEVEL_Y as f32).then_some(SEA_LEVEL_Y as f32));
 
     HydrologyRealization {
         surface_y,
@@ -171,7 +176,7 @@ fn carve_river_channel(
     world_x: i32,
     world_z: i32,
     sample: ColumnAtlasSample,
-    base_surface_y: i32,
+    base_surface_y: f32,
     fill_profile: ColumnFillProfile,
 ) -> Option<HydrologyRealization> {
     let river_strength =
@@ -213,8 +218,7 @@ fn carve_river_channel(
     }
 
     let channel_mask = clamp01(1.0 - centerline_distance / channel_width);
-    let floodplain_drop =
-        ((0.8 + river_strength * 2.0 + sample.wetness * 1.2) * floodplain_mask).round() as i32;
+    let floodplain_drop = (0.6 + river_strength * 2.0 + sample.wetness * 1.2) * floodplain_mask;
     let floodplain_y = base_surface_y - floodplain_drop;
     if channel_mask <= 0.18 {
         return Some(HydrologyRealization {
@@ -228,20 +232,23 @@ fn carve_river_channel(
         _ => classify_river_stage(sample),
     };
     let (channel_depth_base, water_depth_base) = match river_stage {
-        RiverStage::Headwaters => (3.0, 1),
-        RiverStage::Middle => (4.0, 2),
-        RiverStage::Lower => (3.0, 2),
+        RiverStage::Headwaters => (2.2, 0.9),
+        RiverStage::Middle => (3.4, 1.4),
+        RiverStage::Lower => (2.8, 1.6),
     };
-    let channel_depth = ((channel_depth_base
+    let channel_depth = (channel_depth_base
         + river_strength * 2.6
         + sample.river_flow_potential * 1.2
         + sample.wetness * 0.6)
-        * channel_mask)
-        .round() as i32;
-    let bed_y = (floodplain_y - channel_depth.max(1)).min(base_surface_y - 1);
-    let water_depth =
-        water_depth_base + i32::from(river_strength > 0.64 || sample.lake_potential > 0.70);
-    let water_top_y = (bed_y + water_depth).min(floodplain_y - 1);
+        * channel_mask;
+    let bed_y = (floodplain_y - channel_depth.max(0.8)).min(base_surface_y - 0.6);
+    let water_depth = water_depth_base
+        + if river_strength > 0.64 || sample.lake_potential > 0.70 {
+            0.8
+        } else {
+            0.0
+        };
+    let water_top_y = (bed_y + water_depth).min(floodplain_y - 0.2);
 
     Some(HydrologyRealization {
         surface_y: bed_y,

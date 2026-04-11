@@ -1,6 +1,6 @@
 use super::context::ColumnAtlasSample;
 use super::profile::{TerrainProfile, resolve_profile};
-use super::profiles::surface_y_for_profile;
+use super::profiles::surface_y_for_sample;
 use super::sampler::{generate_chunk_atlas_fields, sample_column_atlas};
 use super::super::atlas::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, AtlasFieldMap, AtlasTuning};
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, chunk_local_to_world};
@@ -60,6 +60,26 @@ pub struct ChunkGenerationProbe {
     pub profile_counts: TerrainProfileCounts,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChunkSurfaceLodSample {
+    pub chunk: ChunkCoord,
+    pub local_min_x: u8,
+    pub local_min_z: u8,
+    pub world_min_x: i32,
+    pub world_min_z: i32,
+    pub span_blocks: u8,
+    pub profile: TerrainProfile,
+    pub surface_y: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChunkSurfaceLodGrid {
+    pub chunk: ChunkCoord,
+    pub step_blocks: u8,
+    pub samples_per_axis: u8,
+    pub samples: Vec<ChunkSurfaceLodSample>,
+}
+
 pub fn probe_column(
     coord: ChunkCoord,
     local_x: u8,
@@ -99,6 +119,56 @@ pub fn probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe 
     }
 }
 
+pub fn sample_chunk_surface_lod(
+    coord: ChunkCoord,
+    step_blocks: u8,
+    meta: &WorldMeta,
+) -> ChunkSurfaceLodGrid {
+    let step_blocks = step_blocks.max(1);
+    let step = usize::from(step_blocks);
+    assert!(
+        super::super::coord::CHUNK_EDGE % step == 0,
+        "step_blocks must divide CHUNK_EDGE"
+    );
+
+    let atlas_fields = generate_chunk_atlas_fields(coord, meta);
+    let samples_per_axis = (super::super::coord::CHUNK_EDGE / step) as u8;
+    let mut samples = Vec::with_capacity(usize::from(samples_per_axis) * usize::from(samples_per_axis));
+
+    for sample_z in 0..usize::from(samples_per_axis) {
+        let local_min_z = (sample_z * step) as u8;
+        let local_probe_z = ((usize::from(local_min_z) + step / 2).min(super::super::coord::CHUNK_EDGE - 1)) as u8;
+
+        for sample_x in 0..usize::from(samples_per_axis) {
+            let local_min_x = (sample_x * step) as u8;
+            let local_probe_x =
+                ((usize::from(local_min_x) + step / 2).min(super::super::coord::CHUNK_EDGE - 1)) as u8;
+            let column = probe_column_with_fields(&atlas_fields, coord, local_probe_x, local_probe_z, meta.seed);
+            let origin_local =
+                LocalBlockCoord::new(local_min_x, 0, local_min_z).expect("lod local coordinates must be in bounds");
+            let origin_world = chunk_local_to_world(coord, origin_local);
+
+            samples.push(ChunkSurfaceLodSample {
+                chunk: coord,
+                local_min_x,
+                local_min_z,
+                world_min_x: origin_world.0,
+                world_min_z: origin_world.2,
+                span_blocks: step_blocks,
+                profile: column.profile,
+                surface_y: column.surface_y,
+            });
+        }
+    }
+
+    ChunkSurfaceLodGrid {
+        chunk: coord,
+        step_blocks,
+        samples_per_axis,
+        samples,
+    }
+}
+
 fn probe_column_with_fields(
     atlas_fields: &AtlasFieldMap,
     coord: ChunkCoord,
@@ -121,7 +191,7 @@ fn probe_column_with_fields(
     let atlas_sample = sample_column_atlas(atlas_fields, world_x, world_z);
     let land_threshold = AtlasTuning::default().normalization.land_threshold;
     let profile = resolve_profile(atlas_sample, land_threshold);
-    let surface_y = surface_y_for_profile(seed, world_x, world_z, atlas_sample, profile);
+    let surface_y = surface_y_for_sample(seed, world_x, world_z, atlas_sample, land_threshold);
 
     ColumnGenerationProbe {
         chunk: coord,
