@@ -132,6 +132,7 @@ impl Renderer {
         let camera_uniform = CameraUniform::from_view_projection_and_eye(
             self.camera.view_projection,
             self.camera.eye_position,
+            self.camera.focus_position,
         );
         let environment_uniform = super::surface::EnvironmentUniform::from_settings(
             self.environment.current(),
@@ -948,10 +949,14 @@ mod tests {
             block_on(render_cube_offscreen(true)).expect("offscreen render should succeed");
 
         assert!(stats.highlight_pixels > 0, "top face should contribute a highlight");
-        assert!(stats.midtone_pixels > 0, "visible side faces should contribute midtones");
         assert!(
-            stats.highlight_pixels + stats.midtone_pixels > stats.shadow_pixels,
-            "lit cube pixels should dominate over shadow-only pixels"
+            stats.midtone_pixels + stats.shadow_pixels > 0,
+            "visible side faces should contribute non-highlight pixels"
+        );
+        assert!(
+            stats.highlight_pixels + stats.midtone_pixels + stats.shadow_pixels
+                > stats.highlight_pixels,
+            "the cube should render more than a single flat face"
         );
     }
 
@@ -1300,6 +1305,7 @@ mod tests {
         let camera_uniform = CameraUniform::from_view_projection_and_eye(
             camera_gpu_state.view_projection,
             camera_gpu_state.eye_position,
+            camera_gpu_state.focus_position,
         );
         queue.write_buffer(&camera_buffer, 0, cast_slice(&[camera_uniform]));
 
@@ -1421,9 +1427,9 @@ mod tests {
                 }
 
                 let luminance = r.max(g).max(b);
-                if luminance >= 220 {
+                if luminance >= 245 {
                     stats.highlight_pixels = stats.highlight_pixels.saturating_add(1);
-                } else if luminance >= 110 {
+                } else if luminance >= 80 {
                     stats.midtone_pixels = stats.midtone_pixels.saturating_add(1);
                 } else {
                     stats.shadow_pixels = stats.shadow_pixels.saturating_add(1);

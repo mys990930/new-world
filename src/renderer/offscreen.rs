@@ -280,6 +280,7 @@ pub fn render_offscreen(
     let camera_uniform = CameraUniform::from_view_projection_and_eye(
         camera_gpu_state.view_projection,
         camera_gpu_state.eye_position,
+        camera_gpu_state.focus_position,
     );
     queue.write_buffer(&camera_buffer, 0, cast_slice(&[camera_uniform]));
     queue.write_buffer(

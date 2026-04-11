@@ -1,6 +1,7 @@
 struct CameraUniform {
     view_projection: mat4x4<f32>,
     eye_position: vec4<f32>,
+    focus_position: vec4<f32>,
 };
 
 struct EnvironmentUniform {
@@ -243,14 +244,15 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
         return color;
     }
 
-    let distance_to_eye = distance(world_position, camera.eye_position.xyz);
+    let focus_delta = world_position - camera.focus_position.xyz;
+    let focal_distance = length(vec3<f32>(focus_delta.x, focus_delta.y * 0.35, focus_delta.z));
     let height_term =
         exp(-max(world_position.y, 0.0) * environment.horizon_color_height_falloff.w);
     let fog_amount =
         1.0 -
-        exp(-distance_to_eye * environment.fog_color_density.w * (0.42 + height_term * 0.24));
+        exp(-focal_distance * environment.fog_color_density.w * (0.26 + height_term * 0.10));
     let resisted = fog_amount * (1.0 - fog_resistance(material_kind));
-    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.72));
+    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.38));
 }
 
 @fragment

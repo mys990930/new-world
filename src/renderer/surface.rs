@@ -263,7 +263,7 @@ impl EnvironmentUniform {
 #[cfg(test)]
 pub(crate) fn default_environment_uniform() -> EnvironmentUniform {
     EnvironmentUniform::from_settings(
-        &RenderEnvironment::sunset_quarter_view(),
+        &RenderEnvironment::default(),
         &RenderQualityConfig::default(),
     )
 }

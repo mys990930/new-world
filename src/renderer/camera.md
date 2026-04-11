@@ -53,4 +53,5 @@
 - Renderer expects an orthographic quarter-view pose through an explicit basis override
 - Loose follow, deadzone, movement bias, and smooth recenter are resolved upstream in ECS/app before the renderer sees the camera DTO
 - `CameraUniform` now includes the eye position in addition to the view-projection matrix so fog and silhouette lighting can be computed fully inside the renderer
+- `CameraUniform` now also includes the current focus position so orthographic fog can be evaluated around the gameplay focal area instead of the artificially distant eye point
 - Camera uniform upload must not apply an extra transpose; doing so skews the screen axes and collapses the cube into the wrong silhouette

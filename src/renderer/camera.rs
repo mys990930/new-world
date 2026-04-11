@@ -22,13 +22,19 @@ pub struct RenderViewBasis {
 pub struct CameraUniform {
     pub view_projection: Matrix4,
     pub eye_position: [f32; 4],
+    pub focus_position: [f32; 4],
 }
 
 impl CameraUniform {
-    pub fn from_view_projection_and_eye(view_projection: Matrix4, eye_position: [f32; 3]) -> Self {
+    pub fn from_view_projection_and_eye(
+        view_projection: Matrix4,
+        eye_position: [f32; 3],
+        focus_position: [f32; 3],
+    ) -> Self {
         Self {
             view_projection,
             eye_position: [eye_position[0], eye_position[1], eye_position[2], 1.0],
+            focus_position: [focus_position[0], focus_position[1], focus_position[2], 1.0],
         }
     }
 }
@@ -62,6 +68,7 @@ pub struct CameraGpuState {
     pub projection: Matrix4,
     pub view_projection: Matrix4,
     pub eye_position: [f32; 3],
+    pub focus_position: [f32; 3],
     pub cached_aspect_ratio: f32,
     pub last_uploaded_frame: Option<u64>,
 }
@@ -73,6 +80,7 @@ impl Default for CameraGpuState {
             projection: identity_matrix(),
             view_projection: identity_matrix(),
             eye_position: [0.0, 0.0, 0.0],
+            focus_position: [0.0, 0.0, 0.0],
             cached_aspect_ratio: 1.0,
             last_uploaded_frame: None,
         }
@@ -148,6 +156,7 @@ impl CameraGpuState {
         // multiplied by row vectors, so the composed order is view * projection.
         self.view_projection = multiply_matrix4(view, projection);
         self.eye_position = camera.eye;
+        self.focus_position = camera.target;
         self.cached_aspect_ratio = aspect_ratio;
         self.last_uploaded_frame = Some(frame_index);
         Ok(())
@@ -327,8 +336,11 @@ mod tests {
 
         let mut gpu = CameraGpuState::default();
         gpu.update(&camera, &projection, 1600, 900, 0).unwrap();
-        let uniform =
-            CameraUniform::from_view_projection_and_eye(gpu.view_projection, gpu.eye_position);
+        let uniform = CameraUniform::from_view_projection_and_eye(
+            gpu.view_projection,
+            gpu.eye_position,
+            gpu.focus_position,
+        );
         let point = [0.5, 1.0, 0.5, 1.0];
 
         let cpu_clip = multiply_row_vector(point, gpu.view_projection);

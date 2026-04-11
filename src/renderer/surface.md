@@ -55,3 +55,4 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 - The backend now creates the sun overlay pipeline, shadow depth pipeline, terrain pipeline, dynamic cube pipeline, and debug edge pipeline during initialization.
 - Shadow maps currently use a single `Depth32Float` texture plus comparison sampler.
 - Medium quality uses a smaller hard-sun map than high quality.
+- The environment uniform test helper now follows the current default environment preset instead of pinning a legacy sunset-only baseline.

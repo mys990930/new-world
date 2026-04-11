@@ -57,6 +57,7 @@
 - if there is no live backend or the surface is not configured, nothing is presented
 - terrain and dynamic cubes share bind groups but not shader logic
 - visible-sun and shadow-map calculations are renderer-local and derive from current render state only
+- orthographic fog should be based on focal-area distance rather than raw eye distance, because the quarter-view eye sits far away only to define the view basis
 
 ## Related Modules
 
@@ -69,3 +70,4 @@
 - The current shadow solution is a single directional hard-sun map fit to visible terrain/cube bounds.
 - The visible sun is a full-screen overlay pass positioned from the current sun direction projected into the active camera.
 - Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.
+- Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large.
