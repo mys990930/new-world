@@ -23,8 +23,10 @@ impl GameApp {
         self.collect_job_results();
 
         let window = self.platform.window_state();
+        let previous_selection = self.ecs.selection_state();
         self.ecs
             .update_selection_from_world(&self.world, window.width, window.height);
+        self.log_hovered_block(previous_selection);
 
         let commands = self.ecs.drain_player_commands();
         if !commands.is_empty() {
@@ -82,5 +84,30 @@ impl GameApp {
                 }
             }
         }
+    }
+
+    fn log_hovered_block(&self, previous_selection: crate::ecs::SelectionState) {
+        let current_selection = self.ecs.selection_state();
+        if current_selection.hovered_block == previous_selection.hovered_block {
+            return;
+        }
+
+        let Some(block_pos) = current_selection.hovered_block else {
+            return;
+        };
+        let Some(block_id) = self.world.get_block(block_pos) else {
+            return;
+        };
+
+        let block = self.world.block_registry().block_or_missing(block_id);
+        println!(
+            "[app] hovered block: key={} id={} pos=({}, {}, {}) face={:?}",
+            block.key,
+            block_id.raw(),
+            block_pos.0,
+            block_pos.1,
+            block_pos.2,
+            current_selection.hovered_face
+        );
     }
 }

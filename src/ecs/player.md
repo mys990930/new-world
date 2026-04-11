@@ -83,4 +83,5 @@
 
 - the current minimal implementation spawns one local player during bootstrap
 - bootstrap now preloads a spawn neighborhood and then snaps the local player onto a safe loaded surface so the body does not start underground
+- the current default horizontal move speed is `8.0` world units per second
 - the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet

@@ -80,7 +80,7 @@ pub struct PlayerMovementConfig {
 impl Default for PlayerMovementConfig {
     fn default() -> Self {
         Self {
-            horizontal_units_per_second: 4.0,
+            horizontal_units_per_second: 8.0,
             gravity_units_per_second_sq: 28.0,
             terminal_fall_speed: 32.0,
             max_step_height: 1.0,

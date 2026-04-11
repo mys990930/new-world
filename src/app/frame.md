@@ -13,6 +13,7 @@
 - run world-aware local-player motion against `WorldCore`
 - plan chunk acquisition / meshing jobs from ECS chunk state
 - update world-and-viewport-based selection state
+- log the hovered block key when the raycast target changes
 - drain discrete commands for debugging
 - build render-ready frame DTOs and call the renderer
 
@@ -52,13 +53,15 @@
 9. submit the planned jobs
 10. collect newly completed jobs again
 11. update `SelectionState` from the latest world state and viewport
-12. drain and optionally log discrete commands
-13. build render DTOs and call `renderer.render(...)`
+12. if the hovered block changed, log the hovered block key/id/coord to the console
+13. drain and optionally log discrete commands
+14. build render DTOs and call `renderer.render(...)`
 
 ## Invariants
 
 - world-aware player motion happens after job results are applied and before camera follow runs in `post_update`
 - selection update happens after world/job result application
+- hovered-block logging is edge-triggered on target change so the console does not flood every frame
 - renderer receives render-ready DTOs only
 
 ## Related Modules
