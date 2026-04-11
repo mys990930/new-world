@@ -23,10 +23,9 @@ impl GameApp {
         self.collect_job_results();
 
         let window = self.platform.window_state();
-        let previous_selection = self.ecs.selection_state();
         self.ecs
             .update_selection_from_world(&self.world, window.width, window.height);
-        self.log_hovered_block(previous_selection);
+        self.log_clicked_block();
 
         let commands = self.ecs.drain_player_commands();
         if !commands.is_empty() {
@@ -86,12 +85,13 @@ impl GameApp {
         }
     }
 
-    fn log_hovered_block(&self, previous_selection: crate::ecs::SelectionState) {
-        let current_selection = self.ecs.selection_state();
-        if current_selection.hovered_block == previous_selection.hovered_block {
+    fn log_clicked_block(&self) {
+        let input = self.platform.raw_input_state();
+        if !input.left_just_pressed && !input.right_just_pressed {
             return;
         }
 
+        let current_selection = self.ecs.selection_state();
         let Some(block_pos) = current_selection.hovered_block else {
             return;
         };
@@ -100,8 +100,10 @@ impl GameApp {
         };
 
         let block = self.world.block_registry().block_or_missing(block_id);
+        let trigger = if input.left_just_pressed { "left" } else { "right" };
         println!(
-            "[app] hovered block: key={} id={} pos=({}, {}, {}) face={:?}",
+            "[app] clicked block: button={} key={} id={} pos=({}, {}, {}) face={:?}",
+            trigger,
             block.key,
             block_id.raw(),
             block_pos.0,
