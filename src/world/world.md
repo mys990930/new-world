@@ -150,6 +150,6 @@ NOT:
 - Registry entries now carry an explicit or inferred `BlockMaterialKind` in addition to face textures and tint.
 - Chunk generation now consumes atlas fields inside `world::generation`, resolves terrain profiles, and realizes a first-pass layered terrain volume around fixed sea level `y = 0`.
 - The current generator still reports a dominant terrain profile per column, but final relief is now blended across neighboring profiles so chunk terrain does not step abruptly at macro-profile boundaries.
-- The current layered pass places `stone`, `dirt`, `grass`, `sand`, `gravel`, `mud`, `snow`, sea `water`, and inland river `water`, but still defers trees, tall grass, and ecology.
+- The current layered pass places `stone`, `dirt`, `grass`, `sand`, `gravel`, `mud`, `snow`, sea `water`, and inland river `water`, with sea water currently restricted to ocean/shelf columns so coast reads as beach instead of scattered tide pools. Trees, tall grass, and ecology are still deferred.
 - Meshing emits `material_kind` per vertex so renderer shaders can react differently to grass, soil, stone, and future categories without the renderer owning block semantics.
 - Renderer conversion still happens through `jobs/app::bridge`; world does not upload directly to the GPU.

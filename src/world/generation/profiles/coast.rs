@@ -7,13 +7,18 @@ pub(super) fn surface_y(
     world_z: i32,
     sample: ColumnAtlasSample,
 ) -> f32 {
-    let coastal_rise = 1.5
-        + sample.macro_elevation * 6.0
-        + sample.continent_core_factor * 4.0
-        - sample.coast_factor * 2.5;
-    let beach_roll = centered_fbm(seed, world_x, world_z, 84.0, 3, 2.0, 0.5, ROLLING_RELIEF_SALT) * 3.0;
-    let detail = centered_fbm(seed, world_x, world_z, 20.0, 3, 2.0, 0.5, DETAIL_RELIEF_SALT) * 1.5;
-    let river_carve = sample.riverine_factor * 1.5;
+    let shoreline_rise = sample.ocean_distance * 4.8 + sample.continent_core_factor * 2.2;
+    let coastal_rise = 0.6
+        + shoreline_rise
+        + sample.macro_elevation * 4.2
+        + sample.continent_core_factor * 2.0
+        - sample.coast_factor * 1.1;
+    let beach_roll =
+        centered_fbm(seed, world_x, world_z, 112.0, 4, 2.0, 0.5, ROLLING_RELIEF_SALT) * 1.6;
+    let longshore =
+        centered_fbm(seed, world_x, world_z, 220.0, 3, 2.0, 0.5, ROLLING_RELIEF_SALT.wrapping_add(13)) * 0.8;
+    let detail = centered_fbm(seed, world_x, world_z, 24.0, 3, 2.0, 0.5, DETAIL_RELIEF_SALT) * 0.7;
+    let river_carve = sample.riverine_factor * 0.3;
 
-    (coastal_rise + beach_roll + detail - river_carve).clamp(-1.0, 10.0)
+    (coastal_rise + beach_roll + longshore + detail - river_carve).clamp(0.0, 10.0)
 }

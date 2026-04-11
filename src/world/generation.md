@@ -82,7 +82,8 @@ generation::sample_chunk_surface_lod(
      - otherwise: `dirt`, with `grass` on the surface block
   9. Any exposed land surface that is not classified as `sand` or `snow` uses `grass` as the top block.
   10. If a column has `water_top_y`, fill `water` from `surface_y + 1` through that water top:
-     - ocean/shelf columns use sea level `y = 0`
+     - only `DeepOcean` / `Shelf` columns get automatic sea water up to sea level `y = 0`
+     - `Coast` columns stay at or above sea level and read as beach sand rather than sea-filled low pockets
      - inland river columns can carry water above sea level
 - Trees, tall grass, and ecology are still intentionally out of scope for this pass.
 

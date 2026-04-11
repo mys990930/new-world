@@ -223,6 +223,48 @@ mod tests {
     }
 
     #[test]
+    fn coast_surface_stays_at_or_above_sea_level() {
+        let sample = ColumnAtlasSample {
+            landness: 0.58,
+            ocean_distance: 0.06,
+            coast_factor: 0.70,
+            continent_core_factor: 0.08,
+            macro_elevation: 0.10,
+            ridge_factor: 0.04,
+            mountain_mass: 0.08,
+            ruggedness: 0.12,
+            river_source_potential: 0.04,
+            river_flow_potential: 0.10,
+            riverine_factor: 0.40,
+            lake_potential: 0.06,
+            temperature: 0.56,
+            humidity: 0.50,
+            aridity: 0.24,
+            wetness: 0.22,
+            polar_factor: 0.02,
+            alpine_factor: 0.02,
+        };
+
+        let height = super::profiles::surface_height_for_profile(7, 0, 0, sample, TerrainProfile::Coast);
+        assert!(height >= 0.0);
+    }
+
+    #[test]
+    fn coast_profile_does_not_fill_sea_water_by_default() {
+        let registry = test_registry();
+        let palette = GenerationPalette::from_registry(&registry);
+        let column = ColumnRealization {
+            surface_y: 0,
+            stone_ceiling_y: -8,
+            water_top_y: None,
+            fill_profile: ColumnFillProfile::Coast,
+        };
+
+        assert_eq!(block_for_world_y(0, 0, 0, 7, column, palette), palette.sand);
+        assert_eq!(block_for_world_y(1, 0, 0, 7, column, palette), BlockId::AIR);
+    }
+
+    #[test]
     fn profile_surfaces_span_ocean_to_ridge() {
         let sample = ColumnAtlasSample {
             landness: 0.68,

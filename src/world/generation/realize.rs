@@ -155,15 +155,25 @@ fn apply_hydrology(
     fill_profile: ColumnFillProfile,
     land_threshold: f32,
 ) -> HydrologyRealization {
-    let inland = if sample.landness >= land_threshold {
+    let inland = if sample.landness >= land_threshold && matches!(fill_profile, ColumnFillProfile::River(_)) {
         carve_river_channel(seed, world_x, world_z, sample, base_surface_y, fill_profile)
     } else {
         None
     };
-    let surface_y = inland.map(|realization| realization.surface_y).unwrap_or(base_surface_y);
+    let mut surface_y = inland.map(|realization| realization.surface_y).unwrap_or(base_surface_y);
+    if matches!(fill_profile, ColumnFillProfile::Coast) {
+        surface_y = surface_y.max(SEA_LEVEL_Y as f32);
+    }
     let water_top_y = inland
         .and_then(|realization| realization.water_top_y)
-        .or_else(|| (surface_y < SEA_LEVEL_Y as f32).then_some(SEA_LEVEL_Y as f32));
+        .or_else(|| match fill_profile {
+            ColumnFillProfile::DeepOcean | ColumnFillProfile::ShallowOcean { .. }
+                if surface_y < SEA_LEVEL_Y as f32 =>
+            {
+                Some(SEA_LEVEL_Y as f32)
+            }
+            _ => None,
+        });
 
     HydrologyRealization {
         surface_y,
