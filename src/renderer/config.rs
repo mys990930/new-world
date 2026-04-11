@@ -212,25 +212,25 @@ impl RenderEnvironment {
         Self {
             time_of_day_hours: 18.35,
             sun_direction: normalize3([0.52, 0.86, -0.18]),
-            sun_color: [1.08, 0.74, 0.47],
-            sun_intensity: 1.05,
-            ambient_color: [0.46, 0.34, 0.31],
-            ambient_intensity: 0.82,
+            sun_color: [1.10, 0.76, 0.49],
+            sun_intensity: 1.14,
+            ambient_color: [0.43, 0.32, 0.30],
+            ambient_intensity: 0.72,
             fog_color: [0.88, 0.62, 0.47],
-            fog_density: 0.016,
-            fog_height_falloff: 0.06,
+            fog_density: 0.018,
+            fog_height_falloff: 0.055,
             sky_color: [0.56, 0.42, 0.54],
             horizon_color: [0.96, 0.62, 0.42],
-            overcast: 0.12,
+            overcast: 0.10,
             weather_strength: 0.0,
             wetness: 0.0,
             climate_tint: [1.03, 1.0, 0.98],
             climate_humidity: 0.48,
             climate_temperature_bias: 0.12,
-            top_face_boost: 0.26,
-            side_shadow_strength: 0.32,
-            silhouette_boost: 0.22,
-            saturation_boost: 0.05,
+            top_face_boost: 0.32,
+            side_shadow_strength: 0.48,
+            silhouette_boost: 0.30,
+            saturation_boost: 0.06,
         }
     }
 
@@ -301,7 +301,7 @@ impl RenderEnvironment {
 
 impl Default for RenderEnvironment {
     fn default() -> Self {
-        Self::midday_quarter_view()
+        Self::sunset_quarter_view()
     }
 }
 

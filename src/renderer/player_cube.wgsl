@@ -134,9 +134,9 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
     let height_term = exp(-max(world_position.y, 0.0) * environment.horizon_color_height_falloff.w);
     let fog_amount =
         1.0 -
-        exp(-focal_distance * environment.fog_color_density.w * (0.24 + height_term * 0.08));
+        exp(-focal_distance * environment.fog_color_density.w * (0.27 + height_term * 0.09));
     let resisted = select(fog_amount, fog_amount * 0.45, material_kind == MATERIAL_ACTOR);
-    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.28));
+    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.32));
 }
 
 @fragment
@@ -159,7 +159,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let lambert = max(dot(normal, to_light), 0.0);
     let shadow_visibility = sample_shadow(input.world_position, normal, to_light);
     let shadow_mix =
-        mix(1.0, 0.28 + shadow_visibility * 0.72, sun_shadow.sun_direction_shadow_strength.w);
+        mix(1.0, 0.20 + shadow_visibility * 0.80, sun_shadow.sun_direction_shadow_strength.w);
     let ambient =
         environment.ambient_color_intensity.rgb * environment.ambient_color_intensity.w;
     let sunlight =
@@ -172,7 +172,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         environment.horizon_color_height_falloff.xyz *
         silhouette *
         environment.readability.z *
-        0.10;
+        0.12;
 
     var shaded = base_color * (ambient + sunlight) + rim;
 

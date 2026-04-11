@@ -250,9 +250,9 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
         exp(-max(world_position.y, 0.0) * environment.horizon_color_height_falloff.w);
     let fog_amount =
         1.0 -
-        exp(-focal_distance * environment.fog_color_density.w * (0.26 + height_term * 0.10));
+        exp(-focal_distance * environment.fog_color_density.w * (0.29 + height_term * 0.11));
     let resisted = fog_amount * (1.0 - fog_resistance(material_kind));
-    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.38));
+    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.42));
 }
 
 @fragment
@@ -274,7 +274,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let lambert = max(dot(normal, to_light), 0.0);
     let shadow_visibility = sample_shadow(input.world_position, normal, to_light);
     let shadow_mix =
-        mix(1.0, 0.22 + shadow_visibility * 0.78, sun_shadow.sun_direction_shadow_strength.w);
+        mix(1.0, 0.14 + shadow_visibility * 0.86, sun_shadow.sun_direction_shadow_strength.w);
     let up_factor = max(normal.y, 0.0);
     let side_factor = 1.0 - up_factor;
     let albedo = resolve_albedo(sampled.rgb, input.color.rgb, input.material_kind);
@@ -285,8 +285,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         sun_shadow.sun_color_intensity.w *
         lambert *
         shadow_mix;
-    let top_boost = 1.0 + up_factor * environment.readability.x * 0.82;
-    let side_shadow = 1.0 - side_factor * environment.readability.y * 0.26;
+    let top_boost = 1.0 + up_factor * environment.readability.x * 0.92;
+    let side_shadow = 1.0 - side_factor * environment.readability.y * 0.38;
     let warm_side_tint = mix(
         vec3<f32>(1.0, 1.0, 1.0),
         environment.horizon_color_height_falloff.xyz,
@@ -297,8 +297,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         environment.horizon_color_height_falloff.xyz *
         silhouette *
         environment.readability.z *
-        0.10;
-    let low_light_detail = 0.10 * (1.0 - lambert);
+        0.12;
+    let low_light_detail = 0.035 * (1.0 - lambert);
 
     var shaded = albedo * (ambient + sunlight);
     shaded = shaded * top_boost * side_shadow * warm_side_tint + rim + albedo * low_light_detail;
