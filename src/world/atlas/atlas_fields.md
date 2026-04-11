@@ -29,3 +29,4 @@
 2. Hydrology must remain coherent with land/ocean structure.
 3. Distance-style fields must not collapse to zero just because a small sampled area lacks a local source cell.
 4. Default tuning values live in `tuning.rs`, and field generation composes them rather than hard-coding alternate defaults elsewhere.
+5. Reference seed scans used during tuning should still contain some non-trivial mountain signal so generation can realize more than rolling uplands.

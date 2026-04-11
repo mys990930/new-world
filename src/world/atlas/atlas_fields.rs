@@ -1023,4 +1023,23 @@ mod tests {
 
         assert!(distances.iter().all(|distance| *distance == NO_SOURCE_DISTANCE));
     }
+
+    #[test]
+    fn reference_seed_area_contains_some_mountain_signal() {
+        let meta = WorldMeta::new(42);
+        let area = AtlasArea::new(AtlasCoord::new(-64, -64), 128, 128).unwrap();
+        let atlas = generate_atlas_fields(&meta, area);
+
+        let strongest = atlas
+            .cells()
+            .values()
+            .iter()
+            .map(|cell| cell.mountain_mass)
+            .fold(0.0_f32, f32::max);
+
+        assert!(
+            strongest > 0.25,
+            "reference seed should contain some mountain-bearing atlas cells"
+        );
+    }
 }

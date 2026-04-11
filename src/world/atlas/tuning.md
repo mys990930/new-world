@@ -40,6 +40,36 @@
 
 ---
 
+## Mountain Range Preview Knobs
+
+These fields affect how strongly mountain ranges show up inside `07_biome_preview.png`.
+
+| Field | Meaning | Raise it | Lower it |
+| --- | --- | --- | --- |
+| `preview.mountain_range_ridge_weight` | How much ridge alignment contributes to the mountain-range darkening signal | Long continuous ridges stand out more clearly inside land biomes | Ridges contribute less to visible range silhouettes |
+| `preview.mountain_range_mass_weight` | How much `mountain_mass` contributes to the mountain-range darkening signal | Large mountain bodies darken more strongly | Broad highlands read flatter |
+| `preview.mountain_range_form_weight` | How much resolved mountain form contributes to the range signal | Cells already reading as mountain get extra visual emphasis | Range darkening depends more on raw ridge/mass fields |
+| `preview.mountain_range_threshold` | Minimum combined mountain signal before extra range shading starts | Only strong ranges darken noticeably | Even weaker uplands start to show range structure |
+| `preview.mountain_range_strength` | Overall strength of the extra range darkening pass | Mountain belts cut through biome colors more strongly | Biome colors stay flatter and gentler |
+
+---
+
+## Terrain Mountain Knobs
+
+These fields affect whether atlas produces strong enough mountain signals for chunk generation to realize steep ridges instead of broad noisy uplands.
+
+| Field | Meaning | Raise it | Lower it |
+| --- | --- | --- | --- |
+| `terrain.macro_mountain_weight` | How much mountain mass lifts atlas macro elevation | Mountain-bearing cells climb faster into highland/ridge territory | Mountain signal stays visible mostly as roughness, not height |
+| `terrain.mountain_ridge_weight` | How strongly ridge alignment feeds mountain mass | Long linear mountain belts become more common | Mountain mass depends more on broad cluster noise |
+| `terrain.mountain_cluster_weight` | How strongly clustered mountain blobs feed mountain mass | Massif-like mountain zones widen | Mountains stay more spine-like and sparse |
+| `terrain.mountain_base_min` | Lower bound where mountain mass starts rising | Weak ridge/cluster inputs stay low longer | Mountain mass begins appearing earlier |
+| `terrain.mountain_base_max` | Upper bound where mountain mass saturates | Only very strong ridge/cluster inputs become full mountain cores | Strong mountain cores appear more easily |
+| `hydrology.alpine_elevation_min` | Atlas elevation threshold where alpine influence begins | Alpine stays reserved for only higher terrain | Alpine influence starts earlier |
+| `hydrology.alpine_mountain_min` | Mountain-mass threshold where alpine influence begins | Only strong mountain bodies become alpine candidates | Alpine influence begins on more moderate mountains |
+
+---
+
 ## Quick Knobs
 
 가장 자주 손댈 가능성이 큰 필드는 이쪽이다.

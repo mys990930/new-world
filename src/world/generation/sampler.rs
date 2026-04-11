@@ -6,13 +6,19 @@ use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use super::super::meta::WorldMeta;
 
 const ATLAS_CELL_SPAN_BLOCKS_I32: i32 = ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32;
+const GENERATION_ATLAS_PADDING_CELLS: i32 = 4;
 
 pub(super) fn generate_chunk_atlas_fields(coord: ChunkCoord, meta: &WorldMeta) -> AtlasFieldMap {
-    let origin = AtlasCoord::new(
+    let base = AtlasCoord::new(
         coord.0.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
         coord.2.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
     );
-    let area = AtlasArea::new(origin, 2, 2).expect("generation atlas area is valid");
+    let origin = AtlasCoord::new(
+        base.x - GENERATION_ATLAS_PADDING_CELLS,
+        base.z - GENERATION_ATLAS_PADDING_CELLS,
+    );
+    let span = (GENERATION_ATLAS_PADDING_CELLS * 2 + 2) as u32;
+    let area = AtlasArea::new(origin, span, span).expect("generation atlas area is valid");
     generate_atlas_fields(meta, area)
 }
 
@@ -58,8 +64,24 @@ pub(super) fn sample_column_atlas(
             cell.mountain_mass
         }),
         ruggedness: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| cell.ruggedness),
+        river_source_potential: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
+            cell.river_source_potential
+        }),
+        river_flow_potential: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
+            cell.river_flow_potential
+        }),
         riverine_factor: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
             cell.riverine_factor
+        }),
+        lake_potential: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
+            cell.lake_potential
+        }),
+        temperature: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| cell.temperature),
+        humidity: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| cell.humidity),
+        aridity: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| cell.aridity),
+        wetness: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| cell.wetness),
+        polar_factor: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
+            cell.polar_factor
         }),
         alpine_factor: bilerp_cell(c00, c10, c01, c11, frac_x, frac_z, |cell| {
             cell.alpine_factor

@@ -304,7 +304,7 @@ fn biome_preview_color(
 ) -> [u8; 3] {
     let preview = tuning.preview;
     let abs_height = signed_height.abs().clamp(0.0, 1.0);
-    let color = match biome {
+    let base_color = match biome {
         BiomePreview::Ocean => shade_from_height(
             preview.ocean_light,
             preview.ocean_dark,
@@ -385,6 +385,8 @@ fn biome_preview_color(
         ),
     };
 
+    let color = apply_mountain_range_shading(base_color, cell, biome, signed_height, preview);
+
     if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::Desert | BiomePreview::PolarTundra) {
         color
     } else if cell.overlay.riverine > preview.river_tint_threshold {
@@ -397,6 +399,36 @@ fn biome_preview_color(
     } else {
         color
     }
+}
+
+fn apply_mountain_range_shading(
+    color: [u8; 3],
+    cell: &AtlasCell,
+    biome: BiomePreview,
+    signed_height: f32,
+    preview: super::tuning::AtlasPreviewDebugTuning,
+) -> [u8; 3] {
+    if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::PolarTundra) {
+        return color;
+    }
+
+    let range_signal = clamp01(
+        cell.ridge_factor * preview.mountain_range_ridge_weight
+            + cell.mountain_mass * preview.mountain_range_mass_weight
+            + cell.form.mountain * preview.mountain_range_form_weight,
+    );
+    let positive_height = signed_height.max(0.0);
+    let biome_bonus = match biome {
+        BiomePreview::Mountain => 1.00,
+        BiomePreview::Alpine => 0.92,
+        _ => 0.72,
+    };
+    let shade = smoothstep(preview.mountain_range_threshold, 1.0, range_signal)
+        * positive_height
+        * preview.mountain_range_strength
+        * biome_bonus;
+
+    mix(color, preview.mountain_dark, shade.clamp(0.0, 0.90))
 }
 
 fn preview_signed_height(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
@@ -421,6 +453,15 @@ fn preview_signed_height(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
 
 fn shade_from_height(light: [u8; 3], dark: [u8; 3], height: f32, strength: f32) -> [u8; 3] {
     mix(light, dark, (height.clamp(0.0, 1.0) * strength).clamp(0.0, 1.0))
+}
+
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if edge0 >= edge1 {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+
+    let t = clamp01((value - edge0) / (edge1 - edge0));
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn fill_cell(image: &mut RgbImage, map_width: u32, scale: u32, index: usize, color: [u8; 3]) {
@@ -481,6 +522,60 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     ]
 }
 
+fn clamp01(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
 fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
     (a as f32 + (b as f32 - a as f32) * t).round() as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::atlas::atlas_fields::TerrainFormWeights;
+
+    fn brightness(color: [u8; 3]) -> u32 {
+        color[0] as u32 + color[1] as u32 + color[2] as u32
+    }
+
+    #[test]
+    fn biome_preview_darkens_mountainous_land_more_than_flat_land() {
+        let tuning = AtlasTuning::default();
+        let flat = AtlasCell {
+            ridge_factor: 0.08,
+            mountain_mass: 0.06,
+            form: TerrainFormWeights {
+                plain: 0.92,
+                hill: 0.08,
+                mountain: 0.0,
+            },
+            ..AtlasCell::default()
+        };
+        let mountainous = AtlasCell {
+            ridge_factor: 0.84,
+            mountain_mass: 0.88,
+            form: TerrainFormWeights {
+                plain: 0.0,
+                hill: 0.10,
+                mountain: 0.90,
+            },
+            ..AtlasCell::default()
+        };
+
+        let flat_color = biome_preview_color(
+            &flat,
+            BiomePreview::TemperateForest,
+            0.76,
+            &tuning,
+        );
+        let mountainous_color = biome_preview_color(
+            &mountainous,
+            BiomePreview::TemperateForest,
+            0.76,
+            &tuning,
+        );
+
+        assert!(brightness(mountainous_color) < brightness(flat_color));
+    }
 }

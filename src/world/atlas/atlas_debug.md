@@ -1,16 +1,16 @@
 # atlas_debug
 
-## 역할
+## Role
 
-- atlas field와 resolved preview를 디버그 이미지로 저장한다.
+- Rasterize atlas field maps and resolved preview maps into deterministic debug PNG outputs.
 
-## 책임
+## Responsibilities
 
-- scalar map rasterization
-- categorical map rasterization
-- atlas prototype에서 필요한 파일명 규칙 유지
+- Render scalar atlas fields such as landness, elevation, ridge, hydrology, temperature, humidity, and ecotone.
+- Render categorical atlas previews such as overlay and biome preview.
+- Keep atlas prototype outputs easy to compare across seeds and tuning changes.
 
-## 기본 출력 묶음
+## Default Outputs
 
 - `00_landness.png`
 - `01_elevation.png`
@@ -22,20 +22,19 @@
 - `07_biome_preview.png`
 - `08_ecotone.png`
 
-## biome preview 색 규칙
+## Biome Preview Rules
 
-- `07_biome_preview.png`는 atlas cell 단위 preview biome를 색으로 읽기 쉽게 표현한다.
-- 바다는 파랑 계열을 기본으로 하되, 해수면 아래로 더 깊게 읽히는 셀일수록 더 짙은 파랑으로 표현한다.
-- 육지는 초록 계열을 기본으로 하되, 해수면 위로 더 높게 읽히는 셀일수록 더 짙은 초록으로 표현한다.
-- 해안은 연노랑을 우선 사용한다.
-- 사막 계열은 주황을 우선 사용한다.
-- 극지 계열은 흰색을 우선 사용한다.
-- 강가/습지/고산/숲 계열은 위 기본 규칙 위에서 별도 tint를 섞어 구분한다.
-- 여기서 쓰는 높이감은 atlas preview용 signed height이며, 실제 chunk block 고도와 동일한 계약은 아니다.
+- `07_biome_preview.png` is still an atlas-cell preview, not a chunk or block-level render.
+- Ocean uses a blue base and gets darker as the signed depth moves farther below sea level.
+- Land biomes use their own palette and get darker as signed height rises farther above sea level.
+- Coast stays pale yellow, desert stays orange, and polar terrain stays near white.
+- River influence is applied as a tint on top of the biome color when the riverine signal is strong enough.
+- Mountain ranges are now emphasized as an extra darkening pass on land biomes.
+- That range shading is driven by `ridge_factor`, `mountain_mass`, `form.mountain`, and positive signed height.
+- The result is that mountainous forest, grassland, steppe, or desert cells can still show a visible range silhouette instead of reading as a flat biome patch.
 
-## 불변식
+## Invariants
 
-1. 디버그 이미지는 같은 atlas 입력에서 동일한 픽셀 결과를 내야 한다.
-2. 색상 램프와 class color는 tuning에 충분히 구분 가능해야 한다.
-3. 저장 실패는 명시적 error로 반환한다.
-4. biome preview의 signed height와 주요 색 규칙은 `tuning.rs`의 preview 섹션에서 조정 가능해야 한다.
+1. The same atlas input must always produce the same debug images.
+2. Debug rendering must not redefine atlas ownership or classification rules.
+3. Preview shading may improve readability, but it must not pretend to be final chunk realization.

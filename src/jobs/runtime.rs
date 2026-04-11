@@ -134,9 +134,7 @@ mod tests {
         let mut jobs = JobSystem::new(JobConfig::default());
         let coord = ChunkCoord(0, -8, 0);
         let registry = test_registry();
-        let terrain = registry
-            .block_id("terrain_debug")
-            .expect("terrain_debug block should exist");
+        let stone = registry.block_id("stone").expect("stone block should exist");
 
         assert_eq!(
             jobs.submit(JobRequest::GenerateChunk {
@@ -154,11 +152,11 @@ mod tests {
                 assert_eq!(found, coord);
                 assert_eq!(
                     chunk.get_block(LocalBlockCoord::new(3, 0, 5).unwrap()),
-                    Some(terrain)
+                    Some(stone)
                 );
                 assert_eq!(
                     chunk.get_block(LocalBlockCoord::new(3, 31, 5).unwrap()),
-                    Some(terrain)
+                    Some(stone)
                 );
                 chunk
             }

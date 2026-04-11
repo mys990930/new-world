@@ -45,8 +45,9 @@ pub use edit::{EditError, EditResult, WorldEdit};
 pub use generation::{FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, WORLD_FLOOR_Y, generate_chunk};
 #[allow(unused_imports)]
 pub use generation::{
-    ChunkGenerationProbe, ColumnAtlasSample, ColumnGenerationProbe, TerrainProfile,
-    TerrainProfileCounts, probe_chunk, probe_column,
+    ChunkGenerationProbe, ChunkSurfaceLodGrid, ChunkSurfaceLodSample, ColumnAtlasSample,
+    ColumnGenerationProbe, TerrainProfile, TerrainProfileCounts, probe_chunk, probe_column,
+    sample_chunk_surface_lod,
 };
 #[allow(unused_imports)]
 pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
