@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::Resource;
 
 use super::camera::{
-    CameraState, quarter_view_camera_pose, QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+    CameraState, quarter_view_camera_pose, quarter_view_vertical_world_size,
 };
 use super::input::EcsInputSnapshot;
 use crate::world::{BlockFace, Ray3, WorldBlockCoord, WorldCore};
@@ -49,7 +49,7 @@ pub fn update_selection_from_world(
 
     let pose = quarter_view_camera_pose(camera);
     let aspect = viewport_width as f32 / viewport_height as f32;
-    let half_height = QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5;
+    let half_height = quarter_view_vertical_world_size(camera) * 0.5;
     let half_width = half_height * aspect;
     let ndc_x = (cursor.0 as f32 / viewport_width as f32) * 2.0 - 1.0;
     let ndc_y = 1.0 - (cursor.1 as f32 / viewport_height as f32) * 2.0;
@@ -117,6 +117,8 @@ mod tests {
                 quarter_turns: 0,
                 smoothed_target: [3.0, 1.5, 3.0],
                 desired_target: [3.0, 1.5, 3.0],
+                vertical_world_size: 20.0,
+                desired_vertical_world_size: 20.0,
                 recenter_requested: false,
                 recentering: false,
                 initialized: true,

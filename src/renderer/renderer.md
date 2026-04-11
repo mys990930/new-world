@@ -106,5 +106,6 @@ NOT:
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
 - Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
-- The default environment is still a fixed sunset quarter-view preset, but medium/high quality now enable the shadow-map path.
+- The default environment is now a fixed midday quarter-view preset, while medium/high quality still enable the shadow-map path.
+- The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.

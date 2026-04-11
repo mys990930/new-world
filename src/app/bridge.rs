@@ -2,7 +2,7 @@ use winit::keyboard::KeyCode;
 
 use super::GameApp;
 use crate::ecs::{
-    CameraState, EcsInputSnapshot, QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_camera_pose,
+    CameraState, EcsInputSnapshot, quarter_view_camera_pose, quarter_view_vertical_world_size,
 };
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
@@ -35,6 +35,7 @@ impl GameApp {
                 input.pressed_keys.contains(&KeyCode::KeyW),
                 input.pressed_keys.contains(&KeyCode::KeyS),
             ),
+            zoom_scroll_delta: input.wheel_delta.1,
             primary_down: input.left_pressed,
             primary_just_pressed: input.left_just_pressed,
             secondary_down: input.right_pressed,
@@ -121,7 +122,7 @@ fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
         up: pose.basis.up,
         aspect_override: None,
         projection_mode: RenderProjectionMode::Orthographic {
-            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            vertical_world_size: quarter_view_vertical_world_size(camera_state),
         },
         basis_override: Some(RenderViewBasis {
             right: pose.basis.right,
@@ -249,6 +250,8 @@ mod tests {
             quarter_turns: 0,
             smoothed_target: [0.0, 0.5, 0.0],
             desired_target: [0.0, 0.5, 0.0],
+            vertical_world_size: 24.0,
+            desired_vertical_world_size: 24.0,
             recenter_requested: false,
             recentering: false,
             initialized: true,
@@ -273,6 +276,8 @@ mod tests {
             quarter_turns: 0,
             smoothed_target: [0.0, 0.5, 0.0],
             desired_target: [0.0, 0.5, 0.0],
+            vertical_world_size: 24.0,
+            desired_vertical_world_size: 24.0,
             recenter_requested: false,
             recentering: false,
             initialized: true,
@@ -315,6 +320,23 @@ mod tests {
         assert!(right.1 > bottom.1);
         assert!(top.0.abs() < 1e-5);
         assert!(bottom.0.abs() < 1e-5);
+    }
+
+    #[test]
+    fn render_camera_uses_ecs_vertical_world_size() {
+        let camera = build_quarter_view_camera(CameraState {
+            vertical_world_size: 28.0,
+            desired_vertical_world_size: 28.0,
+            initialized: true,
+            ..CameraState::default()
+        });
+
+        assert_eq!(
+            camera.projection_mode,
+            RenderProjectionMode::Orthographic {
+                vertical_world_size: 28.0,
+            }
+        );
     }
 
     fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {

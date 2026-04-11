@@ -58,6 +58,7 @@
 
 - raw input to gameplay meaning
   - `WASD` becomes screen-relative movement state
+  - mouse wheel becomes frame-local zoom intent for the quarter-view camera
   - left click requests primary action
   - right click requests block placement
   - `Q/E` request quarter-turn camera rotation
@@ -66,6 +67,9 @@
   - screen-relative input remains frame input state
   - `CameraState.quarter_turns` is applied before generating `MoveWorldIntent`
   - same-frame rotation and movement use the post-rotation basis
+- camera framing
+  - quarter-view zoom is owned by ECS camera state rather than renderer config
+  - the app bridge and selection path both consume the same current zoom size
 - player locomotion
   - horizontal velocity derives from `MoveWorldIntent`
   - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling

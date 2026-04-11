@@ -182,6 +182,32 @@ pub struct RenderEnvironment {
 }
 
 impl RenderEnvironment {
+    pub fn midday_quarter_view() -> Self {
+        Self {
+            time_of_day_hours: 12.0,
+            sun_direction: normalize3([0.28, 0.95, -0.14]),
+            sun_color: [1.02, 1.0, 0.94],
+            sun_intensity: 1.18,
+            ambient_color: [0.55, 0.63, 0.73],
+            ambient_intensity: 0.98,
+            fog_color: [0.74, 0.85, 0.97],
+            fog_density: 0.010,
+            fog_height_falloff: 0.045,
+            sky_color: [0.40, 0.68, 0.98],
+            horizon_color: [0.78, 0.90, 0.99],
+            overcast: 0.08,
+            weather_strength: 0.0,
+            wetness: 0.0,
+            climate_tint: [1.0, 1.0, 1.0],
+            climate_humidity: 0.40,
+            climate_temperature_bias: 0.02,
+            top_face_boost: 0.18,
+            side_shadow_strength: 0.27,
+            silhouette_boost: 0.16,
+            saturation_boost: 0.02,
+        }
+    }
+
     pub fn sunset_quarter_view() -> Self {
         Self {
             time_of_day_hours: 18.35,
@@ -275,7 +301,7 @@ impl RenderEnvironment {
 
 impl Default for RenderEnvironment {
     fn default() -> Self {
-        Self::sunset_quarter_view()
+        Self::midday_quarter_view()
     }
 }
 

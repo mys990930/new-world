@@ -6,6 +6,7 @@ use super::command::{PlayerCommand, PlayerCommandBuffer};
 pub struct EcsInputSnapshot {
     pub move_screen_x: i8,
     pub move_screen_y: i8,
+    pub zoom_scroll_delta: f32,
     pub primary_down: bool,
     pub primary_just_pressed: bool,
     pub secondary_down: bool,

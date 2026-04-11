@@ -12,6 +12,8 @@
 - `quarter_turns`
 - `smoothed_target`
 - `desired_target`
+- `vertical_world_size`
+- `desired_vertical_world_size`
 - `recenter_requested`
 - `recentering`
 - `initialized`
@@ -49,6 +51,7 @@
 - The camera is limited to four quarter-view rotations.
 - `Q/E` rotation applies before the same frame's movement intent is interpreted.
 - The player is followed through a smoothed target rather than a hard snap.
+- Mouse-wheel zoom updates the desired orthographic world size inside ECS camera state.
 - Deadzone logic is evaluated in quarter-view screen space defined by `right` and `up`.
 - Forward movement bias shifts framing toward travel direction without replacing the player-centered anchor.
 - Recenter keeps the current rotation and smoothly moves the target back toward the player anchor.
@@ -59,6 +62,7 @@
 - Window-space intent does not map 1:1 to world axes; ECS owns that interpretation.
 - The shared quarter-view basis is the source of truth for movement remapping, selection rays, and render camera pose.
 - Orthographic framing is controlled primarily by `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
+- The runtime camera starts from `QUARTER_VIEW_VERTICAL_WORLD_SIZE` and then lerps `vertical_world_size` toward `desired_vertical_world_size`.
 - In the current implementation, increasing `QUARTER_VIEW_VERTICAL_WORLD_SIZE` shows more world and makes the camera feel farther away.
 - `QUARTER_VIEW_CAMERA_DISTANCE` controls the eye offset along the quarter-view forward axis. Under orthographic projection it affects eye-space relationships such as fog or shadow math more than visible zoom scale.
 
@@ -88,4 +92,5 @@
 
 - The current implementation is still a quarter-view follow camera rather than a full strategy-camera system.
 - The main zoom/framing handle lives in `src/ecs/camera.rs` as `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
-- The default framing now uses a wider orthographic size so the player sees more surrounding terrain at once.
+- Runtime zoom is clamped between a minimum and maximum vertical world size and is driven by mouse-wheel input through ECS.
+- Follow/recenter interpolation is intentionally slower than before so quarter-view transitions feel less abrupt.

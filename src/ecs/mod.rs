@@ -11,7 +11,7 @@ mod selection;
 pub use camera::{
     CameraState, QUARTER_VIEW_CAMERA_DISTANCE, QUARTER_VIEW_VERTICAL_WORLD_SIZE,
     QuarterViewBasis, QuarterViewCameraPose, quarter_view_basis, quarter_view_camera_pose,
-    quarter_view_eye,
+    quarter_view_eye, quarter_view_vertical_world_size,
 };
 #[allow(unused_imports)]
 pub use chunk::ChunkStates;

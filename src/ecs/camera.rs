@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::{Query, Res, ResMut, Resource, With};
 
 use super::command::PlayerCommand;
+use super::input::EcsInputSnapshot;
 use super::player::{FrameDeltaSeconds, LocalPlayerEntity, Player, Transform};
 use super::{MoveWorldIntent, PlayerCommandBuffer};
 
@@ -9,6 +10,8 @@ pub struct CameraState {
     pub quarter_turns: u8,
     pub smoothed_target: [f32; 3],
     pub desired_target: [f32; 3],
+    pub vertical_world_size: f32,
+    pub desired_vertical_world_size: f32,
     pub recenter_requested: bool,
     pub recentering: bool,
     pub initialized: bool,
@@ -30,7 +33,9 @@ pub struct QuarterViewCameraPose {
 
 // Under the orthographic quarter-view camera, this is the main "zoom" handle.
 // Larger values show more world and make the camera feel farther away.
-pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 10.0;
+pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 20.0;
+pub const QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE: f32 = 8.0;
+pub const QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE: f32 = 48.0;
 // This controls how far the eye sits from the target along the quarter-view forward axis.
 // In orthographic mode it affects eye-space relationships such as fog/shadow math more than framing scale.
 pub const QUARTER_VIEW_CAMERA_DISTANCE: f32 = 520.0;
@@ -41,9 +46,14 @@ const CAMERA_DEADZONE_HALF_HEIGHT: f32 = 0.45;
 const CAMERA_FORWARD_VIEW_RATIO: f32 = 0.65;
 const CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO: f32 = (CAMERA_FORWARD_VIEW_RATIO - 0.5) * 2.0;
 const QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER: f32 = 1.732_050_8;
-const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0;
-const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0;
+const CAMERA_LERP_SLOWDOWN: f32 = 3.0;
+const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0 / CAMERA_LERP_SLOWDOWN;
+const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0 / CAMERA_LERP_SLOWDOWN;
+const CAMERA_ZOOM_LERP_PER_SECOND: f32 = CAMERA_FOLLOW_LERP_PER_SECOND;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
+const CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE: f32 = 2.0;
+const CAMERA_SCROLL_PIXEL_DELTA_THRESHOLD: f32 = 8.0;
+const CAMERA_MAX_SCROLL_LINES_PER_FRAME: f32 = 4.0;
 
 impl Default for CameraState {
     fn default() -> Self {
@@ -51,6 +61,8 @@ impl Default for CameraState {
             quarter_turns: 0,
             smoothed_target: [0.0, 0.0, 0.0],
             desired_target: [0.0, 0.0, 0.0],
+            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            desired_vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
             recenter_requested: false,
             recentering: false,
             initialized: false,
@@ -60,6 +72,30 @@ impl Default for CameraState {
 
 pub(crate) fn clear_camera_impulses_system(mut camera: ResMut<CameraState>) {
     camera.recenter_requested = false;
+}
+
+pub(crate) fn apply_camera_zoom_input_system(
+    input: Res<EcsInputSnapshot>,
+    mut camera: ResMut<CameraState>,
+) {
+    if !input.active || !input.focused {
+        return;
+    }
+
+    let scroll_lines = normalized_scroll_lines(input.zoom_scroll_delta);
+    if scroll_lines.abs() <= f32::EPSILON {
+        return;
+    }
+
+    let next_vertical_world_size = clamp_vertical_world_size(
+        camera.desired_vertical_world_size
+            - scroll_lines * CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE,
+    );
+    camera.desired_vertical_world_size = next_vertical_world_size;
+
+    if !camera.initialized {
+        camera.vertical_world_size = next_vertical_world_size;
+    }
 }
 
 pub(crate) fn apply_camera_commands_system(
@@ -99,6 +135,8 @@ pub(crate) fn update_camera_follow_system(
     if !camera.initialized {
         camera.smoothed_target = player_target;
         camera.desired_target = player_target;
+        camera.vertical_world_size = clamp_vertical_world_size(camera.desired_vertical_world_size);
+        camera.desired_vertical_world_size = camera.vertical_world_size;
         camera.recentering = false;
         camera.initialized = true;
         return;
@@ -114,7 +152,7 @@ pub(crate) fn update_camera_follow_system(
     } else {
         let anchor_target = add3(
             player_target,
-            movement_bias_offset(*move_world_intent, basis),
+            movement_bias_offset(*move_world_intent, basis, camera.vertical_world_size),
         );
         resolve_deadzone_target(camera.smoothed_target, anchor_target, basis)
     };
@@ -130,6 +168,12 @@ pub(crate) fn update_camera_follow_system(
         };
         let factor = smoothing_factor(rate, dt);
         camera.smoothed_target = lerp3(camera.smoothed_target, desired_target, factor);
+        let zoom_factor = smoothing_factor(CAMERA_ZOOM_LERP_PER_SECOND, dt);
+        camera.vertical_world_size = lerp_scalar(
+            camera.vertical_world_size,
+            camera.desired_vertical_world_size,
+            zoom_factor,
+        );
     }
 
     if camera.recentering
@@ -159,6 +203,10 @@ pub fn quarter_view_camera_pose(camera: CameraState) -> QuarterViewCameraPose {
     }
 }
 
+pub fn quarter_view_vertical_world_size(camera: CameraState) -> f32 {
+    clamp_vertical_world_size(camera.vertical_world_size)
+}
+
 pub fn quarter_view_eye(target: [f32; 3], quarter_turns: u8) -> [f32; 3] {
     let basis = quarter_view_basis(quarter_turns);
     add3(
@@ -183,6 +231,10 @@ fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
 
 fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
     [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar]
+}
+
+fn lerp_scalar(current: f32, target: f32, factor: f32) -> f32 {
+    current + (target - current) * factor
 }
 
 fn lerp3(current: [f32; 3], target: [f32; 3], factor: f32) -> [f32; 3] {
@@ -228,6 +280,7 @@ fn signed_deadzone_excess(value: f32, half_extent: f32) -> f32 {
 fn movement_bias_offset(
     move_world_intent: MoveWorldIntent,
     basis: QuarterViewBasis,
+    vertical_world_size: f32,
 ) -> [f32; 3] {
     let move_world = [
         move_world_intent.east as f32,
@@ -242,7 +295,7 @@ fn movement_bias_offset(
     }
 
     let inv_length = screen_length_sq.sqrt().recip();
-    let bias_distance = QUARTER_VIEW_VERTICAL_WORLD_SIZE
+    let bias_distance = vertical_world_size
         * 0.5
         * QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER
         * CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO;
@@ -260,6 +313,30 @@ fn movement_bias_offset(
 
 fn smoothing_factor(rate_per_second: f32, dt: f32) -> f32 {
     1.0 - (-rate_per_second * dt).exp()
+}
+
+fn clamp_vertical_world_size(value: f32) -> f32 {
+    value.clamp(
+        QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE,
+        QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE,
+    )
+}
+
+fn normalized_scroll_lines(raw_delta: f32) -> f32 {
+    if !raw_delta.is_finite() {
+        return 0.0;
+    }
+
+    let normalized = if raw_delta.abs() > CAMERA_SCROLL_PIXEL_DELTA_THRESHOLD {
+        raw_delta / 120.0
+    } else {
+        raw_delta
+    };
+
+    normalized.clamp(
+        -CAMERA_MAX_SCROLL_LINES_PER_FRAME,
+        CAMERA_MAX_SCROLL_LINES_PER_FRAME,
+    )
 }
 
 fn normalize3(vector: [f32; 3]) -> [f32; 3] {
@@ -342,6 +419,7 @@ mod tests {
                 north: 0,
             },
             basis,
+            QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         );
 
         assert!(dot3(bias, basis.right) > 0.0);
@@ -357,6 +435,7 @@ mod tests {
                 north: 0,
             },
             basis,
+            QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         );
         let screen_bias = [dot3(bias, basis.right), dot3(bias, basis.up)];
         let forward_screen = [dot3([1.0, 0.0, 0.0], basis.right), dot3([1.0, 0.0, 0.0], basis.up)];
@@ -387,6 +466,8 @@ mod tests {
             quarter_turns: 0,
             smoothed_target: [0.0, 1.5, 0.0],
             desired_target: [0.0, 1.5, 0.0],
+            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            desired_vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
             recenter_requested: true,
             recentering: false,
             initialized: true,
@@ -412,5 +493,54 @@ mod tests {
         assert!(camera.smoothed_target[0] < 3.0);
         assert!(camera.smoothed_target[2] < 3.0);
         assert_eq!(camera.desired_target, [3.0, 1.5, 3.0]);
+    }
+
+    #[test]
+    fn scroll_zoom_updates_desired_vertical_world_size() {
+        let mut world = World::new();
+        world.insert_resource(EcsInputSnapshot {
+            zoom_scroll_delta: 1.0,
+            focused: true,
+            active: true,
+            ..EcsInputSnapshot::default()
+        });
+        world.insert_resource(CameraState::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_camera_zoom_input_system);
+        schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert!(camera.desired_vertical_world_size < QUARTER_VIEW_VERTICAL_WORLD_SIZE);
+        assert_eq!(
+            camera.vertical_world_size,
+            camera.desired_vertical_world_size
+        );
+    }
+
+    #[test]
+    fn scroll_zoom_clamps_to_supported_range() {
+        let mut world = World::new();
+        world.insert_resource(EcsInputSnapshot {
+            zoom_scroll_delta: 1200.0,
+            focused: true,
+            active: true,
+            ..EcsInputSnapshot::default()
+        });
+        world.insert_resource(CameraState {
+            desired_vertical_world_size: QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE + 0.5,
+            vertical_world_size: QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE + 0.5,
+            ..CameraState::default()
+        });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_camera_zoom_input_system);
+        schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert_eq!(
+            camera.desired_vertical_world_size,
+            QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE
+        );
     }
 }

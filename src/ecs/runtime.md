@@ -54,7 +54,7 @@
   - `SelectionState`
 - current frame schedule:
   - pre: clear command buffer, clear frame camera impulses
-  - update: input interpretation -> camera command application -> move intent generation -> local player horizontal velocity sync
+  - update: input interpretation -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
   - post: camera follow update
 - current world-aware helpers are intentionally outside pure ECS systems because `WorldCore` stays app-owned:
   - `simulate_local_player_motion(&WorldCore)`

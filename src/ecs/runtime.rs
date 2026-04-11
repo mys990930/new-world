@@ -1,8 +1,8 @@
 use bevy_ecs::prelude::{IntoScheduleConfigs, Resource, Schedule, World};
 
 use super::camera::{
-    CameraState, apply_camera_commands_system, clear_camera_impulses_system,
-    update_camera_follow_system,
+    CameraState, apply_camera_commands_system, apply_camera_zoom_input_system,
+    clear_camera_impulses_system, update_camera_follow_system,
 };
 use super::chunk::ChunkStates;
 use super::command::{
@@ -46,6 +46,7 @@ impl EcsRuntime {
             (
                 interpret_input_system,
                 apply_camera_commands_system,
+                apply_camera_zoom_input_system,
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
             )
