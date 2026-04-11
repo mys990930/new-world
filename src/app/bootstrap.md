@@ -2,53 +2,59 @@
 
 ## Role
 
-- Create and connect the top-level runtime modules needed at app startup
+- Create and connect the top-level runtime modules needed at app startup.
 
 ## Responsibilities
 
-- Prepare `AppConfig`
-- Create `Platform`
-- Load the default `BlockRegistry`
-- Create `Renderer`
-- Load block textures into the renderer
-- Create `EcsRuntime`
-- Create `WorldCore`
-- Create `JobSystem`
-- Spawn the default local player
-- Create `AppTimingState`
-- Assemble `GameApp`
+- prepare `AppConfig`
+- create `Platform`
+- load the default `BlockRegistry`
+- create `Renderer`
+- load block textures into the renderer
+- auto-detect and open the latest baked world when configured
+- create `EcsRuntime`
+- create `WorldCore`
+- preload the initial spawn neighborhood into memory
+- spawn the default local player
+- place the player on a safe surface when preload data is available
+- create `JobSystem`
+- create `AppTimingState`
+- assemble `GameApp`
 
 ## Non-Responsibilities
 
-- Running the main loop
-- Scheduling redraws
-- Stepping fixed ticks
-- Applying gameplay rules
+- running the main loop
+- scheduling redraws
+- stepping fixed ticks
+- applying gameplay rules every frame
 
 ## Process
 
-1. Read config inputs
-2. Create `Platform`
-3. Load the default block registry from `assets/blocks/index.toml`
-4. Create `Renderer` from a `StubSurfaceTarget` because the OS window does not exist yet
-5. Convert registry texture tiles into renderer texture DTOs and call `Renderer::set_block_textures(...)`
-6. Create `EcsRuntime`
-7. Create `WorldCore` with the initial world seed/version metadata and shared registry
-8. Create `JobSystem`
-9. Spawn the default local player entity
-10. Create app timing state
-11. Return `GameApp`
+1. read config inputs
+2. create `Platform`
+3. load the default block registry from `assets/blocks/index.toml`
+4. create `Renderer` from a `StubSurfaceTarget` because the OS window does not exist yet
+5. convert registry texture tiles into renderer texture DTOs and call `Renderer::set_block_textures(...)`
+6. auto-detect the latest baked world root under `AppConfig.baked_worlds_dir`, if enabled
+7. create `EcsRuntime`
+8. create `WorldCore` using baked manifest metadata when a baked world exists, otherwise use fallback procedural metadata
+9. preload the spawn neighborhood
+10. spawn the default local player entity
+11. snap the local player to a safe loaded surface near the preload anchor when possible
+12. create `JobSystem`
+13. create app timing state
+14. return `GameApp`
 
 ## Output
 
-- Initialized `GameApp`
+- initialized `GameApp`
 
 ## Invariants
 
-- During bootstrap, the renderer may exist without a live GPU surface backend
-- Bootstrap fails fast if the default block registry or block texture set cannot be loaded
-- The default local player is spawned once during bootstrap
-- The bootstrap local player starts at body-center `[3.0, 1.5, 3.0]` so the unit cube stands on top of the generated chunk patch
+- during bootstrap, the renderer may exist without a live GPU surface backend
+- bootstrap fails fast if the default block registry or block texture set cannot be loaded
+- the default local player is spawned once during bootstrap
+- if preload data exists, bootstrap attempts to place the player so the `2x2x4` body does not start embedded in solid blocks
 
 ## Related Modules
 
@@ -62,5 +68,7 @@
 
 ## Notes
 
-- Live window surface attachment happens later in [`runner.rs`](C:/dev/new-world/src/app/runner.rs), during `resumed()`
-- The current bootstrap path is also where world-side `TextureTileSource` values are translated into renderer-side `RenderTextureSource` values.
+- live window surface attachment still happens later in [runner.rs](/C:/dev/new-world/src/app/runner.rs)
+- the current bootstrap path also translates world-side `TextureTileSource` values into renderer-side `RenderTextureSource`
+- when a baked world is found, bootstrap preloads a `3x3` horizontal neighborhood of baked chunk columns around the baked preview chunk so spawn placement and first-frame movement have collision data immediately
+- when no baked world is found, bootstrap falls back to generating a small procedural `3x3` neighborhood on the player plane

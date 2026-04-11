@@ -1,4 +1,5 @@
 pub mod atlas;
+mod baked;
 mod chunk;
 mod coord;
 mod core;
@@ -21,6 +22,12 @@ pub use atlas::{
     ThermalClass, generate_atlas_fields, generate_atlas_fields_with_tuning, resolve_atlas,
     resolve_atlas_with_tuning, write_debug_images, write_debug_images_with_options,
     write_debug_images_with_options_and_tuning,
+};
+#[allow(unused_imports)]
+pub use baked::{
+    BAKED_WORLD_MANIFEST_FILE, BakedStackSummary, BakedWorldError, BakedWorldManifest,
+    BakedWorldSource, baked_world_chunk_path, baked_world_manifest_path,
+    detect_latest_baked_world_root, load_baked_chunk, read_baked_world_manifest,
 };
 #[allow(unused_imports)]
 pub use chunk::{BlockFace, BlockId, ChunkData, ChunkSnapshot, ChunkWriteError};

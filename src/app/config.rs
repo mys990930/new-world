@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -6,6 +7,7 @@ pub struct AppConfig {
     pub width: u32,
     pub height: u32,
     pub timing: TimingConfig,
+    pub baked_worlds_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +30,7 @@ impl Default for AppConfig {
             width: 1280,
             height: 720,
             timing: TimingConfig::default(),
+            baked_worlds_dir: Some(PathBuf::from("target/world-bake")),
         }
     }
 }

@@ -10,9 +10,9 @@ use super::command::{
 };
 use super::input::{interpret_input_system, EcsInputSnapshot};
 use super::player::{
-    integrate_local_player_transform_system, spawn_default_player,
+    place_local_player_on_surface, simulate_local_player_motion, spawn_default_player,
     sync_local_player_velocity_system, update_move_world_intent_system, FrameDeltaSeconds,
-    LocalPlayerEntity, PlayerMovementConfig, Transform,
+    LocalPlayerEntity, PlayerBody, PlayerMovementConfig, PlayerPhysicsState, Transform,
 };
 use super::selection::{SelectionState, update_selection_from_world};
 use crate::world::WorldCore;
@@ -48,17 +48,17 @@ impl EcsRuntime {
                 apply_camera_commands_system,
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
-                integrate_local_player_transform_system,
-                update_camera_follow_system,
             )
                 .chain(),
         );
+        let mut post_update = Schedule::default();
+        post_update.add_systems(update_camera_follow_system);
 
         Self {
             world,
             pre_update,
             update,
-            post_update: Schedule::default(),
+            post_update,
             fixed_update: Schedule::default(),
         }
     }
@@ -116,6 +116,28 @@ impl EcsRuntime {
     pub fn local_player_transform(&self) -> Option<Transform> {
         let entity = self.world.resource::<LocalPlayerEntity>().0?;
         self.world.get::<Transform>(entity).copied()
+    }
+
+    pub fn local_player_body(&self) -> Option<PlayerBody> {
+        let entity = self.world.resource::<LocalPlayerEntity>().0?;
+        self.world.get::<PlayerBody>(entity).copied()
+    }
+
+    pub fn local_player_physics_state(&self) -> Option<PlayerPhysicsState> {
+        let entity = self.world.resource::<LocalPlayerEntity>().0?;
+        self.world.get::<PlayerPhysicsState>(entity).copied()
+    }
+
+    pub fn simulate_local_player_motion(&mut self, world: &WorldCore) {
+        simulate_local_player_motion(&mut self.world, world);
+    }
+
+    pub fn place_local_player_on_surface(
+        &mut self,
+        world: &WorldCore,
+        anchor_xz: [f32; 2],
+    ) -> bool {
+        place_local_player_on_surface(&mut self.world, world, anchor_xz)
     }
 
     pub fn update_selection_from_world(

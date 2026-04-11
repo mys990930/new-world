@@ -1,37 +1,38 @@
 ## app
 
-### 역할
+### Role
 
-- 프로그램 전체 조립과 frame loop orchestration
-- `platform -> app -> ecs -> (simulation) -> world/jobs -> renderer` 흐름의 상위 owner
+- top-level runtime orchestration and frame loop ownership
+- owner of the `platform -> app -> ecs -> world/jobs -> renderer` flow
 
-### 책임
+### Responsibilities
 
 - bootstrap
-- 모듈 생성과 주입
-- frame cadence와 redraw 타이밍 제어
-- platform snapshot을 ECS/renderer bridge로 연결
-- 종료 조건 처리
+- module creation and injection
+- frame cadence and redraw policy
+- `platform -> ecs` and `ecs/world -> renderer` bridge calls
+- baked-world runtime selection ownership
+- top-level shutdown handling
 
-### 비책임
+### Non-Responsibilities
 
-- raw input 수집
-- gameplay rule 계산
-- world source of truth 수정
-- GPU draw 구현
+- raw OS event capture
+- gameplay rule evaluation internals
+- world source-of-truth mutation internals
+- GPU draw implementation details
 
-### 소유 데이터
+### Owned Data
 
 - `Platform`
 - `EcsRuntime`
 - `WorldCore`
+- `Option<BakedWorldSource>`
 - `JobSystem`
 - `Renderer`
 - `AppConfig`
 - `AppTimingState`
 
-### 공개 인터페이스
-
+### Public Interface
 ```rust
 GameApp::new(config: AppConfig) -> GameApp
 GameApp::run(self)
@@ -45,7 +46,7 @@ fn should_run_frame(&self, now: Instant) -> bool
 fn frame_deadline(&self) -> Option<Instant>
 ```
 
-### 의존성
+### Dependencies
 
 - `platform`
 - `ecs`
@@ -53,28 +54,28 @@ fn frame_deadline(&self) -> Option<Instant>
 - `jobs`
 - `renderer`
 
-### 불변식
+### Invariants
 
-1. app만이 모듈 간 실제 연결을 소유한다.
-2. frame cadence는 fixed tick이 아니라 app-owned frame policy다.
-3. renderer는 app bridge가 만든 render-ready DTO만 받는다.
+1. app is the only layer that owns concrete module wiring
+2. frame cadence is app-owned policy, not a platform-owned policy
+3. renderer only receives render-ready DTOs built by app bridge code
+4. baked-world runtime selection is app-owned because it decides whether chunk acquisition should load from disk or fall back to generation
 
-### 하위 모듈 목록 및 역할
+### Submodules
 
 - mod.rs: public facade, re-export
 - config.rs: `AppConfig` / `TimingConfig`
 - state.rs: `GameApp`, `AppTimingState`
-- bootstrap.rs: module 생성과 초기 주입
-- runner.rs: winit `ApplicationHandler`, frame cadence, redraw, 종료 처리
+- bootstrap.rs: module creation, baked-world detection, initial preload, and spawn placement
+- runner.rs: winit `ApplicationHandler`, frame cadence, redraw, shutdown handling
 - frame.rs: frame update pipeline orchestration
 - fixed.rs: future fixed timestep orchestration
 - bridge.rs: cross-module DTO translation
 - shutdown.rs: future teardown / flush
 
-### 현재 구현 메모
+### Current Implementation Notes
 
-- 현재 bootstrap은 window가 아직 없으므로 `StubSurfaceTarget`으로 renderer를 먼저 만든다.
-- 실제 GPU surface attach는 `runner.rs`의 `resumed()`에서 window 생성 직후 수행한다.
-- 현재 frame path는 `ecs -> jobs -> world -> renderer upload -> renderer draw`의 최소 chunk plane vertical slice까지 연결돼 있다.
-- app frame은 world/job 결과 반영 뒤 `cursor -> world raycast -> SelectionState` 경로를 갱신한다.
-- render path는 ECS camera state, local player body-center transform, selection state를 render DTO로 바꿔, 생성된 chunk plane 위의 플레이어 큐브와 ground shadow slab, 그리고 hovered face 위 노란 highlight slab을 함께 그린다.
+- bootstrap still creates the renderer before the real OS window exists, so it starts from `StubSurfaceTarget`
+- the real GPU surface still attaches in `runner.rs` during `resumed()`
+- the current frame path supports both baked chunk loading and procedural generation, then meshing and renderer upload
+- the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`

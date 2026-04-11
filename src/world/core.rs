@@ -115,6 +115,24 @@ impl WorldCore {
         self.get_block(pos)
     }
 
+    pub fn loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)> {
+        let mut coords = self.loaded_chunks.keys().copied();
+        let first = coords.next()?;
+        let mut min = first;
+        let mut max = first;
+
+        for coord in coords {
+            min.0 = min.0.min(coord.0);
+            min.1 = min.1.min(coord.1);
+            min.2 = min.2.min(coord.2);
+            max.0 = max.0.max(coord.0);
+            max.1 = max.1.max(coord.1);
+            max.2 = max.2.max(coord.2);
+        }
+
+        Some((min, max))
+    }
+
     pub fn raycast_blocks(&self, ray: Ray3, max_distance: f32) -> Option<RaycastHit> {
         if max_distance <= 0.0 {
             return None;

@@ -8,15 +8,18 @@ use crate::world::ChunkCoord;
 pub struct ChunkStates {
     pub interest: BTreeSet<ChunkCoord>,
     pub loaded: BTreeSet<ChunkCoord>,
+    pub load_requested: BTreeSet<ChunkCoord>,
     pub generation_requested: BTreeSet<ChunkCoord>,
     pub mesh_requested: BTreeSet<ChunkCoord>,
     pub render_ready: BTreeSet<ChunkCoord>,
 }
 
 impl ChunkStates {
-    pub fn focus_single(&mut self, coord: ChunkCoord) {
-        self.interest.clear();
-        self.interest.insert(coord);
+    pub fn set_interest(
+        &mut self,
+        coords: impl IntoIterator<Item = ChunkCoord>,
+    ) {
+        self.interest = coords.into_iter().collect();
     }
 
     pub fn visible_chunks(&self) -> Vec<ChunkCoord> {

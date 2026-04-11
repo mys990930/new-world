@@ -19,7 +19,9 @@ pub use chunk::ChunkStates;
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
 pub use input::EcsInputSnapshot;
 #[allow(unused_imports)]
-pub use player::{LocalPlayerEntity, Player, Transform, Velocity};
+pub use player::{
+    LocalPlayerEntity, Player, PlayerBody, PlayerPhysicsState, Transform, Velocity,
+};
 pub use runtime::EcsRuntime;
 #[allow(unused_imports)]
 pub use selection::SelectionState;

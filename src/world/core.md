@@ -1,73 +1,66 @@
 # core
 
-## 역할
+## Role
 
-- loaded world state와 top-level world API를 소유한다.
-- 다른 모듈이 world 내부 표현 대신 `WorldCore`를 통해 상호작용하도록 경계를 만든다.
+- Own the loaded world state and top-level world API.
+- Keep other modules interacting with world state through `WorldCore`.
 
-## 책임
+## Responsibilities
 
-- `WorldCore` 정의
-- `WorldMeta` 보관
-- immutable `BlockRegistry` 보관
-- loaded chunk map 소유
-- chunk insert/remove 관리
-- block/chunk read API 제공
-- edit/query/generation/storage/meshing 하위 계약을 묶는 진입점 제공
-- loaded block-grid raycast 진입점 제공
+- define `WorldCore`
+- hold `WorldMeta`
+- hold immutable `BlockRegistry`
+- own the loaded chunk map
+- manage chunk insert/remove
+- provide block/chunk read APIs
+- expose top-level entry points for edit/query/storage/meshing-facing operations
+- expose loaded block-grid raycast entry points
+- expose loaded chunk bounds for runtime helpers that need search ranges
 
-## 비책임
+## Non-Responsibilities
 
 - fixed tick scheduling
-- job queue orchestration
-- gameplay command 의미 해석
+- jobs orchestration
+- gameplay command interpretation
 - renderer draw/upload
-- 절차 생성 실행 정책
+- generation execution policy
 
-## 소유 데이터
+## Owned Data
 
 ### WorldCore
-
 - `meta`
 - `block_registry`
 - loaded chunk map keyed by `ChunkCoord`
-- public access policy for query/edit operations
 
-## 입력
+## Inputs
 
 - `WorldMeta`
 - `Arc<BlockRegistry>`
-- load/generation 결과로 생성된 `ChunkData`
-- block/chunk query 요청
+- loaded/generated `ChunkData`
+- block/chunk queries
 - explicit `WorldEdit`
-- `Ray3`와 raycast 최대 거리
+- `Ray3` and max ray distance
 
-## 출력
+## Outputs
 
-- chunk 존재 여부/참조 결과
-- 제거된 `ChunkData`
+- chunk presence / reference results
+- inserted or removed `ChunkData`
 - `EditResult`
-- snapshot/query 결과
+- snapshots and query results
 - `RaycastHit`
+- loaded chunk bounds
 
-## 처리 흐름
-
-1. 외부 요청이 `WorldCore`로 진입한다.
-2. 필요하면 `coord` 규칙으로 좌표를 분해한다.
-3. loaded chunk map에서 대상 청크를 찾는다.
-4. `chunk`, `edit`, `query` 하위 계약을 사용해 결과를 계산한다.
-5. 호출자에게 명시적 결과를 반환한다.
-
-## 공개 인터페이스
-
+## Public Interface
 ```rust
 WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
 WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
+WorldCore::meta(&self) -> &WorldMeta
 
 WorldCore::has_chunk(coord: ChunkCoord) -> bool
 WorldCore::insert_chunk(coord: ChunkCoord, chunk: ChunkData)
 WorldCore::remove_chunk(coord: ChunkCoord) -> Option<ChunkData>
+WorldCore::loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)>
 
 WorldCore::get_block(pos: WorldBlockCoord) -> Option<BlockId>
 WorldCore::get_chunk(coord: ChunkCoord) -> Option<&ChunkData>
@@ -78,16 +71,14 @@ WorldCore::apply_edit(edit: WorldEdit) -> EditResult
 WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 ```
 
-## 불변식
+## Invariants
 
-- loaded chunk map의 source of truth owner는 `WorldCore`다.
-- registry 해석 결과의 source of truth owner는 `BlockRegistry`이며, `WorldCore`는 이를 읽기 전용으로 들고 있다.
-- 다른 모듈은 내부 블록 배열을 직접 건드리지 않는다.
-- 없는 청크에 대한 읽기/쓰기 규칙은 world 차원에서 일관되게 유지된다.
-- `WorldMeta`는 chunk 개별 데이터보다 상위 레벨에서 유지된다.
-- raycast는 loaded block grid 위를 따라 이동하며, registry 기준 첫 번째 solid block만 hit로 반환한다.
+- the loaded chunk map is owned by `WorldCore`
+- other modules do not mutate raw chunk storage directly
+- `BlockRegistry` interpretation remains separate from raw chunk ids
+- raycasts operate on loaded chunks only
 
-## 관련 모듈
+## Related Modules
 
 - `meta.md`
 - `coord.md`
@@ -96,10 +87,10 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 - `query.md`
 - `generation.md`
 - `storage.md`
+- `baked.md`
 - `registry.md`
 
-## 메모
+## Notes
 
-- generation / storage / meshing은 `WorldCore`가 소유하는 loaded state와 직접 붙기보다, 명시적 입력/출력 타입으로 연결된다.
-- 현재 raycast 구현은 selection 같은 상위 시스템이 재사용할 수 있도록 `BlockFace`, hit point, distance를 함께 돌려준다.
-- jobs는 `block_registry_handle()`로 같은 immutable registry를 공유 받아 generation/meshing을 실행한다.
+- `loaded_chunk_bounds()` exists specifically to support app/ECS helpers such as safe spawn placement without leaking the raw chunk map
+- baked-world loading still inserts chunks through `WorldCore::insert_chunk(...)`; `world` owns the in-memory source of truth regardless of how a chunk was acquired

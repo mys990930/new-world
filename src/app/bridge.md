@@ -2,8 +2,8 @@
 
 ## Role
 
-- Translate cross-module state at runtime boundaries
-- Keep module-owned data models from leaking into neighboring modules
+- Translate cross-module state at runtime boundaries.
+- Keep module-owned data models from leaking into neighboring modules.
 
 ## Responsibilities
 
@@ -42,6 +42,7 @@
 - `ecs -> renderer` only maps camera pose, visibility, and draw-ready instances
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code
+- the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
 
 ## Related Modules
 
@@ -52,9 +53,6 @@
 
 ## Notes
 
-- world-side mesh vertices now carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
-- `RenderCubeInstance` now also carries a renderer material kind so the player cube, ground shadow slab, and hovered-face highlight can be shaded differently
-- the current active bridge paths are:
-  - `platform -> EcsInputSnapshot`
-  - `ecs -> AppRenderFrameData`
-  - `world/jobs -> RenderUploadRequest`
+- world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
+- `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
+- the ground shadow slab now scales from the ECS player body footprint instead of assuming a unit cube

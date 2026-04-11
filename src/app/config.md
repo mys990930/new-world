@@ -1,53 +1,57 @@
 # config
 
-## 역할
+## Role
 
-- app가 사용하는 실행 정책을 typed config로 정의한다.
-- 프레임 타이밍 정책을 코드 흐름과 분리한다.
+- Define typed app startup configuration.
+- Keep frame pacing and baked-world boot policy out of the runtime loop code.
 
-## 소유 데이터
+## Owned Data
 
 ### AppConfig
 - window title
 - window width / height
-- timing config
+- `TimingConfig`
+- `baked_worlds_dir: Option<PathBuf>`
 
 ### TimingConfig
 - `target_frame_rate: Option<u32>`
 
-## 입력
+## Inputs
 
-- 하드코딩 기본값
-- 향후 config file / CLI / 환경변수 결과
+- hardcoded defaults
+- future CLI / file / environment overrides
 
-## 출력
+## Outputs
 
-- bootstrap 단계에서 쓰이는 typed config
-- runner가 참고하는 frame timing policy
+- typed bootstrap inputs
+- frame pacing policy for `runner.rs`
+- baked-world auto-detection policy for `bootstrap.rs`
 
-## 상태 전이 규칙
+## State Transition Rules
 
-- bootstrap 이후 config는 immutable로 취급한다.
-- runtime 중 자주 바뀌는 값은 config가 아니라 별도 runtime state로 둔다.
+- config is treated as immutable after bootstrap
+- fast-changing runtime values belong in `AppTimingState`, not here
 
-## 불변식
+## Invariants
 
-- `target_frame_rate = Some(n)`이면 `n > 0`인 값만 유효하다.
-- `target_frame_rate = None`이면 frame cap 없이 poll cadence로 동작할 수 있다.
+- `target_frame_rate = Some(n)` is only valid for `n > 0`
+- `target_frame_rate = None` means uncapped frame cadence
+- `baked_worlds_dir = Some(path)` means bootstrap may scan that directory for the latest baked world root
+- `baked_worlds_dir = None` disables baked-world auto-detection
 
-## 비책임
+## Non-Responsibilities
 
-- config file 파싱
-- validation error UI
-- 실제 event loop control flow 구현
+- parsing config files
+- validating UI-facing settings
+- driving the event loop
 
-## 관련 모듈
+## Related Modules
 
 - `bootstrap.rs`
 - `state.rs`
 - `runner.rs`
 
-## 메모
+## Notes
 
-- 현재 최소 구현에서 실제로 연결된 timing 값은 `target_frame_rate` 하나다.
-- 기본값은 `Some(60)`이다.
+- the current default frame cap is `60 FPS`
+- the current default baked-world scan directory is `target/world-bake`

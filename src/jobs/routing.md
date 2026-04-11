@@ -1,56 +1,53 @@
 # routing
 
-## 역할
+## Role
 
-- `JobRequest` variant를 실제 `world` 작업 함수로 연결한다.
-- job type별 입력/출력 매핑 규칙을 한 곳에 모은다.
+- Map `JobRequest` variants to concrete worker-side world operations.
+- Keep the request-to-operation dispatch rules in one place.
 
-## 책임
+## Responsibilities
 
-- `GenerateChunk` -> procedural generation 경로 연결
-- `BuildChunkMesh` -> meshing 경로 연결
-- 성공 값을 `JobResult`로 변환
+- `LoadChunk` -> baked storage load
+- `GenerateChunk` -> procedural generation
+- `BuildChunkMesh` -> meshing
+- map operation success/failure into `JobResult`
 
-## 비책임
+## Non-Responsibilities
 
-- queue 상태 관리
-- worker lifecycle 관리
-- gameplay 의미 해석
-- live world source of truth 직접 수정
+- queue state management
+- worker lifecycle management
+- gameplay rule interpretation
+- mutating the live runtime world directly
 
-## 입력
+## Inputs
 
 - `JobRequest`
-- `world` 공용 API와 데이터 타입
+- world-side shared APIs and data types
 
-## 출력
+## Outputs
 
 - `JobResult`
 
-## 처리 흐름
+## Process
 
-1. request variant를 판별한다.
-2. 해당 variant에 맞는 `world` API를 호출한다.
-3. 성공 값을 대응 `JobResult` variant로 감싼다.
+1. match the request variant
+2. call the corresponding world API
+3. convert the outcome into the matching `JobResult`
 
-## 상태 전이 규칙
+## Invariants
 
-- routing은 request payload를 해석하지만 queue 상태를 직접 바꾸지 않는다.
-- 외부 API 호출은 request에 포함된 immutable payload만 사용한다.
+- routing does not manage queue state directly
+- routing only uses immutable payloads carried by the request
+- routing stays on documented shared world APIs, not runtime internals
 
-## 불변식
-
-- routing은 `world` 내부 표현에 직접 결합하지 않고 문서화된 공용 API만 사용한다.
-- meshing/generation 호출 결과는 `JobResult` 경계로만 외부에 노출된다.
-
-## 관련 모듈
+## Related Modules
 
 - `request.md`
 - `result.md`
 - `worker.md`
 - `../world/world.md`
 
-## 메모
+## Notes
 
-- 현재 최소 구현은 `generation::generate_chunk(...)`와 `meshing::build_chunk_mesh(...)` 두 경로만 실제로 연결한다.
-- load/save/simulation routing은 다음 단계에서 leaf request/result variant와 함께 확장한다.
+- the current routing surface now covers baked chunk load, procedural generation, and meshing
+- baked chunk load is the first intentionally fallible worker route in the current runtime

@@ -57,20 +57,25 @@ impl GameApp {
         let mut cube_instances = self
             .ecs
             .local_player_transform()
-            .map(|transform| {
+            .zip(self.ecs.local_player_body())
+            .map(|(transform, body)| {
                 vec![RenderCubeInstance {
                     center: transform.translation,
-                    half_extents: [0.5, 0.5, 0.5],
+                    half_extents: body.half_extents,
                     color: [1.0, 1.0, 1.0, 1.0],
                     material_kind: RenderMaterialKind::Actor,
                 }]
             })
             .unwrap_or_default();
 
-        if let Some(player) = self.ecs.local_player_transform() {
+        if let Some((player, body)) = self
+            .ecs
+            .local_player_transform()
+            .zip(self.ecs.local_player_body())
+        {
             cube_instances.insert(
                 0,
-                build_ground_shadow_instance(player.translation),
+                build_ground_shadow_instance(player.translation, body.half_extents),
             );
         }
 
@@ -126,15 +131,15 @@ fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
     }
 }
 
-fn build_ground_shadow_instance(center: [f32; 3]) -> RenderCubeInstance {
+fn build_ground_shadow_instance(center: [f32; 3], half_extents: [f32; 3]) -> RenderCubeInstance {
     let shadow_offset = [-0.18, 0.0, 0.12];
     RenderCubeInstance {
         center: [
             center[0] + shadow_offset[0],
-            center[1] - 0.49,
+            center[1] - half_extents[1] + 0.01,
             center[2] + shadow_offset[2],
         ],
-        half_extents: [0.62, 0.01, 0.62],
+        half_extents: [half_extents[0] * 0.96, 0.01, half_extents[2] * 0.96],
         color: [0.08, 0.08, 0.10, 1.0],
         material_kind: RenderMaterialKind::Shadow,
     }

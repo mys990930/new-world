@@ -2,8 +2,9 @@
 
 ## Role
 
-- Define player-facing ECS components and movement state transitions
-- Convert screen-relative movement into world-relative movement intent
+- Define player-facing ECS components and movement state transitions.
+- Convert screen-relative movement into world-relative movement intent.
+- Own the minimal local-player body/physics slice used by the current prototype.
 
 ## Owned Data
 
@@ -12,6 +13,8 @@
 - `Player`
 - `Transform`
 - `Velocity`
+- `PlayerBody`
+- `PlayerPhysicsState`
 
 ### Resource / Support State
 
@@ -27,40 +30,47 @@
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
 - `PlayerCommandBuffer`
-- Local player entity id
+- local player entity id
+- `WorldCore` for world-aware motion helpers
 
 ## Outputs
 
 - `MoveWorldIntent`
-- Local player `Velocity`
-- Local player `Transform`
-- Future action state and chunk-interest inputs
+- local player `Velocity`
+- local player `Transform`
+- local player `PlayerPhysicsState`
 
 ## State Transition Rules
 
-- Screen-relative directions do not match world east/north directly
-- In the default quarter-view:
+- screen-relative directions do not match world east/north directly
+- in the default quarter-view:
   - screen top-right = world north
   - screen bottom-right = world east
-- Movement input is first interpreted in that skewed quarter-view basis
+- movement input is first interpreted in that skewed quarter-view basis
 - `CameraState.quarter_turns` is then applied to produce the current world-relative movement intent
-- If `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
-- `MoveWorldIntent` is copied into the local player `Velocity`
-- The same frame then integrates `Velocity * PlayerMovementConfig.units_per_second * FrameDeltaSeconds` into `Transform.translation`
+- if `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
+- `MoveWorldIntent` is copied into the local player horizontal velocity channels
+- vertical velocity is preserved across frames so gravity and falling can accumulate
+- world-aware motion then resolves:
+  - horizontal movement against solid world blocks
+  - one-block automatic step-up
+  - two-block obstacle rejection
+  - gravity and falling
 
 ## Invariants
 
 - `Transform.translation` is interpreted as body-center position
+- `PlayerBody.half_extents` is currently `[1.0, 2.0, 1.0]`, meaning a `2x2x4` block body
 - `MoveWorldIntent` is the continuous world-space movement channel
-- Discrete actions stay in `PlayerCommandBuffer`
-- The bootstrap local player spawns at body-center `[3.0, 1.5, 3.0]` so a unit debug cube stands on the center of the generated `(1..=5, 1..=5)` chunk patch
+- discrete actions stay in `PlayerCommandBuffer`
+- missing world chunks are treated as blocking in the current collision helper so the player does not walk into unloaded space
 
 ## Non-Responsibilities
 
-- Capturing raw keyboard state
-- Calculating camera follow behavior
-- Running selection raycasts
-- Applying world block edits
+- capturing raw keyboard state
+- calculating camera follow behavior
+- running selection raycasts
+- applying world block edits
 
 ## Related Modules
 
@@ -71,5 +81,6 @@
 
 ## Notes
 
-- The current minimal implementation spawns one local player during bootstrap
-- The current slice updates both velocity and transform, without collision or gravity yet
+- the current minimal implementation spawns one local player during bootstrap
+- bootstrap now preloads a spawn neighborhood and then snaps the local player onto a safe loaded surface so the body does not start underground
+- the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet

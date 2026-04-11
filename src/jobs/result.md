@@ -1,57 +1,58 @@
 # result
 
-## 역할
+## Role
 
-- `JobResult` variant와 완료/실패 payload 경계를 정의한다.
-- worker 실행 결과를 메인 스레드가 명시적으로 수거할 수 있는 형태로 고정한다.
+- Define the `JobResult` success/failure boundary.
+- Fix the data shape that worker execution reports back to the main thread.
 
-## 소유 데이터
+## Owned Data
 
 ### JobResult
-- `ChunkGenerated(coord, chunk)`
-- `ChunkMeshBuilt(coord, mesh)`
-- `JobFailed(request, error)`
+- `ChunkLoaded { coord, chunk }`
+- `ChunkGenerated { coord, chunk }`
+- `ChunkMeshBuilt { coord, mesh }`
+- `JobFailed { request, error }`
 
-### Result envelope metadata
-- request correlation 정보
-- 완료 시각 또는 완료 순서 정보
+### JobError
+- `Shutdown`
+- `WorkerDisconnected { worker_id }`
+- `ExecutionFailed { message }`
 
-## 입력
+## Inputs
 
-- worker 실행 성공 결과
-- worker 실행 실패 정보
-- request identity / correlation 정보
+- worker success outputs
+- worker execution failures
+- request identity / correlation data
 
-## 출력
+## Outputs
 
-- 메인 스레드가 drain할 completed result payload
-- ECS/world/app이 후속 처리를 결정할 수 있는 success/failure 결과
+- immutable completed result payloads drained by the main thread
 
-## 상태 전이 규칙
+## State Transition Rules
 
-- worker는 실행이 끝나면 success 또는 failure 중 하나의 result를 정확히 한 번만 방출한다.
-- result는 completed queue에 들어간 뒤, drain되기 전까지 immutable로 보존된다.
-- drain 후의 적용 순서는 completed queue의 deterministic order를 따른다.
+- each executed request produces exactly one success or failure result
+- results remain immutable in the completed queue until drained
+- completed queue order stays deterministic
 
-## 불변식
+## Invariants
 
-- `JobResult`는 live world state를 직접 수정하지 않는다.
-- failure도 request 식별이 가능해야 후속 재시도/정리 정책을 결정할 수 있다.
-- result payload는 상위 계층이 world/ECS/renderer 후속 작업을 결정하기에 충분한 정보만 담는다.
+- `JobResult` does not mutate live world state directly
+- failure results retain the original request so upper layers can clear dedupe state or retry later
+- execution failures now cover fallible baked chunk load paths
 
-## 비책임
+## Non-Responsibilities
 
-- 결과 해석과 ECS 반영
-- world source of truth 직접 수정
-- renderer 업로드 실행
+- interpreting gameplay meaning
+- mutating world source-of-truth state
+- uploading renderer resources
 
-## 관련 모듈
+## Related Modules
 
 - `queue.md`
 - `worker.md`
 - `../ecs/jobs.md`
 
-## 메모
+## Notes
 
-- 현재 최소 구현에서 `JobFailed`는 주로 shutdown 중 미실행 pending request 취소나 worker disconnect 상황을 표현한다.
-- generation/meshing 자체는 현재 world API 기준으로 fallible path가 없어서, worker 내부 계산 실패보다는 runtime 경계 실패를 먼저 다룬다.
+- baked chunk load now uses `ExecutionFailed { message }` when disk read or decode fails
+- app still decides how to log or recover from `JobFailed`

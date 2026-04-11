@@ -1,10 +1,19 @@
-use crate::world::{build_chunk_mesh, generate_chunk};
+use crate::world::{build_chunk_mesh, generate_chunk, load_baked_chunk};
 
 use super::request::JobRequest;
-use super::result::JobResult;
+use super::result::{JobError, JobResult};
 
 pub(crate) fn execute(request: JobRequest) -> JobResult {
     match request {
+        JobRequest::LoadChunk { root, coord } => match load_baked_chunk(root.as_path(), coord) {
+            Ok(chunk) => JobResult::ChunkLoaded { coord, chunk },
+            Err(error) => JobResult::JobFailed {
+                request: JobRequest::LoadChunk { root, coord },
+                error: JobError::ExecutionFailed {
+                    message: error.to_string(),
+                },
+            },
+        },
         JobRequest::GenerateChunk {
             coord,
             meta,

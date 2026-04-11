@@ -1,61 +1,61 @@
 # request
 
-## 역할
+## Role
 
-- `JobRequest` variant와 worker-safe 입력 payload 경계를 정의한다.
-- 상위 모듈이 jobs에 무엇을 요청할 수 있는지 명시한다.
+- Define the worker-safe `JobRequest` payload boundary.
+- Make explicit what upper layers are allowed to ask the jobs system to do.
 
-## 소유 데이터
+## Owned Data
 
 ### JobRequest
+- `LoadChunk { root, coord }`
 - `GenerateChunk { coord, meta, registry }`
 - `BuildChunkMesh { center, neighbors, registry }`
 
 ### Request identity / coalesce key
-- chunk 좌표 기반 dedupe 식별자
+- chunk-coordinate-based dedupe identity
 
-## 입력
+## Inputs
 
 - `ChunkCoord`
+- baked-world root path
 - immutable `ChunkSnapshot`
 - `NeighborChunks`
 - `WorldMeta`
 - `Arc<BlockRegistry>`
 
-## 출력
+## Outputs
 
-- worker가 직접 실행할 수 있는 owned request payload
-- queue가 사용할 request identity / coalesce key
+- owned worker payloads
+- queue-facing request identity / coalesce keys
 
-## 상태 전이 규칙
+## State Transition Rules
 
-- request는 상위 계층이 live world borrow 대신 snapshot/value payload로 생성한다.
-- block registry는 immutable shared config이므로 `Arc`로 worker에 전달한다.
-- queue 진입 전 coalesce key를 계산할 수 있어야 한다.
-- worker가 실행을 시작하면 request payload는 immutable로 취급한다.
+- requests are created from snapshot/value payloads, never live world borrows
+- block registry remains immutable shared config behind `Arc`
+- queue entry computes a coalesce key up front
+- request payload becomes immutable once handed to a worker
 
-## 불변식
+## Invariants
 
-- `JobRequest`는 worker thread/task 경계 너머로 안전하게 전달 가능해야 한다.
-- request payload는 live world 내부 배열에 대한 참조를 들고 있지 않는다.
-- registry payload는 shared immutable data여야 하고, worker가 실행 중 mutate하지 않는다.
-- 동일 request type이라도 merge가 안전하지 않으면 coalescing 대상이 아니다.
+- `JobRequest` must be safe to move across worker boundaries
+- request payload must not keep live world references
+- coalescing only applies when duplicate work is semantically safe
 
-## 비책임
+## Non-Responsibilities
 
-- request 실행
-- 완료 결과 적용
-- queue 스케줄링 정책 결정
+- executing the request
+- applying results back to ECS/world/renderer
+- choosing queue policy
 
-## 관련 모듈
+## Related Modules
 
 - `queue.md`
 - `routing.md`
 - `../ecs/jobs.md`
-- `../world/world.md`
+- `../world/baked.md`
 
-## 메모
+## Notes
 
-- 현재 최소 구현은 block plane vertical slice에 필요한 `GenerateChunk`와 `BuildChunkMesh`만 지원한다.
-- 두 request 모두 generation/meshing이 같은 block definition을 보게 하려고 `Arc<BlockRegistry>`를 함께 전달한다.
-- 중복 coalescing은 두 request 모두 chunk 좌표 기준으로만 적용한다.
+- the current chunk acquisition path now distinguishes baked load from procedural generation
+- coalescing still keys on chunk coordinate because the current runtime owns only one active world session

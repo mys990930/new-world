@@ -1,34 +1,33 @@
 ## ecs
 
-### 역할
+### Role
 
-- 게임 상태 전이의 중심 계층
-- 입력 상태를 gameplay 의미로 해석하고, 후속 world/simulation/jobs 요청의 기반 상태를 만든다
-- 멀티플레이를 고려한 command / intent 경계를 유지한다
+- central gameplay state-transition layer
+- interpret frame input into gameplay meaning and derive follow-up world/jobs/simulation work
+- keep multiplayer-friendly command / intent boundaries
 
-### 책임
+### Responsibilities
 
-- frame/tick 수준 상태 전이
+- frame/tick phase state transitions
 - input interpretation
-- player 중심 entity/component 관리
-- camera 상태 관리
-- selection 상태 관리
-- chunk meta 상태 관리
-- jobs 결과 반영
-- 시스템 실행 순서 정의
+- player entity/component management
+- camera state management
+- selection state management
+- chunk meta-state management
+- jobs result interpretation
+- schedule ordering
 
-### 비책임
+### Non-Responsibilities
 
-- raw OS event 수집
-- world 원본 block 데이터 소유
-- chunk direct I/O
-- procedural generation
-- meshing 알고리즘
-- main loop bootstrap
+- raw OS event capture
+- world source-of-truth block ownership
+- direct chunk I/O
+- procedural generation algorithms
+- meshing algorithms
+- main loop ownership
 
-### 데이터
-
-#### Resource
+### Owned Data
+#### Resources
 
 - `EcsInputSnapshot`
 - `PlayerCommandBuffer`
@@ -39,56 +38,45 @@
 - `LocalPlayerEntity`
 - `ChunkStates`
 - `SelectionState`
-- `PendingJobResults`
-- `ActiveSimRegion`
 
-#### Entity / Component
+#### Entities / Components
 
 - `Player`
 - `Transform`
 - `Velocity`
-- `Inventory`
-- `Health`
-- `InteractionTarget`
+- `PlayerBody`
+- `PlayerPhysicsState`
 
-#### Event / Command
+#### Discrete Commands
 
 - `PrimaryAction`
 - `PlaceBlock`
 - `RotateCamera`
 - `RecenterCamera`
 
-### 유스케이스
+### Use Cases
 
-- raw input을 gameplay 의미로 해석
-  - `WASD`는 화면 기준 이동 상태로 입력된다
-  - `좌클릭`은 기본 행위 요청
-  - `우클릭`은 블록 배치 요청
-  - `Q/E`는 카메라 90도 회전 요청
-  - `Y`는 카메라 리센터 요청
-- 플레이어 이동 의도 생성
-  - 화면 기준 입력은 command가 아니라 frame input state로 유지한다
-  - `CameraState`의 quarter rotation을 먼저 반영한다
-  - 같은 프레임에 회전과 이동이 같이 오면 회전 후 기준으로 `MoveWorldIntent`를 계산한다
-  - `MoveWorldIntent`는 world 기준 이동 의미이며 멀티플레이 경계에도 적합하다
-- 쿼터뷰 좌표계 해석
-  - 창 기준 상하좌우와 월드 기준 동서남북은 일치하지 않는다
-  - 기본 쿼터뷰에서 화면 우측 상단이 북쪽, 화면 우측 하단이 동쪽이다
-  - 따라서 화면 기준 이동은 world axis로 투영한 뒤 사용한다
-- 카메라 상태 갱신
-  - 4방향 쿼터뷰 회전
-  - 플레이어 중심의 느슨한 follow
-  - quarter-view plane 기준 deadzone
-  - 현재 `MoveWorldIntent` 기준의 약한 진행 방향 bias
-  - `Y`는 회전값을 유지한 채 player-centered anchor로 부드럽게 복귀시키는 smooth recenter 요청
-- 커서 기반 selection 갱신
-  - app가 프레임마다 mouse position과 viewport를 전달한다
-  - ECS는 current camera basis와 smoothed follow pose를 기준으로 orthographic ray를 만든다
-  - world raycast 결과를 `SelectionState`로 저장한다
-  - app bridge는 그 상태를 노란 face highlight 렌더 입력으로 바꾼다
+- raw input to gameplay meaning
+  - `WASD` becomes screen-relative movement state
+  - left click requests primary action
+  - right click requests block placement
+  - `Q/E` request quarter-turn camera rotation
+  - `Y` requests camera recenter
+- movement intent generation
+  - screen-relative input remains frame input state
+  - `CameraState.quarter_turns` is applied before generating `MoveWorldIntent`
+  - same-frame rotation and movement use the post-rotation basis
+- player locomotion
+  - horizontal velocity derives from `MoveWorldIntent`
+  - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
+- chunk acquisition planning
+  - baked worlds prefer disk load through jobs
+  - fallback worlds prefer procedural generation
+- selection update
+  - app provides cursor position and viewport
+  - ECS uses quarter-view camera state to build the selection ray
 
-### 공개 인터페이스
-
+### Public Interface
 ```rust
 EcsRuntime::new() -> EcsRuntime
 EcsRuntime::insert_resource<T>(&mut self, value: T)
@@ -103,6 +91,12 @@ EcsRuntime::run_fixed_update()
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
 EcsRuntime::move_world_intent() -> MoveWorldIntent
+EcsRuntime::set_frame_delta_seconds(dt_seconds: f32)
+EcsRuntime::camera_state() -> CameraState
+EcsRuntime::local_player_transform() -> Option<Transform>
+EcsRuntime::local_player_body() -> Option<PlayerBody>
+EcsRuntime::simulate_local_player_motion(world: &WorldCore)
+EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
 EcsRuntime::update_selection_from_world(
     world: &WorldCore,
     viewport_width: u32,
@@ -111,48 +105,35 @@ EcsRuntime::update_selection_from_world(
 EcsRuntime::selection_state() -> SelectionState
 ```
 
-### 의존성
+### Dependencies
 
 - `bevy_ecs`
 - `world`
 - `simulation`
 - `jobs`
 
-NOT:
+### Invariants
 
-- `platform` 구현
-- renderer GPU 구현
-- app loop ownership
+1. ECS does not directly read raw OS events
+2. world source-of-truth block data stays in `world`
+3. discrete actions and continuous movement stay on different channels
+4. screen-relative input and world-relative movement intent stay as separate boundaries
+5. world-aware helpers may query `WorldCore`, but ECS still does not own world storage
 
-### 불변식
-
-1. ECS는 raw OS event를 직접 다루지 않는다.
-2. world 원본 block 데이터는 ECS가 아니라 world가 소유한다.
-3. discrete 행동과 continuous 이동 의도는 같은 표현으로 섞지 않는다.
-4. 화면 기준 입력과 world 기준 intent는 별도 경계로 유지한다.
-5. 같은 프레임의 회전은 그 프레임 이동 intent 계산에 먼저 반영된다.
-6. selection policy는 ECS가 소유하지만 실제 블록 step/raycast는 world query를 사용한다.
-7. render용 카메라 pose는 ECS camera state에서 결정되고, app/renderer는 그 결과만 소비한다.
-
-### 하위 모듈 목록 및 역할
+### Submodules
 - mod.rs: public facade, re-export
-- runtime.rs: `EcsRuntime`, `World`/`Schedule` 소유, resource 초기화, pre/update/post/fixed 실행 진입점
-- input.rs: `EcsInputSnapshot`, frame 입력 resource, discrete command 후보 생성
-- command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS 내부 command/request buffer 정의
-- player.rs: `Player`/`Transform`/`Velocity`, local player spawn, 화면 기준 이동 상태를 world 기준 이동 intent로 변환
-- camera.rs: `CameraState`, 4방향 쿼터뷰 follow 상태, deadzone/bias/recenter policy, shared quarter-view basis/follow pose helper
-- selection.rs: world raycast 기반 hover target 상태 정의와 최소 selection update 규칙
-- chunk.rs: player 기준 interest / camera 기준 visible chunk meta 상태 정의
-- jobs.rs: jobs 결과 반영과 후속 요청 생성 규칙
-- fixed.rs: fixed tick용 simulation 흐름 정의
+- runtime.rs: `EcsRuntime`, schedule ownership, helper entry points
+- input.rs: `EcsInputSnapshot`, frame input resource, discrete command creation
+- command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS-side command/request buffers
+- player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
+- camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
+- selection.rs: world-raycast-based hover target state and selection rules
+- chunk.rs: chunk interest / acquisition / render-ready meta state
+- jobs.rs: jobs result interpretation and deterministic follow-up requests
+- fixed.rs: future fixed-tick simulation flow
 
-### 현재 구현 메모
+### Current Implementation Notes
 
-- 현재 최소 구현은 `EcsInputSnapshot -> PlayerCommandBuffer + MoveWorldIntent`까지 연결되어 있다.
-- discrete command는 app에서 로그로 확인할 수 있다.
-- `MoveWorldIntent`는 local player `Velocity`에 반영된다.
-- local player `Velocity`는 같은 frame의 `FrameDeltaSeconds`를 사용해 `Transform.translation`에 적분된다.
-- 기본 local player는 bootstrap 시점에 1회 spawn된다.
-- 목표 설계에서는 카메라가 quarter-view 고정 preset 위에 loose follow, deadzone, 약한 진행 방향 bias, smooth recenter를 가진다.
-- 현재 코드는 아직 selection과 render camera를 raw player transform 기준으로 만들고 있으므로, follow camera 계약은 다음 구현에서 맞춰야 한다.
-- 앞/뒤 타겟 전환, 배치 프리뷰 위치 분리, hover `0.3s` 규칙은 아직 future work다.
+- the current minimal slice now supports both baked-world loading and procedural fallback
+- continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
+- hover front/back switching, placement preview separation, and network prediction are still future work
