@@ -16,6 +16,7 @@
 - Fill solid terrain mass into `ChunkData` for relief inspection.
 - Expose deterministic debug probes for chunk/profile/surface inspection while tuning generation.
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
+- Keep probe helpers clearly separate from exact realized-chunk inspection; probes stop at surface sampling, while exact top-down previews should scan realized chunk data.
 
 ## Non-Responsibilities
 
@@ -97,6 +98,12 @@ generation::sample_chunk_surface_lod(
 6. Apply hydrology-aware carving and water-top resolution.
 7. Write block ids into `ChunkData`.
 8. Return the finished chunk without mutating any live world state.
+
+## Probe Scope Notes
+
+- `probe_chunk`, `probe_column`, and `sample_chunk_surface_lod` are inspection helpers for atlas sampling and base surface reasoning.
+- They intentionally do not represent the full realized topmost visible block after hydrology, water fill, and layered block placement.
+- Tools that need an exact top-down answer should scan realized `ChunkData` instead of reading probe surfaces directly.
 
 ## Invariants
 
