@@ -70,4 +70,5 @@
 - The current shadow solution is a single directional hard-sun map fit to visible terrain/cube bounds.
 - The visible sun is a full-screen overlay pass positioned from the current sun direction projected into the active camera.
 - Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.
+- Terrain shading now includes a subtle top-face contour treatment so receding height changes do not flatten into a single plane as easily in quarter view.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.

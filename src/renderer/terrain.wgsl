@@ -239,6 +239,40 @@ fn apply_color_grade(color: vec3<f32>, world_position: vec3<f32>, material_kind:
     return mix(saturated, saturated * warm_grade, grade_strength);
 }
 
+fn contour_response(material_kind: u32) -> f32 {
+    switch material_kind {
+        case MATERIAL_STONE, MATERIAL_SOIL, MATERIAL_SAND: {
+            return 1.0;
+        }
+        case MATERIAL_GRASS: {
+            return 0.82;
+        }
+        case MATERIAL_FOLIAGE: {
+            return 0.35;
+        }
+        case MATERIAL_WATER, MATERIAL_EMISSIVE: {
+            return 0.0;
+        }
+        default: {
+            return 0.70;
+        }
+    }
+}
+
+fn top_face_contour_mask(uv: vec2<f32>, up_factor: f32, material_kind: u32) -> f32 {
+    if up_factor <= 0.001 {
+        return 0.0;
+    }
+
+    let edge_distance = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+    let aa = max(fwidth(edge_distance), 0.0015);
+    let width = 0.030;
+    let border = 1.0 - smoothstep(width, width + aa * 2.0, edge_distance);
+    let strength =
+        clamp(0.03 + environment.readability.y * 0.20 + environment.readability.z * 0.04, 0.0, 0.18);
+    return border * up_factor * contour_response(material_kind) * strength;
+}
+
 fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) -> vec3<f32> {
     if environment.quality_flags.x == 0u {
         return color;
@@ -299,11 +333,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         environment.readability.z *
         0.12;
     let low_light_detail = 0.035 * (1.0 - lambert);
+    let contour_mask = top_face_contour_mask(input.uv, up_factor, input.material_kind);
+    let contour_tint = environment.horizon_color_height_falloff.xyz * 0.08;
 
     var shaded = albedo * (ambient + sunlight);
     shaded = shaded * top_boost * side_shadow * warm_side_tint + rim + albedo * low_light_detail;
     shaded = apply_climate_and_weather(shaded, input.material_kind);
     shaded = apply_color_grade(shaded, input.world_position, input.material_kind);
+    shaded = mix(shaded, shaded * 0.74 + contour_tint, contour_mask);
     shaded = apply_fog(shaded, input.world_position, input.material_kind);
 
     return vec4<f32>(clamp(shaded, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
