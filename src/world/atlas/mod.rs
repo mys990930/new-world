@@ -23,9 +23,12 @@ pub use scale::{
     AtlasAreaError, AtlasCoord, AtlasGrid,
 };
 pub use structure::{
-    AtlasStructureMap, DrainageGraph, DrainageNode, DrainageNodeKind, MountainChainGraph,
-    MountainChainId, MountainChainScale, MountainSpineSegment, RiverPathId, RiverPathKind,
-    RiverPathSegment, generate_atlas_structure, generate_atlas_structure_with_tuning,
+    ATLAS_STRUCTURE_REGION_EDGE_CELLS, ATLAS_STRUCTURE_REGION_PADDING_CELLS, AtlasStructureMap,
+    AtlasStructureRegion, AtlasStructureRegionCoord, DrainageGraph, DrainageNode,
+    DrainageNodeKind, MountainChainGraph, MountainChainId, MountainChainScale,
+    MountainSpineSegment, RiverPathId, RiverPathKind, RiverPathSegment,
+    atlas_structure_region_coord_for_atlas, atlas_structure_regions_covering_area,
+    generate_atlas_structure, generate_atlas_structure_with_tuning,
 };
 pub use tuning::{
     AtlasClimateTuning, AtlasColorRgb, AtlasContinentTuning, AtlasHydrologyTuning,

@@ -95,7 +95,7 @@ generation::sample_chunk_surface_lod(
 
 - Atlas remains the owner of macro terrain direction, but generation becomes the owner of chunk-local realization of that structure.
 - The next revision should stop inventing major ridge and river direction per column.
-- Instead, generation should read a padded atlas structure window and derive chunk-local distance fields from nearby mountain spines and river paths.
+- Instead, generation should read a padded atlas structure window assembled from nearby structure regions and derive chunk-local distance fields from nearby mountain spines and river paths.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
   2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
@@ -122,6 +122,7 @@ generation::sample_chunk_surface_lod(
 
 1. Map the target chunk to the atlas neighborhood needed for both scalar fields and structural guides.
 2. Generate or read the atlas field window plus mountain/drainage structure window.
+   The structure window is built from deterministic structure regions rather than from a single globally materialized graph.
 3. Interpolate scalar atlas signals per block column.
 4. Rasterize nearby mountain spines and river paths into chunk-local directional distance fields.
 5. Build the raw surface scaffold from profile weights plus structure-aware ridge/valley terms.

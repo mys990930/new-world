@@ -18,13 +18,16 @@ pub use atlas::{
     AtlasCoord, AtlasDebugError, AtlasDebugOptions, AtlasFieldMap, AtlasGrid,
     AtlasHydrologyTuning, AtlasNormalizationTuning, AtlasPreviewDebugTuning, AtlasResolvedCell,
     AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasStructureMap,
-    AtlasTerrainTuning, AtlasTuning, AtlasWeightTuning, BiomePreview, DrainageGraph,
-    DrainageNode, DrainageNodeKind, MoistureClass, MountainChainGraph, MountainChainId,
-    MountainChainScale, MountainSpineSegment, OverlayClass, RiverPathId, RiverPathKind,
-    RiverPathSegment, TerrainFormClass, ThermalClass, generate_atlas_fields,
-    generate_atlas_fields_with_tuning, generate_atlas_structure,
-    generate_atlas_structure_with_tuning, resolve_atlas, resolve_atlas_with_tuning,
-    write_debug_images, write_debug_images_with_options, write_debug_images_with_options_and_tuning,
+    AtlasStructureRegion, AtlasStructureRegionCoord, AtlasTerrainTuning, AtlasTuning,
+    AtlasWeightTuning, BiomePreview, DrainageGraph, DrainageNode, DrainageNodeKind,
+    MoistureClass, MountainChainGraph, MountainChainId, MountainChainScale,
+    MountainSpineSegment, OverlayClass, RiverPathId, RiverPathKind, RiverPathSegment,
+    TerrainFormClass, ThermalClass, ATLAS_STRUCTURE_REGION_EDGE_CELLS,
+    ATLAS_STRUCTURE_REGION_PADDING_CELLS, atlas_structure_region_coord_for_atlas,
+    atlas_structure_regions_covering_area, generate_atlas_fields, generate_atlas_fields_with_tuning,
+    generate_atlas_structure, generate_atlas_structure_with_tuning, resolve_atlas,
+    resolve_atlas_with_tuning, write_debug_images, write_debug_images_with_options,
+    write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
 pub use baked::{

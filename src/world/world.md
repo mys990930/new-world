@@ -46,6 +46,7 @@
 - `AtlasCoord`, `AtlasArea`
 - `AtlasFieldMap`, `AtlasResolvedMap`
 - `AtlasStructureMap`
+- `AtlasStructureRegionCoord`, `AtlasStructureRegion`
 - `MountainChainGraph`, `MountainSpineSegment`
 - `DrainageGraph`, `RiverPathSegment`
 - `ChunkGenerationProbe`, `ColumnGenerationProbe`
@@ -67,6 +68,8 @@ generate_atlas_structure_with_tuning(
     area: AtlasArea,
     tuning: &AtlasTuning,
 ) -> AtlasStructureMap
+atlas_structure_region_coord_for_atlas(coord: AtlasCoord) -> AtlasStructureRegionCoord
+atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegionCoord>
 
 WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
@@ -100,6 +103,7 @@ NOT:
 4. baked-world helpers may load chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
+7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order
 
 ### Submodules
 
