@@ -239,41 +239,36 @@ fn apply_color_grade(color: vec3<f32>, world_position: vec3<f32>, material_kind:
     return mix(saturated, saturated * warm_grade, grade_strength);
 }
 
-fn contour_response(material_kind: u32) -> f32 {
+fn terrace_contour_response(material_kind: u32) -> f32 {
     switch material_kind {
         case MATERIAL_STONE, MATERIAL_SOIL, MATERIAL_SAND: {
             return 1.0;
         }
         case MATERIAL_GRASS: {
-            return 1.0;
+            return 0.90;
         }
         case MATERIAL_FOLIAGE: {
-            return 0.72;
+            return 0.48;
         }
         case MATERIAL_WATER, MATERIAL_EMISSIVE: {
             return 0.0;
         }
         default: {
-            return 0.90;
+            return 0.84;
         }
     }
 }
 
-fn top_face_contour_mask(uv: vec2<f32>, up_factor: f32, material_kind: u32) -> f32 {
-    if up_factor <= 0.001 {
+fn terrace_contour_mask(uv: vec2<f32>, vertical_factor: f32, material_kind: u32) -> f32 {
+    if vertical_factor <= 0.001 {
         return 0.0;
     }
 
-    let edge_distance = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-    let aa = max(fwidth(edge_distance), 0.0015);
-    let inner_width = 0.050;
-    let outer_width = 0.110;
-    let inner_border = 1.0 - smoothstep(inner_width, inner_width + aa * 2.0, edge_distance);
-    let outer_border = 1.0 - smoothstep(outer_width, outer_width + aa * 3.5, edge_distance);
-    let border = max(inner_border, outer_border * 0.58);
+    let edge_aa = max(fwidth(uv.y), 0.0020);
+    let band = 1.0 - smoothstep(0.10, 0.16 + edge_aa * 2.5, uv.y);
     let strength =
-        clamp(0.18 + environment.readability.y * 0.42 + environment.readability.z * 0.12, 0.0, 0.58);
-    return border * up_factor * contour_response(material_kind) * strength;
+        clamp(0.18 + environment.readability.y * 0.36 + environment.readability.z * 0.08, 0.0, 0.44);
+    return band * vertical_factor * terrace_contour_response(material_kind) * strength;
 }
 
 fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) -> vec3<f32> {
@@ -314,6 +309,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         mix(1.0, 0.14 + shadow_visibility * 0.86, sun_shadow.sun_direction_shadow_strength.w);
     let up_factor = max(normal.y, 0.0);
     let side_factor = 1.0 - up_factor;
+    let vertical_factor = 1.0 - abs(normal.y);
     let albedo = resolve_albedo(sampled.rgb, input.color.rgb, input.material_kind);
     let ambient =
         environment.ambient_color_intensity.rgb * environment.ambient_color_intensity.w;
@@ -336,11 +332,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         environment.readability.z *
         0.12;
     let low_light_detail = 0.035 * (1.0 - lambert);
-    let contour_mask = top_face_contour_mask(input.uv, up_factor, input.material_kind);
-    let contour_color = mix(
-        vec3<f32>(0.05, 0.04, 0.04),
-        environment.horizon_color_height_falloff.xyz * 0.20,
-        0.35
+    let terrace_contour = terrace_contour_mask(input.uv, vertical_factor, input.material_kind);
+    let terrace_contour_color = mix(
+        vec3<f32>(0.06, 0.045, 0.04),
+        environment.horizon_color_height_falloff.xyz * 0.18,
+        0.28
     );
 
     var shaded = albedo * (ambient + sunlight);
@@ -348,7 +344,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     shaded = apply_climate_and_weather(shaded, input.material_kind);
     shaded = apply_color_grade(shaded, input.world_position, input.material_kind);
     shaded = apply_fog(shaded, input.world_position, input.material_kind);
-    shaded = mix(shaded, contour_color, clamp(contour_mask, 0.0, 0.70));
+    shaded = mix(shaded, terrace_contour_color, clamp(terrace_contour, 0.0, 0.60));
 
     return vec4<f32>(clamp(shaded, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
 }

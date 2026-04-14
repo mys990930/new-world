@@ -104,7 +104,7 @@ NOT:
 
 - Uploaded chunk terrain includes material classification from the world registry.
 - The terrain shader preserves more raw texture detail before atmosphere/fog grading, so dirt/grass/stone read more clearly in quarter view.
-- The terrain shader now also adds a readability-first top-face contour line, which makes downhill slope breaks and receding terraces show up much more clearly in orthographic quarter view without introducing a full wireframe pass.
+- The terrain shader now adds a terrace contour on the upper strip of exposed vertical faces, so layer breaks read more like step boundaries than per-block top outlines.
 - A visible sun overlay is now drawn from the current `sun_direction`.
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
