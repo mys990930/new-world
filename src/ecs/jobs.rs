@@ -45,23 +45,12 @@ impl EcsRuntime {
             chunk_states.generation_requested.insert(*coord);
         }
 
-        for coord in interest.into_iter().filter(|coord| coord.1 == target_chunk.1) {
-            if !chunk_states.loaded.contains(&coord)
-                || chunk_states.render_ready.contains(&coord)
-                || chunk_states.mesh_requested.contains(&coord)
-            {
-                continue;
-            }
-
-            if let Some(center) = world.snapshot_chunk(coord) {
-                requests.push(JobRequest::BuildChunkMesh {
-                    center,
-                    neighbors: world.query_neighbors(coord),
-                    registry: world.block_registry_handle(),
-                });
-                chunk_states.mesh_requested.insert(coord);
-            }
-        }
+        enqueue_mesh_requests_for_interest(
+            &mut requests,
+            &interest,
+            &mut chunk_states,
+            world,
+        );
 
         requests
     }
@@ -130,6 +119,33 @@ fn sync_loaded_chunk_states(chunk_states: &mut ChunkStates, world: &WorldCore) {
     }
 }
 
+fn enqueue_mesh_requests_for_interest(
+    requests: &mut Vec<JobRequest>,
+    interest: &[ChunkCoord],
+    chunk_states: &mut ChunkStates,
+    world: &WorldCore,
+) {
+    for &coord in interest {
+        if !chunk_states.loaded.contains(&coord)
+            || chunk_states.render_ready.contains(&coord)
+            || chunk_states.mesh_requested.contains(&coord)
+        {
+            continue;
+        }
+
+        let Some(center) = world.snapshot_chunk(coord) else {
+            continue;
+        };
+
+        requests.push(JobRequest::BuildChunkMesh {
+            center,
+            neighbors: world.query_neighbors(coord),
+            registry: world.block_registry_handle(),
+        });
+        chunk_states.mesh_requested.insert(coord);
+    }
+}
+
 fn interest_coords(
     target_chunk: ChunkCoord,
     baked_world: Option<&BakedWorldSource>,
@@ -155,4 +171,75 @@ fn interest_coords(
     }
 
     coords
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::world::{BlockRegistry, ChunkData, WorldMeta};
+
+    fn test_registry() -> Arc<BlockRegistry> {
+        Arc::new(BlockRegistry::load_default().expect("default registry should load"))
+    }
+
+    fn test_world() -> WorldCore {
+        WorldCore::new(WorldMeta::default(), test_registry())
+    }
+
+    #[test]
+    fn enqueue_mesh_requests_includes_loaded_vertical_interest_chunks() {
+        let mut world = test_world();
+        let surface = ChunkCoord(0, 0, 0);
+        let below = ChunkCoord(0, -1, 0);
+        world.insert_chunk(surface, ChunkData::new_empty(surface));
+        world.insert_chunk(below, ChunkData::new_empty(below));
+
+        let mut requests = Vec::new();
+        let mut chunk_states = ChunkStates::default();
+        chunk_states.loaded.insert(surface);
+        chunk_states.loaded.insert(below);
+
+        enqueue_mesh_requests_for_interest(
+            &mut requests,
+            &[surface, below],
+            &mut chunk_states,
+            &world,
+        );
+
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().any(|request| request.coord() == surface));
+        assert!(requests.iter().any(|request| request.coord() == below));
+        assert!(chunk_states.mesh_requested.contains(&surface));
+        assert!(chunk_states.mesh_requested.contains(&below));
+    }
+
+    #[test]
+    fn enqueue_mesh_requests_skips_render_ready_and_already_requested_chunks() {
+        let mut world = test_world();
+        let ready = ChunkCoord(0, 0, 0);
+        let pending = ChunkCoord(0, -1, 0);
+        let fresh = ChunkCoord(0, -2, 0);
+        world.insert_chunk(ready, ChunkData::new_empty(ready));
+        world.insert_chunk(pending, ChunkData::new_empty(pending));
+        world.insert_chunk(fresh, ChunkData::new_empty(fresh));
+
+        let mut requests = Vec::new();
+        let mut chunk_states = ChunkStates::default();
+        chunk_states.loaded.extend([ready, pending, fresh]);
+        chunk_states.render_ready.insert(ready);
+        chunk_states.mesh_requested.insert(pending);
+
+        enqueue_mesh_requests_for_interest(
+            &mut requests,
+            &[ready, pending, fresh],
+            &mut chunk_states,
+            &world,
+        );
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].coord(), fresh);
+        assert!(chunk_states.mesh_requested.contains(&fresh));
+    }
 }

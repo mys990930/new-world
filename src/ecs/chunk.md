@@ -36,13 +36,14 @@
 - when a baked world is active, interest expands that `5x5` neighborhood across the baked vertical chunk range so collision has loaded columns to work with
 - if an interesting chunk is missing and the baked manifest contains it, ECS requests `LoadChunk`
 - otherwise ECS falls back to `GenerateChunk`
-- loaded but non-render-ready chunks on the player plane request meshing
+- loaded but non-render-ready interesting chunks request meshing
+- when baked-world interest spans multiple `y` chunk layers, vertically loaded chunks must also become render-ready so lower terrain can render instead of only remaining selectable
 
 ## Invariants
 
 - ECS owns chunk meta state only, not raw chunk storage
 - load/generate/mesh request dedupe stays deterministic
-- visible chunks come from the render-ready set in the current minimal slice
+- visible chunks come from the render-ready set in the current minimal slice, so interest chunks that should render must first pass through the mesh-request path regardless of vertical layer
 
 ## Non-Responsibilities
 
