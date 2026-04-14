@@ -69,12 +69,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     while let Some(flag) = args.first().cloned() {
         args.remove(0);
         match flag.as_str() {
-            "--center-x" => {
-                center_x = parse_required::<i32>(&mut args, "center-x")?;
+            "--center-x" | "--chunk-x" => {
+                let label = if flag == "--chunk-x" {
+                    "chunk-x"
+                } else {
+                    "center-x"
+                };
+                center_x = parse_required::<i32>(&mut args, label)?;
                 center_explicit = true;
             }
-            "--center-z" => {
-                center_z = parse_required::<i32>(&mut args, "center-z")?;
+            "--center-z" | "--chunk-z" => {
+                let label = if flag == "--chunk-z" {
+                    "chunk-z"
+                } else {
+                    "center-z"
+                };
+                center_z = parse_required::<i32>(&mut args, label)?;
                 center_explicit = true;
             }
             "--radius" => radius = parse_required::<i32>(&mut args, "radius")?,
@@ -577,7 +587,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
+    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {

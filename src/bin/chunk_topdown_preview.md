@@ -9,6 +9,7 @@
 
 - either `seed` or `--world-dir <path>`
 - preview center in chunk coordinates
+- `--chunk-x` / `--chunk-z` aliases for direct chunk targeting
 - horizontal chunk radius
 - vertical chunk bounds
 - pixels per block
