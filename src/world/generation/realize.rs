@@ -2,8 +2,8 @@ use super::context::{
     ColumnAtlasSample, ColumnFillProfile, ColumnRealization, GenerationPalette, RiverStage,
 };
 use super::noise::{
-    MATERIAL_BLEND_SALT, STONE_DEPTH_SALT, centered_fbm, clamp01, hash01_2d, hash01_3d,
-    lerp_f32,
+    MATERIAL_BLEND_SALT, STONE_DEPTH_SALT, centered_fbm, clamp01, hash01_2d, lerp_f32,
+    ridge_signal_fbm,
 };
 use super::sampler::generate_chunk_atlas_fields;
 use super::surface::build_chunk_surface_field;
@@ -18,11 +18,23 @@ const SURFACE_STONE_MIN_DEPTH: i32 = 8;
 const SURFACE_STONE_MAX_DEPTH: i32 = 16;
 const RIVER_CHANNEL_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4100);
 const RIVER_CHANNEL_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4101);
+const MATERIAL_BOUNDARY_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4200);
+const MATERIAL_BOUNDARY_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4201);
+const SEDIMENT_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4202);
+const SEDIMENT_ZONE_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4203);
+const GRAVEL_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4204);
+const GRAVEL_ZONE_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4205);
 
 #[derive(Debug, Clone, Copy)]
 struct HydrologyRealization {
     surface_y: f32,
     water_top_y: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ColumnBlocks {
+    pub surface_block: BlockId,
+    pub fill_block: BlockId,
 }
 
 pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegistry) -> ChunkData {
@@ -42,8 +54,15 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
             let atlas_sample = surface_column.atlas_sample;
             let profile = surface_column.profile;
             let base_surface_y = surface_column.surface_y;
-            let fill_profile =
-                classify_fill_profile(atlas_sample, base_surface_y.round() as i32, land_threshold, profile);
+            let fill_profile = classify_fill_profile(
+                meta.seed,
+                world_x,
+                world_z,
+                atlas_sample,
+                base_surface_y.round() as i32,
+                land_threshold,
+                profile,
+            );
             let hydrology = apply_hydrology(
                 meta.seed,
                 world_x,
@@ -67,12 +86,19 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
                 water_top_y,
                 fill_profile,
             };
+            let blocks = resolve_column_blocks(
+                meta.seed,
+                world_x,
+                world_z,
+                atlas_sample,
+                realization,
+                palette,
+            );
 
             for local_y in 0..CHUNK_EDGE_I32 as u8 {
                 let local = LocalBlockCoord::new(local_x, local_y, local_z).unwrap();
                 let world_y = chunk_local_to_world(coord, local).1;
-                let block =
-                    block_for_world_y(world_y, world_x, world_z, meta.seed, realization, palette);
+                let block = block_for_world_y(world_y, realization, blocks, palette);
                 if block != BlockId::AIR {
                     let _ = chunk.set_block(local, block);
                 }
@@ -92,29 +118,44 @@ fn compute_stone_ceiling(seed: u64, world_x: i32, world_z: i32, surface_y: i32) 
 }
 
 pub(super) fn classify_fill_profile(
+    seed: u64,
+    world_x: i32,
+    world_z: i32,
     sample: ColumnAtlasSample,
     surface_y: i32,
     land_threshold: f32,
     profile: super::profile::TerrainProfile,
 ) -> ColumnFillProfile {
-    let is_land = sample.landness >= land_threshold;
+    let boundary_offset = material_boundary_offset(seed, world_x, world_z);
+    let warped_landness = clamp01(sample.landness + boundary_offset);
+    let warped_coast_factor = clamp01(
+        sample.coast_factor
+            + boundary_offset * 1.6
+            + (0.16 - sample.ocean_distance).max(0.0) * 1.4,
+    );
+    let is_land = warped_landness >= land_threshold;
     let river_connected = (sample.riverine_factor > 0.54 && sample.river_flow_potential > 0.14)
         || sample.river_flow_potential > 0.42
         || sample.lake_potential > 0.66;
+    let emergent_shore = surface_y >= SEA_LEVEL_Y + 2
+        && sample.ocean_distance < 0.18
+        && sample.landness <= land_threshold + 0.04
+        && sample.mountain_mass < 0.82;
     let coast_like = matches!(profile, super::profile::TerrainProfile::Coast)
-        || (sample.coast_factor > 0.40
-            && surface_y <= SEA_LEVEL_Y + 8
-            && sample.mountain_mass < 0.38);
+        || emergent_shore
+        || (warped_coast_factor > 0.38
+            && surface_y <= SEA_LEVEL_Y + 14
+            && sample.mountain_mass < 0.72);
+
+    if coast_like {
+        return ColumnFillProfile::Coast;
+    }
 
     if !is_land {
         return match profile {
             super::profile::TerrainProfile::DeepOcean => ColumnFillProfile::DeepOcean,
             _ => ColumnFillProfile::ShallowOcean { river_connected },
         };
-    }
-
-    if coast_like {
-        return ColumnFillProfile::Coast;
     }
 
     if river_connected {
@@ -134,6 +175,30 @@ pub(super) fn classify_fill_profile(
     }
 
     ColumnFillProfile::SoilWithGrassTop
+}
+
+fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {
+    let broad = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        320.0,
+        3,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_PRIMARY_SALT,
+    );
+    let medium = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        112.0,
+        2,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_SECONDARY_SALT,
+    );
+    (broad * 0.68 + medium * 0.32) * 0.055
 }
 
 fn classify_river_stage(sample: ColumnAtlasSample) -> RiverStage {
@@ -289,10 +354,8 @@ fn carve_river_channel(
 
 pub(super) fn block_for_world_y(
     world_y: i32,
-    world_x: i32,
-    world_z: i32,
-    seed: u64,
     column: ColumnRealization,
+    blocks: ColumnBlocks,
     palette: GenerationPalette,
 ) -> BlockId {
     if world_y < WORLD_FLOOR_Y {
@@ -304,18 +367,10 @@ pub(super) fn block_for_world_y(
     }
 
     if world_y <= column.surface_y {
-        let is_surface = world_y == column.surface_y;
-        return fill_block_for_profile(
-            column.fill_profile,
-            world_x,
-            world_y,
-            world_z,
-            seed,
-            is_surface,
-            column.water_top_y.is_some_and(|water_top_y| water_top_y > column.surface_y),
-            column.surface_y,
-            palette,
-        );
+        if world_y == column.surface_y {
+            return blocks.surface_block;
+        }
+        return blocks.fill_block;
     }
 
     if column
@@ -328,61 +383,169 @@ pub(super) fn block_for_world_y(
     BlockId::AIR
 }
 
-fn fill_block_for_profile(
-    profile: ColumnFillProfile,
-    world_x: i32,
-    world_y: i32,
-    world_z: i32,
+fn resolve_column_blocks(
     seed: u64,
-    is_surface: bool,
-    submerged_surface: bool,
-    surface_y: i32,
+    world_x: i32,
+    world_z: i32,
+    sample: ColumnAtlasSample,
+    column: ColumnRealization,
     palette: GenerationPalette,
-) -> BlockId {
-    let roll = hash01_3d(seed, world_x, world_y, world_z, MATERIAL_BLEND_SALT);
-    let grass_topped_land_surface =
-        is_surface && surface_y >= SEA_LEVEL_Y && !submerged_surface;
+) -> ColumnBlocks {
+    let submerged_surface = column
+        .water_top_y
+        .is_some_and(|water_top_y| water_top_y > column.surface_y);
 
-    match profile {
-        ColumnFillProfile::DeepOcean => palette.mud,
+    match column.fill_profile {
+        ColumnFillProfile::DeepOcean => ColumnBlocks {
+            surface_block: palette.mud,
+            fill_block: palette.mud,
+        },
         ColumnFillProfile::ShallowOcean { river_connected } => {
-            if river_connected {
-                if roll < 0.62 {
-                    palette.sand
-                } else {
-                    palette.mud
-                }
-            } else if roll < 0.22 {
-                palette.gravel
-            } else if roll < 0.67 {
-                palette.sand
-            } else {
-                palette.mud
+            let sediment =
+                select_shallow_ocean_sediment(seed, world_x, world_z, sample, river_connected, palette);
+            ColumnBlocks {
+                surface_block: sediment,
+                fill_block: sediment,
             }
         }
-        ColumnFillProfile::River(RiverStage::Headwaters) => palette.gravel,
-        ColumnFillProfile::River(RiverStage::Middle) => {
-            if roll < 0.58 {
-                palette.gravel
-            } else {
-                palette.sand
+        ColumnFillProfile::River(stage) => {
+            let sediment = select_river_bed_material(seed, world_x, world_z, sample, stage, palette);
+            ColumnBlocks {
+                surface_block: sediment,
+                fill_block: sediment,
             }
         }
-        ColumnFillProfile::River(RiverStage::Lower) => {
-            if roll < 0.52 {
-                palette.mud
-            } else {
-                palette.sand
-            }
-        }
-        ColumnFillProfile::Coast | ColumnFillProfile::Desert => palette.sand,
-        ColumnFillProfile::Frozen => palette.snow,
-        ColumnFillProfile::SoilWithGrassTop => {
-            if grass_topped_land_surface {
+        ColumnFillProfile::Coast | ColumnFillProfile::Desert => ColumnBlocks {
+            surface_block: palette.sand,
+            fill_block: palette.sand,
+        },
+        ColumnFillProfile::Frozen => ColumnBlocks {
+            surface_block: palette.snow,
+            fill_block: palette.snow,
+        },
+        ColumnFillProfile::SoilWithGrassTop => ColumnBlocks {
+            surface_block: if column.surface_y >= SEA_LEVEL_Y && !submerged_surface {
                 palette.grass
             } else {
                 palette.dirt
+            },
+            fill_block: palette.dirt,
+        },
+    }
+}
+
+fn select_shallow_ocean_sediment(
+    seed: u64,
+    world_x: i32,
+    world_z: i32,
+    sample: ColumnAtlasSample,
+    river_connected: bool,
+    palette: GenerationPalette,
+) -> BlockId {
+    let sediment = sediment_zone_signal(seed, world_x, world_z);
+    let gravel = gravel_zone_signal(seed, world_x, world_z);
+    let mud_bias = sample.wetness * 0.28
+        + sample.lake_potential * 0.20
+        + if river_connected { 0.10 } else { 0.0 };
+    let sand_score = 0.56 + sediment * 0.24 - mud_bias * 0.24;
+    let mud_score = 0.40 - sediment * 0.20 + mud_bias * 0.30;
+    let gravel_threshold = if river_connected { 0.90 } else { 0.95 };
+
+    if gravel > gravel_threshold {
+        palette.gravel
+    } else if sand_score >= mud_score {
+        palette.sand
+    } else {
+        palette.mud
+    }
+}
+
+fn select_river_bed_material(
+    seed: u64,
+    world_x: i32,
+    world_z: i32,
+    sample: ColumnAtlasSample,
+    stage: RiverStage,
+    palette: GenerationPalette,
+) -> BlockId {
+    let sediment = sediment_zone_signal(seed, world_x, world_z);
+    let gravel = gravel_zone_signal(seed, world_x, world_z);
+    let lower_silt_bias = sample.wetness * 0.20 + sample.lake_potential * 0.20;
+
+    match stage {
+        RiverStage::Headwaters => {
+            if gravel > 0.44 {
+                palette.gravel
+            } else {
+                palette.sand
+            }
+        }
+        RiverStage::Middle => {
+            if gravel > 0.70 {
+                palette.gravel
+            } else if sediment > -0.12 {
+                palette.sand
+            } else {
+                palette.mud
+            }
+        }
+        RiverStage::Lower => {
+            if sediment + lower_silt_bias > 0.10 {
+                palette.sand
+            } else {
+                palette.mud
             }
         }
     }
+}
+
+fn sediment_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
+    let broad = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        224.0,
+        4,
+        2.0,
+        0.5,
+        SEDIMENT_ZONE_PRIMARY_SALT,
+    );
+    let medium = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        88.0,
+        3,
+        2.0,
+        0.5,
+        SEDIMENT_ZONE_SECONDARY_SALT,
+    );
+    broad * 0.72 + medium * 0.28
+}
+
+fn gravel_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
+    let ridged = ridge_signal_fbm(
+        seed,
+        world_x,
+        world_z,
+        136.0,
+        3,
+        2.0,
+        0.55,
+        GRAVEL_ZONE_PRIMARY_SALT,
+    );
+    let patch = clamp01(
+        centered_fbm(
+            seed,
+            world_x,
+            world_z,
+            56.0,
+            2,
+            2.0,
+            0.5,
+            GRAVEL_ZONE_SECONDARY_SALT,
+        ) * 0.5
+            + 0.5,
+    );
+    clamp01(ridged * 0.72 + patch * 0.28)
 }

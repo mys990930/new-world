@@ -73,16 +73,6 @@ pub(super) fn hash01_2d(seed: u64, x: i32, z: i32, salt: u64) -> f32 {
     noise01_2d(seed, x, z, salt)
 }
 
-pub(super) fn hash01_3d(seed: u64, x: i32, y: i32, z: i32, salt: u64) -> f32 {
-    let mut value = seed ^ salt;
-    value ^= (x as u64).wrapping_mul(HASH_K1);
-    value ^= (y as u64).wrapping_mul(0xC6BC_2796_92B5_CC83);
-    value ^= (z as u64).wrapping_mul(HASH_K2);
-    let bits = splitmix64(value) >> 11;
-    let max = ((1_u64 << 53) - 1) as f64;
-    (bits as f64 / max) as f32
-}
-
 fn splitmix64(mut value: u64) -> u64 {
     value = value.wrapping_add(HASH_K1);
     value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);

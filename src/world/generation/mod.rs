@@ -29,7 +29,7 @@ mod tests {
     use super::profile::surface_profile_blend;
     use super::profile::TerrainProfile;
     use super::profiles::{surface_y_for_profile, surface_y_for_sample};
-    use super::realize::block_for_world_y;
+    use super::realize::{ColumnBlocks, block_for_world_y};
     use super::sampler::generate_chunk_atlas_fields;
     use super::surface::build_chunk_surface_field;
     use super::*;
@@ -37,6 +37,13 @@ mod tests {
 
     fn test_registry() -> BlockRegistry {
         BlockRegistry::load_default().expect("default registry should load")
+    }
+
+    fn blocks(surface_block: BlockId, fill_block: BlockId) -> ColumnBlocks {
+        ColumnBlocks {
+            surface_block,
+            fill_block,
+        }
     }
 
     #[test]
@@ -78,10 +85,26 @@ mod tests {
             fill_profile: ColumnFillProfile::SoilWithGrassTop,
         };
 
-        assert_eq!(block_for_world_y(4, 0, 0, 7, column, palette), palette.grass);
-        assert_eq!(block_for_world_y(3, 0, 0, 7, column, palette), palette.dirt);
-        assert_eq!(block_for_world_y(-6, 0, 0, 7, column, palette), palette.stone);
-        assert_eq!(block_for_world_y(5, 0, 0, 7, column, palette), BlockId::AIR);
+        assert_eq!(
+            block_for_world_y(4, column, blocks(palette.grass, palette.dirt), palette),
+            palette.grass
+        );
+        assert_eq!(
+            block_for_world_y(3, column, blocks(palette.grass, palette.dirt), palette),
+            palette.dirt
+        );
+        assert_eq!(
+            block_for_world_y(2, column, blocks(palette.grass, palette.dirt), palette),
+            palette.dirt
+        );
+        assert_eq!(
+            block_for_world_y(-6, column, blocks(palette.grass, palette.dirt), palette),
+            palette.stone
+        );
+        assert_eq!(
+            block_for_world_y(5, column, blocks(palette.grass, palette.dirt), palette),
+            BlockId::AIR
+        );
     }
 
     #[test]
@@ -95,11 +118,12 @@ mod tests {
             fill_profile: ColumnFillProfile::DeepOcean,
         };
 
-        assert_eq!(block_for_world_y(-12, 0, 0, 7, column, palette), palette.stone);
-        assert_eq!(block_for_world_y(-5, 0, 0, 7, column, palette), palette.mud);
-        assert_eq!(block_for_world_y(-4, 0, 0, 7, column, palette), palette.water);
-        assert_eq!(block_for_world_y(0, 0, 0, 7, column, palette), palette.water);
-        assert_eq!(block_for_world_y(1, 0, 0, 7, column, palette), BlockId::AIR);
+        let column_blocks = blocks(palette.mud, palette.mud);
+        assert_eq!(block_for_world_y(-12, column, column_blocks, palette), palette.stone);
+        assert_eq!(block_for_world_y(-5, column, column_blocks, palette), palette.mud);
+        assert_eq!(block_for_world_y(-4, column, column_blocks, palette), palette.water);
+        assert_eq!(block_for_world_y(0, column, column_blocks, palette), palette.water);
+        assert_eq!(block_for_world_y(1, column, column_blocks, palette), BlockId::AIR);
     }
 
     #[test]
@@ -126,15 +150,25 @@ mod tests {
             fill_profile: ColumnFillProfile::River(RiverStage::Lower),
         };
 
-        assert_eq!(block_for_world_y(6, 0, 0, 7, headwaters, palette), palette.gravel);
-        assert_eq!(block_for_world_y(5, 0, 0, 7, headwaters, palette), palette.gravel);
-        let middle_block = block_for_world_y(5, 3, 6, 7, middle, palette);
+        assert_eq!(
+            block_for_world_y(6, headwaters, blocks(palette.gravel, palette.gravel), palette),
+            palette.gravel
+        );
+        assert_eq!(
+            block_for_world_y(5, headwaters, blocks(palette.gravel, palette.gravel), palette),
+            palette.gravel
+        );
+        let middle_block =
+            block_for_world_y(5, middle, blocks(palette.sand, palette.sand), palette);
         assert!(middle_block == palette.gravel || middle_block == palette.sand);
-        let middle_surface = block_for_world_y(6, 9, 12, 7, middle, palette);
+        let middle_surface =
+            block_for_world_y(6, middle, blocks(palette.gravel, palette.gravel), palette);
         assert!(middle_surface == palette.gravel || middle_surface == palette.sand);
-        let lower_block = block_for_world_y(5, 9, 12, 7, lower, palette);
+        let lower_block =
+            block_for_world_y(5, lower, blocks(palette.mud, palette.mud), palette);
         assert!(lower_block == palette.mud || lower_block == palette.sand);
-        let lower_surface = block_for_world_y(6, 9, 12, 7, lower, palette);
+        let lower_surface =
+            block_for_world_y(6, lower, blocks(palette.sand, palette.sand), palette);
         assert!(lower_surface == palette.mud || lower_surface == palette.sand);
     }
 
@@ -149,7 +183,10 @@ mod tests {
             fill_profile: ColumnFillProfile::SoilWithGrassTop,
         };
 
-        assert_eq!(block_for_world_y(12, 0, 0, 7, soil, palette), palette.grass);
+        assert_eq!(
+            block_for_world_y(12, soil, blocks(palette.grass, palette.dirt), palette),
+            palette.grass
+        );
     }
 
     #[test]
@@ -175,7 +212,15 @@ mod tests {
             alpine_factor: 0.02,
         };
 
-        let fill = super::realize::classify_fill_profile(sample, 2, 0.53, TerrainProfile::Plain);
+        let fill = super::realize::classify_fill_profile(
+            7,
+            0,
+            0,
+            sample,
+            2,
+            0.53,
+            TerrainProfile::Plain,
+        );
         assert_eq!(fill, ColumnFillProfile::Coast);
     }
 
@@ -202,7 +247,15 @@ mod tests {
             alpine_factor: 0.02,
         };
 
-        let fill = super::realize::classify_fill_profile(sample, 3, 0.53, TerrainProfile::Coast);
+        let fill = super::realize::classify_fill_profile(
+            7,
+            0,
+            0,
+            sample,
+            3,
+            0.53,
+            TerrainProfile::Coast,
+        );
         assert_eq!(fill, ColumnFillProfile::Coast);
     }
 
@@ -217,8 +270,9 @@ mod tests {
             fill_profile: ColumnFillProfile::River(RiverStage::Headwaters),
         };
 
-        assert_eq!(block_for_world_y(6, 0, 0, 7, column, palette), palette.gravel);
-        assert_eq!(block_for_world_y(7, 0, 0, 7, column, palette), palette.water);
+        let column_blocks = blocks(palette.gravel, palette.gravel);
+        assert_eq!(block_for_world_y(6, column, column_blocks, palette), palette.gravel);
+        assert_eq!(block_for_world_y(7, column, column_blocks, palette), palette.water);
     }
 
     #[test]
@@ -259,8 +313,45 @@ mod tests {
             fill_profile: ColumnFillProfile::Coast,
         };
 
-        assert_eq!(block_for_world_y(0, 0, 0, 7, column, palette), palette.sand);
-        assert_eq!(block_for_world_y(1, 0, 0, 7, column, palette), BlockId::AIR);
+        let column_blocks = blocks(palette.sand, palette.sand);
+        assert_eq!(block_for_world_y(0, column, column_blocks, palette), palette.sand);
+        assert_eq!(block_for_world_y(1, column, column_blocks, palette), BlockId::AIR);
+    }
+
+    #[test]
+    fn emergent_shelf_prefers_coast_fill_over_dry_shallow_ocean() {
+        let sample = ColumnAtlasSample {
+            landness: 0.528,
+            ocean_distance: 0.0,
+            coast_factor: 0.0,
+            continent_core_factor: 0.0,
+            macro_elevation: 0.042,
+            ridge_factor: 0.154,
+            mountain_mass: 0.685,
+            ruggedness: 0.0,
+            river_source_potential: 0.0,
+            river_flow_potential: 0.0,
+            riverine_factor: 0.0,
+            lake_potential: 0.0,
+            temperature: 0.5,
+            humidity: 0.5,
+            aridity: 0.2,
+            wetness: 0.2,
+            polar_factor: 0.0,
+            alpine_factor: 0.55,
+        };
+
+        let fill = super::realize::classify_fill_profile(
+            42,
+            5136,
+            -4592,
+            sample,
+            16,
+            0.53,
+            TerrainProfile::Shelf,
+        );
+
+        assert_eq!(fill, ColumnFillProfile::Coast);
     }
 
     #[test]

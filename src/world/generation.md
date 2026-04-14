@@ -68,16 +68,16 @@ generation::sample_chunk_surface_lod(
   1. Sample and bilerp atlas-derived macro inputs from the surrounding atlas cells.
   2. Resolve a dominant generation-side `TerrainProfile` for debug and material heuristics.
   3. Blend the profile surface shapers into a raw signed `surface_y`, then smooth the local chunk heightfield in world-space before realization.
-  4. Resolve a column material profile, with coast classification taking priority over river-bed classification near sea level so beaches remain visible.
+  4. Resolve a column material profile using low-frequency boundary noise, with emergent shelf columns above sea level able to collapse into coast instead of staying as dry shallow-ocean sediment.
   5. Optionally carve river floodplains/channels out of the smoothed surface using both atlas river signals and local concavity, then assign a `water_top_y` for inland rivers or sea water.
   6. Pick a stone-core ceiling at `surface_y - random(8..=16)` from the carved final ground surface.
   7. Fill `stone` from world `y = -256` through that ceiling.
-  8. Fill the layer above the stone core through `surface_y` using atlas-informed material rules:
+  8. Resolve column-scale surface/fill blocks, then fill the layer above the stone core through `surface_y` using atlas-informed material rules:
      - deep ocean floor: `mud`
-     - shallow ocean floor: `sand` / `mud`, with extra `gravel` when not river-connected
-     - river headwaters: `gravel` bed
-     - river middle reaches: `gravel` / `sand` bed
-     - river lower reaches: `mud` / `sand` bed
+     - shallow ocean floor: broad `sand` / `mud` / occasional `gravel` zones chosen per column from a low-frequency sediment field instead of per-block random noise
+     - river headwaters: mostly `gravel` beds, but still chosen from a smooth column-scale sediment field
+     - river middle reaches: smooth `gravel` / `sand` reaches rather than checkerboard block noise
+     - river lower reaches: smooth `mud` / `sand` reaches
      - coast: `sand`
      - desert: `sand`
      - alpine or polar terrain: `snow`
@@ -98,8 +98,9 @@ generation::sample_chunk_surface_lod(
 5. Blend the profile-specific surface functions into a raw surface heightfield.
 6. Smooth that heightfield and derive local concavity for hydrology.
 7. Apply hydrology-aware carving and water-top resolution.
-8. Write block ids into `ChunkData`.
-9. Return the finished chunk without mutating any live world state.
+8. Resolve per-column surface/fill blocks from fill profile plus sediment fields.
+9. Write block ids into `ChunkData`.
+10. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
