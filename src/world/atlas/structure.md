@@ -35,6 +35,25 @@
 - `RiverPathId`
 - `RiverPathSegment`
 
+## 공개 인터페이스
+
+```rust
+generate_atlas_structure(meta: &WorldMeta, area: AtlasArea) -> AtlasStructureMap
+generate_atlas_structure_with_tuning(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    tuning: &AtlasTuning,
+) -> AtlasStructureMap
+```
+
+## 현재 스캐폴드 계약
+
+- `AtlasStructureMap`은 현재 `AtlasArea`와 비어 있을 수 있는 graph 컨테이너를 소유한다.
+- `MountainChainGraph`는 `MountainSpineSegment` 목록을 소유한다.
+- `DrainageGraph`는 `DrainageNode`와 `RiverPathSegment` 목록을 소유한다.
+- 첫 단계 구현에서는 생성 함수가 area-stable empty graph를 반환해도 괜찮다.
+- 다음 단계부터 mountain chain과 drainage segment를 채워 넣는다.
+
 ## generation이 읽는 방식
 
 1. generation은 target chunk 주변의 atlas structure window를 요청한다.

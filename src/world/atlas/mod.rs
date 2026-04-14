@@ -3,6 +3,7 @@ mod atlas_fields;
 mod atlas_resolver;
 mod scale;
 mod seed;
+mod structure;
 mod tuning;
 
 pub use atlas_debug::{
@@ -20,6 +21,11 @@ pub use atlas_resolver::{
 pub use scale::{
     ATLAS_CELL_SIZE_IN_CHUNKS, ATLAS_CELL_SIZE_IN_REGIONS, ATLAS_CELL_SIZE_M, AtlasArea,
     AtlasAreaError, AtlasCoord, AtlasGrid,
+};
+pub use structure::{
+    AtlasStructureMap, DrainageGraph, DrainageNode, DrainageNodeKind, MountainChainGraph,
+    MountainChainId, MountainChainScale, MountainSpineSegment, RiverPathId, RiverPathKind,
+    RiverPathSegment, generate_atlas_structure, generate_atlas_structure_with_tuning,
 };
 pub use tuning::{
     AtlasClimateTuning, AtlasColorRgb, AtlasContinentTuning, AtlasHydrologyTuning,

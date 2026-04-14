@@ -17,11 +17,14 @@ pub use atlas::{
     AtlasAreaError, AtlasCell, AtlasClimateTuning, AtlasColorRgb, AtlasContinentTuning,
     AtlasCoord, AtlasDebugError, AtlasDebugOptions, AtlasFieldMap, AtlasGrid,
     AtlasHydrologyTuning, AtlasNormalizationTuning, AtlasPreviewDebugTuning, AtlasResolvedCell,
-    AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasTerrainTuning, AtlasTuning,
-    AtlasWeightTuning, BiomePreview, MoistureClass, OverlayClass, TerrainFormClass,
-    ThermalClass, generate_atlas_fields, generate_atlas_fields_with_tuning, resolve_atlas,
-    resolve_atlas_with_tuning, write_debug_images, write_debug_images_with_options,
-    write_debug_images_with_options_and_tuning,
+    AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasStructureMap,
+    AtlasTerrainTuning, AtlasTuning, AtlasWeightTuning, BiomePreview, DrainageGraph,
+    DrainageNode, DrainageNodeKind, MoistureClass, MountainChainGraph, MountainChainId,
+    MountainChainScale, MountainSpineSegment, OverlayClass, RiverPathId, RiverPathKind,
+    RiverPathSegment, TerrainFormClass, ThermalClass, generate_atlas_fields,
+    generate_atlas_fields_with_tuning, generate_atlas_structure,
+    generate_atlas_structure_with_tuning, resolve_atlas, resolve_atlas_with_tuning,
+    write_debug_images, write_debug_images_with_options, write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
 pub use baked::{

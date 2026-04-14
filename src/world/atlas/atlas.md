@@ -36,6 +36,13 @@ generate_atlas_fields_with_tuning(
     tuning: &AtlasTuning,
 ) -> AtlasFieldMap
 
+generate_atlas_structure(meta: &WorldMeta, area: AtlasArea) -> AtlasStructureMap
+generate_atlas_structure_with_tuning(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    tuning: &AtlasTuning,
+) -> AtlasStructureMap
+
 resolve_atlas(fields: &AtlasFieldMap) -> AtlasResolvedMap
 resolve_atlas_with_tuning(
     fields: &AtlasFieldMap,

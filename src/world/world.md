@@ -61,6 +61,13 @@
 BlockRegistry::load_default() -> Result<BlockRegistry, BlockRegistryError>
 BlockRegistry::load_from_path(path: impl AsRef<Path>) -> Result<BlockRegistry, BlockRegistryError>
 
+generate_atlas_structure(meta: &WorldMeta, area: AtlasArea) -> AtlasStructureMap
+generate_atlas_structure_with_tuning(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    tuning: &AtlasTuning,
+) -> AtlasStructureMap
+
 WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
 WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
