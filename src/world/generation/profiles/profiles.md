@@ -9,6 +9,7 @@
 - dispatch from `TerrainProfile` to the matching surface function
 - keep ocean, coast, inland, and ridge shaping logic isolated
 - expose blended profile surface evaluation so neighboring profiles can ease into each other instead of creating hard height seams
+- keep profile-local relief broad enough to describe contour shape while leaving final smoothing to `surface.md`
 
 ## Current Modules
 
@@ -24,3 +25,4 @@
 - Generation can now blend several of those curves together near boundaries, while still reporting a dominant profile for debug and fill heuristics.
 - This keeps future material, vegetation, and structure generation aligned around the same profile boundary.
 - `upland` now owns broken highland relief, while `ridge` is expected to exaggerate crags, escarpments, and sharper vertical transitions instead of reading like a taller plain.
+- These profile functions now intentionally bias toward lower-frequency shape; final chunk generation smooths the combined field before hydrology and block fill.

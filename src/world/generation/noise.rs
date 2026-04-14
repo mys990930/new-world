@@ -2,17 +2,12 @@ const HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
 const HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const HASH_K3: u64 = 0x1656_67B1_9E37_79F9;
 
-pub(super) const SURFACE_JITTER_SALT: u64 = 0x9511_1100_0000_0001;
 pub(super) const STONE_DEPTH_SALT: u64 = 0x9511_1100_0000_0002;
 pub(super) const MATERIAL_BLEND_SALT: u64 = 0x9511_1100_0000_0003;
 pub(super) const OCEAN_FLOOR_SALT: u64 = 0x9511_1100_0000_0101;
 pub(super) const ROLLING_RELIEF_SALT: u64 = 0x9511_1100_0000_0102;
 pub(super) const DETAIL_RELIEF_SALT: u64 = 0x9511_1100_0000_0103;
 pub(super) const RIDGE_RELIEF_SALT: u64 = 0x9511_1100_0000_0104;
-
-pub(super) fn centered_noise(seed: u64, world_x: i32, world_z: i32, salt: u64) -> f32 {
-    noise01_2d(seed, world_x, world_z, salt) * 2.0 - 1.0
-}
 
 pub(super) fn centered_fbm(
     seed: u64,

@@ -13,6 +13,7 @@
 - Sample atlas-scale macro environment data needed for chunk realization.
 - Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
 - Convert atlas fields into per-column surface elevation around a fixed sea level using blended profile surfaces rather than a single hard profile switch.
+- Build a smoothed chunk-local surface field before hydrology so contour flow stays readable at block resolution.
 - Fill solid terrain mass into `ChunkData` for relief inspection.
 - Expose deterministic debug probes for chunk/profile/surface inspection while tuning generation.
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
@@ -66,26 +67,26 @@ generation::sample_chunk_surface_lod(
 - For each `(x, z)` column in the chunk:
   1. Sample and bilerp atlas-derived macro inputs from the surrounding atlas cells.
   2. Resolve a dominant generation-side `TerrainProfile` for debug and material heuristics.
-  3. Blend the profile surface shapers plus block-scale deterministic relief noise into a base signed `surface_y`.
+  3. Blend the profile surface shapers into a raw signed `surface_y`, then smooth the local chunk heightfield in world-space before realization.
   4. Resolve a column material profile, with coast classification taking priority over river-bed classification near sea level so beaches remain visible.
-  5. Optionally carve river floodplains/channels out of the base surface and assign a `water_top_y` for inland rivers or sea water.
+  5. Optionally carve river floodplains/channels out of the smoothed surface using both atlas river signals and local concavity, then assign a `water_top_y` for inland rivers or sea water.
   6. Pick a stone-core ceiling at `surface_y - random(8..=16)` from the carved final ground surface.
   7. Fill `stone` from world `y = -256` through that ceiling.
   8. Fill the layer above the stone core through `surface_y` using atlas-informed material rules:
      - deep ocean floor: `mud`
      - shallow ocean floor: `sand` / `mud`, with extra `gravel` when not river-connected
-     - river headwaters: `gravel` bed, with exposed land banks still becoming `grass`
-     - river middle reaches: `gravel` / `sand` bed, with exposed land banks still becoming `grass`
-     - river lower reaches: `mud` / `sand` bed, with exposed land banks still becoming `grass`
+     - river headwaters: `gravel` bed
+     - river middle reaches: `gravel` / `sand` bed
+     - river lower reaches: `mud` / `sand` bed
      - coast: `sand`
      - desert: `sand`
      - alpine or polar terrain: `snow`
      - otherwise: `dirt`, with `grass` on the surface block
-  9. Any exposed land surface that is not classified as `sand` or `snow` uses `grass` as the top block.
+  9. Any exposed land surface that is not classified as river/coast/desert/snow uses `grass` as the top block.
   10. If a column has `water_top_y`, fill `water` from `surface_y + 1` through that water top:
      - only `DeepOcean` / `Shelf` columns get automatic sea water up to sea level `y = 0`
      - `Coast` columns stay at or above sea level and read as beach sand rather than sea-filled low pockets
-     - inland river columns can carry water above sea level
+     - inland river columns can carry water above sea level and are biased toward locally concave channel cores
 - Trees, tall grass, and ecology are still intentionally out of scope for this pass.
 
 ## Processing Flow
@@ -94,10 +95,11 @@ generation::sample_chunk_surface_lod(
 2. Generate atlas fields for that neighborhood.
 3. Interpolate the atlas signals per block column inside the chunk.
 4. Resolve a dominant terrain profile from the sampled column context.
-5. Blend the profile-specific surface functions into a single surface height.
-6. Apply hydrology-aware carving and water-top resolution.
-7. Write block ids into `ChunkData`.
-8. Return the finished chunk without mutating any live world state.
+5. Blend the profile-specific surface functions into a raw surface heightfield.
+6. Smooth that heightfield and derive local concavity for hydrology.
+7. Apply hydrology-aware carving and water-top resolution.
+8. Write block ids into `ChunkData`.
+9. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
@@ -120,6 +122,7 @@ generation::sample_chunk_surface_lod(
 - `sampler.md`: chunk-to-atlas neighborhood lookup and bilerp sampling
 - `profile.md`: generation-side terrain profile resolution
 - `noise.md`: deterministic block-scale relief noise helpers
+- `surface.md`: smoothed chunk-local surface scaffold and local concavity derivation
 - `probe.md`: deterministic terrain inspection helpers
 - `profiles/profiles.md`: profile-specific surface shaping modules
 - `realize.md`: chunk fill loop and layered terrain realization

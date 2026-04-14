@@ -5,9 +5,8 @@ use super::noise::{
     MATERIAL_BLEND_SALT, STONE_DEPTH_SALT, centered_fbm, clamp01, hash01_2d, hash01_3d,
     lerp_f32,
 };
-use super::profile::resolve_profile;
-use super::profiles::surface_height_for_sample;
-use super::sampler::{generate_chunk_atlas_fields, sample_column_atlas};
+use super::sampler::generate_chunk_atlas_fields;
+use super::surface::build_chunk_surface_field;
 use super::super::atlas::AtlasTuning;
 use super::super::chunk::{BlockId, ChunkData};
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, chunk_local_to_world};
@@ -29,6 +28,7 @@ struct HydrologyRealization {
 pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegistry) -> ChunkData {
     let palette = GenerationPalette::from_registry(registry);
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
     let land_threshold = AtlasTuning::default().normalization.land_threshold;
     let mut chunk = ChunkData::new_empty(coord);
 
@@ -38,10 +38,10 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
                 chunk_local_to_world(coord, LocalBlockCoord::new(local_x, 0, local_z).unwrap());
             let world_x = column_origin.0;
             let world_z = column_origin.2;
-            let atlas_sample = sample_column_atlas(&atlas_fields, world_x, world_z);
-            let profile = resolve_profile(atlas_sample, land_threshold);
-            let base_surface_y =
-                surface_height_for_sample(meta.seed, world_x, world_z, atlas_sample, land_threshold);
+            let surface_column = surface_field.column(local_x, local_z);
+            let atlas_sample = surface_column.atlas_sample;
+            let profile = surface_column.profile;
+            let base_surface_y = surface_column.surface_y;
             let fill_profile =
                 classify_fill_profile(atlas_sample, base_surface_y.round() as i32, land_threshold, profile);
             let hydrology = apply_hydrology(
@@ -52,6 +52,7 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
                 base_surface_y,
                 fill_profile,
                 land_threshold,
+                surface_column.local_concavity,
             );
             let surface_y = hydrology.surface_y.round() as i32;
             let water_top_y = hydrology
@@ -97,7 +98,9 @@ pub(super) fn classify_fill_profile(
     profile: super::profile::TerrainProfile,
 ) -> ColumnFillProfile {
     let is_land = sample.landness >= land_threshold;
-    let river_connected = sample.riverine_factor > 0.46 || sample.lake_potential > 0.58;
+    let river_connected = (sample.riverine_factor > 0.54 && sample.river_flow_potential > 0.14)
+        || sample.river_flow_potential > 0.42
+        || sample.lake_potential > 0.66;
     let coast_like = matches!(profile, super::profile::TerrainProfile::Coast)
         || (sample.coast_factor > 0.40
             && surface_y <= SEA_LEVEL_Y + 8
@@ -154,9 +157,18 @@ fn apply_hydrology(
     base_surface_y: f32,
     fill_profile: ColumnFillProfile,
     land_threshold: f32,
+    local_concavity: f32,
 ) -> HydrologyRealization {
     let inland = if sample.landness >= land_threshold && matches!(fill_profile, ColumnFillProfile::River(_)) {
-        carve_river_channel(seed, world_x, world_z, sample, base_surface_y, fill_profile)
+        carve_river_channel(
+            seed,
+            world_x,
+            world_z,
+            sample,
+            base_surface_y,
+            fill_profile,
+            local_concavity,
+        )
     } else {
         None
     };
@@ -188,10 +200,12 @@ fn carve_river_channel(
     sample: ColumnAtlasSample,
     base_surface_y: f32,
     fill_profile: ColumnFillProfile,
+    local_concavity: f32,
 ) -> Option<HydrologyRealization> {
-    let river_strength =
-        clamp01(sample.riverine_factor * 1.22 + sample.lake_potential * 0.36 - 0.46);
-    if river_strength <= 0.04 {
+    let river_strength = clamp01(
+        sample.riverine_factor * 1.10 + sample.lake_potential * 0.28 + local_concavity * 0.45 - 0.44,
+    );
+    if river_strength <= 0.05 || (local_concavity < 0.05 && sample.river_flow_potential < 0.24) {
         return None;
     }
 
@@ -217,20 +231,22 @@ fn carve_river_channel(
     ) * 0.34;
     let centerline_distance = (meander_primary * 0.72 + meander_secondary * 0.28).abs();
 
-    let mut channel_width = lerp_f32(0.032, 0.128, river_strength) + sample.lake_potential * 0.04;
+    let mut channel_width =
+        lerp_f32(0.044, 0.144, river_strength) + sample.lake_potential * 0.05 + local_concavity * 0.04;
     if matches!(fill_profile, ColumnFillProfile::Coast) {
         channel_width += 0.05;
     }
-    let floodplain_width = channel_width * 2.8 + 0.09;
+    let floodplain_width = channel_width * (2.1 + local_concavity * 2.0) + 0.08;
     let floodplain_mask = clamp01(1.0 - centerline_distance / floodplain_width);
     if floodplain_mask <= 0.0 {
         return None;
     }
 
     let channel_mask = clamp01(1.0 - centerline_distance / channel_width);
-    let floodplain_drop = (0.6 + river_strength * 2.0 + sample.wetness * 1.2) * floodplain_mask;
+    let floodplain_drop =
+        (0.8 + river_strength * 2.8 + sample.wetness * 1.6 + local_concavity * 1.8) * floodplain_mask;
     let floodplain_y = base_surface_y - floodplain_drop;
-    if channel_mask <= 0.18 {
+    if channel_mask <= 0.08 {
         return Some(HydrologyRealization {
             surface_y: floodplain_y,
             water_top_y: None,
@@ -249,16 +265,21 @@ fn carve_river_channel(
     let channel_depth = (channel_depth_base
         + river_strength * 2.6
         + sample.river_flow_potential * 1.2
-        + sample.wetness * 0.6)
+        + sample.wetness * 0.8
+        + local_concavity * 3.2)
         * channel_mask;
-    let bed_y = (floodplain_y - channel_depth.max(0.8)).min(base_surface_y - 0.6);
-    let water_depth = water_depth_base
+    let bed_y = (floodplain_y - channel_depth.max(1.4)).min(base_surface_y - 0.8);
+    let bank_freeboard = (0.40 - river_strength * 0.18 - local_concavity * 0.12).clamp(0.08, 0.40);
+    let water_surface_y = floodplain_y - bank_freeboard;
+    let min_water_depth = water_depth_base
+        + river_strength * 0.7
+        + local_concavity * 0.8
         + if river_strength > 0.64 || sample.lake_potential > 0.70 {
             0.8
         } else {
             0.0
         };
-    let water_top_y = (bed_y + water_depth).min(floodplain_y - 0.2);
+    let water_top_y = water_surface_y.max(bed_y + min_water_depth);
 
     Some(HydrologyRealization {
         surface_y: bed_y,
@@ -339,26 +360,16 @@ fn fill_block_for_profile(
                 palette.mud
             }
         }
-        ColumnFillProfile::River(RiverStage::Headwaters) => {
-            if grass_topped_land_surface {
-                palette.grass
-            } else {
-                palette.gravel
-            }
-        }
+        ColumnFillProfile::River(RiverStage::Headwaters) => palette.gravel,
         ColumnFillProfile::River(RiverStage::Middle) => {
-            if grass_topped_land_surface {
-                palette.grass
-            } else if roll < 0.58 {
+            if roll < 0.58 {
                 palette.gravel
             } else {
                 palette.sand
             }
         }
         ColumnFillProfile::River(RiverStage::Lower) => {
-            if grass_topped_land_surface {
-                palette.grass
-            } else if roll < 0.52 {
+            if roll < 0.52 {
                 palette.mud
             } else {
                 palette.sand

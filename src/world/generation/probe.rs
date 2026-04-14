@@ -1,8 +1,8 @@
 use super::context::ColumnAtlasSample;
-use super::profile::{TerrainProfile, resolve_profile};
-use super::profiles::surface_y_for_sample;
-use super::sampler::{generate_chunk_atlas_fields, sample_column_atlas};
-use super::super::atlas::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, AtlasFieldMap, AtlasTuning};
+use super::profile::TerrainProfile;
+use super::sampler::generate_chunk_atlas_fields;
+use super::surface::{ChunkSurfaceField, build_chunk_surface_field};
+use super::super::atlas::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord};
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, chunk_local_to_world};
 use super::super::meta::WorldMeta;
 
@@ -87,24 +87,24 @@ pub fn probe_column(
     meta: &WorldMeta,
 ) -> ColumnGenerationProbe {
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
-    probe_column_with_fields(&atlas_fields, coord, local_x, local_z, meta.seed)
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
+    probe_column_with_surface_field(&surface_field, coord, local_x, local_z)
 }
 
 pub fn probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe {
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
     let mut surface_min_y = i32::MAX;
     let mut surface_max_y = i32::MIN;
     let mut surface_sum = 0_i64;
     let mut counts = TerrainProfileCounts::default();
 
-    for local_z in 0..CHUNK_EDGE_I32 as u8 {
-        for local_x in 0..CHUNK_EDGE_I32 as u8 {
-            let column = probe_column_with_fields(&atlas_fields, coord, local_x, local_z, meta.seed);
-            surface_min_y = surface_min_y.min(column.surface_y);
-            surface_max_y = surface_max_y.max(column.surface_y);
-            surface_sum += i64::from(column.surface_y);
-            counts.record(column.profile);
-        }
+    for column in surface_field.central_columns() {
+        let surface_y = column.surface_y.round() as i32;
+        surface_min_y = surface_min_y.min(surface_y);
+        surface_max_y = surface_max_y.max(surface_y);
+        surface_sum += i64::from(surface_y);
+        counts.record(column.profile);
     }
 
     let total = counts.total().max(1);
@@ -132,6 +132,7 @@ pub fn sample_chunk_surface_lod(
     );
 
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
     let samples_per_axis = (super::super::coord::CHUNK_EDGE / step) as u8;
     let mut samples = Vec::with_capacity(usize::from(samples_per_axis) * usize::from(samples_per_axis));
 
@@ -143,7 +144,8 @@ pub fn sample_chunk_surface_lod(
             let local_min_x = (sample_x * step) as u8;
             let local_probe_x =
                 ((usize::from(local_min_x) + step / 2).min(super::super::coord::CHUNK_EDGE - 1)) as u8;
-            let column = probe_column_with_fields(&atlas_fields, coord, local_probe_x, local_probe_z, meta.seed);
+            let column =
+                probe_column_with_surface_field(&surface_field, coord, local_probe_x, local_probe_z);
             let origin_local =
                 LocalBlockCoord::new(local_min_x, 0, local_min_z).expect("lod local coordinates must be in bounds");
             let origin_world = chunk_local_to_world(coord, origin_local);
@@ -169,12 +171,11 @@ pub fn sample_chunk_surface_lod(
     }
 }
 
-fn probe_column_with_fields(
-    atlas_fields: &AtlasFieldMap,
+fn probe_column_with_surface_field(
+    surface_field: &ChunkSurfaceField,
     coord: ChunkCoord,
     local_x: u8,
     local_z: u8,
-    seed: u64,
 ) -> ColumnGenerationProbe {
     let local = LocalBlockCoord::new(local_x, 0, local_z).expect("probe local coordinates must be in bounds");
     let column_origin = chunk_local_to_world(coord, local);
@@ -188,10 +189,10 @@ fn probe_column_with_fields(
         (world_x.rem_euclid(ATLAS_CELL_SPAN_BLOCKS_I32) as f32 + 0.5) / ATLAS_CELL_SPAN_BLOCKS_I32 as f32;
     let atlas_frac_z =
         (world_z.rem_euclid(ATLAS_CELL_SPAN_BLOCKS_I32) as f32 + 0.5) / ATLAS_CELL_SPAN_BLOCKS_I32 as f32;
-    let atlas_sample = sample_column_atlas(atlas_fields, world_x, world_z);
-    let land_threshold = AtlasTuning::default().normalization.land_threshold;
-    let profile = resolve_profile(atlas_sample, land_threshold);
-    let surface_y = surface_y_for_sample(seed, world_x, world_z, atlas_sample, land_threshold);
+    let prepared = surface_field.column(local_x, local_z);
+    let atlas_sample = prepared.atlas_sample;
+    let profile = prepared.profile;
+    let surface_y = prepared.surface_y.round() as i32;
 
     ColumnGenerationProbe {
         chunk: coord,

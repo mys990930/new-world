@@ -57,6 +57,7 @@ pub(super) fn surface_height_for_sample(
             * surface_height_for_profile(seed, world_x, world_z, sample, TerrainProfile::Ridge)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn surface_y_for_sample(
     seed: u64,
     world_x: i32,

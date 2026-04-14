@@ -5,6 +5,7 @@ mod probe;
 mod profiles;
 mod realize;
 mod sampler;
+mod surface;
 
 pub const SEA_LEVEL_Y: i32 = 0;
 pub const WORLD_FLOOR_Y: i32 = -256;
@@ -29,6 +30,8 @@ mod tests {
     use super::profile::TerrainProfile;
     use super::profiles::{surface_y_for_profile, surface_y_for_sample};
     use super::realize::block_for_world_y;
+    use super::sampler::generate_chunk_atlas_fields;
+    use super::surface::build_chunk_surface_field;
     use super::*;
     use crate::world::{BlockId, BlockRegistry, ChunkCoord, LocalBlockCoord, WorldMeta};
 
@@ -123,25 +126,22 @@ mod tests {
             fill_profile: ColumnFillProfile::River(RiverStage::Lower),
         };
 
-        assert_eq!(block_for_world_y(6, 0, 0, 7, headwaters, palette), palette.grass);
+        assert_eq!(block_for_world_y(6, 0, 0, 7, headwaters, palette), palette.gravel);
         assert_eq!(block_for_world_y(5, 0, 0, 7, headwaters, palette), palette.gravel);
         let middle_block = block_for_world_y(5, 3, 6, 7, middle, palette);
         assert!(middle_block == palette.gravel || middle_block == palette.sand);
-        assert_eq!(block_for_world_y(6, 9, 12, 7, middle, palette), palette.grass);
+        let middle_surface = block_for_world_y(6, 9, 12, 7, middle, palette);
+        assert!(middle_surface == palette.gravel || middle_surface == palette.sand);
         let lower_block = block_for_world_y(5, 9, 12, 7, lower, palette);
         assert!(lower_block == palette.mud || lower_block == palette.sand);
+        let lower_surface = block_for_world_y(6, 9, 12, 7, lower, palette);
+        assert!(lower_surface == palette.mud || lower_surface == palette.sand);
     }
 
     #[test]
-    fn non_sand_non_snow_land_surfaces_use_grass_top() {
+    fn soil_land_surfaces_use_grass_top() {
         let registry = test_registry();
         let palette = GenerationPalette::from_registry(&registry);
-        let headwaters = ColumnRealization {
-            surface_y: 6,
-            stone_ceiling_y: 0,
-            water_top_y: None,
-            fill_profile: ColumnFillProfile::River(RiverStage::Headwaters),
-        };
         let soil = ColumnRealization {
             surface_y: 12,
             stone_ceiling_y: 3,
@@ -149,7 +149,6 @@ mod tests {
             fill_profile: ColumnFillProfile::SoilWithGrassTop,
         };
 
-        assert_eq!(block_for_world_y(6, 0, 0, 7, headwaters, palette), palette.grass);
         assert_eq!(block_for_world_y(12, 0, 0, 7, soil, palette), palette.grass);
     }
 
@@ -390,6 +389,34 @@ mod tests {
 
         assert_ne!(a, b);
         assert!((a - b).abs() >= 2);
+    }
+
+    #[test]
+    fn smoothed_surface_field_reduces_local_height_jitter() {
+        let meta = WorldMeta::new(42);
+        let coord = ChunkCoord(5, 0, -8);
+        let atlas_fields = generate_chunk_atlas_fields(coord, &meta);
+        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields);
+        let mut raw_delta_sum = 0.0_f32;
+        let mut smooth_delta_sum = 0.0_f32;
+        let mut samples = 0_u32;
+
+        for local_z in 0..31_u8 {
+            for local_x in 0..31_u8 {
+                let center = surface_field.column(local_x, local_z);
+                let east = surface_field.column(local_x + 1, local_z);
+                let south = surface_field.column(local_x, local_z + 1);
+
+                raw_delta_sum += (center.raw_surface_y - east.raw_surface_y).abs();
+                raw_delta_sum += (center.raw_surface_y - south.raw_surface_y).abs();
+                smooth_delta_sum += (center.surface_y - east.surface_y).abs();
+                smooth_delta_sum += (center.surface_y - south.surface_y).abs();
+                samples += 2;
+            }
+        }
+
+        assert!(samples > 0);
+        assert!(smooth_delta_sum < raw_delta_sum);
     }
 
     #[test]
