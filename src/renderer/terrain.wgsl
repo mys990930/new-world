@@ -245,16 +245,16 @@ fn contour_response(material_kind: u32) -> f32 {
             return 1.0;
         }
         case MATERIAL_GRASS: {
-            return 0.96;
+            return 1.0;
         }
         case MATERIAL_FOLIAGE: {
-            return 0.55;
+            return 0.72;
         }
         case MATERIAL_WATER, MATERIAL_EMISSIVE: {
             return 0.0;
         }
         default: {
-            return 0.82;
+            return 0.90;
         }
     }
 }
@@ -266,10 +266,13 @@ fn top_face_contour_mask(uv: vec2<f32>, up_factor: f32, material_kind: u32) -> f
 
     let edge_distance = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
     let aa = max(fwidth(edge_distance), 0.0015);
-    let width = 0.060;
-    let border = 1.0 - smoothstep(width, width + aa * 2.0, edge_distance);
+    let inner_width = 0.050;
+    let outer_width = 0.110;
+    let inner_border = 1.0 - smoothstep(inner_width, inner_width + aa * 2.0, edge_distance);
+    let outer_border = 1.0 - smoothstep(outer_width, outer_width + aa * 3.5, edge_distance);
+    let border = max(inner_border, outer_border * 0.58);
     let strength =
-        clamp(0.08 + environment.readability.y * 0.30 + environment.readability.z * 0.08, 0.0, 0.34);
+        clamp(0.18 + environment.readability.y * 0.42 + environment.readability.z * 0.12, 0.0, 0.58);
     return border * up_factor * contour_response(material_kind) * strength;
 }
 
@@ -334,15 +337,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         0.12;
     let low_light_detail = 0.035 * (1.0 - lambert);
     let contour_mask = top_face_contour_mask(input.uv, up_factor, input.material_kind);
-    let contour_tint =
-        mix(environment.horizon_color_height_falloff.xyz, vec3<f32>(0.06, 0.05, 0.05), 0.55) * 0.18;
+    let contour_color = mix(
+        vec3<f32>(0.05, 0.04, 0.04),
+        environment.horizon_color_height_falloff.xyz * 0.20,
+        0.35
+    );
 
     var shaded = albedo * (ambient + sunlight);
     shaded = shaded * top_boost * side_shadow * warm_side_tint + rim + albedo * low_light_detail;
     shaded = apply_climate_and_weather(shaded, input.material_kind);
     shaded = apply_color_grade(shaded, input.world_position, input.material_kind);
-    shaded = mix(shaded, shaded * 0.48 + contour_tint, contour_mask);
     shaded = apply_fog(shaded, input.world_position, input.material_kind);
+    shaded = mix(shaded, contour_color, clamp(contour_mask, 0.0, 0.70));
 
     return vec4<f32>(clamp(shaded, vec3<f32>(0.0), vec3<f32>(1.0)), alpha);
 }
