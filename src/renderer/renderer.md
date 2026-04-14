@@ -19,6 +19,7 @@
 - Submit / present / recoverable render error propagation
 - Offscreen terrain preview rendering for debug binaries
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
+- Consume render-facing octant / pose DTOs for future moving voxel entities without owning gameplay-facing yaw rules
 
 ### Non-Responsibilities
 
@@ -97,6 +98,7 @@ NOT:
 4. Block textures are uploaded as a same-size `texture_2d_array`, and mesh vertices address them by `texture_layer`.
 5. Mesh vertices also carry `material_kind`, but the renderer only interprets renderer-side shading enums and never queries world block definitions directly.
 6. The visible sun and shadow-map logic are renderer-owned visualizations of the current environment state, not gameplay-owned world objects.
+7. Future moving voxel-entity rendering should consume bridge-produced octant / pose data and must not infer gameplay-facing direction from velocity or input on its own.
 
 ### Current Implementation Notes
 
@@ -109,3 +111,5 @@ NOT:
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping a light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
+- Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.
+- For future animated voxel creatures, prebaked data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.

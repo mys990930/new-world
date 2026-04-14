@@ -11,6 +11,7 @@
 - frame/tick phase state transitions
 - input interpretation
 - player entity/component management
+- moving-entity facing / pose state management
 - camera state management
 - selection state management
 - chunk meta-state management
@@ -73,6 +74,10 @@
 - player locomotion
   - horizontal velocity derives from `MoveWorldIntent`
   - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
+- moving entity render-facing state
+  - gameplay-facing movement / yaw may stay continuous in ECS
+  - render-facing direction for voxel creatures should quantize to 8 octants only when exporting render DTOs
+  - octant switching policy, hysteresis, and pose selection stay ECS-owned rather than renderer-owned
 - chunk acquisition planning
   - baked worlds prefer disk load through jobs
   - fallback worlds prefer procedural generation
@@ -123,6 +128,7 @@ EcsRuntime::selection_state() -> SelectionState
 3. discrete actions and continuous movement stay on different channels
 4. screen-relative input and world-relative movement intent stay as separate boundaries
 5. world-aware helpers may query `WorldCore`, but ECS still does not own world storage
+6. render-facing octant / pose state for moving voxel entities is derived gameplay output, not renderer-authored state
 
 ### Submodules
 - mod.rs: public facade, re-export
@@ -140,4 +146,5 @@ EcsRuntime::selection_state() -> SelectionState
 
 - the current minimal slice now supports both baked-world loading and procedural fallback
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
+- future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - hover front/back switching, placement preview separation, and network prediction are still future work

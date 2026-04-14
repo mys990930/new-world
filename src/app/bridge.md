@@ -44,6 +44,7 @@
 - quarter-view basis rules are still defined in ECS camera code
 - the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
 - quarter-view zoom also stays ECS-owned; the bridge only forwards wheel delta into `EcsInputSnapshot` and later reads the current ECS camera zoom when building `RenderCameraState`
+- when moving voxel entities gain richer render DTOs, the bridge should convert ECS-owned continuous facing / pose state into renderer-facing `facing_octant` and `pose_id` fields rather than passing raw gameplay yaw through unchanged
 
 ## Related Modules
 
@@ -58,3 +59,4 @@
 - `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
 - the ground shadow slab now scales from the ECS player body footprint instead of assuming a unit cube
 - orthographic `vertical_world_size` now comes from ECS camera state instead of a renderer-side fixed constant
+- the preferred future path for moving voxel creatures is: ECS keeps continuous motion/facing, then `bridge` emits a render-facing octant plus pose identifier so renderer stays gameplay-agnostic
