@@ -58,4 +58,5 @@
 - the current minimal chunk pipeline is:
   - baked path: `LoadChunk -> BuildChunkMesh`
   - fallback path: `GenerateChunk -> BuildChunkMesh`
+- the current steady-state horizontal interest envelope is a fixed `5x5` neighborhood around the focused player chunk
 - app still owns the actual `world.insert_chunk(...)` and `renderer.apply_upload(...)` calls

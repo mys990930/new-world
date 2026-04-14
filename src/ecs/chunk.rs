@@ -4,6 +4,8 @@ use bevy_ecs::prelude::Resource;
 
 use crate::world::ChunkCoord;
 
+pub const HORIZONTAL_INTEREST_CHUNK_RADIUS: i32 = 2;
+
 #[derive(Resource, Debug, Clone, Default)]
 pub struct ChunkStates {
     pub interest: BTreeSet<ChunkCoord>,

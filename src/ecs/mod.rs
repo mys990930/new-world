@@ -14,7 +14,7 @@ pub use camera::{
     quarter_view_eye, quarter_view_vertical_world_size,
 };
 #[allow(unused_imports)]
-pub use chunk::ChunkStates;
+pub use chunk::{ChunkStates, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 #[allow(unused_imports)]
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
 pub use input::EcsInputSnapshot;

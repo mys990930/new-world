@@ -1,5 +1,5 @@
 use super::{AppConfig, AppTimingState, GameApp};
-use crate::ecs::EcsRuntime;
+use crate::ecs::{EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 use crate::jobs::{JobConfig, JobSystem};
 use crate::platform::{Platform, PlatformConfig};
 use crate::renderer::{
@@ -145,9 +145,10 @@ fn preload_baked_column_coords(
     let min = baked_world.manifest().min_chunk_coord();
     let max = baked_world.manifest().max_chunk_coord();
     let mut coords = Vec::new();
+    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
 
-    for z in (preview_chunk.2 - 1)..=(preview_chunk.2 + 1) {
-        for x in (preview_chunk.0 - 1)..=(preview_chunk.0 + 1) {
+    for z in (preview_chunk.2 - radius)..=(preview_chunk.2 + radius) {
+        for x in (preview_chunk.0 - radius)..=(preview_chunk.0 + radius) {
             for y in min.1..=max.1 {
                 let coord = ChunkCoord(x, y, z);
                 if baked_world.contains_chunk(coord) {
@@ -162,8 +163,9 @@ fn preload_baked_column_coords(
 
 fn preload_generated_chunk_coords(preview_chunk: ChunkCoord) -> Vec<ChunkCoord> {
     let mut coords = Vec::new();
-    for z in (preview_chunk.2 - 1)..=(preview_chunk.2 + 1) {
-        for x in (preview_chunk.0 - 1)..=(preview_chunk.0 + 1) {
+    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
+    for z in (preview_chunk.2 - radius)..=(preview_chunk.2 + radius) {
+        for x in (preview_chunk.0 - radius)..=(preview_chunk.0 + radius) {
             coords.push(ChunkCoord(x, preview_chunk.1, z));
         }
     }

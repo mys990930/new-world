@@ -92,6 +92,8 @@ EcsRuntime::insert_resource<T>(&mut self, value: T)
 EcsRuntime::world(&self) -> &World
 EcsRuntime::world_mut(&mut self) -> &mut World
 
+pub const HORIZONTAL_INTEREST_CHUNK_RADIUS: i32
+
 EcsRuntime::run_pre_update()
 EcsRuntime::run_update()
 EcsRuntime::run_post_update()

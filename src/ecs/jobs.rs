@@ -1,7 +1,7 @@
 use crate::jobs::{JobRequest, JobResult};
 use crate::world::{BakedWorldSource, ChunkCoord, WorldBlockCoord, WorldCore};
 
-use super::{ChunkStates, EcsRuntime};
+use super::{ChunkStates, EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 
 impl EcsRuntime {
     pub fn plan_chunk_job_requests(
@@ -135,9 +135,10 @@ fn interest_coords(
     baked_world: Option<&BakedWorldSource>,
 ) -> Vec<ChunkCoord> {
     let mut coords = Vec::new();
+    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
 
-    for z in (target_chunk.2 - 1)..=(target_chunk.2 + 1) {
-        for x in (target_chunk.0 - 1)..=(target_chunk.0 + 1) {
+    for z in (target_chunk.2 - radius)..=(target_chunk.2 + radius) {
+        for x in (target_chunk.0 - radius)..=(target_chunk.0 + radius) {
             if let Some(source) = baked_world {
                 let min = source.manifest().min_chunk_coord();
                 let max = source.manifest().max_chunk_coord();

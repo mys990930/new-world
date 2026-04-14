@@ -32,8 +32,8 @@
 ## State Transition Rules
 
 - player movement determines the center interest chunk
-- the current minimal implementation expands horizontal interest to a `3x3` neighborhood around the player chunk
-- when a baked world is active, interest expands that `3x3` neighborhood across the baked vertical chunk range so collision has loaded columns to work with
+- the current minimal implementation expands horizontal interest to a `5x5` neighborhood around the player chunk
+- when a baked world is active, interest expands that `5x5` neighborhood across the baked vertical chunk range so collision has loaded columns to work with
 - if an interesting chunk is missing and the baked manifest contains it, ECS requests `LoadChunk`
 - otherwise ECS falls back to `GenerateChunk`
 - loaded but non-render-ready chunks on the player plane request meshing
@@ -62,3 +62,4 @@
 
 - the current visible-chunk slice is still simple: it returns the render-ready set directly
 - the current interest logic is intentionally broader than the first prototype because player collision now treats missing chunks as blocking
+- bootstrap uses the same horizontal chunk radius so the first rendered frame already matches the steady-state acquisition envelope

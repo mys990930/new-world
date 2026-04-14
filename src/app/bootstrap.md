@@ -70,5 +70,5 @@
 
 - live window surface attachment still happens later in [runner.rs](/C:/dev/new-world/src/app/runner.rs)
 - the current bootstrap path also translates world-side `TextureTileSource` values into renderer-side `RenderTextureSource`
-- when a baked world is found, bootstrap preloads a `3x3` horizontal neighborhood of baked chunk columns around the baked preview chunk so spawn placement and first-frame movement have collision data immediately
-- when no baked world is found, bootstrap falls back to generating a small procedural `3x3` neighborhood on the player plane
+- when a baked world is found, bootstrap preloads a `5x5` horizontal neighborhood of baked chunk columns around the baked preview chunk so spawn placement and first-frame movement do not expose chunk edges immediately
+- when no baked world is found, bootstrap falls back to generating a small procedural `5x5` neighborhood on the player plane
