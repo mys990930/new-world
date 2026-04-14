@@ -74,7 +74,7 @@ impl FaceTextureSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockDef {
     pub id: BlockId,
     pub key: String,
@@ -82,9 +82,12 @@ pub struct BlockDef {
     pub opaque: bool,
     pub render_kind: BlockRenderKind,
     pub material: BlockMaterialKind,
+    pub surface_height: f32,
     pub face_textures: FaceTextureSet,
     pub tint: [u8; 4],
 }
+
+impl Eq for BlockDef {}
 
 impl BlockDef {
     pub fn is_rendered_cube(&self) -> bool {
@@ -93,6 +96,10 @@ impl BlockDef {
 
     pub fn is_opaque(&self) -> bool {
         self.opaque
+    }
+
+    pub fn surface_height(&self) -> f32 {
+        self.surface_height
     }
 
     pub fn tint_as_linear_rgba(&self) -> [f32; 4] {
@@ -109,7 +116,7 @@ impl BlockDef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockRegistry {
     tile_size: u32,
     textures: Vec<TextureTileDef>,
@@ -118,6 +125,8 @@ pub struct BlockRegistry {
     textures_by_key: HashMap<String, TextureTileId>,
     missing_block: BlockDef,
 }
+
+impl Eq for BlockRegistry {}
 
 impl BlockRegistry {
     pub fn load_default() -> Result<Self, BlockRegistryError> {
@@ -202,6 +211,8 @@ impl BlockRegistry {
                 .material
                 .map(BlockMaterialKind::from_manifest)
                 .unwrap_or_else(|| infer_block_material_kind(&block.key, render_kind));
+            let surface_height =
+                resolve_surface_height(block.surface_height, block.key.as_str())?;
 
             let tint = block.tint.unwrap_or([255, 255, 255, 255]);
             let def = BlockDef {
@@ -211,6 +222,7 @@ impl BlockRegistry {
                 opaque: block.opaque,
                 render_kind,
                 material,
+                surface_height,
                 face_textures,
                 tint,
             };
@@ -235,6 +247,7 @@ impl BlockRegistry {
                 opaque: true,
                 render_kind: BlockRenderKind::Cube,
                 material: BlockMaterialKind::GenericOpaque,
+                surface_height: 1.0,
                 face_textures: FaceTextureSet::WHITE,
                 tint: [255, 0, 255, 255],
             },
@@ -331,6 +344,22 @@ fn infer_block_material_kind(key: &str, render_kind: BlockRenderKind) -> BlockMa
     }
 }
 
+fn resolve_surface_height(
+    surface_height: Option<f32>,
+    block_key: &str,
+) -> Result<f32, BlockRegistryError> {
+    let surface_height = surface_height.unwrap_or(1.0);
+    if !surface_height.is_finite() || !(0.0..=1.0).contains(&surface_height) || surface_height <= 0.0
+    {
+        return Err(BlockRegistryError::InvalidSurfaceHeight {
+            block_key: block_key.to_string(),
+            value: surface_height,
+        });
+    }
+
+    Ok(surface_height)
+}
+
 pub fn default_manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
@@ -359,6 +388,10 @@ pub enum BlockRegistryError {
     DuplicateBlockKey(String),
     DuplicateBlockId(u16),
     MissingRequiredBlock(&'static str),
+    InvalidSurfaceHeight {
+        block_key: String,
+        value: f32,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -421,6 +454,8 @@ pub struct ManifestBlockDef {
     #[serde(default)]
     pub material: Option<ManifestBlockMaterialKind>,
     #[serde(default)]
+    pub surface_height: Option<f32>,
+    #[serde(default)]
     pub top: String,
     #[serde(default)]
     pub bottom: String,
@@ -462,5 +497,12 @@ mod tests {
         assert!(registry.block_id("mud").is_some());
         assert!(registry.block_id("snow").is_some());
         assert!(registry.block_id("water").is_some());
+        assert_eq!(
+            registry
+                .block(registry.block_id("water").expect("water block should exist"))
+                .expect("water definition should exist")
+                .surface_height(),
+            0.9
+        );
     }
 }

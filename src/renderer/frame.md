@@ -17,9 +17,11 @@
 - draw the visible sun overlay
 - bind the block texture array
 - draw uploaded chunk meshes for the current `visible_chunks`
+- draw opaque terrain before translucent terrain partitions
 - expand `cube_instances` into a cube mesh with per-face normals
 - draw the terrain pass
 - draw the dynamic cube pass
+- draw the translucent water pass
 - optionally draw the debug edge overlay pass
 - submit and present
 - propagate recoverable surface errors
@@ -47,7 +49,7 @@
 4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds.
 5. Upload camera, environment, and sun-shadow uniforms.
 6. Render the shadow map when the active quality preset enables it.
-7. Begin the main color pass, draw the visible sun overlay, then draw terrain and dynamic cubes.
+7. Begin the main color pass, draw the visible sun overlay, opaque terrain, dynamic cubes, and then translucent water.
 8. Optionally draw the debug edge overlay pass.
 9. Submit and present.
 
@@ -70,5 +72,6 @@
 - The current shadow solution is a single directional hard-sun map fit to visible terrain/cube bounds.
 - The visible sun is a full-screen overlay pass positioned from the current sun direction projected into the active camera.
 - Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.
-- Terrain shading now includes a terrace contour treatment on exposed vertical faces so receding height changes and downhill breaks read as layer boundaries instead of per-block top outlines.
+- Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
+- Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.

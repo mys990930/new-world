@@ -20,6 +20,7 @@ use super::{
     CameraGpuState, ClearColor, CpuMesh, MeshVertex, RenderCameraState, RenderConfig,
     RenderEnvironment,
 };
+use super::upload::split_chunk_mesh_for_transparency;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OffscreenRenderRequest {
@@ -267,6 +268,17 @@ pub fn render_offscreen(
         &terrain_shader,
         wgpu::TextureFormat::Rgba8UnormSrgb,
         wgpu::TextureFormat::Depth32Float,
+        Some(wgpu::BlendState::REPLACE),
+        true,
+    );
+    let water_pipeline = create_terrain_pipeline(
+        &device,
+        &pipeline_layout,
+        &terrain_shader,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth32Float,
+        Some(wgpu::BlendState::ALPHA_BLENDING),
+        false,
     );
 
     let mut camera_gpu_state = CameraGpuState::default();
@@ -302,20 +314,12 @@ pub fn render_offscreen(
         .into_iter()
         .filter(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty())
         .map(|mesh| {
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("offscreen_chunk_vertex_buffer"),
-                contents: cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("offscreen_chunk_index_buffer"),
-                contents: cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+            let (opaque_mesh, translucent_mesh) = split_chunk_mesh_for_transparency(mesh);
             OffscreenGpuMesh {
-                vertex_buffer,
-                index_buffer,
-                index_count: mesh.indices.len() as u32,
+                opaque: create_offscreen_mesh_buffers(&device, &opaque_mesh),
+                translucent: translucent_mesh
+                    .as_ref()
+                    .and_then(|mesh| create_offscreen_mesh_buffers(&device, mesh)),
             }
         })
         .collect::<Vec<_>>();
@@ -371,9 +375,25 @@ pub fn render_offscreen(
         render_pass.set_bind_group(3, &shadow_bind_group, &[]);
 
         for mesh in &gpu_meshes {
-            render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            let Some(opaque) = mesh.opaque.as_ref() else {
+                continue;
+            };
+            render_pass.set_vertex_buffer(0, opaque.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(opaque.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..opaque.index_count, 0, 0..1);
+        }
+
+        render_pass.set_pipeline(&water_pipeline);
+        for mesh in &gpu_meshes {
+            let Some(translucent) = mesh.translucent.as_ref() else {
+                continue;
+            };
+            render_pass.set_vertex_buffer(0, translucent.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(
+                translucent.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            render_pass.draw_indexed(0..translucent.index_count, 0, 0..1);
         }
     }
 
@@ -425,7 +445,10 @@ pub fn render_offscreen(
         width: request.width,
         height: request.height,
         rgba,
-        draw_call_count: gpu_meshes.len() as u32,
+        draw_call_count: gpu_meshes
+            .iter()
+            .map(|mesh| u32::from(mesh.opaque.is_some()) + u32::from(mesh.translucent.is_some()))
+            .sum(),
     })
 }
 
@@ -447,9 +470,39 @@ pub fn write_offscreen_png(
 }
 
 struct OffscreenGpuMesh {
+    opaque: Option<OffscreenMeshBuffers>,
+    translucent: Option<OffscreenMeshBuffers>,
+}
+
+struct OffscreenMeshBuffers {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+}
+
+fn create_offscreen_mesh_buffers(
+    device: &wgpu::Device,
+    mesh: &CpuMesh,
+) -> Option<OffscreenMeshBuffers> {
+    if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+        return None;
+    }
+
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("offscreen_chunk_vertex_buffer"),
+        contents: cast_slice(&mesh.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("offscreen_chunk_index_buffer"),
+        contents: cast_slice(&mesh.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    Some(OffscreenMeshBuffers {
+        vertex_buffer,
+        index_buffer,
+        index_count: mesh.indices.len() as u32,
+    })
 }
 
 fn create_terrain_pipeline(
@@ -458,6 +511,8 @@ fn create_terrain_pipeline(
     shader: &wgpu::ShaderModule,
     color_format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+    depth_write_enabled: bool,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("offscreen_terrain_pipeline"),
@@ -479,7 +534,7 @@ fn create_terrain_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: depth_format,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(depth_write_enabled),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -491,7 +546,7 @@ fn create_terrain_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

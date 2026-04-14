@@ -1,7 +1,13 @@
 use super::chunk::{BlockFace, BlockId, ChunkSnapshot};
-use super::coord::{ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world};
+use super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world};
 use super::query::NeighborChunks;
-use super::registry::{BlockMaterialKind, BlockRegistry};
+use super::registry::{BlockDef, BlockMaterialKind, BlockRegistry};
+
+const TOP_EDGE_NEG_X: u32 = 1 << 0;
+const TOP_EDGE_POS_X: u32 = 1 << 1;
+const TOP_EDGE_NEG_Z: u32 = 1 << 2;
+const TOP_EDGE_POS_Z: u32 = 1 << 3;
+const HEIGHT_EPSILON: f32 = 0.001;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderBounds {
@@ -17,6 +23,7 @@ pub struct MeshVertex {
     pub uv: [f32; 2],
     pub texture_layer: u32,
     pub material_kind: BlockMaterialKind,
+    pub contour_edges: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -55,15 +62,27 @@ pub fn build_chunk_mesh(
                 if !block_def.is_rendered_cube() {
                     continue;
                 }
+                let block_height = resolved_block_surface_height(center, &neighbors, local, registry);
+                if block_height <= HEIGHT_EPSILON {
+                    continue;
+                }
 
                 for face in faces() {
-                    if neighbor_block(center, &neighbors, local, face)
-                        .is_some_and(|neighbor| registry.block_or_missing(neighbor).is_opaque())
-                    {
+                    let Some(face_span) =
+                        visible_face_span(center, &neighbors, local, block_def, block_height, face, registry)
+                    else {
                         continue;
-                    }
+                    };
 
-                    append_face(&mut mesh, center.coord(), local, block, block_def, face);
+                    append_face(
+                        &mut mesh,
+                        center.coord(),
+                        local,
+                        block_def,
+                        face,
+                        face_span,
+                        top_face_contour_edges(center, &neighbors, local, block_height, face, registry),
+                    );
                 }
             }
         }
@@ -105,16 +124,17 @@ fn append_face(
     mesh: &mut CpuMesh,
     chunk: ChunkCoord,
     local: LocalBlockCoord,
-    _block: BlockId,
-    block_def: &super::registry::BlockDef,
+    block_def: &BlockDef,
     face: BlockFace,
+    face_span: FaceSpan,
+    contour_edges: u32,
 ) {
     let world = chunk_local_to_world(chunk, local);
-    let positions = face_positions(world, face);
+    let positions = face_positions(world, face, face_span);
     let base_index = mesh.vertices.len() as u32;
     let color = block_def.tint_as_linear_rgba();
     let normal = face_normal(face);
-    let uv = face_uvs();
+    let uv = face_uvs(face, face_span);
     let texture_layer = u32::from(block_def.texture_for_face(face).0);
     let material_kind = block_def.material;
 
@@ -128,6 +148,7 @@ fn append_face(
             uv,
             texture_layer,
             material_kind,
+            contour_edges,
         });
     }
 
@@ -141,32 +162,46 @@ fn append_face(
     ]);
 }
 
-fn face_uvs() -> [[f32; 2]; 4] {
-    [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FaceSpan {
+    min_y: f32,
+    max_y: f32,
 }
 
-fn face_positions(world: WorldBlockCoord, face: BlockFace) -> [[f32; 3]; 4] {
+fn face_uvs(face: BlockFace, face_span: FaceSpan) -> [[f32; 2]; 4] {
+    match face {
+        BlockFace::PosY | BlockFace::NegY => [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+        BlockFace::NegX | BlockFace::PosX | BlockFace::NegZ | BlockFace::PosZ => {
+            let bottom_v = 1.0 - face_span.min_y;
+            let top_v = 1.0 - face_span.max_y;
+            [[0.0, bottom_v], [1.0, bottom_v], [1.0, top_v], [0.0, top_v]]
+        }
+    }
+}
+
+fn face_positions(world: WorldBlockCoord, face: BlockFace, face_span: FaceSpan) -> [[f32; 3]; 4] {
     let min = [world.0 as f32, world.1 as f32, world.2 as f32];
-    let max = [min[0] + 1.0, min[1] + 1.0, min[2] + 1.0];
+    let max = [min[0] + 1.0, min[1] + face_span.max_y, min[2] + 1.0];
+    let clipped_min_y = min[1] + face_span.min_y;
 
     match face {
         BlockFace::NegX => [
-            [min[0], min[1], min[2]],
-            [min[0], min[1], max[2]],
+            [min[0], clipped_min_y, min[2]],
+            [min[0], clipped_min_y, max[2]],
             [min[0], max[1], max[2]],
             [min[0], max[1], min[2]],
         ],
         BlockFace::PosX => [
-            [max[0], min[1], max[2]],
-            [max[0], min[1], min[2]],
+            [max[0], clipped_min_y, max[2]],
+            [max[0], clipped_min_y, min[2]],
             [max[0], max[1], min[2]],
             [max[0], max[1], max[2]],
         ],
         BlockFace::NegY => [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [max[0], min[1], min[2]],
-            [min[0], min[1], min[2]],
+            [min[0], clipped_min_y, max[2]],
+            [max[0], clipped_min_y, max[2]],
+            [max[0], clipped_min_y, min[2]],
+            [min[0], clipped_min_y, min[2]],
         ],
         BlockFace::PosY => [
             [min[0], max[1], min[2]],
@@ -175,18 +210,220 @@ fn face_positions(world: WorldBlockCoord, face: BlockFace) -> [[f32; 3]; 4] {
             [min[0], max[1], max[2]],
         ],
         BlockFace::NegZ => [
-            [max[0], min[1], min[2]],
-            [min[0], min[1], min[2]],
+            [max[0], clipped_min_y, min[2]],
+            [min[0], clipped_min_y, min[2]],
             [min[0], max[1], min[2]],
             [max[0], max[1], min[2]],
         ],
         BlockFace::PosZ => [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
+            [min[0], clipped_min_y, max[2]],
+            [max[0], clipped_min_y, max[2]],
             [max[0], max[1], max[2]],
             [min[0], max[1], max[2]],
         ],
     }
+}
+
+fn visible_face_span(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    block_def: &BlockDef,
+    block_height: f32,
+    face: BlockFace,
+    registry: &BlockRegistry,
+) -> Option<FaceSpan> {
+    let neighbor = neighbor_block(center, neighbors, local, face);
+    let neighbor_def = neighbor.map(|block| registry.block_or_missing(block));
+
+    match face {
+        BlockFace::PosY | BlockFace::NegY => {
+            if neighbor_def.is_some_and(|neighbor_def| {
+                neighbor_def.is_opaque() || shared_water_volume(block_def, neighbor_def)
+            }) {
+                return None;
+            }
+
+            let y = if matches!(face, BlockFace::PosY) {
+                block_height
+            } else {
+                0.0
+            };
+            Some(FaceSpan { min_y: y, max_y: y })
+        }
+        BlockFace::NegX | BlockFace::PosX | BlockFace::NegZ | BlockFace::PosZ => {
+            if neighbor_def.is_some_and(BlockDef::is_opaque) {
+                return None;
+            }
+
+            if let Some(neighbor_def) = neighbor_def {
+                if shared_water_volume(block_def, neighbor_def) {
+                    let neighbor_height =
+                        surface_height_at_offset(center, neighbors, local, face_offset(face), registry)
+                            .unwrap_or(1.0);
+                    if neighbor_height >= block_height - HEIGHT_EPSILON {
+                        return None;
+                    }
+
+                    return Some(FaceSpan {
+                        min_y: neighbor_height.clamp(0.0, block_height),
+                        max_y: block_height,
+                    });
+                }
+            }
+
+            Some(FaceSpan {
+                min_y: 0.0,
+                max_y: block_height,
+            })
+        }
+    }
+}
+
+fn top_face_contour_edges(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    block_height: f32,
+    face: BlockFace,
+    registry: &BlockRegistry,
+) -> u32 {
+    if !matches!(face, BlockFace::PosY) {
+        return 0;
+    }
+
+    let mut mask = 0;
+    for (edge_mask, offset) in [
+        (TOP_EDGE_NEG_X, (-1, 0, 0)),
+        (TOP_EDGE_POS_X, (1, 0, 0)),
+        (TOP_EDGE_NEG_Z, (0, 0, -1)),
+        (TOP_EDGE_POS_Z, (0, 0, 1)),
+    ] {
+        let neighbor_height =
+            surface_height_at_offset(center, neighbors, local, offset, registry).unwrap_or(0.0);
+        if (neighbor_height - block_height).abs() > HEIGHT_EPSILON {
+            mask |= edge_mask;
+        }
+    }
+
+    mask
+}
+
+fn surface_height_at_offset(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    offset: (i32, i32, i32),
+    registry: &BlockRegistry,
+) -> Option<f32> {
+    let block = block_at_offset(center, neighbors, local, offset)?;
+    let block_def = registry.block_or_missing(block);
+    if !block_def.is_rendered_cube() {
+        return Some(0.0);
+    }
+
+    let mut height = block_def.surface_height();
+    if matches!(block_def.material, BlockMaterialKind::Water) {
+        let above = block_at_offset(
+            center,
+            neighbors,
+            local,
+            (offset.0, offset.1 + 1, offset.2),
+        );
+        if above.is_some_and(|block| {
+            let above_def = registry.block_or_missing(block);
+            above_def.is_rendered_cube() && matches!(above_def.material, BlockMaterialKind::Water)
+        }) {
+            height = 1.0;
+        }
+    }
+
+    Some(height)
+}
+
+fn resolved_block_surface_height(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    registry: &BlockRegistry,
+) -> f32 {
+    surface_height_at_offset(center, neighbors, local, (0, 0, 0), registry).unwrap_or(0.0)
+}
+
+fn block_at_offset(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    offset: (i32, i32, i32),
+) -> Option<BlockId> {
+    let x = i32::from(local.x) + offset.0;
+    let y = i32::from(local.y) + offset.1;
+    let z = i32::from(local.z) + offset.2;
+
+    let in_bounds = |value: i32| (0..CHUNK_EDGE_I32).contains(&value);
+    if in_bounds(x) && in_bounds(y) && in_bounds(z) {
+        return center.get_block(LocalBlockCoord::new(x as u8, y as u8, z as u8).unwrap());
+    }
+
+    let out_x = !in_bounds(x);
+    let out_y = !in_bounds(y);
+    let out_z = !in_bounds(z);
+    if [out_x, out_y, out_z].into_iter().filter(|out| *out).count() != 1 {
+        return None;
+    }
+
+    let snapshot = if out_x {
+        if x < 0 {
+            neighbors.neg_x.as_ref()
+        } else {
+            neighbors.pos_x.as_ref()
+        }
+    } else if out_y {
+        if y < 0 {
+            neighbors.neg_y.as_ref()
+        } else {
+            neighbors.pos_y.as_ref()
+        }
+    } else if z < 0 {
+        neighbors.neg_z.as_ref()
+    } else {
+        neighbors.pos_z.as_ref()
+    }?;
+
+    let neighbor_x = wrap_local_coord(x)?;
+    let neighbor_y = wrap_local_coord(y)?;
+    let neighbor_z = wrap_local_coord(z)?;
+    snapshot.get_block(LocalBlockCoord::new(neighbor_x, neighbor_y, neighbor_z).unwrap())
+}
+
+fn wrap_local_coord(value: i32) -> Option<u8> {
+    if (0..CHUNK_EDGE_I32).contains(&value) {
+        Some(value as u8)
+    } else if value < 0 {
+        Some((CHUNK_EDGE_I32 - 1) as u8)
+    } else if value == CHUNK_EDGE_I32 {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn face_offset(face: BlockFace) -> (i32, i32, i32) {
+    match face {
+        BlockFace::NegX => (-1, 0, 0),
+        BlockFace::PosX => (1, 0, 0),
+        BlockFace::NegY => (0, -1, 0),
+        BlockFace::PosY => (0, 1, 0),
+        BlockFace::NegZ => (0, 0, -1),
+        BlockFace::PosZ => (0, 0, 1),
+    }
+}
+
+fn shared_water_volume(current: &BlockDef, neighbor: &BlockDef) -> bool {
+    current.is_rendered_cube()
+        && neighbor.is_rendered_cube()
+        && matches!(current.material, BlockMaterialKind::Water)
+        && matches!(neighbor.material, BlockMaterialKind::Water)
 }
 
 fn face_normal(face: BlockFace) -> [f32; 3] {
@@ -301,5 +538,70 @@ mod tests {
         );
         assert!(mesh.is_empty());
         assert!(mesh.bounds.is_none());
+    }
+
+    #[test]
+    fn lowered_water_top_marks_real_top_face_edges() {
+        let registry = test_registry();
+        let water = registry.block_id("water").expect("water block should exist");
+        let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        chunk.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water).unwrap();
+        chunk.set_block(LocalBlockCoord::new(1, 0, 0).unwrap(), BlockId::GRASS).unwrap();
+
+        let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default(), &registry);
+        let top_face_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex.material_kind == BlockMaterialKind::Water
+                    && vertex.normal == [0.0, 1.0, 0.0]
+                    && (vertex.position[1] - 0.9).abs() <= 0.0001
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(top_face_vertices.len(), 4);
+        assert!(top_face_vertices.iter().all(|vertex| vertex.contour_edges != 0));
+        assert!(top_face_vertices
+            .iter()
+            .all(|vertex| vertex.contour_edges & TOP_EDGE_POS_X != 0));
+    }
+
+    #[test]
+    fn stacked_water_keeps_full_submerged_height_and_only_exposes_upper_side_strip() {
+        let registry = test_registry();
+        let water = registry.block_id("water").expect("water block should exist");
+        let mut center = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
+        center
+            .set_block(LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 0, 0).unwrap(), water)
+            .unwrap();
+        center
+            .set_block(LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 1, 0).unwrap(), water)
+            .unwrap();
+        east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water).unwrap();
+
+        let mesh = build_chunk_mesh(
+            &center.snapshot(),
+            NeighborChunks {
+                pos_x: Some(east.snapshot()),
+                ..NeighborChunks::default()
+            },
+            &registry,
+        );
+
+        assert!(mesh
+            .vertices
+            .iter()
+            .any(|vertex| {
+                vertex.material_kind == BlockMaterialKind::Water
+                    && (vertex.position[1] - 1.9).abs() <= HEIGHT_EPSILON
+            }));
+        assert!(mesh.vertices.iter().any(|vertex| {
+            vertex.material_kind == BlockMaterialKind::Water
+                && vertex.normal == [1.0, 0.0, 0.0]
+                && vertex.position[0] >= CHUNK_EDGE as f32
+                && vertex.position[1] > 0.89
+                && vertex.position[1] <= 1.0 + HEIGHT_EPSILON
+        }));
     }
 }

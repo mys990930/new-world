@@ -10,7 +10,7 @@ use super::{
         BlockTextureSet, create_block_texture_bind_group_layout,
         create_gpu_block_texture_resources,
     },
-    CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig,
+    ui::UiVertex, CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig,
     RenderStats, RenderWorld, Renderer,
 };
 
@@ -491,6 +491,7 @@ async fn create_backend(
     let dynamic_shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
     let shadow_depth_shader = device.create_shader_module(wgpu::include_wgsl!("shadow_depth.wgsl"));
     let sun_overlay_shader = device.create_shader_module(wgpu::include_wgsl!("sun_overlay.wgsl"));
+    let ui_rect_shader = device.create_shader_module(wgpu::include_wgsl!("ui_rect.wgsl"));
     let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_camera_buffer"),
         size: std::mem::size_of::<super::camera::CameraUniform>() as u64,
@@ -639,6 +640,11 @@ async fn create_backend(
         multiview_mask: None,
         cache: None,
     });
+    let ui_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("renderer_ui_pipeline_layout"),
+        bind_group_layouts: &[],
+        immediate_size: 0,
+    });
     let terrain_pipeline = create_render_pipeline(
         &device,
         "renderer_terrain_pipeline",
@@ -647,6 +653,19 @@ async fn create_backend(
         surface_config.format,
         Some(depth_format),
         wgpu::PrimitiveTopology::TriangleList,
+        Some(wgpu::BlendState::REPLACE),
+        true,
+    );
+    let water_pipeline = create_render_pipeline(
+        &device,
+        "renderer_water_pipeline",
+        &main_pipeline_layout,
+        &terrain_shader,
+        surface_config.format,
+        Some(depth_format),
+        wgpu::PrimitiveTopology::TriangleList,
+        Some(wgpu::BlendState::ALPHA_BLENDING),
+        false,
     );
     let dynamic_cube_pipeline = create_render_pipeline(
         &device,
@@ -656,7 +675,42 @@ async fn create_backend(
         surface_config.format,
         Some(depth_format),
         wgpu::PrimitiveTopology::TriangleList,
+        Some(wgpu::BlendState::REPLACE),
+        true,
     );
+    let ui_rect_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("renderer_ui_rect_pipeline"),
+        layout: Some(&ui_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &ui_rect_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[UiVertex::vertex_buffer_layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &ui_rect_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
     let shadow_depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("renderer_shadow_depth_pipeline"),
         layout: Some(&shadow_pipeline_layout),
@@ -699,6 +753,8 @@ async fn create_backend(
         surface_config.format,
         None,
         wgpu::PrimitiveTopology::LineList,
+        Some(wgpu::BlendState::REPLACE),
+        false,
     );
 
     Ok(RendererBackend {
@@ -724,8 +780,10 @@ async fn create_backend(
         block_textures,
         sun_overlay_pipeline,
         terrain_pipeline,
+        water_pipeline,
         dynamic_cube_pipeline,
         shadow_depth_pipeline,
+        ui_rect_pipeline,
         debug_edge_pipeline,
     })
 }
@@ -738,6 +796,8 @@ fn create_render_pipeline(
     surface_format: wgpu::TextureFormat,
     depth_format: Option<wgpu::TextureFormat>,
     topology: wgpu::PrimitiveTopology,
+    blend: Option<wgpu::BlendState>,
+    depth_write_enabled: bool,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
@@ -759,7 +819,7 @@ fn create_render_pipeline(
         },
         depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
             format,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(depth_write_enabled),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -771,7 +831,7 @@ fn create_render_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: surface_format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend,
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

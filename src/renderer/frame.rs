@@ -3,7 +3,8 @@ use wgpu::util::DeviceExt;
 
 use super::{
     camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderBounds,
-    RenderCameraState, RenderMaterialKind, RenderSurfaceError, Renderer,
+    RenderCameraState, RenderMaterialKind, RenderSurfaceError, RenderUiRect, Renderer,
+    ui::UiVertex,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -17,8 +18,10 @@ pub struct RenderCubeInstance {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderFrameInput<'a> {
     pub camera: &'a RenderCameraState,
+    pub draw_scene: bool,
     pub visible_chunks: &'a [ChunkCoord],
     pub cube_instances: &'a [RenderCubeInstance],
+    pub ui_rects: &'a [RenderUiRect],
     pub clear_color_override: Option<[f32; 4]>,
 }
 
@@ -99,8 +102,9 @@ impl Renderer {
                 self.world
                     .chunk_meshes
                     .get(coord)
-                    .and_then(|mesh| mesh.buffers.as_ref())
-                    .is_some()
+                    .is_some_and(|mesh| {
+                        mesh.opaque_buffers.is_some() || mesh.translucent_buffers.is_some()
+                    })
             })
             .count();
         let submitted_chunk_count = u32::try_from(submitted_chunk_count).unwrap_or(u32::MAX);
@@ -108,21 +112,31 @@ impl Renderer {
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = 0;
 
-        let dynamic_cube_mesh = build_cube_mesh(frame.cube_instances);
+        let dynamic_cube_mesh = frame.draw_scene.then(|| build_cube_mesh(frame.cube_instances)).flatten();
         let debug_edge_mesh = self
             .config
             .debug
             .debug_overlay
-            .then(|| build_cube_edge_mesh(frame.cube_instances, frame.camera))
+            .then(|| {
+                frame
+                    .draw_scene
+                    .then(|| build_cube_edge_mesh(frame.cube_instances, frame.camera))
+                    .flatten()
+            })
             .flatten();
-        let sun_shadow_uniform = build_sun_shadow_uniform(
-            frame.camera,
-            frame.visible_chunks,
-            &self.world,
-            frame.cube_instances,
-            self.environment.current(),
-            &self.config.quality,
-        );
+        let ui_rect_mesh = build_ui_rect_mesh(frame.ui_rects);
+        let sun_shadow_uniform = if frame.draw_scene {
+            build_sun_shadow_uniform(
+                frame.camera,
+                frame.visible_chunks,
+                &self.world,
+                frame.cube_instances,
+                self.environment.current(),
+                &self.config.quality,
+            )
+        } else {
+            super::surface::SunShadowUniform::disabled()
+        };
 
         let Some(backend) = self.backend.as_mut() else {
             self.last_stats = stats;
@@ -194,6 +208,23 @@ impl Renderer {
                         });
                 (vertex_buffer, index_buffer, indices.len() as u32)
             });
+        let ui_rect_buffers = ui_rect_mesh.as_ref().map(|(vertices, indices)| {
+            let vertex_buffer = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("renderer_ui_rect_vertex_buffer"),
+                    contents: cast_slice(vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = backend
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("renderer_ui_rect_index_buffer"),
+                    contents: cast_slice(indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            (vertex_buffer, index_buffer, indices.len() as u32)
+        });
 
         let surface_texture = match backend.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture)
@@ -231,7 +262,7 @@ impl Renderer {
                 label: Some("renderer_frame_encoder"),
             });
 
-        if sun_shadow_uniform.shadow_params[2] > 0.5 {
+        if frame.draw_scene && sun_shadow_uniform.shadow_params[2] > 0.5 {
             let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("renderer_shadow_depth_pass"),
                 color_attachments: &[],
@@ -255,7 +286,7 @@ impl Renderer {
                 let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
                     continue;
                 };
-                let Some(buffers) = chunk_mesh.buffers.as_ref() else {
+                let Some(buffers) = chunk_mesh.opaque_buffers.as_ref() else {
                     continue;
                 };
 
@@ -264,7 +295,7 @@ impl Renderer {
                     buffers.index_buffer.slice(..),
                     wgpu::IndexFormat::Uint32,
                 );
-                shadow_pass.draw_indexed(0..chunk_mesh.index_count, 0, 0..1);
+                shadow_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
@@ -306,46 +337,68 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            render_pass.set_pipeline(&backend.sun_overlay_pipeline);
-            render_pass.set_bind_group(0, &backend.shadow_pass_bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
-            stats.draw_call_count = stats.draw_call_count.saturating_add(1);
-
-            render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-            render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
-            render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
-            render_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
-            render_pass.set_pipeline(&backend.terrain_pipeline);
-
-            for coord in frame.visible_chunks {
-                let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
-                    continue;
-                };
-                let Some(buffers) = chunk_mesh.buffers.as_ref() else {
-                    continue;
-                };
-
-                render_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(
-                    buffers.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                render_pass.draw_indexed(0..chunk_mesh.index_count, 0, 0..1);
+            if frame.draw_scene {
+                render_pass.set_pipeline(&backend.sun_overlay_pipeline);
+                render_pass.set_bind_group(0, &backend.shadow_pass_bind_group, &[]);
+                render_pass.draw(0..3, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
-            }
 
-            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref() {
-                render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                render_pass
-                    .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..*index_count, 0, 0..1);
-                stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
+                render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
+                render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
+                render_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
+                render_pass.set_pipeline(&backend.terrain_pipeline);
+
+                for coord in frame.visible_chunks {
+                    let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
+                        continue;
+                    };
+                    let Some(buffers) = chunk_mesh.opaque_buffers.as_ref() else {
+                        continue;
+                    };
+
+                    render_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(
+                        buffers.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                }
+
+                if let Some((vertex_buffer, index_buffer, index_count)) =
+                    dynamic_cube_buffers.as_ref()
+                {
+                    render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass
+                        .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                }
+
+                render_pass.set_pipeline(&backend.water_pipeline);
+                for coord in frame.visible_chunks {
+                    let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
+                        continue;
+                    };
+                    let Some(buffers) = chunk_mesh.translucent_buffers.as_ref() else {
+                        continue;
+                    };
+
+                    render_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(
+                        buffers.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    render_pass.draw_indexed(0..chunk_mesh.translucent_index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                }
             }
 
         }
 
-        if self.config.debug.debug_overlay {
+        if frame.draw_scene && self.config.debug.debug_overlay {
             if let Some((edge_vertex_buffer, edge_index_buffer, edge_index_count)) =
                 debug_edge_buffers.as_ref()
             {
@@ -377,6 +430,30 @@ impl Renderer {
                 edge_pass.draw_indexed(0..*edge_index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
+        }
+
+        if let Some((vertex_buffer, index_buffer, index_count)) = ui_rect_buffers.as_ref() {
+            let mut ui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("renderer_ui_overlay_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &surface_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            ui_pass.set_pipeline(&backend.ui_rect_pipeline);
+            ui_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            ui_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            ui_pass.draw_indexed(0..*index_count, 0, 0..1);
+            stats.draw_call_count = stats.draw_call_count.saturating_add(1);
         }
 
         backend.queue.submit(Some(encoder.finish()));
@@ -431,6 +508,7 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
                     uv,
                     texture_layer: 0,
                     material_kind: cube.material_kind.as_u32(),
+                    contour_edges: 0,
                 });
             }
 
@@ -482,6 +560,7 @@ fn build_cube_edge_mesh(
             uv: [0.0, 0.0],
             texture_layer: 0,
             material_kind: RenderMaterialKind::Highlight.as_u32(),
+            contour_edges: 0,
         }));
         let view_to_eye = view_direction_towards_eye(camera);
         let edge_pairs = visible_edge_pairs(view_to_eye);
@@ -492,6 +571,61 @@ fn build_cube_edge_mesh(
     }
 
     Some((vertices, indices))
+}
+
+fn build_ui_rect_mesh(ui_rects: &[RenderUiRect]) -> Option<(Vec<UiVertex>, Vec<u32>)> {
+    if ui_rects.is_empty() {
+        return None;
+    }
+
+    let mut vertices = Vec::with_capacity(ui_rects.len() * 4);
+    let mut indices = Vec::with_capacity(ui_rects.len() * 6);
+
+    for rect in ui_rects {
+        let min_x = rect.min[0].clamp(0.0, 1.0);
+        let min_y = rect.min[1].clamp(0.0, 1.0);
+        let max_x = rect.max[0].clamp(0.0, 1.0);
+        let max_y = rect.max[1].clamp(0.0, 1.0);
+
+        if max_x <= min_x || max_y <= min_y {
+            continue;
+        }
+
+        let x0 = min_x * 2.0 - 1.0;
+        let x1 = max_x * 2.0 - 1.0;
+        let y0 = 1.0 - min_y * 2.0;
+        let y1 = 1.0 - max_y * 2.0;
+        let base_index = vertices.len() as u32;
+
+        vertices.extend_from_slice(&[
+            UiVertex {
+                position: [x0, y0],
+                color: rect.color,
+            },
+            UiVertex {
+                position: [x1, y0],
+                color: rect.color,
+            },
+            UiVertex {
+                position: [x1, y1],
+                color: rect.color,
+            },
+            UiVertex {
+                position: [x0, y1],
+                color: rect.color,
+            },
+        ]);
+        indices.extend_from_slice(&[
+            base_index,
+            base_index + 1,
+            base_index + 2,
+            base_index,
+            base_index + 2,
+            base_index + 3,
+        ]);
+    }
+
+    (!vertices.is_empty()).then_some((vertices, indices))
 }
 
 fn view_direction_towards_eye(camera: &RenderCameraState) -> [f32; 3] {

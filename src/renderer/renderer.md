@@ -104,7 +104,7 @@ NOT:
 
 - Uploaded chunk terrain includes material classification from the world registry.
 - The terrain shader preserves more raw texture detail before atmosphere/fog grading, so dirt/grass/stone read more clearly in quarter view.
-- The terrain shader now adds a terrace contour on the upper strip of exposed vertical faces, so layer breaks read more like step boundaries than per-block top outlines.
+- The terrain shader now consumes world-provided top-face contour edges, so layer breaks read on actual height transitions instead of every block border.
 - A visible sun overlay is now drawn from the current `sun_direction`.
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
@@ -114,3 +114,5 @@ NOT:
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
 - Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.
 - For future animated voxel creatures, prebaked data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.
+- Water triangles are now renderer-split into a translucent terrain partition so semi-transparent water can render after opaque terrain without changing the app bridge DTO shape.
+- Exposed water surface height remains world-owned geometry; the renderer only shades and blends the lowered mesh it receives.

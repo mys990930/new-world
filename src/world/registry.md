@@ -14,6 +14,7 @@
 - reserve the built-in white tile at layer `0`
 - define the missing-block fallback
 - define block visual-material classification through `BlockMaterialKind`
+- define per-block exposed surface-height defaults for meshing
 
 ## Non-Responsibilities
 
@@ -38,6 +39,7 @@
 - `opaque`
 - `render_kind`
 - `material`
+- `surface_height`
 - `face_textures`
 - `tint`
 
@@ -82,6 +84,7 @@ default_manifest_path() -> PathBuf
 ## Invariants
 
 - `tile_size` must be non-zero
+- `surface_height` must remain within `(0.0, 1.0]`
 - texture layer `0` is always the built-in white tile
 - texture keys and block keys must be unique
 - the `air` block must exist at `id = 0`
@@ -99,6 +102,8 @@ default_manifest_path() -> PathBuf
 ## Notes
 
 - Block definition TOML files may now specify `material = "..."`.
+- Block definition TOML files may now specify `surface_height = 0.90`-style exposed top heights.
 - If a block definition omits `material`, the registry infers a reasonable default from the block key so the system remains backward-compatible.
 - The current built-in categories are `generic_opaque`, `grass`, `soil`, `stone`, `sand`, `foliage`, `water`, and `emissive`.
 - `BlockMaterialKind` exists so meshing and renderer shading can react to material semantics without making the renderer responsible for block-type ownership.
+- The registry stores the exposed-top default only; world meshing still decides the final emitted height contextually for stacked fluids.

@@ -4,6 +4,7 @@ solid = false
 opaque = false
 render = "cube"
 material = "water"
+surface_height = 0.90
 top = "water"
 bottom = "water"
 side = "water"

@@ -215,6 +215,7 @@ fn world_vertex_to_render(vertex: WorldMeshVertex) -> RenderMeshVertex {
         uv: vertex.uv,
         texture_layer: vertex.texture_layer,
         material_kind: render_material_kind_from_world(vertex.material_kind).as_u32(),
+        contour_edges: vertex.contour_edges,
     }
 }
 

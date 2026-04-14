@@ -56,6 +56,7 @@ struct VertexInput {
     @location(3) uv: vec2<f32>,
     @location(4) texture_layer: u32,
     @location(5) material_kind: u32,
+    @location(6) contour_edges: u32,
 };
 
 struct VertexOutput {
@@ -66,6 +67,7 @@ struct VertexOutput {
     @location(3) @interpolate(flat) texture_layer: u32,
     @location(4) @interpolate(flat) material_kind: u32,
     @location(5) world_position: vec3<f32>,
+    @location(6) @interpolate(flat) contour_edges: u32,
 };
 
 @vertex
@@ -78,6 +80,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.texture_layer = input.texture_layer;
     output.material_kind = input.material_kind;
     output.world_position = input.position;
+    output.contour_edges = input.contour_edges;
     return output;
 }
 
@@ -247,10 +250,13 @@ fn terrace_contour_response(material_kind: u32) -> f32 {
         case MATERIAL_GRASS: {
             return 0.90;
         }
+        case MATERIAL_WATER: {
+            return 0.68;
+        }
         case MATERIAL_FOLIAGE: {
             return 0.48;
         }
-        case MATERIAL_WATER, MATERIAL_EMISSIVE: {
+        case MATERIAL_EMISSIVE: {
             return 0.0;
         }
         default: {
@@ -259,16 +265,38 @@ fn terrace_contour_response(material_kind: u32) -> f32 {
     }
 }
 
-fn terrace_contour_mask(uv: vec2<f32>, vertical_factor: f32, material_kind: u32) -> f32 {
-    if vertical_factor <= 0.001 {
+fn contour_band(distance_to_edge: f32) -> f32 {
+    let edge_aa = max(fwidth(distance_to_edge), 0.0020);
+    return 1.0 - smoothstep(0.055, 0.085 + edge_aa * 2.5, distance_to_edge);
+}
+
+fn top_terrace_contour_mask(
+    uv: vec2<f32>,
+    top_factor: f32,
+    contour_edges: u32,
+    material_kind: u32,
+) -> f32 {
+    if top_factor <= 0.999 || contour_edges == 0u {
         return 0.0;
     }
 
-    let edge_aa = max(fwidth(uv.y), 0.0020);
-    let band = 1.0 - smoothstep(0.10, 0.16 + edge_aa * 2.5, uv.y);
+    var band = 0.0;
+    if (contour_edges & 1u) != 0u {
+        band = max(band, contour_band(uv.x));
+    }
+    if (contour_edges & 2u) != 0u {
+        band = max(band, contour_band(1.0 - uv.x));
+    }
+    if (contour_edges & 4u) != 0u {
+        band = max(band, contour_band(1.0 - uv.y));
+    }
+    if (contour_edges & 8u) != 0u {
+        band = max(band, contour_band(uv.y));
+    }
+
     let strength =
-        clamp(0.18 + environment.readability.y * 0.36 + environment.readability.z * 0.08, 0.0, 0.44);
-    return band * vertical_factor * terrace_contour_response(material_kind) * strength;
+        clamp(0.16 + environment.readability.y * 0.22 + environment.readability.z * 0.18, 0.0, 0.58);
+    return band * terrace_contour_response(material_kind) * strength;
 }
 
 fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) -> vec3<f32> {
@@ -295,7 +323,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         input.uv,
         i32(input.texture_layer)
     );
-    let alpha = sampled.a * input.color.a;
+    var alpha = sampled.a * input.color.a;
+    if input.material_kind == MATERIAL_WATER {
+        alpha = clamp(alpha * 0.68, 0.0, 0.82);
+    }
     if alpha <= 0.001 {
         discard;
     }
@@ -309,7 +340,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         mix(1.0, 0.14 + shadow_visibility * 0.86, sun_shadow.sun_direction_shadow_strength.w);
     let up_factor = max(normal.y, 0.0);
     let side_factor = 1.0 - up_factor;
-    let vertical_factor = 1.0 - abs(normal.y);
     let albedo = resolve_albedo(sampled.rgb, input.color.rgb, input.material_kind);
     let ambient =
         environment.ambient_color_intensity.rgb * environment.ambient_color_intensity.w;
@@ -332,7 +362,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         environment.readability.z *
         0.12;
     let low_light_detail = 0.035 * (1.0 - lambert);
-    let terrace_contour = terrace_contour_mask(input.uv, vertical_factor, input.material_kind);
+    let terrace_contour =
+        top_terrace_contour_mask(input.uv, up_factor, input.contour_edges, input.material_kind);
     let terrace_contour_color = mix(
         vec3<f32>(0.06, 0.045, 0.04),
         environment.horizon_color_height_falloff.xyz * 0.18,

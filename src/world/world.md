@@ -19,6 +19,7 @@
 - procedural generation result expression as `ChunkData`
 - block definition / texture tile lookup
 - block visual-material lookup
+- block exposed-surface-height lookup for meshing
 - save/load byte codec
 - baked world manifest / baked chunk load support
 - meshing input provision
@@ -86,6 +87,7 @@ NOT:
 2. raw chunk storage keeps ids while gameplay/render meaning is interpreted through `BlockRegistry`
 3. world meshing produces CPU-side data only
 4. baked-world helpers may load chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
+5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 
 ### Submodules
 
@@ -107,3 +109,4 @@ NOT:
 - the default block registry is loaded from `assets/blocks/index.toml`
 - chunk acquisition can now come from either baked disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
+- exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning

@@ -144,7 +144,9 @@ pub(crate) struct RendererBackend {
     pub(crate) block_textures: GpuBlockTextureResources,
     pub(crate) sun_overlay_pipeline: wgpu::RenderPipeline,
     pub(crate) terrain_pipeline: wgpu::RenderPipeline,
+    pub(crate) water_pipeline: wgpu::RenderPipeline,
     pub(crate) dynamic_cube_pipeline: wgpu::RenderPipeline,
     pub(crate) shadow_depth_pipeline: wgpu::RenderPipeline,
+    pub(crate) ui_rect_pipeline: wgpu::RenderPipeline,
     pub(crate) debug_edge_pipeline: wgpu::RenderPipeline,
 }
