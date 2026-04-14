@@ -13,10 +13,10 @@
 - Create the shadow-map texture and comparison sampler
 - Create the camera, environment, and sun-shadow uniform buffers and bind groups
 - Create the block-texture bind group layout and GPU texture-array resources
-- Create the screen-space UI rectangle pipeline
+- Create the screen-space UI sprite pipeline and atlas bind group
 - Configure and reconfigure the surface
 - Bridge renderer bootstrap time and post-`resumed()` live attach time
-- Build the sun overlay, shadow depth, opaque terrain, translucent water, dynamic cube, UI rectangle, and debug edge pipelines
+- Build the sun overlay, shadow depth, opaque terrain, translucent water, dynamic cube, UI sprite, and debug edge pipelines
 
 ## Non-Responsibilities
 
@@ -53,7 +53,8 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 ## Notes
 
-- The backend now creates the sun overlay pipeline, shadow depth pipeline, opaque terrain pipeline, translucent water pipeline, dynamic cube pipeline, UI rectangle pipeline, and debug edge pipeline during initialization.
+- The backend now creates the sun overlay pipeline, shadow depth pipeline, opaque terrain pipeline, translucent water pipeline, dynamic cube pipeline, UI sprite pipeline, and debug edge pipeline during initialization.
 - Shadow maps currently use a single `Depth32Float` texture plus comparison sampler.
 - Medium quality uses a smaller hard-sun map than high quality.
 - The environment uniform test helper now follows the current default environment preset instead of pinning a separate hardcoded baseline.
+- the UI backend path also owns the nearest-filtered atlas texture bind group used by sprite-based HUD and menu quads

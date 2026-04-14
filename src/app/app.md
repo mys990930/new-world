@@ -13,6 +13,7 @@
 - `platform -> ecs` and `app/ecs/world -> renderer` bridge calls
 - baked-world runtime selection ownership
 - top-level app-mode and overlay ownership
+- top-level bake / baked-world selection screen ownership
 - top-level shutdown handling
 
 ### Non-Responsibilities
@@ -65,6 +66,7 @@ fn frame_deadline(&self) -> Option<Instant>
 3. renderer only receives render-ready DTOs built by app bridge code
 4. baked-world runtime selection is app-owned because it decides whether chunk acquisition should load from disk or fall back to generation
 5. top-level screen mode stays app-owned so non-gameplay screens do not force ECS/world ownership changes
+6. top-level menu actions such as bake / baked-world reload stay app-owned so lower layers keep their existing responsibilities
 
 ### Submodules
 
@@ -85,4 +87,4 @@ fn frame_deadline(&self) -> Option<Instant>
 - the real GPU surface still attaches in `runner.rs` during `resumed()`
 - the current frame path supports both baked chunk loading and procedural generation, then meshing and renderer upload
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
-- the current app-owned screen slice can render a placeholder world-select layout without stepping gameplay, and can add HUD frames without giving renderer any ECS/world dependency
+- the current app-owned screen slice can bake and reload baked worlds, render a sprite-based world-select layout without stepping gameplay, and add HUD frames without giving renderer any ECS/world dependency

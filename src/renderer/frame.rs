@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 use super::{
     camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderBounds,
-    RenderCameraState, RenderMaterialKind, RenderSurfaceError, RenderUiRect, Renderer,
+    RenderCameraState, RenderMaterialKind, RenderSurfaceError, RenderUiSprite, Renderer,
     ui::UiVertex,
 };
 
@@ -21,7 +21,7 @@ pub struct RenderFrameInput<'a> {
     pub draw_scene: bool,
     pub visible_chunks: &'a [ChunkCoord],
     pub cube_instances: &'a [RenderCubeInstance],
-    pub ui_rects: &'a [RenderUiRect],
+    pub ui_sprites: &'a [RenderUiSprite],
     pub clear_color_override: Option<[f32; 4]>,
 }
 
@@ -124,7 +124,11 @@ impl Renderer {
                     .flatten()
             })
             .flatten();
-        let ui_rect_mesh = build_ui_rect_mesh(frame.ui_rects);
+        let ui_sprite_mesh = build_ui_sprite_mesh(
+            frame.ui_sprites,
+            self.surface.width(),
+            self.surface.height(),
+        );
         let sun_shadow_uniform = if frame.draw_scene {
             build_sun_shadow_uniform(
                 frame.camera,
@@ -208,18 +212,18 @@ impl Renderer {
                         });
                 (vertex_buffer, index_buffer, indices.len() as u32)
             });
-        let ui_rect_buffers = ui_rect_mesh.as_ref().map(|(vertices, indices)| {
+        let ui_sprite_buffers = ui_sprite_mesh.as_ref().map(|(vertices, indices)| {
             let vertex_buffer = backend
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("renderer_ui_rect_vertex_buffer"),
+                    label: Some("renderer_ui_sprite_vertex_buffer"),
                     contents: cast_slice(vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
             let index_buffer = backend
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("renderer_ui_rect_index_buffer"),
+                    label: Some("renderer_ui_sprite_index_buffer"),
                     contents: cast_slice(indices),
                     usage: wgpu::BufferUsages::INDEX,
                 });
@@ -432,7 +436,7 @@ impl Renderer {
             }
         }
 
-        if let Some((vertex_buffer, index_buffer, index_count)) = ui_rect_buffers.as_ref() {
+        if let Some((vertex_buffer, index_buffer, index_count)) = ui_sprite_buffers.as_ref() {
             let mut ui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("renderer_ui_overlay_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -449,7 +453,8 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            ui_pass.set_pipeline(&backend.ui_rect_pipeline);
+            ui_pass.set_pipeline(&backend.ui_sprite_pipeline);
+            ui_pass.set_bind_group(0, &backend.ui_texture.bind_group, &[]);
             ui_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             ui_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             ui_pass.draw_indexed(0..*index_count, 0, 0..1);
@@ -573,46 +578,56 @@ fn build_cube_edge_mesh(
     Some((vertices, indices))
 }
 
-fn build_ui_rect_mesh(ui_rects: &[RenderUiRect]) -> Option<(Vec<UiVertex>, Vec<u32>)> {
-    if ui_rects.is_empty() {
+fn build_ui_sprite_mesh(
+    ui_sprites: &[RenderUiSprite],
+    surface_width: u32,
+    surface_height: u32,
+) -> Option<(Vec<UiVertex>, Vec<u32>)> {
+    if ui_sprites.is_empty() || surface_width == 0 || surface_height == 0 {
         return None;
     }
 
-    let mut vertices = Vec::with_capacity(ui_rects.len() * 4);
-    let mut indices = Vec::with_capacity(ui_rects.len() * 6);
+    let mut vertices = Vec::with_capacity(ui_sprites.len() * 4);
+    let mut indices = Vec::with_capacity(ui_sprites.len() * 6);
+    let width = surface_width as f32;
+    let height = surface_height as f32;
 
-    for rect in ui_rects {
-        let min_x = rect.min[0].clamp(0.0, 1.0);
-        let min_y = rect.min[1].clamp(0.0, 1.0);
-        let max_x = rect.max[0].clamp(0.0, 1.0);
-        let max_y = rect.max[1].clamp(0.0, 1.0);
+    for sprite in ui_sprites {
+        let min_x = sprite.min_screen_px[0].clamp(0.0, width);
+        let min_y = sprite.min_screen_px[1].clamp(0.0, height);
+        let max_x = sprite.max_screen_px[0].clamp(0.0, width);
+        let max_y = sprite.max_screen_px[1].clamp(0.0, height);
 
         if max_x <= min_x || max_y <= min_y {
             continue;
         }
 
-        let x0 = min_x * 2.0 - 1.0;
-        let x1 = max_x * 2.0 - 1.0;
-        let y0 = 1.0 - min_y * 2.0;
-        let y1 = 1.0 - max_y * 2.0;
+        let x0 = (min_x / width) * 2.0 - 1.0;
+        let x1 = (max_x / width) * 2.0 - 1.0;
+        let y0 = 1.0 - (min_y / height) * 2.0;
+        let y1 = 1.0 - (max_y / height) * 2.0;
         let base_index = vertices.len() as u32;
 
         vertices.extend_from_slice(&[
             UiVertex {
                 position: [x0, y0],
-                color: rect.color,
+                uv: [sprite.uv_min[0], sprite.uv_min[1]],
+                tint: sprite.tint,
             },
             UiVertex {
                 position: [x1, y0],
-                color: rect.color,
+                uv: [sprite.uv_max[0], sprite.uv_min[1]],
+                tint: sprite.tint,
             },
             UiVertex {
                 position: [x1, y1],
-                color: rect.color,
+                uv: [sprite.uv_max[0], sprite.uv_max[1]],
+                tint: sprite.tint,
             },
             UiVertex {
                 position: [x0, y1],
-                color: rect.color,
+                uv: [sprite.uv_min[0], sprite.uv_max[1]],
+                tint: sprite.tint,
             },
         ]);
         indices.extend_from_slice(&[

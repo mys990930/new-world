@@ -221,6 +221,17 @@ impl Renderer {
         }
     }
 
+    pub fn clear_chunk_meshes(&mut self) {
+        let removed = self.world.chunk_meshes.len() as u32;
+        if removed == 0 {
+            return;
+        }
+
+        self.world.chunk_meshes.clear();
+        self.world.generation = self.world.generation.saturating_add(1);
+        self.world.removed_this_frame = self.world.removed_this_frame.saturating_add(removed);
+    }
+
     pub(crate) fn rebuild_chunk_mesh_buffers(&mut self) -> Result<(), RenderUploadError> {
         let Some(device) = self.backend_device().cloned() else {
             return Ok(());

@@ -40,7 +40,7 @@ pub use texture::{
     RenderTextureArraySource, RenderTextureError, RenderTextureSource, RenderTextureTile,
 };
 #[allow(unused_imports)]
-pub use ui::RenderUiRect;
+pub use ui::{RenderUiSprite, RenderUiTextureError, RenderUiTextureSource};
 #[allow(unused_imports)]
 pub use upload::{
     ChunkCoord, CpuMesh, GpuChunkMesh, MeshVertex, RenderBounds, RenderMaterialKind,

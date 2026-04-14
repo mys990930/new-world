@@ -16,7 +16,7 @@
 - update world-and-viewport-based selection state
 - log the clicked block key when a click lands on the current raycast target
 - drain discrete commands for debugging
-- build render-ready frame DTOs and call the renderer
+- build render-ready frame DTOs, including atlas-backed UI sprites, and call the renderer
 
 ## Non-Responsibilities
 
@@ -58,7 +58,7 @@
 13. update `SelectionState` from the latest world state and viewport
 14. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
 15. drain and optionally log discrete commands
-16. build render DTOs and call `renderer.render(...)`
+16. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
 
@@ -67,6 +67,7 @@
 - block logging is click-triggered so the console does not flood every frame
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
+- world-select bake/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI
 
 ## Related Modules
 
@@ -80,4 +81,4 @@
 
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a baked world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
-- the current world-select screen is a placeholder app-mode that skips gameplay updates and renders only app-owned UI rectangles
+- the current world-select screen is a keyboard-driven app-mode that skips gameplay updates and renders only app-owned pixel-sprite UI

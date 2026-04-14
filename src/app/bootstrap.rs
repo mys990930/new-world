@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{AppConfig, AppTimingState, AppUiState, GameApp};
 use crate::ecs::{
@@ -8,11 +8,12 @@ use crate::jobs::{JobConfig, JobSystem};
 use crate::platform::{Platform, PlatformConfig};
 use crate::renderer::{
     RenderConfig, RenderTextureArraySource, RenderTextureSource, RenderTextureTile, Renderer,
-    StubSurfaceTarget,
+    RenderUiTextureSource, StubSurfaceTarget,
 };
 use crate::world::{
-    BakedWorldSource, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, TextureTileSource, WorldCore,
-    WorldMeta, detect_latest_baked_world_root, generate_chunk,
+    BakedWorldSource, BakeWorldConfig, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord,
+    TextureTileSource, WorldCore, WorldMeta, bake_world_to_directory,
+    detect_latest_baked_world_root, generate_chunk,
 };
 
 impl GameApp {
@@ -35,6 +36,9 @@ impl GameApp {
         renderer
             .set_block_textures(block_registry_to_render_textures(block_registry.as_ref()))
             .expect("failed to load block textures");
+        if let Err(error) = renderer.set_ui_texture(RenderUiTextureSource::File(ui_atlas_path())) {
+            eprintln!("[app] failed to load UI atlas: {:?}", error);
+        }
         let mut ecs = EcsRuntime::new();
         let baked_world = open_baked_world(&config);
         let mut world = WorldCore::new(initial_world_meta(baked_world.as_ref()), block_registry);
@@ -62,6 +66,86 @@ impl GameApp {
             ui: AppUiState::default(),
             timing,
         }
+    }
+
+    pub(crate) fn bake_world_from_ui(
+        &mut self,
+        seed: u64,
+        center_x: i32,
+        center_z: i32,
+        radius: i32,
+    ) -> Result<PathBuf, String> {
+        let base_dir = self
+            .config
+            .baked_worlds_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/world-bake"));
+        let meta = WorldMeta::new(seed);
+        let root = base_dir.join(format!(
+            "runtime_seed_{seed}_cx{center_x}_cz{center_z}_r{radius}_v{}",
+            meta.generator_version
+        ));
+        let config = BakeWorldConfig {
+            seed,
+            center_x,
+            center_z,
+            radius,
+            min_y_chunk: -2,
+            max_y_chunk: 3,
+        };
+
+        bake_world_to_directory(root.as_path(), config, self.world.block_registry())
+            .map_err(|error| error.to_string())?;
+        println!("[app] baked world: {}", root.display());
+        Ok(root)
+    }
+
+    pub(crate) fn load_baked_world_from_ui(
+        &mut self,
+        root: &Path,
+        spawn_chunk_x: i32,
+        spawn_chunk_z: i32,
+    ) -> Result<(), String> {
+        let source = BakedWorldSource::open(root).map_err(|error| error.to_string())?;
+        let min = source.manifest().min_chunk_coord();
+        let max = source.manifest().max_chunk_coord();
+        let preview_chunk = ChunkCoord(
+            spawn_chunk_x.clamp(min.0, max.0),
+            0,
+            spawn_chunk_z.clamp(min.2, max.2),
+        );
+
+        let mut world = WorldCore::new(source.manifest().world_meta(), self.world.block_registry_handle());
+        for coord in preload_baked_column_coords(&source, preview_chunk) {
+            let chunk = source
+                .load_chunk(coord)
+                .map_err(|error| format!("failed to load {:?}: {}", coord, error))?;
+            world.insert_chunk(coord, chunk);
+        }
+
+        let mut ecs = EcsRuntime::new();
+        ecs.spawn_default_player();
+        let anchor = chunk_center_anchor(preview_chunk);
+        if !ecs.place_local_player_on_surface(&world, anchor) {
+            return Err(format!(
+                "failed to place player near chunk {} {}",
+                preview_chunk.0, preview_chunk.2
+            ));
+        }
+
+        self.jobs.shutdown();
+        self.renderer.clear_chunk_meshes();
+        self.ecs = ecs;
+        self.world = world;
+        self.baked_world = Some(source);
+        self.jobs = JobSystem::new(JobConfig::default());
+        println!(
+            "[app] loaded baked world {} at chunk {} {}",
+            root.display(),
+            preview_chunk.0,
+            preview_chunk.2
+        );
+        Ok(())
     }
 }
 
@@ -195,4 +279,11 @@ fn chunk_center_anchor(coord: ChunkCoord) -> [f32; 2] {
         coord.0 as f32 * CHUNK_EDGE_I32 as f32 + CHUNK_EDGE_I32 as f32 * 0.5,
         coord.2 as f32 * CHUNK_EDGE_I32 as f32 + CHUNK_EDGE_I32 as f32 * 0.5,
     ]
+}
+
+fn ui_atlas_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("ui")
+        .join("pixel_ui_atlas.png")
 }

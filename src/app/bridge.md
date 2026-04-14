@@ -8,7 +8,8 @@
 ## Responsibilities
 
 - convert platform raw state into `EcsInputSnapshot`
-- convert app/ECS gameplay state into render-ready DTOs
+- convert app / ECS gameplay state into render-ready DTOs
+- convert app-owned menu / HUD layout into renderer-owned pixel-sprite DTOs
 - convert world/jobs outputs into renderer upload requests
 
 ## Non-Responsibilities
@@ -36,20 +37,21 @@
 - `bridge` stays mostly stateless
 - input meaning belongs to ECS, not to `bridge`
 - renderer receives render-ready DTOs only, never ECS/world internals
+- renderer UI DTOs stay screen-space sprite data, not app/world/UI ownership data
 
 ## Invariants
 
 - `platform -> ecs` only maps raw transient/held input into frame input resources
-- `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI rectangles
+- `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI sprites
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code
 - the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
-- quarter-view zoom also stays ECS-owned; the bridge only forwards wheel delta into `EcsInputSnapshot` and later reads the current ECS camera zoom when building `RenderCameraState`
-- when moving voxel entities gain richer render DTOs, the bridge should convert ECS-owned continuous facing / pose state into renderer-facing `facing_octant` and `pose_id` fields rather than passing raw gameplay yaw through unchanged
+- UI text and panels are built from atlas-backed sprite pieces, not renderer-owned text shaping
 
 ## Related Modules
 
 - `frame.rs`
+- `ui.rs`
 - `platform`
 - `ecs`
 - `renderer`
@@ -58,7 +60,5 @@
 
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
 - `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
-- the ground shadow slab now scales from the ECS player body footprint instead of assuming a unit cube
-- weak-perspective quarter-view framing now comes from ECS camera state instead of a renderer-side fixed constant, and the bridge exports the gameplay camera through `RenderProjectionMode::Perspective`
-- app-owned HUD and menu layouts currently translate into renderer `RenderUiRect` values, so placeholder screens can be built without renderer knowledge of ECS/world structures
-- the preferred future path for moving voxel creatures is: ECS keeps continuous motion/facing, then `bridge` emits a render-facing octant plus pose identifier so renderer stays gameplay-agnostic
+- the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas and a tiny atlas-backed bitmap font
+- app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only

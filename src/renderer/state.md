@@ -10,6 +10,7 @@
 - `RendererBackend` now owns:
   - camera/environment/sun-shadow uniform buffers and bind groups
   - block-texture bind group/layout
+  - UI atlas texture bind group/layout
   - main depth resources
   - shadow-map resources
-  - sun overlay, shadow depth, terrain, dynamic, UI, and debug pipelines
+  - sun overlay, shadow depth, terrain, dynamic, UI sprite, and debug pipelines

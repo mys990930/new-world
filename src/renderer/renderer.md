@@ -16,7 +16,7 @@
 - Consume renderer material kinds and run material-aware shading
 - Depth buffer and shadow-map creation/recreation
 - CPU render DTO -> GPU draw command conversion
-- screen-space UI rectangle draw submission
+- screen-space UI sprite draw submission
 - Submit / present / recoverable render error propagation
 - Offscreen terrain preview rendering for debug binaries
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
@@ -44,7 +44,8 @@
 - `CameraGpuState`
 - `RenderTextureArraySource`
 - `RenderCubeInstance`
-- `RenderUiRect`
+- `RenderUiSprite`
+- `RenderUiTextureSource`
 - `RenderStats`
 
 ### Use Cases
@@ -70,9 +71,11 @@ Renderer::attach_window_surface(window: Arc<Window>) -> Result<(), RenderInitErr
 Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 Renderer::set_block_textures(source: RenderTextureArraySource) -> Result<(), RenderTextureError>
+Renderer::set_ui_texture(source: RenderUiTextureSource) -> Result<(), RenderUiTextureError>
 Renderer::set_environment(environment: RenderEnvironment)
 Renderer::apply_upload(request: RenderUploadRequest) -> Result<(), RenderUploadError>
 Renderer::remove_chunk_mesh(coord: ChunkCoord)
+Renderer::clear_chunk_meshes()
 
 Renderer::render(frame: RenderFrameInput<'_>) -> Result<RenderStats, RenderError>
 
@@ -101,7 +104,7 @@ NOT:
 5. Mesh vertices also carry `material_kind`, but the renderer only interprets renderer-side shading enums and never queries world block definitions directly.
 6. The visible sun and shadow-map logic are renderer-owned visualizations of the current environment state, not gameplay-owned world objects.
 7. Future moving voxel-entity rendering should consume bridge-produced octant / pose data and must not infer gameplay-facing direction from velocity or input on its own.
-8. Screen-space UI rectangles stay renderer-local DTOs and do not expose ECS/world ownership.
+8. Screen-space UI sprites stay renderer-local DTOs and do not expose ECS/world ownership.
 
 ### Current Implementation Notes
 
@@ -112,7 +115,7 @@ NOT:
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
 - Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
-- Screen-space app UI currently enters as `RenderUiRect` and is rendered in a dedicated overlay pass with no camera/world dependency.
+- Screen-space app UI currently enters as `RenderUiSprite` and is rendered in a dedicated overlay pass with no camera/world dependency.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping a light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.

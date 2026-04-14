@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::{
     texture::{BlockTextureSet, GpuBlockTextureResources},
+    ui::{GpuUiTextureResources, UiTextureSet},
     CameraGpuState, ChunkCoord, ClearColor, GpuChunkMesh, PipelineSet, RenderConfig,
     RenderEnvironment, RenderStats, SurfaceState,
 };
@@ -12,6 +13,7 @@ pub struct Renderer {
     pub(crate) pipelines: PipelineSet,
     pub(crate) world: RenderWorld,
     pub(crate) block_textures: BlockTextureSet,
+    pub(crate) ui_texture: UiTextureSet,
     pub(crate) environment: RenderEnvironmentState,
     pub(crate) camera: CameraGpuState,
     pub(crate) backend: Option<RendererBackend>,
@@ -142,11 +144,13 @@ pub(crate) struct RendererBackend {
     pub(crate) _shadow_map_sampler: wgpu::Sampler,
     pub(crate) block_texture_bind_group_layout: wgpu::BindGroupLayout,
     pub(crate) block_textures: GpuBlockTextureResources,
+    pub(crate) ui_texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) ui_texture: GpuUiTextureResources,
     pub(crate) sun_overlay_pipeline: wgpu::RenderPipeline,
     pub(crate) terrain_pipeline: wgpu::RenderPipeline,
     pub(crate) water_pipeline: wgpu::RenderPipeline,
     pub(crate) dynamic_cube_pipeline: wgpu::RenderPipeline,
     pub(crate) shadow_depth_pipeline: wgpu::RenderPipeline,
-    pub(crate) ui_rect_pipeline: wgpu::RenderPipeline,
+    pub(crate) ui_sprite_pipeline: wgpu::RenderPipeline,
     pub(crate) debug_edge_pipeline: wgpu::RenderPipeline,
 }

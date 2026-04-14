@@ -55,6 +55,7 @@
 - `NeighborChunks`
 - `Ray3`, `RaycastHit`
 - `BakedWorldManifest`, `BakedStackSummary`, `BakedWorldSource`
+- `BakeWorldConfig`
 - `WorldCore`
 
 ### Public Interface
@@ -79,6 +80,10 @@ WorldCore::loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)>
 read_baked_world_manifest(root: &Path) -> Result<BakedWorldManifest, BakedWorldError>
 load_baked_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, BakedWorldError>
 detect_latest_baked_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>>
+write_baked_world_manifest(root: &Path, manifest: &BakedWorldManifest) -> Result<(), BakedWorldError>
+save_baked_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, BakedWorldError>
+summarize_baked_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> BakedStackSummary
+bake_world_to_directory(root: &Path, config: BakeWorldConfig, block_registry: &BlockRegistry) -> Result<BakedWorldManifest, BakedWorldError>
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
@@ -100,7 +105,7 @@ NOT:
 1. block and chunk mutations only happen through world-owned APIs
 2. raw chunk storage keeps ids while gameplay/render meaning is interpreted through `BlockRegistry`
 3. world meshing produces CPU-side data only
-4. baked-world helpers may load chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
+4. baked-world helpers may load or write chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order

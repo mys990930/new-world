@@ -22,7 +22,7 @@
 - draw the terrain pass
 - draw the dynamic cube pass
 - draw the translucent water pass
-- draw the screen-space UI overlay pass
+- draw the screen-space UI sprite overlay pass
 - optionally draw the debug edge overlay pass
 - submit and present
 - propagate recoverable surface errors
@@ -58,7 +58,7 @@
 ## Invariants
 
 - renderer only sees render-ready DTOs such as `RenderCubeInstance`
-- renderer-only UI rectangles are screen-space DTOs and do not require camera/world ownership
+- renderer-only UI sprites are screen-space DTOs and do not require camera/world ownership
 - if there is no live backend or the surface is not configured, nothing is presented
 - terrain and dynamic cubes share bind groups but not shader logic
 - visible-sun and shadow-map calculations are renderer-local and derive from current render state only
@@ -78,4 +78,4 @@
 - Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.
-- the current UI path is intentionally minimal and only supports flat colored rectangles for placeholder menus and HUD frames
+- the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames

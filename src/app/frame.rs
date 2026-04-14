@@ -62,7 +62,7 @@ impl GameApp {
             draw_scene: render_frame.draw_scene,
             visible_chunks: &render_frame.visible_chunks,
             cube_instances: &render_frame.cube_instances,
-            ui_rects: &render_frame.ui_rects,
+            ui_sprites: &render_frame.ui_sprites,
             clear_color_override: render_frame.clear_color_override,
         }) {
             eprintln!("[app] renderer frame failed: {:?}", error);

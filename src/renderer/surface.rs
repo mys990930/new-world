@@ -10,8 +10,12 @@ use super::{
         BlockTextureSet, create_block_texture_bind_group_layout,
         create_gpu_block_texture_resources,
     },
-    ui::UiVertex, CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig,
-    RenderStats, RenderWorld, Renderer,
+    ui::{
+        UiTextureSet, UiVertex, create_gpu_ui_texture_resources,
+        create_ui_texture_bind_group_layout,
+    },
+    CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig, RenderStats,
+    RenderWorld, Renderer,
 };
 
 pub trait RenderSurfaceTarget {
@@ -356,6 +360,7 @@ impl Renderer {
         )
         .map_err(|_| RenderInitError::InvalidConfig("camera projection config is invalid"))?;
         let block_textures = BlockTextureSet::default();
+        let ui_texture = UiTextureSet::default();
         let environment = RenderEnvironmentState::from_config(&config);
 
         let backend = match target.owned_window() {
@@ -364,6 +369,7 @@ impl Renderer {
                 &config,
                 &surface,
                 &block_textures,
+                &ui_texture,
                 environment.current(),
             ))?),
             None => None,
@@ -375,6 +381,7 @@ impl Renderer {
             pipelines,
             world: RenderWorld::default(),
             block_textures,
+            ui_texture,
             environment,
             camera,
             backend,
@@ -397,6 +404,7 @@ impl Renderer {
             &self.config,
             &self.surface,
             &self.block_textures,
+            &self.ui_texture,
             self.environment.current(),
         ))?);
         self.rebuild_chunk_mesh_buffers()
@@ -426,6 +434,7 @@ async fn create_backend(
     config: &RenderConfig,
     surface: &SurfaceState,
     block_textures: &BlockTextureSet,
+    ui_texture: &UiTextureSet,
     environment: &RenderEnvironment,
 ) -> Result<RendererBackend, RenderInitError> {
     let instance = wgpu::Instance::default();
@@ -491,7 +500,7 @@ async fn create_backend(
     let dynamic_shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
     let shadow_depth_shader = device.create_shader_module(wgpu::include_wgsl!("shadow_depth.wgsl"));
     let sun_overlay_shader = device.create_shader_module(wgpu::include_wgsl!("sun_overlay.wgsl"));
-    let ui_rect_shader = device.create_shader_module(wgpu::include_wgsl!("ui_rect.wgsl"));
+    let ui_sprite_shader = device.create_shader_module(wgpu::include_wgsl!("ui_sprite.wgsl"));
     let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_camera_buffer"),
         size: std::mem::size_of::<super::camera::CameraUniform>() as u64,
@@ -589,6 +598,13 @@ async fn create_backend(
         &block_texture_bind_group_layout,
         block_textures,
     );
+    let ui_texture_bind_group_layout = create_ui_texture_bind_group_layout(&device);
+    let ui_texture = create_gpu_ui_texture_resources(
+        &device,
+        &queue,
+        &ui_texture_bind_group_layout,
+        ui_texture,
+    );
     let main_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_main_pipeline_layout"),
         bind_group_layouts: &[
@@ -642,7 +658,7 @@ async fn create_backend(
     });
     let ui_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_ui_pipeline_layout"),
-        bind_group_layouts: &[],
+        bind_group_layouts: &[Some(&ui_texture_bind_group_layout)],
         immediate_size: 0,
     });
     let terrain_pipeline = create_render_pipeline(
@@ -678,11 +694,11 @@ async fn create_backend(
         Some(wgpu::BlendState::REPLACE),
         true,
     );
-    let ui_rect_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("renderer_ui_rect_pipeline"),
+    let ui_sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("renderer_ui_sprite_pipeline"),
         layout: Some(&ui_pipeline_layout),
         vertex: wgpu::VertexState {
-            module: &ui_rect_shader,
+            module: &ui_sprite_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[UiVertex::vertex_buffer_layout()],
@@ -699,7 +715,7 @@ async fn create_backend(
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
-            module: &ui_rect_shader,
+            module: &ui_sprite_shader,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
@@ -778,12 +794,14 @@ async fn create_backend(
         _shadow_map_sampler: shadow_map_sampler,
         block_texture_bind_group_layout,
         block_textures,
+        ui_texture_bind_group_layout,
+        ui_texture,
         sun_overlay_pipeline,
         terrain_pipeline,
         water_pipeline,
         dynamic_cube_pipeline,
         shadow_depth_pipeline,
-        ui_rect_pipeline,
+        ui_sprite_pipeline,
         debug_edge_pipeline,
     })
 }
