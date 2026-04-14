@@ -50,7 +50,7 @@
 
 ## Notes
 
-- Renderer expects an orthographic quarter-view pose through an explicit basis override
+- The main gameplay slice now feeds a weak-perspective quarter-view pose through an explicit basis override, while renderer orthographic support still exists for preview/debug paths
 - Loose follow, deadzone, movement bias, and smooth recenter are resolved upstream in ECS/app before the renderer sees the camera DTO
 - `CameraUniform` now includes the eye position in addition to the view-projection matrix so fog and silhouette lighting can be computed fully inside the renderer
 - `CameraUniform` now also includes the current focus position so orthographic fog can be evaluated around the gameplay focal area instead of the artificially distant eye point

@@ -1,9 +1,7 @@
 use winit::keyboard::KeyCode;
 
 use super::GameApp;
-use crate::ecs::{
-    CameraState, EcsInputSnapshot, quarter_view_camera_pose, quarter_view_vertical_world_size,
-};
+use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_camera_pose};
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
     RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
@@ -121,9 +119,7 @@ fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
         target: pose.target,
         up: pose.basis.up,
         aspect_override: None,
-        projection_mode: RenderProjectionMode::Orthographic {
-            vertical_world_size: quarter_view_vertical_world_size(camera_state),
-        },
+        projection_mode: RenderProjectionMode::Perspective,
         basis_override: Some(RenderViewBasis {
             right: pose.basis.right,
             up: pose.basis.up,
@@ -323,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn render_camera_uses_ecs_vertical_world_size() {
+    fn render_camera_uses_weak_perspective_projection() {
         let camera = build_quarter_view_camera(CameraState {
             vertical_world_size: 28.0,
             desired_vertical_world_size: 28.0,
@@ -331,12 +327,12 @@ mod tests {
             ..CameraState::default()
         });
 
-        assert_eq!(
-            camera.projection_mode,
-            RenderProjectionMode::Orthographic {
-                vertical_world_size: 28.0,
-            }
-        );
+        assert_eq!(camera.projection_mode, RenderProjectionMode::Perspective);
+        let distance = ((camera.eye[0] - camera.target[0]).powi(2)
+            + (camera.eye[1] - camera.target[1]).powi(2)
+            + (camera.eye[2] - camera.target[2]).powi(2))
+        .sqrt();
+        assert!((distance - crate::ecs::quarter_view_perspective_distance(28.0)).abs() < 1e-4);
     }
 
     fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {

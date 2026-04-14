@@ -33,7 +33,7 @@
 
 - Selection updates after app/world state has been refreshed for the current frame.
 - The selection ray uses the same smoothed quarter-view pose and current zoom size that rendering uses.
-- The orthographic ray origin is offset across the quarter-view `right/up` plane by the cursor position and current vertical world size.
+- The current gameplay slice uses a weak perspective ray that starts at the camera eye and passes through a cursor-selected point on the quarter-view focus plane.
 - If focus, activity, viewport, or cursor validity checks fail, selection is cleared.
 - If raycast misses, selection is cleared.
 
@@ -60,4 +60,4 @@
 
 ## Notes
 
-- Zooming the camera now changes the orthographic selection footprint automatically because selection reads the ECS-owned current zoom value.
+- Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.

@@ -31,13 +31,16 @@ pub struct QuarterViewCameraPose {
     pub basis: QuarterViewBasis,
 }
 
-// Under the orthographic quarter-view camera, this is the main "zoom" handle.
-// Larger values show more world and make the camera feel farther away.
+// For the gameplay quarter-view camera, this is the main framing/zoom handle.
+// Larger values show more world around the focus plane and make the camera feel farther away.
 pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 20.0;
 pub const QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE: f32 = 8.0;
 pub const QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE: f32 = 48.0;
-// This controls how far the eye sits from the target along the quarter-view forward axis.
-// In orthographic mode it affects eye-space relationships such as fog/shadow math more than framing scale.
+// The gameplay slice now uses a weak perspective projection tuned for better slope readability.
+// This fixed FOV must stay aligned with the renderer config wired up by app bootstrap.
+pub const QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS: f32 = 0.42;
+// This legacy orthographic eye distance is still used by preview/debug helpers that keep an
+// orthographic quarter-view camera. The main gameplay render/selection path no longer uses it.
 pub const QUARTER_VIEW_CAMERA_DISTANCE: f32 = 520.0;
 const CAMERA_UP_BASE: [f32; 3] = [-1.0, std::f32::consts::SQRT_2, 1.0];
 const CAMERA_RIGHT_BASE: [f32; 3] = [1.0, 0.0, 1.0];
@@ -196,15 +199,41 @@ pub fn quarter_view_basis(quarter_turns: u8) -> QuarterViewBasis {
 
 pub fn quarter_view_camera_pose(camera: CameraState) -> QuarterViewCameraPose {
     let basis = quarter_view_basis(camera.quarter_turns);
+    let vertical_world_size = quarter_view_vertical_world_size(camera);
     QuarterViewCameraPose {
         target: camera.smoothed_target,
-        eye: quarter_view_eye(camera.smoothed_target, camera.quarter_turns),
+        eye: quarter_view_perspective_eye(
+            camera.smoothed_target,
+            camera.quarter_turns,
+            vertical_world_size,
+        ),
         basis,
     }
 }
 
 pub fn quarter_view_vertical_world_size(camera: CameraState) -> f32 {
     clamp_vertical_world_size(camera.vertical_world_size)
+}
+
+pub fn quarter_view_perspective_eye(
+    target: [f32; 3],
+    quarter_turns: u8,
+    vertical_world_size: f32,
+) -> [f32; 3] {
+    let basis = quarter_view_basis(quarter_turns);
+    add3(
+        target,
+        scale3(
+            basis.forward,
+            -quarter_view_perspective_distance(vertical_world_size),
+        ),
+    )
+}
+
+pub fn quarter_view_perspective_distance(vertical_world_size: f32) -> f32 {
+    let half_height = clamp_vertical_world_size(vertical_world_size) * 0.5;
+    let half_fov = QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS * 0.5;
+    half_height / half_fov.tan().max(0.001)
 }
 
 pub fn quarter_view_eye(target: [f32; 3], quarter_turns: u8) -> [f32; 3] {

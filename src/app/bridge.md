@@ -58,5 +58,5 @@
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
 - `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
 - the ground shadow slab now scales from the ECS player body footprint instead of assuming a unit cube
-- orthographic `vertical_world_size` now comes from ECS camera state instead of a renderer-side fixed constant
+- weak-perspective quarter-view framing now comes from ECS camera state instead of a renderer-side fixed constant, and the bridge exports the gameplay camera through `RenderProjectionMode::Perspective`
 - the preferred future path for moving voxel creatures is: ECS keeps continuous motion/facing, then `bridge` emits a render-facing octant plus pose identifier so renderer stays gameplay-agnostic

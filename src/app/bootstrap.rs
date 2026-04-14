@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use super::{AppConfig, AppTimingState, GameApp};
-use crate::ecs::{EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
+use crate::ecs::{
+    EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS,
+};
 use crate::jobs::{JobConfig, JobSystem};
 use crate::platform::{Platform, PlatformConfig};
 use crate::renderer::{
@@ -22,9 +24,12 @@ impl GameApp {
         });
         let block_registry =
             std::sync::Arc::new(BlockRegistry::load_default().expect("failed to load block registry"));
+        let mut render_config = RenderConfig::default();
+        render_config.camera_projection.vertical_fov_radians =
+            QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS;
         let mut renderer = Renderer::new(
             &StubSurfaceTarget::new(config.width, config.height),
-            RenderConfig::default(),
+            render_config,
         )
         .expect("failed to create renderer");
         renderer

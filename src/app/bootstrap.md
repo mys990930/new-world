@@ -70,5 +70,6 @@
 
 - live window surface attachment still happens later in [runner.rs](/C:/dev/new-world/src/app/runner.rs)
 - the current bootstrap path also translates world-side `TextureTileSource` values into renderer-side `RenderTextureSource`
+- bootstrap now aligns the renderer camera FOV with the ECS weak-perspective quarter-view constant so render projection and selection ray construction stay in sync
 - when a baked world is found, bootstrap preloads a `5x5` horizontal neighborhood of baked chunk columns around the baked preview chunk so spawn placement and first-frame movement do not expose chunk edges immediately
 - when no baked world is found, bootstrap falls back to generating a small procedural `5x5` neighborhood on the player plane

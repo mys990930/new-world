@@ -53,18 +53,22 @@ pub fn update_selection_from_world(
     let half_width = half_height * aspect;
     let ndc_x = (cursor.0 as f32 / viewport_width as f32) * 2.0 - 1.0;
     let ndc_y = 1.0 - (cursor.1 as f32 / viewport_height as f32) * 2.0;
-    let origin = add3(
-        pose.eye,
+    let focal_point = add3(
+        pose.target,
         add3(
             scale3(pose.basis.right, ndc_x * half_width),
             scale3(pose.basis.up, ndc_y * half_height),
         ),
     );
+    let Some(direction) = normalize3(subtract3(focal_point, pose.eye)) else {
+        selection.clear();
+        return;
+    };
 
     let hit = world.raycast_blocks(
         Ray3 {
-            origin,
-            direction: pose.basis.forward,
+            origin: pose.eye,
+            direction,
         },
         1024.0,
     );
@@ -83,8 +87,26 @@ fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
     [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
 }
 
+fn subtract3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
 fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
     [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar]
+}
+
+fn normalize3(value: [f32; 3]) -> Option<[f32; 3]> {
+    let length_sq = value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
+    if length_sq <= f32::EPSILON {
+        return None;
+    }
+
+    let inv_length = length_sq.sqrt().recip();
+    Some([
+        value[0] * inv_length,
+        value[1] * inv_length,
+        value[2] * inv_length,
+    ])
 }
 
 #[cfg(test)]
