@@ -14,6 +14,7 @@
 - Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
 - Convert atlas fields into per-column surface elevation around a fixed sea level using blended profile surfaces rather than a single hard profile switch.
 - Build a smoothed chunk-local surface field before hydrology so contour flow stays readable at block resolution.
+- Realize atlas-owned mountain spines and drainage paths into chunk-local ridge, valley, and channel geometry.
 - Fill solid terrain mass into `ChunkData` for relief inspection.
 - Expose deterministic debug probes for chunk/profile/surface inspection while tuning generation.
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
@@ -22,6 +23,7 @@
 ## Non-Responsibilities
 
 - Owning atlas field generation itself
+- Owning atlas mountain-chain or drainage graph creation itself
 - Mutating live world storage
 - Async worker orchestration
 - Meshing
@@ -89,6 +91,20 @@ generation::sample_chunk_surface_lod(
      - inland river columns can carry water above sea level and are biased toward locally concave channel cores
 - Trees, tall grass, and ecology are still intentionally out of scope for this pass.
 
+## Next Structure-Driven Revision Target
+
+- Atlas remains the owner of macro terrain direction, but generation becomes the owner of chunk-local realization of that structure.
+- The next revision should stop inventing major ridge and river direction per column.
+- Instead, generation should read a padded atlas structure window and derive chunk-local distance fields from nearby mountain spines and river paths.
+- Target flow for each chunk:
+  1. sample atlas scalar fields and nearby structural guides together
+  2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
+  3. rasterize drainage and river segments into distance-to-channel / along-channel fields
+  4. build the raw surface scaffold from those structural fields, then smooth and locally refine it
+  5. enforce connected river channels with minimum wetted width/depth and downstream-directed water surfaces
+  6. keep local noise as detail only, not as the source of macro ridge or river direction
+- In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.
+
 ## Processing Flow
 
 1. Map the target chunk to the atlas neighborhood needed for macro sampling.
@@ -101,6 +117,18 @@ generation::sample_chunk_surface_lod(
 8. Resolve per-column surface/fill blocks from fill profile plus sediment fields.
 9. Write block ids into `ChunkData`.
 10. Return the finished chunk without mutating any live world state.
+
+## Planned Next Processing Flow
+
+1. Map the target chunk to the atlas neighborhood needed for both scalar fields and structural guides.
+2. Generate or read the atlas field window plus mountain/drainage structure window.
+3. Interpolate scalar atlas signals per block column.
+4. Rasterize nearby mountain spines and river paths into chunk-local directional distance fields.
+5. Build the raw surface scaffold from profile weights plus structure-aware ridge/valley terms.
+6. Smooth that surface while preserving large structural direction and derive local concavity only as a secondary refinement signal.
+7. Realize connected channels and ridge shoulders from the structural fields.
+8. Resolve per-column materials and write block ids into `ChunkData`.
+9. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
@@ -116,6 +144,7 @@ generation::sample_chunk_surface_lod(
 4. Blocks below world-space `y = -256` are outside the current generated volume.
 5. The current generator version emits layered terrain materials plus sea water and inland river water, but still no vegetation or ecology.
 6. Generation reads block meaning through `BlockRegistry`; it does not own texture or renderer policy.
+7. Major ridge and river direction must eventually come from atlas-owned structure, not from chunk-local random carve alone.
 
 ## Internal Submodules
 

@@ -22,5 +22,7 @@
 - Strong river signals now carve floodplains/channels out of the smoothed terrain, using local concavity to favor real low points instead of painting equally across a whole riverine band.
 - Shallow-ocean and river sediment are now chosen once per column from low-frequency sediment fields, so `sand` / `mud` / `gravel` read as broad patches instead of per-block speckle.
 - River fill profiles keep river-bed material on the surface instead of reverting to grass just because the local channel is not submerged.
+- The current hydrology carve is still a first-pass scalar approach; the next revision should replace per-column meander invention with atlas-owned river path rasterization and guaranteed connected wetted channels.
+- The same next revision should stop treating ridge direction as mostly profile/noise-driven and instead realize mountain shoulders and valleys from atlas-owned spine structure.
 - Vegetation and ecology are still deferred.
 - Probe helpers stop before block fill and let tooling inspect the same `sample -> profile -> surface_y` path without generating a full preview image.

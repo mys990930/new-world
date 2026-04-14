@@ -71,6 +71,8 @@
 - 블록 원본 데이터의 source of truth는 world다
 - 외부는 내부 배열을 직접 건드리지 않고, 명시적 API/command/결과를 통해 수정한다
 - 렌더러는 world의 원본 데이터 소유자가 아니다
+- chunk generation이 참조하는 거시 지형 구조도 world 하위 atlas가 소유한다
+- 큰 산맥의 spine, 배수 방향, 강 경로 같은 macro guide는 chunk가 즉흥적으로 만들지 않고 atlas 구조를 기반으로 현실화한다
 
 ### ECS 중심의 상태 전이
 - ECS는 게임 의미를 다루는 계층이다

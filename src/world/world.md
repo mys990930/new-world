@@ -14,6 +14,7 @@
 - block/chunk read-write API
 - coordinate transformation rules
 - atlas-scale macro environment interpretation
+- atlas-scale mountain-chain / drainage structure ownership
 - snapshot/query surfaces
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -44,6 +45,9 @@
 - `ChunkData`, `ChunkSnapshot`
 - `AtlasCoord`, `AtlasArea`
 - `AtlasFieldMap`, `AtlasResolvedMap`
+- `AtlasStructureMap`
+- `MountainChainGraph`, `MountainSpineSegment`
+- `DrainageGraph`, `RiverPathSegment`
 - `ChunkGenerationProbe`, `ColumnGenerationProbe`
 - `WorldEdit`, `EditResult`
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
@@ -88,6 +92,7 @@ NOT:
 3. world meshing produces CPU-side data only
 4. baked-world helpers may load chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
+6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 
 ### Submodules
 
@@ -100,6 +105,7 @@ NOT:
 - `registry.md`: block definition, texture tile, and material contract
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
+- `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
 - `storage.md`: raw chunk byte serialization contract
 - `baked.md`: baked manifest / baked runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
@@ -110,3 +116,4 @@ NOT:
 - chunk acquisition can now come from either baked disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
+- atlas terrain structure is currently still scalar-first in code, but the next generation revision is expected to move mountain-chain and drainage direction ownership into atlas before chunk realization
