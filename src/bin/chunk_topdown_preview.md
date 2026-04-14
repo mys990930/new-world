@@ -18,6 +18,13 @@
 ## Outputs
 
 - a PNG image where each world block column becomes one colored top-down cell
+- a stdout diagnostic summary for the same realized data and its chunk meshes
+  - visible top-block counts
+  - columns containing any `water`
+  - columns where `water` is the top-visible block
+  - total water-block depth statistics inside the scanned volume
+  - chunk-mesh water-face counts
+  - a coarse generation-vs-meshing-vs-renderer hint based on those counts
 
 ## Current Flow
 
@@ -28,6 +35,7 @@
 5. Color the cell with a diagnostic material palette plus relief-based brightness.
 6. Draw subtle per-cell borders so flat areas remain readable.
 7. Save the PNG to disk.
+8. Print column and mesh debug summaries for the scanned window.
 
 ## Exactness Notes
 
@@ -35,8 +43,15 @@
 - In baked-world mode, it reads the persisted chunk `.bin` payloads and scans the actual loaded chunk contents.
 - That means the top-down geometry is exact for the chosen projection rule: the image represents the topmost non-air block found in each `xz` column inside the requested vertical window.
 - The colors are intentionally diagnostic and are not meant to match final renderer shading or texture sampling.
+- The stdout counters are also exact for the chosen window because they are computed from the same realized `ChunkData` and from meshes built through `world::meshing::build_chunk_mesh(...)`.
 
 ## Visibility Notes
 
 - Borders are always drawn between block cells when `pixels-per-block >= 2`.
 - Borders become slightly stronger where adjacent cells differ in top block or top `y`, which makes step changes and river cuts easier to read.
+
+## Diagnostic Notes
+
+- If the summary reports zero `water` columns and zero water faces, the issue is upstream of rendering and points at generation.
+- If the summary reports `water` columns but zero water faces, inspect world meshing or block render metadata.
+- If the summary reports both visible `water` columns and water faces, but the live game view still hides them, the remaining suspect is renderer presentation or shading rather than chunk generation.

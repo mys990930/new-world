@@ -9,7 +9,7 @@ use image::{Rgb, RgbImage};
 use new_world::world::{
     BakedWorldManifest, BakedWorldSource, BlockId, BlockMaterialKind, BlockRegistry,
     CHUNK_EDGE_I32, ChunkCoord, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta,
-    generate_chunk,
+    build_chunk_mesh, generate_chunk,
 };
 
 const DEFAULT_CENTER_X: i32 = 0;
@@ -42,6 +42,42 @@ impl TopdownCell {
 struct SurfaceRange {
     min_y: i32,
     max_y: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColumnScan {
+    visible: TopdownCell,
+    top_solid: TopdownCell,
+    top_water_y: Option<i32>,
+    water_block_count: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockCount {
+    key: String,
+    count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PreviewDebugSummary {
+    total_columns: usize,
+    columns_with_any_water: usize,
+    columns_with_top_water: usize,
+    columns_with_hidden_water: usize,
+    total_water_blocks: usize,
+    average_water_depth: f32,
+    max_water_depth: u16,
+    top_visible_blocks: Vec<BlockCount>,
+    top_solid_blocks: Vec<BlockCount>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MeshDebugSummary {
+    chunk_count: usize,
+    meshed_chunk_count: usize,
+    total_face_count: usize,
+    water_face_count: usize,
+    chunks_with_water_faces: usize,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -164,7 +200,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     }
 
-    let (image, surface_range) = render_topdown_preview(
+    let (image, surface_range, debug_summary) = render_topdown_preview(
         &world,
         block_registry.as_ref(),
         center_x,
@@ -174,6 +210,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_y_chunk,
         pixels_per_block,
     )?;
+    let mesh_debug = collect_mesh_debug_summary(
+        &world,
+        block_registry.as_ref(),
+        center_x,
+        center_z,
+        radius,
+        min_y_chunk,
+        max_y_chunk,
+    );
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -194,6 +239,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         "surface relief: {}..{}",
         surface_range.min_y, surface_range.max_y
     );
+    print_preview_debug_summary(&debug_summary);
+    print_mesh_debug_summary(mesh_debug);
+    println!(
+        "water diagnostic: {}",
+        diagnose_water_visibility(&debug_summary, mesh_debug)
+    );
     println!("output: {}", output.display());
     println!("image: {}x{}", image.width(), image.height());
 
@@ -209,7 +260,7 @@ fn render_topdown_preview(
     min_y_chunk: i32,
     max_y_chunk: i32,
     pixels_per_block: u32,
-) -> Result<(RgbImage, SurfaceRange), Box<dyn Error>> {
+) -> Result<(RgbImage, SurfaceRange, PreviewDebugSummary), Box<dyn Error>> {
     let chunk_span = u32::try_from(radius.saturating_mul(2).saturating_add(1))
         .map_err(|_| cli_error("radius produced an invalid chunk span"))?;
     let blocks_per_axis = chunk_span
@@ -241,7 +292,14 @@ fn render_topdown_preview(
         let world_z = min_world_z + i32::try_from(z_offset).expect("grid z index should fit in i32");
         for x_offset in 0..grid_width {
             let world_x = min_world_x + i32::try_from(x_offset).expect("grid x index should fit in i32");
-            cells.push(sample_top_cell(world, world_x, world_z, min_world_y, max_world_y));
+            cells.push(sample_column_scan(
+                world,
+                registry,
+                world_x,
+                world_z,
+                min_world_y,
+                max_world_y,
+            ));
         }
     }
 
@@ -256,11 +314,12 @@ fn render_topdown_preview(
             center_z + radius
         ))
     })?;
+    let debug_summary = summarize_column_scans(&cells, registry);
 
     let mut image = RgbImage::new(width, height);
     for z in 0..grid_height {
         for x in 0..grid_width {
-            let cell = cells[z * grid_width + x];
+            let cell = cells[z * grid_width + x].visible;
             let base = color_for_cell(cell, registry, surface_range);
             let pixel_origin_x =
                 u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
@@ -289,16 +348,22 @@ fn render_topdown_preview(
         }
     }
 
-    Ok((image, surface_range))
+    Ok((image, surface_range, debug_summary))
 }
 
-fn sample_top_cell(
+fn sample_column_scan(
     world: &WorldCore,
+    registry: &BlockRegistry,
     world_x: i32,
     world_z: i32,
     min_world_y: i32,
     max_world_y: i32,
-) -> TopdownCell {
+) -> ColumnScan {
+    let mut visible = TopdownCell::AIR;
+    let mut top_solid = TopdownCell::AIR;
+    let mut top_water_y = None;
+    let mut water_block_count = 0_u16;
+
     for world_y in (min_world_y..=max_world_y).rev() {
         let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z)) else {
             continue;
@@ -306,17 +371,38 @@ fn sample_top_cell(
         if block.is_air() {
             continue;
         }
-        return TopdownCell {
-            top_y: Some(world_y),
-            block,
-        };
+
+        let block_def = registry.block_or_missing(block);
+        if visible.top_y.is_none() {
+            visible = TopdownCell {
+                top_y: Some(world_y),
+                block,
+            };
+        }
+        if top_solid.top_y.is_none() && block_def.solid {
+            top_solid = TopdownCell {
+                top_y: Some(world_y),
+                block,
+            };
+        }
+        if block_def.key == "water" {
+            if top_water_y.is_none() {
+                top_water_y = Some(world_y);
+            }
+            water_block_count = water_block_count.saturating_add(1);
+        }
     }
 
-    TopdownCell::AIR
+    ColumnScan {
+        visible,
+        top_solid,
+        top_water_y,
+        water_block_count,
+    }
 }
 
-fn surface_range_for_cells(cells: &[TopdownCell]) -> Option<SurfaceRange> {
-    let mut top_cells = cells.iter().filter_map(|cell| cell.top_y);
+fn surface_range_for_cells(cells: &[ColumnScan]) -> Option<SurfaceRange> {
+    let mut top_cells = cells.iter().filter_map(|cell| cell.visible.top_y);
     let first = top_cells.next()?;
     let mut min_y = first;
     let mut max_y = first;
@@ -327,6 +413,108 @@ fn surface_range_for_cells(cells: &[TopdownCell]) -> Option<SurfaceRange> {
     }
 
     Some(SurfaceRange { min_y, max_y })
+}
+
+fn summarize_column_scans(cells: &[ColumnScan], registry: &BlockRegistry) -> PreviewDebugSummary {
+    let mut columns_with_any_water = 0_usize;
+    let mut columns_with_top_water = 0_usize;
+    let mut columns_with_hidden_water = 0_usize;
+    let mut total_water_blocks = 0_usize;
+    let mut max_water_depth = 0_u16;
+    let mut top_visible = Vec::<BlockCount>::new();
+    let mut top_solid = Vec::<BlockCount>::new();
+
+    for cell in cells {
+        let has_water = cell.water_block_count > 0;
+        if has_water {
+            columns_with_any_water += 1;
+            total_water_blocks += usize::from(cell.water_block_count);
+            max_water_depth = max_water_depth.max(cell.water_block_count);
+        }
+
+        if cell.top_water_y == cell.visible.top_y && cell.top_water_y.is_some() {
+            columns_with_top_water += 1;
+        } else if has_water {
+            columns_with_hidden_water += 1;
+        }
+
+        if let Some(key) = block_key_for_cell(cell.visible, registry) {
+            increment_block_count(&mut top_visible, key);
+        }
+        if let Some(key) = block_key_for_cell(cell.top_solid, registry) {
+            increment_block_count(&mut top_solid, key);
+        }
+    }
+
+    sort_block_counts(&mut top_visible);
+    sort_block_counts(&mut top_solid);
+
+    let average_water_depth = if columns_with_any_water > 0 {
+        total_water_blocks as f32 / columns_with_any_water as f32
+    } else {
+        0.0
+    };
+
+    PreviewDebugSummary {
+        total_columns: cells.len(),
+        columns_with_any_water,
+        columns_with_top_water,
+        columns_with_hidden_water,
+        total_water_blocks,
+        average_water_depth,
+        max_water_depth,
+        top_visible_blocks: top_visible,
+        top_solid_blocks: top_solid,
+    }
+}
+
+fn collect_mesh_debug_summary(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> MeshDebugSummary {
+    let mut summary = MeshDebugSummary {
+        chunk_count: 0,
+        meshed_chunk_count: 0,
+        total_face_count: 0,
+        water_face_count: 0,
+        chunks_with_water_faces: 0,
+    };
+
+    for chunk_y in min_y_chunk..=max_y_chunk {
+        for chunk_z in (center_z - radius)..=(center_z + radius) {
+            for chunk_x in (center_x - radius)..=(center_x + radius) {
+                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
+                let Some(snapshot) = world.snapshot_chunk(coord) else {
+                    continue;
+                };
+                summary.chunk_count += 1;
+                let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), registry);
+                if mesh.is_empty() {
+                    continue;
+                }
+
+                summary.meshed_chunk_count += 1;
+                let face_count = mesh.vertices.len() / 4;
+                let water_face_count = mesh
+                    .vertices
+                    .chunks_exact(4)
+                    .filter(|face| face[0].material_kind == BlockMaterialKind::Water)
+                    .count();
+                summary.total_face_count += face_count;
+                summary.water_face_count += water_face_count;
+                if water_face_count > 0 {
+                    summary.chunks_with_water_faces += 1;
+                }
+            }
+        }
+    }
+
+    summary
 }
 
 fn color_for_cell(cell: TopdownCell, registry: &BlockRegistry, surface_range: SurfaceRange) -> [u8; 3] {
@@ -371,7 +559,7 @@ fn material_base_color(material: BlockMaterialKind) -> [u8; 3] {
 }
 
 fn outline_strength(
-    cells: &[TopdownCell],
+    cells: &[ColumnScan],
     width: usize,
     height: usize,
     x: usize,
@@ -385,18 +573,24 @@ fn outline_strength(
     }
 
     let index = z * width + x;
-    let cell = cells[index];
+    let cell = cells[index].visible;
     let mut strength = 0.0_f32;
 
     if local_x == 0 {
-        strength = strength.max(edge_strength(cell, x.checked_sub(1).map(|nx| cells[z * width + nx])));
+        strength = strength.max(edge_strength(
+            cell,
+            x.checked_sub(1).map(|nx| cells[z * width + nx].visible),
+        ));
     }
     if local_y == 0 {
-        strength = strength.max(edge_strength(cell, z.checked_sub(1).map(|nz| cells[nz * width + x])));
+        strength = strength.max(edge_strength(
+            cell,
+            z.checked_sub(1).map(|nz| cells[nz * width + x].visible),
+        ));
     }
     if local_x + 1 == pixels_per_block {
         let right = if x + 1 < width {
-            Some(cells[z * width + (x + 1)])
+            Some(cells[z * width + (x + 1)].visible)
         } else {
             None
         };
@@ -404,7 +598,7 @@ fn outline_strength(
     }
     if local_y + 1 == pixels_per_block {
         let bottom = if z + 1 < height {
-            Some(cells[(z + 1) * width + x])
+            Some(cells[(z + 1) * width + x].visible)
         } else {
             None
         };
@@ -438,6 +632,95 @@ fn darken(color: [u8; 3], amount: f32) -> [u8; 3] {
 
 fn scale_channel(channel: u8, factor: f32) -> u8 {
     (channel as f32 * factor).round().clamp(0.0, 255.0) as u8
+}
+
+fn block_key_for_cell(cell: TopdownCell, registry: &BlockRegistry) -> Option<String> {
+    cell.top_y
+        .map(|_| registry.block_or_missing(cell.block).key.clone())
+}
+
+fn increment_block_count(counts: &mut Vec<BlockCount>, key: String) {
+    if let Some(existing) = counts.iter_mut().find(|count| count.key == key) {
+        existing.count += 1;
+    } else {
+        counts.push(BlockCount { key, count: 1 });
+    }
+}
+
+fn sort_block_counts(counts: &mut [BlockCount]) {
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+}
+
+fn print_preview_debug_summary(summary: &PreviewDebugSummary) {
+    println!("column debug:");
+    println!("  total columns: {}", summary.total_columns);
+    println!(
+        "  columns with any water: {} ({:.1}%)",
+        summary.columns_with_any_water,
+        percent(summary.columns_with_any_water, summary.total_columns)
+    );
+    println!(
+        "  columns with top-visible water: {} ({:.1}%)",
+        summary.columns_with_top_water,
+        percent(summary.columns_with_top_water, summary.total_columns)
+    );
+    println!(
+        "  columns with hidden water: {} ({:.1}%)",
+        summary.columns_with_hidden_water,
+        percent(summary.columns_with_hidden_water, summary.total_columns)
+    );
+    println!("  total water blocks in scanned volume: {}", summary.total_water_blocks);
+    println!(
+        "  water depth per wet column: avg {:.2}, max {}",
+        summary.average_water_depth, summary.max_water_depth
+    );
+    print_block_counts("  top visible blocks:", &summary.top_visible_blocks);
+    print_block_counts("  top solid blocks:", &summary.top_solid_blocks);
+}
+
+fn print_mesh_debug_summary(summary: MeshDebugSummary) {
+    println!("mesh debug:");
+    println!("  loaded chunks in preview: {}", summary.chunk_count);
+    println!("  non-empty chunk meshes: {}", summary.meshed_chunk_count);
+    println!("  total emitted faces: {}", summary.total_face_count);
+    println!(
+        "  water faces: {} ({:.1}%), chunks with water faces: {}",
+        summary.water_face_count,
+        percent(summary.water_face_count, summary.total_face_count),
+        summary.chunks_with_water_faces
+    );
+}
+
+fn print_block_counts(label: &str, counts: &[BlockCount]) {
+    println!("{label}");
+    for count in counts.iter().take(8) {
+        println!("    {}: {}", count.key, count.count);
+    }
+}
+
+fn percent(part: usize, whole: usize) -> f32 {
+    if whole == 0 {
+        0.0
+    } else {
+        (part as f32 / whole as f32) * 100.0
+    }
+}
+
+fn diagnose_water_visibility(summary: &PreviewDebugSummary, mesh_debug: MeshDebugSummary) -> &'static str {
+    if summary.columns_with_any_water == 0 {
+        "no water blocks were realized in the scanned chunk volume, so this preview points to generation rather than renderer visibility"
+    } else if mesh_debug.water_face_count == 0 {
+        "water blocks exist in chunk data but produced no water faces in meshing, so inspect world meshing or block render-kind/opacity rules"
+    } else if summary.columns_with_top_water == 0 {
+        "water exists and survives meshing, but it is not the topmost non-air block in this top-down projection"
+    } else {
+        "water exists in realized chunk data and in the generated chunk meshes; if it is still invisible in the live game view, the remaining suspect is renderer presentation rather than chunk generation"
+    }
 }
 
 fn generate_preview_chunks(
@@ -592,4 +875,64 @@ fn usage() -> &'static str {
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
     Box::new(io::Error::new(ErrorKind::InvalidInput, message.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn block_count(key: &str, count: usize) -> BlockCount {
+        BlockCount {
+            key: key.to_string(),
+            count,
+        }
+    }
+
+    #[test]
+    fn water_diagnostic_points_at_generation_when_no_water_exists() {
+        let summary = PreviewDebugSummary {
+            total_columns: 64,
+            columns_with_any_water: 0,
+            columns_with_top_water: 0,
+            columns_with_hidden_water: 0,
+            total_water_blocks: 0,
+            average_water_depth: 0.0,
+            max_water_depth: 0,
+            top_visible_blocks: vec![block_count("stone", 64)],
+            top_solid_blocks: vec![block_count("stone", 64)],
+        };
+        let mesh = MeshDebugSummary {
+            chunk_count: 1,
+            meshed_chunk_count: 1,
+            total_face_count: 128,
+            water_face_count: 0,
+            chunks_with_water_faces: 0,
+        };
+
+        assert!(diagnose_water_visibility(&summary, mesh).contains("generation"));
+    }
+
+    #[test]
+    fn water_diagnostic_points_at_renderer_when_water_is_visible_and_meshed() {
+        let summary = PreviewDebugSummary {
+            total_columns: 64,
+            columns_with_any_water: 12,
+            columns_with_top_water: 12,
+            columns_with_hidden_water: 0,
+            total_water_blocks: 18,
+            average_water_depth: 1.5,
+            max_water_depth: 3,
+            top_visible_blocks: vec![block_count("water", 12), block_count("sand", 52)],
+            top_solid_blocks: vec![block_count("sand", 64)],
+        };
+        let mesh = MeshDebugSummary {
+            chunk_count: 1,
+            meshed_chunk_count: 1,
+            total_face_count: 180,
+            water_face_count: 24,
+            chunks_with_water_faces: 1,
+        };
+
+        assert!(diagnose_water_visibility(&summary, mesh).contains("renderer"));
+    }
 }
