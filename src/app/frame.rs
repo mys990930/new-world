@@ -4,6 +4,13 @@ use crate::renderer::RenderFrameInput;
 
 impl GameApp {
     pub fn update(&mut self) {
+        self.handle_ui_shortcuts();
+
+        if !self.gameplay_active() {
+            self.collect_job_results();
+            return;
+        }
+
         self.ecs
             .set_frame_delta_seconds(self.timing.frame_dt.as_secs_f32());
         self.bridge_platform_to_ecs();
@@ -48,13 +55,15 @@ impl GameApp {
             }
         }
 
-        let render_frame = self.bridge_ecs_to_render_frame();
+        let render_frame = self.bridge_app_to_render_frame();
 
         if let Err(error) = self.renderer.render(RenderFrameInput {
             camera: &render_frame.camera,
+            draw_scene: render_frame.draw_scene,
             visible_chunks: &render_frame.visible_chunks,
             cube_instances: &render_frame.cube_instances,
-            clear_color_override: None,
+            ui_rects: &render_frame.ui_rects,
+            clear_color_override: render_frame.clear_color_override,
         }) {
             eprintln!("[app] renderer frame failed: {:?}", error);
         }

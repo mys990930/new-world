@@ -6,6 +6,7 @@ pub enum PipelineKind {
     TerrainOpaque,
     DynamicOpaque,
     ShadowDepth,
+    UiOverlay,
     DebugOverlay,
 }
 
@@ -24,6 +25,7 @@ pub struct PipelineSet {
     pub terrain_opaque: PipelineState,
     pub dynamic_opaque: PipelineState,
     pub shadow_depth: PipelineState,
+    pub ui_overlay: PipelineState,
     pub debug_overlay: Option<PipelineState>,
 }
 
@@ -58,6 +60,13 @@ impl PipelineSet {
             depth_enabled: true,
             rebuild_generation: base_generation,
         };
+        let ui_overlay = PipelineState {
+            label: "ui_overlay",
+            kind: PipelineKind::UiOverlay,
+            sample_count: config.sample_count,
+            depth_enabled: false,
+            rebuild_generation: base_generation,
+        };
         let debug_overlay = config.debug.debug_overlay.then_some(PipelineState {
             label: "debug_overlay",
             kind: PipelineKind::DebugOverlay,
@@ -71,6 +80,7 @@ impl PipelineSet {
             terrain_opaque,
             dynamic_opaque,
             shadow_depth,
+            ui_overlay,
             debug_overlay,
         }
     }
@@ -80,6 +90,7 @@ impl PipelineSet {
         self.terrain_opaque.rebuild_generation = surface.resize_generation;
         self.dynamic_opaque.rebuild_generation = surface.resize_generation;
         self.shadow_depth.rebuild_generation = surface.resize_generation;
+        self.ui_overlay.rebuild_generation = surface.resize_generation;
         if let Some(debug_overlay) = self.debug_overlay.as_mut() {
             debug_overlay.rebuild_generation = surface.resize_generation;
         }

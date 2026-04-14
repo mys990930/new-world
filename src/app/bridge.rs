@@ -1,11 +1,11 @@
 use winit::keyboard::KeyCode;
 
-use super::GameApp;
+use super::{AppMode, GameApp};
 use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_camera_pose};
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
     RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
-    RenderUploadRequest, RenderViewBasis,
+    RenderUiRect, RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
     BlockFace, BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
@@ -14,8 +14,11 @@ use crate::world::{
 
 pub struct AppRenderFrameData {
     pub camera: RenderCameraState,
+    pub draw_scene: bool,
     pub visible_chunks: Vec<RenderChunkCoord>,
     pub cube_instances: Vec<RenderCubeInstance>,
+    pub ui_rects: Vec<RenderUiRect>,
+    pub clear_color_override: Option<[f32; 4]>,
 }
 
 impl GameApp {
@@ -50,48 +53,64 @@ impl GameApp {
         });
     }
 
-    pub fn bridge_ecs_to_render_frame(&self) -> AppRenderFrameData {
+    pub fn bridge_app_to_render_frame(&self) -> AppRenderFrameData {
         let camera_state = self.ecs.camera_state();
         let camera = build_quarter_view_camera(camera_state);
-        let mut cube_instances = self
-            .ecs
-            .local_player_transform()
-            .zip(self.ecs.local_player_body())
-            .map(|(transform, body)| {
-                vec![RenderCubeInstance {
-                    center: transform.translation,
-                    half_extents: body.half_extents,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    material_kind: RenderMaterialKind::Actor,
-                }]
-            })
-            .unwrap_or_default();
+        match self.ui.mode {
+            AppMode::InGame => {
+                let mut cube_instances = self
+                    .ecs
+                    .local_player_transform()
+                    .zip(self.ecs.local_player_body())
+                    .map(|(transform, body)| {
+                        vec![RenderCubeInstance {
+                            center: transform.translation,
+                            half_extents: body.half_extents,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            material_kind: RenderMaterialKind::Actor,
+                        }]
+                    })
+                    .unwrap_or_default();
 
-        if let Some((player, body)) = self
-            .ecs
-            .local_player_transform()
-            .zip(self.ecs.local_player_body())
-        {
-            cube_instances.insert(
-                0,
-                build_ground_shadow_instance(player.translation, body.half_extents),
-            );
-        }
+                if let Some((player, body)) = self
+                    .ecs
+                    .local_player_transform()
+                    .zip(self.ecs.local_player_body())
+                {
+                    cube_instances.insert(
+                        0,
+                        build_ground_shadow_instance(player.translation, body.half_extents),
+                    );
+                }
 
-        let selection = self.ecs.selection_state();
-        if let (Some(block), Some(face)) = (selection.hovered_block, selection.hovered_face) {
-            cube_instances.push(build_selection_face_instance(block, face));
-        }
+                let selection = self.ecs.selection_state();
+                if let (Some(block), Some(face)) = (selection.hovered_block, selection.hovered_face)
+                {
+                    cube_instances.push(build_selection_face_instance(block, face));
+                }
 
-        AppRenderFrameData {
-            camera,
-            visible_chunks: self
-                .ecs
-                .visible_chunks()
-                .into_iter()
-                .map(world_chunk_to_render)
-                .collect(),
-            cube_instances,
+                AppRenderFrameData {
+                    camera,
+                    draw_scene: true,
+                    visible_chunks: self
+                        .ecs
+                        .visible_chunks()
+                        .into_iter()
+                        .map(world_chunk_to_render)
+                        .collect(),
+                    cube_instances,
+                    ui_rects: build_ingame_ui_rects(self.ui.show_minimap_overlay),
+                    clear_color_override: None,
+                }
+            }
+            AppMode::WorldSelect => AppRenderFrameData {
+                camera,
+                draw_scene: false,
+                visible_chunks: Vec::new(),
+                cube_instances: Vec::new(),
+                ui_rects: build_world_select_ui_rects(self.ui.selected_world_slot),
+                clear_color_override: Some([0.06, 0.07, 0.09, 1.0]),
+            },
         }
     }
 
@@ -190,6 +209,102 @@ fn build_selection_face_instance(block: WorldBlockCoord, face: BlockFace) -> Ren
             material_kind: RenderMaterialKind::Highlight,
         },
     }
+}
+
+fn build_ingame_ui_rects(show_minimap_overlay: bool) -> Vec<RenderUiRect> {
+    if !show_minimap_overlay {
+        return Vec::new();
+    }
+
+    vec![
+        RenderUiRect {
+            min: [0.765, 0.045],
+            max: [0.975, 0.325],
+            color: [0.04, 0.05, 0.06, 0.78],
+        },
+        RenderUiRect {
+            min: [0.775, 0.055],
+            max: [0.965, 0.315],
+            color: [0.78, 0.73, 0.58, 0.92],
+        },
+        RenderUiRect {
+            min: [0.785, 0.065],
+            max: [0.955, 0.255],
+            color: [0.15, 0.21, 0.17, 0.92],
+        },
+        RenderUiRect {
+            min: [0.84, 0.13],
+            max: [0.90, 0.19],
+            color: [0.92, 0.84, 0.30, 0.96],
+        },
+        RenderUiRect {
+            min: [0.785, 0.268],
+            max: [0.955, 0.305],
+            color: [0.10, 0.11, 0.13, 0.94],
+        },
+    ]
+}
+
+fn build_world_select_ui_rects(selected_world_slot: usize) -> Vec<RenderUiRect> {
+    let left_selected = selected_world_slot % 2 == 0;
+    let left_card = if left_selected {
+        [0.82, 0.66, 0.34, 0.98]
+    } else {
+        [0.33, 0.31, 0.29, 0.98]
+    };
+    let right_card = if left_selected {
+        [0.33, 0.31, 0.29, 0.98]
+    } else {
+        [0.82, 0.66, 0.34, 0.98]
+    };
+
+    vec![
+        RenderUiRect {
+            min: [0.0, 0.0],
+            max: [1.0, 1.0],
+            color: [0.03, 0.04, 0.05, 0.90],
+        },
+        RenderUiRect {
+            min: [0.12, 0.10],
+            max: [0.88, 0.90],
+            color: [0.17, 0.15, 0.14, 0.98],
+        },
+        RenderUiRect {
+            min: [0.12, 0.10],
+            max: [0.88, 0.19],
+            color: [0.20, 0.29, 0.26, 0.98],
+        },
+        RenderUiRect {
+            min: [0.18, 0.28],
+            max: [0.46, 0.68],
+            color: left_card,
+        },
+        RenderUiRect {
+            min: [0.54, 0.28],
+            max: [0.82, 0.68],
+            color: right_card,
+        },
+        RenderUiRect {
+            min: [0.205, 0.31],
+            max: [0.435, 0.45],
+            color: [0.12, 0.13, 0.15, 0.94],
+        },
+        RenderUiRect {
+            min: [0.565, 0.31],
+            max: [0.795, 0.45],
+            color: [0.12, 0.13, 0.15, 0.94],
+        },
+        RenderUiRect {
+            min: [0.18, 0.74],
+            max: [0.82, 0.81],
+            color: [0.09, 0.10, 0.12, 0.94],
+        },
+        RenderUiRect {
+            min: [0.62, 0.84],
+            max: [0.82, 0.89],
+            color: [0.82, 0.66, 0.34, 0.98],
+        },
+    ]
 }
 
 fn world_chunk_to_render(coord: WorldChunkCoord) -> RenderChunkCoord {

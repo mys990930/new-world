@@ -7,6 +7,7 @@
 ## Responsibilities
 
 - inject app timing state as ECS frame delta
+- handle app-owned screen shortcuts before gameplay logic
 - bridge platform snapshot into ECS input
 - run ECS `pre/update/post` phases
 - collect completed jobs and apply them to ECS/world/renderer
@@ -43,19 +44,21 @@
 ## Process
 
 1. inject `frame_dt` into ECS
-2. `bridge_platform_to_ecs()`
-3. `ecs.run_pre_update()`
-4. `ecs.run_update()`
-5. collect any already-completed jobs into ECS/world/renderer
-6. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
-7. `ecs.run_post_update()`
-8. plan chunk requests with `ecs.plan_chunk_job_requests(&world, baked_world.as_ref())`
-9. submit the planned jobs
-10. collect newly completed jobs again
-11. update `SelectionState` from the latest world state and viewport
-12. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-13. drain and optionally log discrete commands
-14. build render DTOs and call `renderer.render(...)`
+2. handle app-owned screen shortcuts
+3. if gameplay is inactive, only collect completed jobs and stop before ECS/world gameplay work
+4. `bridge_platform_to_ecs()`
+5. `ecs.run_pre_update()`
+6. `ecs.run_update()`
+7. collect any already-completed jobs into ECS/world/renderer
+8. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
+9. `ecs.run_post_update()`
+10. plan chunk requests with `ecs.plan_chunk_job_requests(&world, baked_world.as_ref())`
+11. submit the planned jobs
+12. collect newly completed jobs again
+13. update `SelectionState` from the latest world state and viewport
+14. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
+15. drain and optionally log discrete commands
+16. build render DTOs and call `renderer.render(...)`
 
 ## Invariants
 
@@ -63,6 +66,7 @@
 - selection update happens after world/job result application
 - block logging is click-triggered so the console does not flood every frame
 - renderer receives render-ready DTOs only
+- app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 
 ## Related Modules
 
@@ -76,3 +80,4 @@
 
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a baked world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
+- the current world-select screen is a placeholder app-mode that skips gameplay updates and renders only app-owned UI rectangles

@@ -10,8 +10,9 @@
 - bootstrap
 - module creation and injection
 - frame cadence and redraw policy
-- `platform -> ecs` and `ecs/world -> renderer` bridge calls
+- `platform -> ecs` and `app/ecs/world -> renderer` bridge calls
 - baked-world runtime selection ownership
+- top-level app-mode and overlay ownership
 - top-level shutdown handling
 
 ### Non-Responsibilities
@@ -29,6 +30,7 @@
 - `Option<BakedWorldSource>`
 - `JobSystem`
 - `Renderer`
+- `AppUiState`
 - `AppConfig`
 - `AppTimingState`
 
@@ -39,8 +41,10 @@ GameApp::run(self)
 
 fn update(&mut self)
 fn render(&mut self)
+fn handle_ui_shortcuts(&mut self)
+fn gameplay_active(&self) -> bool
 fn bridge_platform_to_ecs(&mut self)
-fn bridge_ecs_to_render_frame(&self) -> AppRenderFrameData
+fn bridge_app_to_render_frame(&self) -> AppRenderFrameData
 fn begin_timed_frame(&mut self, now: Instant)
 fn should_run_frame(&self, now: Instant) -> bool
 fn frame_deadline(&self) -> Option<Instant>
@@ -60,6 +64,7 @@ fn frame_deadline(&self) -> Option<Instant>
 2. frame cadence is app-owned policy, not a platform-owned policy
 3. renderer only receives render-ready DTOs built by app bridge code
 4. baked-world runtime selection is app-owned because it decides whether chunk acquisition should load from disk or fall back to generation
+5. top-level screen mode stays app-owned so non-gameplay screens do not force ECS/world ownership changes
 
 ### Submodules
 
@@ -71,6 +76,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - frame.rs: frame update pipeline orchestration
 - fixed.rs: future fixed timestep orchestration
 - bridge.rs: cross-module DTO translation
+- ui.rs: app-mode and lightweight overlay state
 - shutdown.rs: future teardown / flush
 
 ### Current Implementation Notes
@@ -79,3 +85,4 @@ fn frame_deadline(&self) -> Option<Instant>
 - the real GPU surface still attaches in `runner.rs` during `resumed()`
 - the current frame path supports both baked chunk loading and procedural generation, then meshing and renderer upload
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
+- the current app-owned screen slice can render a placeholder world-select layout without stepping gameplay, and can add HUD frames without giving renderer any ECS/world dependency

@@ -12,4 +12,4 @@
   - block-texture bind group/layout
   - main depth resources
   - shadow-map resources
-  - sun overlay, shadow depth, terrain, dynamic, and debug pipelines
+  - sun overlay, shadow depth, terrain, dynamic, UI, and debug pipelines

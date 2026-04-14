@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{AppConfig, AppTimingState, GameApp};
+use super::{AppConfig, AppTimingState, AppUiState, GameApp};
 use crate::ecs::{
     EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS,
 };
@@ -59,6 +59,7 @@ impl GameApp {
             baked_world,
             jobs,
             renderer,
+            ui: AppUiState::default(),
             timing,
         }
     }

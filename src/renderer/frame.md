@@ -22,6 +22,7 @@
 - draw the terrain pass
 - draw the dynamic cube pass
 - draw the translucent water pass
+- draw the screen-space UI overlay pass
 - optionally draw the debug edge overlay pass
 - submit and present
 - propagate recoverable surface errors
@@ -44,18 +45,20 @@
 ## Processing Flow
 
 1. Update frame index and stats.
-2. Update `RenderCameraState` into `CameraGpuState`.
+2. Update `RenderCameraState` into `CameraGpuState` when scene rendering is enabled.
 3. Resolve the clear color from the active renderer environment unless the app overrides it.
-4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds.
+4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds when scene rendering is enabled.
 5. Upload camera, environment, and sun-shadow uniforms.
 6. Render the shadow map when the active quality preset enables it.
-7. Begin the main color pass, draw the visible sun overlay, opaque terrain, dynamic cubes, and then translucent water.
-8. Optionally draw the debug edge overlay pass.
-9. Submit and present.
+7. Begin the main color pass and, when `draw_scene` is enabled, draw the visible sun overlay, opaque terrain, dynamic cubes, and then translucent water.
+8. Draw the screen-space UI overlay pass.
+9. Optionally draw the debug edge overlay pass for the 3D scene.
+10. Submit and present.
 
 ## Invariants
 
 - renderer only sees render-ready DTOs such as `RenderCubeInstance`
+- renderer-only UI rectangles are screen-space DTOs and do not require camera/world ownership
 - if there is no live backend or the surface is not configured, nothing is presented
 - terrain and dynamic cubes share bind groups but not shader logic
 - visible-sun and shadow-map calculations are renderer-local and derive from current render state only
@@ -75,3 +78,4 @@
 - Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.
+- the current UI path is intentionally minimal and only supports flat colored rectangles for placeholder menus and HUD frames

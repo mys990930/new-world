@@ -15,6 +15,7 @@
 - `baked_world`
 - `jobs`
 - `renderer`
+- `ui`
 - `timing`
 
 ### AppTimingState
@@ -60,3 +61,4 @@
 
 - the current `GameApp` always owns exactly one active `Platform`, `EcsRuntime`, `WorldCore`, `JobSystem`, and `Renderer`
 - baked-world runtime ownership lives in app state because `app` decides whether world acquisition should load from disk or fall back to generation
+- top-level screen mode and lightweight overlay visibility are also app-owned because they should not force ECS/world dependencies

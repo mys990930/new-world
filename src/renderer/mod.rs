@@ -6,6 +6,7 @@ mod pipeline;
 mod state;
 mod surface;
 mod texture;
+mod ui;
 mod upload;
 
 #[allow(unused_imports)]
@@ -38,6 +39,8 @@ pub use surface::{
 pub use texture::{
     RenderTextureArraySource, RenderTextureError, RenderTextureSource, RenderTextureTile,
 };
+#[allow(unused_imports)]
+pub use ui::RenderUiRect;
 #[allow(unused_imports)]
 pub use upload::{
     ChunkCoord, CpuMesh, GpuChunkMesh, MeshVertex, RenderBounds, RenderMaterialKind,

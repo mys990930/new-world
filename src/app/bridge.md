@@ -8,7 +8,7 @@
 ## Responsibilities
 
 - convert platform raw state into `EcsInputSnapshot`
-- convert ECS gameplay state into render-ready DTOs
+- convert app/ECS gameplay state into render-ready DTOs
 - convert world/jobs outputs into renderer upload requests
 
 ## Non-Responsibilities
@@ -21,6 +21,7 @@
 ## Inputs
 
 - `Platform` state
+- `AppUiState`
 - `EcsRuntime` state
 - `world::CpuMesh` and chunk coord
 
@@ -39,7 +40,7 @@
 ## Invariants
 
 - `platform -> ecs` only maps raw transient/held input into frame input resources
-- `ecs -> renderer` only maps camera pose, visibility, and draw-ready instances
+- `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI rectangles
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code
 - the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
@@ -59,4 +60,5 @@
 - `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
 - the ground shadow slab now scales from the ECS player body footprint instead of assuming a unit cube
 - weak-perspective quarter-view framing now comes from ECS camera state instead of a renderer-side fixed constant, and the bridge exports the gameplay camera through `RenderProjectionMode::Perspective`
+- app-owned HUD and menu layouts currently translate into renderer `RenderUiRect` values, so placeholder screens can be built without renderer knowledge of ECS/world structures
 - the preferred future path for moving voxel creatures is: ECS keeps continuous motion/facing, then `bridge` emits a render-facing octant plus pose identifier so renderer stays gameplay-agnostic

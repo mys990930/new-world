@@ -7,6 +7,8 @@ use crate::platform::Platform;
 use crate::renderer::Renderer;
 use crate::world::{BakedWorldSource, WorldCore};
 
+use super::AppUiState;
+
 pub struct GameApp {
     pub config: AppConfig,
     pub platform: Platform,
@@ -15,6 +17,7 @@ pub struct GameApp {
     pub baked_world: Option<BakedWorldSource>,
     pub jobs: JobSystem,
     pub renderer: Renderer,
+    pub ui: AppUiState,
     pub timing: AppTimingState,
 }
 
