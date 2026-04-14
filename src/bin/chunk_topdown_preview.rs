@@ -523,7 +523,7 @@ fn color_for_cell(cell: TopdownCell, registry: &BlockRegistry, surface_range: Su
     };
 
     let def = registry.block_or_missing(cell.block);
-    let base = material_base_color(def.material);
+    let base = block_base_color(def);
     let tint = def.tint;
     let modulated = [
         ((u16::from(base[0]) * u16::from(tint[0])) / 255) as u8,
@@ -543,6 +543,14 @@ fn color_for_cell(cell: TopdownCell, registry: &BlockRegistry, surface_range: Su
     };
 
     brighten(modulated, brightness)
+}
+
+fn block_base_color(def: &new_world::world::BlockDef) -> [u8; 3] {
+    match def.key.as_str() {
+        // Snow keeps a dedicated override so preview diagnostics do not read as gray stone.
+        "snow" => [244, 248, 255],
+        _ => material_base_color(def.material),
+    }
 }
 
 fn material_base_color(material: BlockMaterialKind) -> [u8; 3] {
@@ -934,5 +942,15 @@ mod tests {
         };
 
         assert!(diagnose_water_visibility(&summary, mesh).contains("renderer"));
+    }
+
+    #[test]
+    fn snow_preview_color_uses_white_override() {
+        let registry = BlockRegistry::load_default().expect("default registry should load");
+        let snow = registry
+            .block(registry.block_id("snow").expect("snow block should exist"))
+            .expect("snow def should exist");
+
+        assert_eq!(block_base_color(snow), [244, 248, 255]);
     }
 }

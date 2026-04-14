@@ -33,6 +33,7 @@
 3. For each `world (x, z)` column, scan from the requested max `y` down to the min `y`.
 4. Record the topmost non-air block in that column.
 5. Color the cell with a diagnostic material palette plus relief-based brightness.
+   - `snow` keeps a preview-only white override so frozen terrain does not read as gray stone in debug images.
 6. Draw subtle per-cell borders so flat areas remain readable.
 7. Save the PNG to disk.
 8. Print column and mesh debug summaries for the scanned window.
