@@ -68,5 +68,5 @@ BakedWorldSource::load_chunk(&self, coord: ChunkCoord) -> Result<ChunkData, Bake
 
 ## Notes
 
-- the current app bootstrap policy auto-detects the most recently modified baked world root under `target/world-bake`
+- the current app bootstrap policy may ask for an explicit baked world root first and only fall back to most-recent root discovery under `target/world-bake`
 - baked runtime support is intentionally separate from `storage.md` because manifest/root-discovery policy is broader than the raw chunk byte codec

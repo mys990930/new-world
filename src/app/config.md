@@ -11,6 +11,7 @@
 - window title
 - window width / height
 - `TimingConfig`
+- `preferred_baked_world_root: Option<PathBuf>`
 - `baked_worlds_dir: Option<PathBuf>`
 
 ### TimingConfig
@@ -25,7 +26,7 @@
 
 - typed bootstrap inputs
 - frame pacing policy for `runner.rs`
-- baked-world auto-detection policy for `bootstrap.rs`
+- baked-world preferred-root and auto-detection policy for `bootstrap.rs`
 
 ## State Transition Rules
 
@@ -36,6 +37,7 @@
 
 - `target_frame_rate = Some(n)` is only valid for `n > 0`
 - `target_frame_rate = None` means uncapped frame cadence
+- `preferred_baked_world_root = Some(path)` means bootstrap should try that baked world root before scanning the baked worlds directory
 - `baked_worlds_dir = Some(path)` means bootstrap may scan that directory for the latest baked world root
 - `baked_worlds_dir = None` disables baked-world auto-detection
 
@@ -54,4 +56,5 @@
 ## Notes
 
 - the current default frame cap is `60 FPS`
+- the current default preferred baked world is `target/world-bake/runtime_seed_42_cx5_cz-8_r6_v10`
 - the current default baked-world scan directory is `target/world-bake`

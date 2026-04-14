@@ -11,7 +11,7 @@
 - load the default `BlockRegistry`
 - create `Renderer`
 - load block textures into the renderer
-- auto-detect and open the latest baked world when configured
+- open the configured preferred baked world when available, otherwise auto-detect the latest baked world
 - create `EcsRuntime`
 - create `WorldCore`
 - preload the initial spawn neighborhood into memory
@@ -35,7 +35,7 @@
 3. load the default block registry from `assets/blocks/index.toml`
 4. create `Renderer` from a `StubSurfaceTarget` because the OS window does not exist yet
 5. convert registry texture tiles into renderer texture DTOs and call `Renderer::set_block_textures(...)`
-6. auto-detect the latest baked world root under `AppConfig.baked_worlds_dir`, if enabled
+6. try `AppConfig.preferred_baked_world_root` first, then auto-detect the latest baked world root under `AppConfig.baked_worlds_dir` if needed
 7. create `EcsRuntime`
 8. create `WorldCore` using baked manifest metadata when a baked world exists, otherwise use fallback procedural metadata
 9. preload the spawn neighborhood

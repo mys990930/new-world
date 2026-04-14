@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::{AppConfig, AppTimingState, GameApp};
 use crate::ecs::{EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 use crate::jobs::{JobConfig, JobSystem};
@@ -76,6 +78,12 @@ fn block_registry_to_render_textures(registry: &BlockRegistry) -> RenderTextureA
 }
 
 fn open_baked_world(config: &AppConfig) -> Option<BakedWorldSource> {
+    if let Some(root) = config.preferred_baked_world_root.as_deref() {
+        if let Some(source) = try_open_baked_world_root(root, "preferred") {
+            return Some(source);
+        }
+    }
+
     let Some(base_dir) = config.baked_worlds_dir.as_deref() else {
         return None;
     };
@@ -91,14 +99,18 @@ fn open_baked_world(config: &AppConfig) -> Option<BakedWorldSource> {
         return None;
     };
 
-    match BakedWorldSource::open(&root) {
+    try_open_baked_world_root(&root, "detected")
+}
+
+fn try_open_baked_world_root(root: &Path, label: &str) -> Option<BakedWorldSource> {
+    match BakedWorldSource::open(root) {
         Ok(source) => {
-            println!("[app] using baked world: {}", root.display());
+            println!("[app] using {label} baked world: {}", root.display());
             Some(source)
         }
         Err(error) => {
             eprintln!(
-                "[app] failed to open baked world {}: {}",
+                "[app] failed to open {label} baked world {}: {}",
                 root.display(),
                 error
             );
