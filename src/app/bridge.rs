@@ -2,8 +2,9 @@ use super::{
     AppMode, GameApp,
     ui::{
         build_world_select_layout, UiRectPx, WorldSelectAction, WorldSelectButtonLayout,
-        WorldSelectFieldLayout, WorldSelectInfoLineLayout, WorldSelectLayout,
-        WorldSelectSectionLayout, WorldSelectState,
+        WorldSelectFieldLayout, WorldSelectInfoLineLayout, WorldSelectInputField,
+        WorldSelectLayout, WorldSelectListLayout, WorldSelectLoadingPopupLayout,
+        WorldSelectSectionLayout, WorldSelectState, WorldSelectWorldRowLayout,
     },
 };
 use crate::ecs::{
@@ -161,8 +162,10 @@ impl GameApp {
                     .and_then(|name| name.to_str());
                 let layout =
                     build_world_select_layout(&self.ui.world_select, viewport, current_loaded_label);
-                let hovered_action =
-                    layout.action_at(self.platform.raw_input_state().mouse_position);
+                let mouse_position = self.platform.raw_input_state().mouse_position;
+                let hovered_action = layout.action_at(mouse_position);
+                let hovered_input_field = layout.input_field_at(mouse_position);
+                let hovered_world_index = layout.created_world_index_at(mouse_position);
 
                 AppRenderFrameData {
                     camera,
@@ -173,6 +176,8 @@ impl GameApp {
                         &layout,
                         &self.ui.world_select,
                         hovered_action,
+                        hovered_input_field,
+                        hovered_world_index,
                     ),
                     clear_color_override: Some([0.06, 0.07, 0.09, 1.0]),
                 }
@@ -621,6 +626,8 @@ fn build_world_select_ui_sprites(
     layout: &WorldSelectLayout,
     state: &WorldSelectState,
     hovered_action: Option<WorldSelectAction>,
+    hovered_input_field: Option<WorldSelectInputField>,
+    hovered_world_index: Option<usize>,
 ) -> Vec<RenderUiSprite> {
     let mut sprites = Vec::new();
 
@@ -643,7 +650,7 @@ fn build_world_select_ui_sprites(
         layout.title_rect.x + 24.0,
         layout.title_rect.y + 58.0,
         2.0,
-        "MOUSE SPINNERS  CLICK BUTTONS",
+        "CLICK VALUES TO TYPE  SCROLL THE WORLD LIST",
         [0.76, 0.71, 0.61, 1.0],
     );
 
@@ -654,6 +661,8 @@ fn build_world_select_ui_sprites(
             state.section == section.section
                 || hovered_action.and_then(WorldSelectAction::section) == Some(section.section),
             hovered_action,
+            hovered_input_field,
+            hovered_world_index,
         );
     }
 
@@ -688,6 +697,10 @@ fn build_world_select_ui_sprites(
         hovered_action == Some(layout.close_button.action),
     );
 
+    if let Some(popup) = &layout.loading_popup {
+        push_world_select_loading_popup(&mut sprites, popup);
+    }
+
     sprites
 }
 
@@ -696,6 +709,8 @@ fn push_world_select_section_layout(
     section: &WorldSelectSectionLayout,
     selected: bool,
     hovered_action: Option<WorldSelectAction>,
+    hovered_input_field: Option<WorldSelectInputField>,
+    hovered_world_index: Option<usize>,
 ) {
     let frame_tint = if selected {
         [0.27, 0.22, 0.15, 1.0]
@@ -738,9 +753,13 @@ fn push_world_select_section_layout(
         push_world_select_field(
             sprites,
             field,
+            hovered_input_field == Some(field.field),
             hovered_action == Some(field.increase_action),
             hovered_action == Some(field.decrease_action),
         );
+    }
+    if let Some(world_list) = &section.world_list {
+        push_world_select_list(sprites, world_list, hovered_world_index);
     }
     for info_line in &section.info_lines {
         push_world_select_info_line(sprites, info_line);
@@ -753,6 +772,7 @@ fn push_world_select_section_layout(
 fn push_world_select_field(
     sprites: &mut Vec<RenderUiSprite>,
     field: &WorldSelectFieldLayout,
+    value_hovered: bool,
     increase_hovered: bool,
     decrease_hovered: bool,
 ) {
@@ -761,7 +781,9 @@ fn push_world_select_field(
     } else {
         [0.14, 0.12, 0.11, 0.92]
     };
-    let value_frame = if field.enabled {
+    let value_frame = if field.enabled && (field.focused || value_hovered) {
+        [0.28, 0.40, 0.50, 1.0]
+    } else if field.enabled {
         [0.14, 0.18, 0.22, 1.0]
     } else {
         [0.09, 0.10, 0.11, 0.90]
@@ -771,10 +793,17 @@ fn push_world_select_field(
     } else {
         [0.07, 0.07, 0.07, 0.92]
     };
-    let value_fill = if field.enabled {
+    let value_fill = if field.enabled && field.focused {
+        [0.10, 0.20, 0.28, 0.98]
+    } else if field.enabled {
         [0.08, 0.12, 0.16, 0.98]
     } else {
         [0.06, 0.07, 0.08, 0.92]
+    };
+    let value_text = if field.focused && field.value.is_empty() {
+        "_".to_string()
+    } else {
+        field.value.clone()
     };
 
     push_small_panel(sprites, field.label_rect, label_frame, label_fill);
@@ -790,7 +819,7 @@ fn push_world_select_field(
         sprites,
         field.value_rect,
         2.0,
-        &truncate_text_to_width(&field.value, field.value_rect.w - 10.0, 2.0),
+        &truncate_text_to_width(&value_text, field.value_rect.w - 10.0, 2.0),
         if field.enabled {
             [0.78, 0.86, 0.95, 1.0]
         } else {
@@ -800,6 +829,137 @@ fn push_world_select_field(
 
     push_world_select_arrow_button(sprites, field.increase_rect, "UP", increase_hovered, field.enabled);
     push_world_select_arrow_button(sprites, field.decrease_rect, "DN", decrease_hovered, field.enabled);
+}
+
+fn push_world_select_list(
+    sprites: &mut Vec<RenderUiSprite>,
+    list: &WorldSelectListLayout,
+    hovered_world_index: Option<usize>,
+) {
+    push_small_panel(
+        sprites,
+        list.rect,
+        [0.24, 0.22, 0.18, 1.0],
+        [0.08, 0.10, 0.12, 0.98],
+    );
+
+    if list.rows.is_empty() {
+        push_text_centered(
+            sprites,
+            list.rect,
+            2.0,
+            "EMPTY",
+            [0.50, 0.54, 0.58, 0.98],
+        );
+        return;
+    }
+
+    for row in &list.rows {
+        push_world_select_world_row(
+            sprites,
+            row,
+            hovered_world_index == Some(row.world_index),
+        );
+    }
+}
+
+fn push_world_select_world_row(
+    sprites: &mut Vec<RenderUiSprite>,
+    row: &WorldSelectWorldRowLayout,
+    hovered: bool,
+) {
+    let (frame_tint, fill_tint, title_tint, detail_tint) = if !row.enabled {
+        (
+            [0.22, 0.22, 0.22, 0.92],
+            [0.08, 0.08, 0.08, 0.90],
+            [0.44, 0.44, 0.44, 0.96],
+            [0.38, 0.38, 0.38, 0.92],
+        )
+    } else if row.selected {
+        (
+            [0.88, 0.72, 0.34, 1.0],
+            [0.18, 0.14, 0.10, 0.98],
+            [0.99, 0.94, 0.82, 1.0],
+            [0.88, 0.84, 0.76, 0.98],
+        )
+    } else if hovered {
+        (
+            [0.62, 0.54, 0.36, 1.0],
+            [0.14, 0.12, 0.10, 0.98],
+            [0.95, 0.90, 0.78, 1.0],
+            [0.78, 0.80, 0.84, 0.98],
+        )
+    } else {
+        (
+            [0.34, 0.32, 0.28, 0.98],
+            [0.10, 0.10, 0.11, 0.96],
+            [0.86, 0.88, 0.92, 1.0],
+            [0.62, 0.66, 0.72, 0.98],
+        )
+    };
+
+    push_small_panel(sprites, row.rect, frame_tint, fill_tint);
+    push_text(
+        sprites,
+        row.rect.x + 12.0,
+        row.rect.y + 8.0,
+        2.0,
+        &truncate_text_to_width(&row.label, row.rect.w - 24.0, 2.0),
+        title_tint,
+    );
+    push_text(
+        sprites,
+        row.rect.x + 12.0,
+        row.rect.y + 32.0,
+        1.0,
+        &truncate_text_to_width(&row.detail, row.rect.w - 24.0, 1.0),
+        detail_tint,
+    );
+}
+
+fn push_world_select_loading_popup(
+    sprites: &mut Vec<RenderUiSprite>,
+    popup: &WorldSelectLoadingPopupLayout,
+) {
+    push_fill(
+        sprites,
+        popup.overlay_rect,
+        TILE_PANEL_CENTER,
+        [0.02, 0.03, 0.05, 0.78],
+    );
+    push_panel(
+        sprites,
+        popup.rect,
+        [0.22, 0.18, 0.14, 1.0],
+        [0.86, 0.70, 0.30, 1.0],
+    );
+    push_fill(
+        sprites,
+        popup.rect.inset(18.0),
+        TILE_PANEL_INSET,
+        [0.08, 0.10, 0.12, 0.98],
+    );
+    push_text_centered(
+        sprites,
+        popup.title_rect,
+        2.0,
+        &popup.title,
+        [0.98, 0.93, 0.82, 1.0],
+    );
+    push_text_centered(
+        sprites,
+        popup.message_rect,
+        3.0,
+        &popup.message,
+        [0.92, 0.96, 0.98, 1.0],
+    );
+    push_text_centered(
+        sprites,
+        popup.detail_rect,
+        2.0,
+        &popup.detail,
+        [0.80, 0.86, 0.94, 1.0],
+    );
 }
 
 fn push_world_select_info_line(sprites: &mut Vec<RenderUiSprite>, info_line: &WorldSelectInfoLineLayout) {

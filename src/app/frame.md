@@ -82,5 +82,5 @@
 
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
-- the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI
+- the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - the current inventory / quickslot HUD remains in normal `InGame` mode and is rendered as ECS-derived pixel-atlas UI over the scene

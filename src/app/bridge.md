@@ -63,7 +63,7 @@
 
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
 - `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
-- the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, spinner rows, and explicit action buttons
-- the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, so visible controls and clickable bounds stay aligned
+- the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, editable field rows, a scrollable created-world list, explicit action buttons, and a centered loading popup
+- the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
 - in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes
