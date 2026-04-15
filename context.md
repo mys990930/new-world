@@ -7,6 +7,7 @@
 - A future deterministic meso terrain layer is planned between atlas-scale macro guidance and chunk-local micro detail.
 - That meso layer should span multiple chunks, be generated on demand, and be reproducible from seed-derived region coordinates plus nearby atlas context rather than from whole-world precomputation.
 - Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape families and realization categories, not as the final meso feature system.
+- The planned terrain stack is: `atlas scalar macro -> atlas structure -> atlas meso guides -> generation profile families -> local detail/smoothing -> hydrology/material fill`.
 
 ## 1. 프로젝트 한줄 개요
 

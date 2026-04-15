@@ -58,6 +58,7 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 - pass-outlet and sink solving still remain later steps.
 - river path segments now also carry downstream progress ranges so chunk generation can recover branch progress from the nearest segment projection.
 - this structure graph should stay macro and directional. Smaller multi-chunk terrain identity such as hill groups, cliff bands, or local basins is expected to come from a later meso layer rather than from overloading mountain/drainage segments.
+- meso is therefore planned as a sibling atlas layer, not as an extension of `AtlasStructureMap`.
 
 - `AtlasStructureMap`은 현재 `AtlasArea`와 비어 있을 수 있는 graph 컨테이너를 소유한다.
 - `AtlasStructureRegionCoord`는 atlas structure cache/ownership의 기본 단위 좌표다.

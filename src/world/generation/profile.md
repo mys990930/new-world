@@ -20,3 +20,4 @@
 - The same `TerrainProfile` enum is surfaced through generation probe APIs so debug tooling can report which profile dominated a chunk or column, even though final surface height can now be blended from multiple neighboring profile shapers.
 - Ridge promotion is intentionally more aggressive than preview-biome classification because terrain realization needs sharper transitions between rolling uplands and steep mountain spines.
 - `Coast`, `Plain`, `Upland`, and `Ridge` should not be treated as the future meso feature set. They are broad shape families that future meso guides may bias or modulate.
+- In the planned multi-scale model, profile resolution happens after macro sampling but before meso deformation is applied to the final local scaffold.

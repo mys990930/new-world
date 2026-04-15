@@ -124,6 +124,7 @@ NOT:
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
+- `atlas/meso.md`: planned atlas-owned multi-chunk terrain-guide contract
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
@@ -137,3 +138,4 @@ NOT:
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
 - that future meso layer is expected to sit between atlas and generation micro detail as an on-demand deterministic guide, but the concrete feature catalog is still intentionally undecided
+- the planned long-term terrain pipeline is `atlas scalar macro -> atlas structure -> atlas meso guides -> generation profile families -> local detail and smoothing -> hydrology -> material/block fill`

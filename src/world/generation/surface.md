@@ -8,6 +8,7 @@
 
 - sample per-column atlas inputs for the target chunk plus padding
 - sample or rasterize nearby atlas structure guides for the same padded footprint
+- leave room for future meso guide sampling over that same footprint
 - resolve the dominant terrain profile for each sampled column
 - evaluate the raw profile-blended `surface_y`
 - bias that raw scaffold with ridge/channel guide weights before smoothing
@@ -33,4 +34,5 @@
 - Nearby mountain spines and river paths are rasterized into per-column structure weights before smoothing, so chunk-local relief can already lean toward the atlas-owned macro skeleton.
 - `along_channel_cells` now represents downstream progress along the owning river branch, not just distance inside a single projected segment.
 - Explicit drainage `Confluence` nodes are also sampled into the guide so later hydrology can widen and deepen tributary joins.
+- A later meso layer should bias broad hill, cliff, basin, or terrace shape before final smoothing. The current implementation still relies on profile families plus structure without that extra middle-scale guide.
 - This module does not place blocks; it only prepares the shared surface scaffold used by probes and realization.

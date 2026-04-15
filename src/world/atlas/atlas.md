@@ -6,6 +6,7 @@
 - Chunk generation still owns the final carved river shape, but it can now sample confluence nodes as part of the atlas-owned drainage guide.
 - Atlas remains intentionally macro at the current scale. The current plan is to add a separate deterministic meso layer for multi-chunk local terrain identity instead of shrinking atlas cells.
 - That future meso layer should be derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
+- Atlas is now planned as a three-part guide owner: scalar macro fields, directional structure, and a future meso terrain-guide layer.
 
 ## 역할
 
@@ -80,6 +81,7 @@ write_debug_images(
 - `scale.md`
 - `tuning.md`
 - `structure.md`
+- `meso.md`
 - `atlas_fields.md`
 - `atlas_resolver.md`
 - `atlas_debug.md`

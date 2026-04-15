@@ -22,6 +22,21 @@
 - Keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns.
 - Keep probe helpers clearly separate from exact realized-chunk inspection; probes stop at surface sampling, while exact top-down previews should scan realized chunk data.
 
+## Planned Multi-Scale Model
+
+- `atlas scalar macro`
+  - climate, coastness, continent-ness, elevation tendency, wetness
+- `atlas structure`
+  - mountain-range direction, ridge skeleton, drainage direction, river topology
+- `atlas meso guides`
+  - several-chunk terrain identity such as local hill groups, escarpment bands, basins, terraces, or coastal breakup
+- `generation profile families`
+  - `DeepOcean`, `Shelf`, `Coast`, `Plain`, `Upland`, `Ridge`
+- `generation local detail`
+  - profile-local relief noise, smoothing, and small contour breakup
+- `hydrology/material fill`
+  - final river carve, water surface, sediment choice, topsoil, stone core, and block fill
+
 ## Non-Responsibilities
 
 - Owning atlas field generation itself
@@ -104,13 +119,14 @@ generation::sample_chunk_surface_lod(
 - A later revision should also insert a deterministic meso layer between atlas and micro detail so features such as hill groups, cliff bands, basins, coves, or terraces can span several chunks without requiring atlas to change identity every few chunks.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
-  2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
-  3. rasterize drainage and river segments into distance-to-channel / along-channel fields
-  4. build the raw surface scaffold from those structural fields, then smooth and locally refine it
-  5. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
-  6. enforce connected river channels with minimum wetted width/depth, richer confluence handling, and clearer trunk/tributary continuity
-  7. keep local noise as detail only, not as the source of macro ridge or river direction
-  8. add a later meso guide layer between atlas windows and profile-local detail so multi-chunk terrain can read more playfully without sacrificing macro coherence
+  2. gather the matching meso guide window for the same terrain footprint
+  3. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
+  4. rasterize drainage and river segments into distance-to-channel / along-channel fields
+  5. sample meso guides into several-chunk hill/cliff/basin biases
+  6. build the raw surface scaffold from profile families, then apply meso deformation before local smoothing
+  7. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
+  8. enforce connected river channels with minimum wetted width/depth, richer confluence handling, and clearer trunk/tributary continuity
+  9. keep local noise as detail only, not as the source of macro ridge or river direction
 - In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.
 
 ## Processing Flow
@@ -132,13 +148,15 @@ generation::sample_chunk_surface_lod(
 1. Map the target chunk to the atlas neighborhood needed for both scalar fields and structural guides.
 2. Generate or read the atlas field window plus mountain/drainage structure window.
    The structure window is built from deterministic structure regions rather than from a single globally materialized graph.
-3. Interpolate scalar atlas signals per block column.
-4. Rasterize nearby mountain spines and river paths into chunk-local directional distance fields.
-5. Build the raw surface scaffold from profile weights plus structure-aware ridge/valley terms.
-6. Smooth that surface while preserving large structural direction and derive local concavity only as a secondary refinement signal.
-7. Realize connected channels and ridge shoulders from the structural fields.
-8. Resolve per-column materials and write block ids into `ChunkData`.
-9. Return the finished chunk without mutating any live world state.
+3. Generate or read the matching meso guide window from atlas context and aligned meso regions.
+4. Interpolate scalar atlas signals per block column.
+5. Rasterize nearby mountain spines and river paths into chunk-local directional distance fields.
+6. Sample meso guides into several-chunk deformation weights and local headings.
+7. Build the raw surface scaffold from profile families, then apply meso deformation plus structure-aware ridge/valley terms.
+8. Smooth that surface while preserving large structural direction and meso readability, then derive local concavity only as a secondary refinement signal.
+9. Realize connected channels and ridge shoulders from the structural fields, while letting meso basin/terrace signals bias where broad local relief should gather.
+10. Resolve per-column materials and write block ids into `ChunkData`.
+11. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
@@ -174,4 +192,5 @@ generation::sample_chunk_surface_lod(
 - `chunk.md`
 - `registry.md`
 - `atlas/atlas.md`
+- `atlas/meso.md`
 - `jobs/jobs.md`
