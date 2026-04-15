@@ -120,6 +120,6 @@ NOT:
 - The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
 - Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.
-- For future animated voxel creatures, prebaked data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.
+- For future animated voxel creatures, precreated data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.
 - Water triangles are now renderer-split into a translucent terrain partition so semi-transparent water can render after opaque terrain without changing the app bridge DTO shape.
 - Exposed water surface height remains world-owned geometry; the renderer only shades and blends the lowered mesh it receives.

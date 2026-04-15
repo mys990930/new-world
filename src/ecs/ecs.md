@@ -79,9 +79,9 @@
   - render-facing direction for voxel creatures should quantize to 8 octants only when exporting render DTOs
   - octant switching policy, hysteresis, and pose selection stay ECS-owned rather than renderer-owned
 - chunk acquisition planning
-  - baked worlds prefer disk load through jobs
+  - created worlds prefer disk load through jobs
   - fallback worlds prefer procedural generation
-  - vertically loaded baked-world chunks that are inside the current interest set must still request meshing even when they are below or above the player's current chunk layer
+  - vertically loaded created-world chunks that are inside the current interest set must still request meshing even when they are below or above the player's current chunk layer
 - selection update
   - app provides cursor position and viewport
   - ECS uses quarter-view camera state to build the selection ray
@@ -147,8 +147,8 @@ EcsRuntime::selection_state() -> SelectionState
 
 ### Current Implementation Notes
 
-- the current minimal slice now supports both baked-world loading and procedural fallback
+- the current minimal slice now supports both created-world loading and procedural fallback
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
-- chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper baked chunks do not stay selectable-but-invisible
+- chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
 - hover front/back switching, placement preview separation, and network prediction are still future work

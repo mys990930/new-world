@@ -1,5 +1,5 @@
 pub mod atlas;
-mod baked;
+mod created;
 mod chunk;
 mod coord;
 mod core;
@@ -30,12 +30,12 @@ pub use atlas::{
     write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
-pub use baked::{
-    BAKED_WORLD_MANIFEST_FILE, BakeWorldConfig, BakedStackSummary, BakedWorldError,
-    BakedWorldManifest, BakedWorldSource, bake_world_to_directory, baked_world_chunk_path,
-    baked_world_manifest_path, detect_latest_baked_world_root, load_baked_chunk,
-    read_baked_world_manifest, save_baked_chunk, summarize_baked_stack,
-    write_baked_world_manifest,
+pub use created::{
+    CREATED_WORLD_MANIFEST_FILE, CreateWorldConfig, CreatedWorldStackSummary, CreatedWorldError,
+    CreatedWorldManifest, CreatedWorldSource, create_world_to_directory, created_world_chunk_path,
+    created_world_manifest_path, detect_latest_created_world_root, load_created_world_chunk,
+    read_created_world_manifest, save_created_world_chunk, summarize_created_world_stack,
+    write_created_world_manifest,
 };
 #[allow(unused_imports)]
 pub use chunk::{BlockFace, BlockId, ChunkData, ChunkSnapshot, ChunkWriteError};

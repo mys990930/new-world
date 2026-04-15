@@ -2,11 +2,11 @@
 
 ## Role
 
-- Share baked-world persistence helpers across `world_bake`, `world_coords`, and `chunk_preview`.
+- Share created-world persistence helpers across `world_create`, `world_coords`, and `chunk_preview`.
 
 ## Responsibilities
 
-- define the baked-world manifest schema
+- define the created-world manifest schema
 - save/load generated chunk payloads through `world::storage`
 - summarize chunk-stack relief for preview scoring
 

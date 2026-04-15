@@ -7,8 +7,8 @@ pub struct AppConfig {
     pub width: u32,
     pub height: u32,
     pub timing: TimingConfig,
-    pub preferred_baked_world_root: Option<PathBuf>,
-    pub baked_worlds_dir: Option<PathBuf>,
+    pub preferred_created_world_root: Option<PathBuf>,
+    pub created_worlds_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,10 +31,10 @@ impl Default for AppConfig {
             width: 1280,
             height: 720,
             timing: TimingConfig::default(),
-            preferred_baked_world_root: Some(PathBuf::from(
-                "target/world-bake/runtime_seed_42_cx5_cz-8_r6_v10",
+            preferred_created_world_root: Some(PathBuf::from(
+                "target/world-create/runtime_seed_42_160_-144",
             )),
-            baked_worlds_dir: Some(PathBuf::from("target/world-bake")),
+            created_worlds_dir: Some(PathBuf::from("target/world-create")),
         }
     }
 }

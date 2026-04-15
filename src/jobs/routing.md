@@ -7,7 +7,8 @@
 
 ## Responsibilities
 
-- `LoadChunk` -> baked storage load
+- `CreateWorld` -> created-world directory creation
+- `LoadChunk` -> created-world storage load
 - `GenerateChunk` -> procedural generation
 - `BuildChunkMesh` -> meshing
 - map operation success/failure into `JobResult`
@@ -49,5 +50,5 @@
 
 ## Notes
 
-- the current routing surface now covers baked chunk load, procedural generation, and meshing
-- baked chunk load is the first intentionally fallible worker route in the current runtime
+- the current routing surface now covers create-world directory creation, created-world chunk load, procedural generation, and meshing
+- create-world and created-world load routes are intentionally fallible worker paths in the current runtime

@@ -91,7 +91,7 @@ EcsRuntime::update_selection_from_world(
 EcsRuntime::selection_state() -> SelectionState
 EcsRuntime::plan_chunk_job_requests(
     world: &WorldCore,
-    baked_world: Option<&BakedWorldSource>,
+    created_world: Option<&CreatedWorldSource>,
 ) -> Vec<JobRequest>
 EcsRuntime::apply_job_result(result: &JobResult)
 EcsRuntime::visible_chunks() -> Vec<ChunkCoord>

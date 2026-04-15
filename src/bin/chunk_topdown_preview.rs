@@ -7,7 +7,7 @@ use std::sync::Arc;
 use image::{Rgb, RgbImage};
 
 use new_world::world::{
-    BakedWorldManifest, BakedWorldSource, BlockId, BlockMaterialKind, BlockRegistry,
+    CreatedWorldManifest, CreatedWorldSource, BlockId, BlockMaterialKind, BlockRegistry,
     CHUNK_EDGE_I32, ChunkCoord, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta,
     build_chunk_mesh, generate_chunk,
 };
@@ -22,7 +22,7 @@ const DEFAULT_PIXELS_PER_BLOCK: u32 = 6;
 #[derive(Debug, Clone)]
 enum PreviewSource {
     Seed(u64),
-    BakedWorld(PathBuf),
+    CreatedWorld(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let source = if args.first().map(String::as_str) == Some("--world-dir") {
         args.remove(0);
-        PreviewSource::BakedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
+        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
     } else {
         PreviewSource::Seed(parse_required::<u64>(&mut args, "seed")?)
     };
@@ -149,23 +149,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?,
     );
 
-    let (meta, baked_source) = match &source {
+    let (meta, created_world_source) = match &source {
         PreviewSource::Seed(seed) => (WorldMeta::new(*seed), None),
-        PreviewSource::BakedWorld(world_dir) => {
-            let baked_source = BakedWorldSource::open(world_dir).map_err(|error| {
+        PreviewSource::CreatedWorld(world_dir) => {
+            let created_world_source = CreatedWorldSource::open(world_dir).map_err(|error| {
                 cli_error(format!(
-                    "failed to open baked world {}: {error}",
+                    "failed to open created world {}: {error}",
                     world_dir.display()
                 ))
             })?;
-            (baked_source.manifest().world_meta(), Some(baked_source))
+            (
+                created_world_source.manifest().world_meta(),
+                Some(created_world_source),
+            )
         }
     };
 
     let requested_center = if center_explicit {
         (center_x, center_z)
-    } else if let Some(baked_source) = baked_source.as_ref() {
-        choose_baked_center(baked_source.manifest(), radius, min_y_chunk, max_y_chunk)?
+    } else if let Some(created_world_source) = created_world_source.as_ref() {
+        choose_created_world_center(
+            created_world_source.manifest(),
+            radius,
+            min_y_chunk,
+            max_y_chunk,
+        )?
     } else {
         (center_x, center_z)
     };
@@ -176,9 +184,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius));
     let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-    match baked_source.as_ref() {
+    match created_world_source.as_ref() {
         Some(source) => {
-            ensure_baked_bounds_cover_request(
+            ensure_created_world_bounds_cover_request(
                 source.manifest().min_chunk_coord(),
                 source.manifest().max_chunk_coord(),
                 center_x,
@@ -226,8 +234,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match &source {
         PreviewSource::Seed(seed) => println!("preview source: generated from seed {seed}"),
-        PreviewSource::BakedWorld(world_dir) => {
-            println!("preview source: baked world {}", world_dir.display())
+        PreviewSource::CreatedWorld(world_dir) => {
+            println!("preview source: created world {}", world_dir.display())
         }
     }
     println!("center chunk: ({center_x}, {center_z})");
@@ -753,7 +761,7 @@ fn generate_preview_chunks(
 
 fn load_preview_chunks(
     world: &mut WorldCore,
-    source: &BakedWorldSource,
+    source: &CreatedWorldSource,
     center_x: i32,
     center_z: i32,
     radius: i32,
@@ -766,7 +774,7 @@ fn load_preview_chunks(
                 let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
                 let chunk = source.load_chunk(coord).map_err(|error| {
                     cli_error(format!(
-                        "failed to load baked chunk ({}, {}, {}): {error}",
+                        "failed to load created-world chunk ({}, {}, {}): {error}",
                         coord.0, coord.1, coord.2
                     ))
                 })?;
@@ -778,7 +786,7 @@ fn load_preview_chunks(
     Ok(())
 }
 
-fn ensure_baked_bounds_cover_request(
+fn ensure_created_world_bounds_cover_request(
     min_chunk: ChunkCoord,
     max_chunk: ChunkCoord,
     center_x: i32,
@@ -797,7 +805,7 @@ fn ensure_baked_bounds_cover_request(
         || requested_max.2 > max_chunk.2
     {
         return Err(cli_error(format!(
-            "requested preview area x={}..{}, y={}..{}, z={}..{} is outside baked bounds x={}..{}, y={}..{}, z={}..{}",
+            "requested preview area x={}..{}, y={}..{}, z={}..{} is outside created-world bounds x={}..{}, y={}..{}, z={}..{}",
             requested_min.0,
             requested_max.0,
             requested_min.1,
@@ -816,8 +824,8 @@ fn ensure_baked_bounds_cover_request(
     Ok(())
 }
 
-fn choose_baked_center(
-    manifest: &BakedWorldManifest,
+fn choose_created_world_center(
+    manifest: &CreatedWorldManifest,
     radius: i32,
     min_y_chunk: i32,
     max_y_chunk: i32,
@@ -840,7 +848,7 @@ fn choose_baked_center(
     }
 
     Err(cli_error(format!(
-        "no baked preview center fits radius {} inside baked bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
+        "no created-world preview center fits radius {} inside created-world bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
         radius,
         min_chunk.0,
         max_chunk.0,
@@ -856,7 +864,7 @@ fn default_output_path(source: &PreviewSource, center_x: i32, center_z: i32, rad
         PreviewSource::Seed(seed) => PathBuf::from(format!(
             "target/chunk-topdown-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}.png"
         )),
-        PreviewSource::BakedWorld(world_dir) => {
+        PreviewSource::CreatedWorld(world_dir) => {
             world_dir.join(format!("topdown_cx{center_x}_cz{center_z}_r{radius}.png"))
         }
     }

@@ -12,7 +12,7 @@
 - `platform`
 - `ecs`
 - `world`
-- `baked_world`
+- `created_world`
 - `jobs`
 - `renderer`
 - `ui`
@@ -43,7 +43,7 @@
 ## Invariants
 
 - `frame_dt` is frame cadence state, not fixed-tick state
-- `baked_world` holds runtime metadata about the currently selected auto-detected baked world, if one exists
+- `created_world` holds runtime metadata about the currently selected auto-detected created world, if one exists
 
 ## Non-Responsibilities
 
@@ -60,5 +60,5 @@
 ## Notes
 
 - the current `GameApp` always owns exactly one active `Platform`, `EcsRuntime`, `WorldCore`, `JobSystem`, and `Renderer`
-- baked-world runtime ownership lives in app state because `app` decides whether world acquisition should load from disk or fall back to generation
+- created-world runtime ownership lives in app state because `app` decides whether world acquisition should load from disk or fall back to generation
 - top-level screen mode and lightweight overlay visibility are also app-owned because they should not force ECS/world dependencies

@@ -87,10 +87,10 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 - `query.md`
 - `generation.md`
 - `storage.md`
-- `baked.md`
+- `created.md`
 - `registry.md`
 
 ## Notes
 
 - `loaded_chunk_bounds()` exists specifically to support app/ECS helpers such as safe spawn placement without leaking the raw chunk map
-- baked-world loading still inserts chunks through `WorldCore::insert_chunk(...)`; `world` owns the in-memory source of truth regardless of how a chunk was acquired
+- created-world loading still inserts chunks through `WorldCore::insert_chunk(...)`; `world` owns the in-memory source of truth regardless of how a chunk was acquired

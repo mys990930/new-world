@@ -11,11 +11,11 @@ use new_world::world::{
     save_chunk,
 };
 
-pub const WORLD_BAKE_MANIFEST_FILE: &str = "manifest.toml";
-const WORLD_BAKE_FORMAT_VERSION: u32 = 1;
+pub const WORLD_CREATE_MANIFEST_FILE: &str = "manifest.toml";
+const WORLD_CREATE_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BakedWorldManifest {
+pub struct CreatedWorldManifest {
     pub format_version: u32,
     pub seed: u64,
     pub generator_version: u32,
@@ -23,10 +23,10 @@ pub struct BakedWorldManifest {
     pub min_chunk: [i32; 3],
     pub max_chunk: [i32; 3],
     pub default_preview_center: [i32; 2],
-    pub stacks: Vec<BakedStackSummary>,
+    pub stacks: Vec<CreatedWorldStackSummary>,
 }
 
-impl BakedWorldManifest {
+impl CreatedWorldManifest {
     pub fn new(
         seed: u64,
         generator_version: u32,
@@ -34,10 +34,10 @@ impl BakedWorldManifest {
         min_chunk: ChunkCoord,
         max_chunk: ChunkCoord,
         default_preview_center: [i32; 2],
-        stacks: Vec<BakedStackSummary>,
+        stacks: Vec<CreatedWorldStackSummary>,
     ) -> Self {
         Self {
-            format_version: WORLD_BAKE_FORMAT_VERSION,
+            format_version: WORLD_CREATE_FORMAT_VERSION,
             seed,
             generator_version,
             save_format_version,
@@ -62,7 +62,7 @@ impl BakedWorldManifest {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct BakedStackSummary {
+pub struct CreatedWorldStackSummary {
     pub center_x: i32,
     pub center_z: i32,
     pub relief_min_y: Option<i32>,
@@ -72,19 +72,19 @@ pub struct BakedStackSummary {
     pub score: i64,
 }
 
-pub fn write_manifest(root: &Path, manifest: &BakedWorldManifest) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_manifest(root: &Path, manifest: &CreatedWorldManifest) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(root)?;
     let text = toml::to_string_pretty(manifest)?;
     fs::write(manifest_path(root), text)?;
     Ok(())
 }
 
-pub fn read_manifest(root: &Path) -> Result<BakedWorldManifest, Box<dyn std::error::Error>> {
+pub fn read_manifest(root: &Path) -> Result<CreatedWorldManifest, Box<dyn std::error::Error>> {
     let text = fs::read_to_string(manifest_path(root))?;
-    let manifest = toml::from_str::<BakedWorldManifest>(&text)?;
-    if manifest.format_version != WORLD_BAKE_FORMAT_VERSION {
+    let manifest = toml::from_str::<CreatedWorldManifest>(&text)?;
+    if manifest.format_version != WORLD_CREATE_FORMAT_VERSION {
         return Err(format!(
-            "unsupported baked world manifest version: {}",
+            "unsupported created world manifest version: {}",
             manifest.format_version
         )
         .into());
@@ -129,10 +129,10 @@ pub fn chunk_path(root: &Path, coord: ChunkCoord) -> PathBuf {
 }
 
 pub fn manifest_path(root: &Path) -> PathBuf {
-    root.join(WORLD_BAKE_MANIFEST_FILE)
+    root.join(WORLD_CREATE_MANIFEST_FILE)
 }
 
-pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> BakedStackSummary {
+pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> CreatedWorldStackSummary {
     let min_world_y = min_chunk_y * CHUNK_EDGE_I32;
     let max_world_y = (max_chunk_y + 1) * CHUNK_EDGE_I32 - 1;
 
@@ -175,7 +175,7 @@ pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chun
         + i64::from(relief_range) * 1_000
         + i64::from(relief_max_y.unwrap_or(min_world_y));
 
-    BakedStackSummary {
+    CreatedWorldStackSummary {
         center_x,
         center_z,
         relief_min_y,

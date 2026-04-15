@@ -4,16 +4,15 @@ use super::{AppConfig, AppTimingState, AppUiState, GameApp};
 use crate::ecs::{
     EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS,
 };
-use crate::jobs::{JobConfig, JobSystem};
+use crate::jobs::{JobConfig, JobRequest, JobSystem};
 use crate::platform::{Platform, PlatformConfig};
 use crate::renderer::{
     RenderConfig, RenderTextureArraySource, RenderTextureSource, RenderTextureTile, Renderer,
     RenderUiTextureSource, StubSurfaceTarget,
 };
 use crate::world::{
-    BakedWorldSource, BakeWorldConfig, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord,
-    TextureTileSource, WorldCore, WorldMeta, bake_world_to_directory,
-    detect_latest_baked_world_root, generate_chunk,
+    CreatedWorldSource, CreateWorldConfig, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord,
+    TextureTileSource, WorldCore, WorldMeta, detect_latest_created_world_root, generate_chunk,
 };
 
 impl GameApp {
@@ -40,9 +39,9 @@ impl GameApp {
             eprintln!("[app] failed to load UI atlas: {:?}", error);
         }
         let mut ecs = EcsRuntime::new();
-        let baked_world = open_baked_world(&config);
-        let mut world = WorldCore::new(initial_world_meta(baked_world.as_ref()), block_registry);
-        let spawn_anchor = preload_spawn_neighborhood(&mut world, baked_world.as_ref());
+        let created_world = open_created_world(&config);
+        let mut world = WorldCore::new(initial_world_meta(created_world.as_ref()), block_registry);
+        let spawn_anchor = preload_spawn_neighborhood(&mut world, created_world.as_ref());
         ecs.spawn_default_player();
         if let Some(anchor) = spawn_anchor {
             if !ecs.place_local_player_on_surface(&world, anchor) {
@@ -60,7 +59,7 @@ impl GameApp {
             platform,
             ecs,
             world,
-            baked_world,
+            created_world,
             jobs,
             renderer,
             ui: AppUiState::default(),
@@ -68,24 +67,21 @@ impl GameApp {
         }
     }
 
-    pub(crate) fn bake_world_from_ui(
+    pub(crate) fn request_create_world_from_ui(
         &mut self,
         seed: u64,
         center_x: i32,
         center_z: i32,
         radius: i32,
     ) -> Result<PathBuf, String> {
-        let base_dir = self
-            .config
-            .baked_worlds_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("target/world-bake"));
-        let meta = WorldMeta::new(seed);
-        let root = base_dir.join(format!(
-            "runtime_seed_{seed}_cx{center_x}_cz{center_z}_r{radius}_v{}",
-            meta.generator_version
-        ));
-        let config = BakeWorldConfig {
+        let root = create_world_root_path(
+            self.config.created_worlds_dir.as_deref(),
+            seed,
+            center_x,
+            center_z,
+            radius,
+        );
+        let config = CreateWorldConfig {
             seed,
             center_x,
             center_z,
@@ -94,19 +90,24 @@ impl GameApp {
             max_y_chunk: 3,
         };
 
-        bake_world_to_directory(root.as_path(), config, self.world.block_registry())
-            .map_err(|error| error.to_string())?;
-        println!("[app] baked world: {}", root.display());
+        self.jobs
+            .submit(JobRequest::CreateWorld {
+                root: root.clone(),
+                config,
+                registry: self.world.block_registry_handle(),
+            })
+            .map_err(|error| format!("failed to queue create-world job: {error:?}"))?;
+        println!("[app] queued create world: {}", root.display());
         Ok(root)
     }
 
-    pub(crate) fn load_baked_world_from_ui(
+    pub(crate) fn load_created_world_from_ui(
         &mut self,
         root: &Path,
         spawn_chunk_x: i32,
         spawn_chunk_z: i32,
     ) -> Result<(), String> {
-        let source = BakedWorldSource::open(root).map_err(|error| error.to_string())?;
+        let source = CreatedWorldSource::open(root).map_err(|error| error.to_string())?;
         let min = source.manifest().min_chunk_coord();
         let max = source.manifest().max_chunk_coord();
         let preview_chunk = ChunkCoord(
@@ -116,7 +117,7 @@ impl GameApp {
         );
 
         let mut world = WorldCore::new(source.manifest().world_meta(), self.world.block_registry_handle());
-        for coord in preload_baked_column_coords(&source, preview_chunk) {
+        for coord in preload_created_column_coords(&source, preview_chunk) {
             let chunk = source
                 .load_chunk(coord)
                 .map_err(|error| format!("failed to load {:?}: {}", coord, error))?;
@@ -137,10 +138,10 @@ impl GameApp {
         self.renderer.clear_chunk_meshes();
         self.ecs = ecs;
         self.world = world;
-        self.baked_world = Some(source);
+        self.created_world = Some(source);
         self.jobs = JobSystem::new(JobConfig::default());
         println!(
-            "[app] loaded baked world {} at chunk {} {}",
+            "[app] loaded created world {} at chunk {} {}",
             root.display(),
             preview_chunk.0,
             preview_chunk.2
@@ -167,20 +168,20 @@ fn block_registry_to_render_textures(registry: &BlockRegistry) -> RenderTextureA
     }
 }
 
-fn open_baked_world(config: &AppConfig) -> Option<BakedWorldSource> {
-    if let Some(root) = config.preferred_baked_world_root.as_deref() {
-        if let Some(source) = try_open_baked_world_root(root, "preferred") {
+fn open_created_world(config: &AppConfig) -> Option<CreatedWorldSource> {
+    if let Some(root) = config.preferred_created_world_root.as_deref() {
+        if let Some(source) = try_open_created_world_root(root, "preferred") {
             return Some(source);
         }
     }
 
-    let Some(base_dir) = config.baked_worlds_dir.as_deref() else {
+    let Some(base_dir) = config.created_worlds_dir.as_deref() else {
         return None;
     };
 
-    let Ok(root) = detect_latest_baked_world_root(base_dir) else {
+    let Ok(root) = detect_latest_created_world_root(base_dir) else {
         eprintln!(
-            "[app] failed to inspect baked worlds directory {}",
+            "[app] failed to inspect created worlds directory {}",
             base_dir.display()
         );
         return None;
@@ -189,18 +190,18 @@ fn open_baked_world(config: &AppConfig) -> Option<BakedWorldSource> {
         return None;
     };
 
-    try_open_baked_world_root(&root, "detected")
+    try_open_created_world_root(&root, "detected")
 }
 
-fn try_open_baked_world_root(root: &Path, label: &str) -> Option<BakedWorldSource> {
-    match BakedWorldSource::open(root) {
+fn try_open_created_world_root(root: &Path, label: &str) -> Option<CreatedWorldSource> {
+    match CreatedWorldSource::open(root) {
         Ok(source) => {
-            println!("[app] using {label} baked world: {}", root.display());
+            println!("[app] using {label} created world: {}", root.display());
             Some(source)
         }
         Err(error) => {
             eprintln!(
-                "[app] failed to open {label} baked world {}: {}",
+                "[app] failed to open {label} created world {}: {}",
                 root.display(),
                 error
             );
@@ -209,22 +210,22 @@ fn try_open_baked_world_root(root: &Path, label: &str) -> Option<BakedWorldSourc
     }
 }
 
-fn initial_world_meta(baked_world: Option<&BakedWorldSource>) -> WorldMeta {
-    baked_world
+fn initial_world_meta(created_world: Option<&CreatedWorldSource>) -> WorldMeta {
+    created_world
         .map(|source| source.manifest().world_meta())
         .unwrap_or_else(|| WorldMeta::new(7))
 }
 
 fn preload_spawn_neighborhood(
     world: &mut WorldCore,
-    baked_world: Option<&BakedWorldSource>,
+    created_world: Option<&CreatedWorldSource>,
 ) -> Option<[f32; 2]> {
-    if let Some(source) = baked_world {
+    if let Some(source) = created_world {
         let preview = source.default_preview_chunk();
-        for coord in preload_baked_column_coords(source, preview) {
+        for coord in preload_created_column_coords(source, preview) {
             match source.load_chunk(coord) {
                 Ok(chunk) => world.insert_chunk(coord, chunk),
-                Err(error) => eprintln!("[app] failed to preload baked chunk {:?}: {}", coord, error),
+                Err(error) => eprintln!("[app] failed to preload created-world chunk {:?}: {}", coord, error),
             }
         }
 
@@ -240,12 +241,12 @@ fn preload_spawn_neighborhood(
     Some(chunk_center_anchor(preview))
 }
 
-fn preload_baked_column_coords(
-    baked_world: &BakedWorldSource,
+fn preload_created_column_coords(
+    created_world: &CreatedWorldSource,
     preview_chunk: ChunkCoord,
 ) -> Vec<ChunkCoord> {
-    let min = baked_world.manifest().min_chunk_coord();
-    let max = baked_world.manifest().max_chunk_coord();
+    let min = created_world.manifest().min_chunk_coord();
+    let max = created_world.manifest().max_chunk_coord();
     let mut coords = Vec::new();
     let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
 
@@ -253,7 +254,7 @@ fn preload_baked_column_coords(
         for x in (preview_chunk.0 - radius)..=(preview_chunk.0 + radius) {
             for y in min.1..=max.1 {
                 let coord = ChunkCoord(x, y, z);
-                if baked_world.contains_chunk(coord) {
+                if created_world.contains_chunk(coord) {
                     coords.push(coord);
                 }
             }
@@ -286,4 +287,21 @@ fn ui_atlas_path() -> PathBuf {
         .join("assets")
         .join("ui")
         .join("pixel_ui_atlas.png")
+}
+
+fn create_world_root_path(
+    base_dir: Option<&Path>,
+    seed: u64,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+) -> PathBuf {
+    let base_dir = base_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("target/world-create"));
+    let meta = WorldMeta::new(seed);
+    base_dir.join(format!(
+        "runtime_seed_{seed}_cx{center_x}_cz{center_z}_r{radius}_v{}",
+        meta.generator_version
+    ))
 }

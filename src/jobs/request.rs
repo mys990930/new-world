@@ -1,10 +1,17 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::world::{BlockRegistry, ChunkCoord, ChunkSnapshot, NeighborChunks, WorldMeta};
+use crate::world::{
+    BlockRegistry, ChunkCoord, ChunkSnapshot, CreateWorldConfig, NeighborChunks, WorldMeta,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobRequest {
+    CreateWorld {
+        root: PathBuf,
+        config: CreateWorldConfig,
+        registry: Arc<BlockRegistry>,
+    },
     LoadChunk {
         root: PathBuf,
         coord: ChunkCoord,
@@ -21,8 +28,9 @@ pub enum JobRequest {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum JobCoalesceKey {
+    CreateWorld(PathBuf),
     LoadChunk(ChunkCoord),
     GenerateChunk(ChunkCoord),
     BuildChunkMesh(ChunkCoord),
@@ -31,6 +39,9 @@ pub(crate) enum JobCoalesceKey {
 impl JobRequest {
     pub fn coord(&self) -> ChunkCoord {
         match self {
+            Self::CreateWorld { .. } => {
+                panic!("CreateWorld request does not map to a single chunk coordinate")
+            }
             Self::LoadChunk { coord, .. } | Self::GenerateChunk { coord, .. } => *coord,
             Self::BuildChunkMesh { center, .. } => center.coord(),
         }
@@ -38,6 +49,7 @@ impl JobRequest {
 
     pub(crate) fn coalesce_key(&self) -> JobCoalesceKey {
         match self {
+            Self::CreateWorld { root, .. } => JobCoalesceKey::CreateWorld(root.clone()),
             Self::LoadChunk { coord, .. } => JobCoalesceKey::LoadChunk(*coord),
             Self::GenerateChunk { coord, .. } => JobCoalesceKey::GenerateChunk(*coord),
             Self::BuildChunkMesh { center, .. } => JobCoalesceKey::BuildChunkMesh(center.coord()),

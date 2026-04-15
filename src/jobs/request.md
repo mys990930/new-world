@@ -8,17 +8,20 @@
 ## Owned Data
 
 ### JobRequest
+- `CreateWorld { root, config, registry }`
 - `LoadChunk { root, coord }`
 - `GenerateChunk { coord, meta, registry }`
 - `BuildChunkMesh { center, neighbors, registry }`
 
 ### Request identity / coalesce key
-- chunk-coordinate-based dedupe identity
+- path-based dedupe identity for `CreateWorld`
+- chunk-coordinate-based dedupe identity for chunk-scoped work
 
 ## Inputs
 
 - `ChunkCoord`
-- baked-world root path
+- `CreateWorldConfig`
+- created-world root path
 - immutable `ChunkSnapshot`
 - `NeighborChunks`
 - `WorldMeta`
@@ -53,9 +56,10 @@
 - `queue.md`
 - `routing.md`
 - `../ecs/jobs.md`
-- `../world/baked.md`
+- `../world/created.md`
 
 ## Notes
 
-- the current chunk acquisition path now distinguishes baked load from procedural generation
-- coalescing still keys on chunk coordinate because the current runtime owns only one active world session
+- the current chunk acquisition path now distinguishes created-world load from procedural generation
+- create-world requests coalesce on destination root path so duplicate button presses do not enqueue duplicate directory creation
+- chunk-scoped coalescing still keys on chunk coordinate because the current runtime owns only one active world session

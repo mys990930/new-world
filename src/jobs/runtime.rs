@@ -118,6 +118,7 @@ impl Drop for JobSystem {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -246,6 +247,51 @@ mod tests {
         assert_ne!(first.coord(), second.coord());
 
         jobs.shutdown();
+    }
+
+    #[test]
+    fn create_world_job_produces_manifest_result() {
+        let mut jobs = JobSystem::new(JobConfig {
+            worker_count: 1,
+            max_pending_requests: Some(4),
+        });
+        let root = std::env::temp_dir().join(format!(
+            "new-world-create-job-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+
+        let request = JobRequest::CreateWorld {
+            root: root.clone(),
+            config: crate::world::CreateWorldConfig {
+                seed: 42,
+                center_x: 0,
+                center_z: 0,
+                radius: 1,
+                min_y_chunk: -1,
+                max_y_chunk: 1,
+            },
+            registry: test_registry(),
+        };
+
+        assert_eq!(jobs.submit(request).unwrap(), JobEnqueueOutcome::Enqueued);
+
+        let result = wait_for_single_result(&mut jobs);
+        match result {
+            JobResult::WorldCreated { root: found, manifest } => {
+                assert_eq!(found, root);
+                assert_eq!(manifest.seed, 42);
+                assert!(found.exists());
+                assert!(found.join("manifest.toml").exists());
+            }
+            other => panic!("expected created world result, got {other:?}"),
+        }
+
+        jobs.shutdown();
+        let _ = fs::remove_dir_all(root);
     }
 
     fn wait_for_single_result(jobs: &mut JobSystem) -> JobResult {

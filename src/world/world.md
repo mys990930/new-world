@@ -22,7 +22,7 @@
 - block visual-material lookup
 - block exposed-surface-height lookup for meshing
 - save/load byte codec
-- baked world manifest / baked chunk load support
+- created world manifest / created-world chunk load support
 - meshing input provision
 - block-grid raycast queries
 
@@ -54,8 +54,8 @@
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
 - `NeighborChunks`
 - `Ray3`, `RaycastHit`
-- `BakedWorldManifest`, `BakedStackSummary`, `BakedWorldSource`
-- `BakeWorldConfig`
+- `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
+- `CreateWorldConfig`
 - `WorldCore`
 
 ### Public Interface
@@ -77,13 +77,13 @@ WorldCore::block_registry(&self) -> &BlockRegistry
 WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
 WorldCore::loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)>
 
-read_baked_world_manifest(root: &Path) -> Result<BakedWorldManifest, BakedWorldError>
-load_baked_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, BakedWorldError>
-detect_latest_baked_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>>
-write_baked_world_manifest(root: &Path, manifest: &BakedWorldManifest) -> Result<(), BakedWorldError>
-save_baked_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, BakedWorldError>
-summarize_baked_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> BakedStackSummary
-bake_world_to_directory(root: &Path, config: BakeWorldConfig, block_registry: &BlockRegistry) -> Result<BakedWorldManifest, BakedWorldError>
+read_created_world_manifest(root: &Path) -> Result<CreatedWorldManifest, CreatedWorldError>
+load_created_world_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, CreatedWorldError>
+detect_latest_created_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>>
+write_created_world_manifest(root: &Path, manifest: &CreatedWorldManifest) -> Result<(), CreatedWorldError>
+save_created_world_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, CreatedWorldError>
+summarize_created_world_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> CreatedWorldStackSummary
+create_world_to_directory(root: &Path, config: CreateWorldConfig, block_registry: &BlockRegistry) -> Result<CreatedWorldManifest, CreatedWorldError>
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
@@ -105,7 +105,7 @@ NOT:
 1. block and chunk mutations only happen through world-owned APIs
 2. raw chunk storage keeps ids while gameplay/render meaning is interpreted through `BlockRegistry`
 3. world meshing produces CPU-side data only
-4. baked-world helpers may load or write chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
+4. created-world helpers may load or write chunk bytes, but in-memory chunk ownership still belongs to `WorldCore`
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order
@@ -123,13 +123,13 @@ NOT:
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
 - `storage.md`: raw chunk byte serialization contract
-- `baked.md`: baked manifest / baked runtime load contract
+- `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
 
 ### Current Implementation Notes
 
 - the default block registry is loaded from `assets/blocks/index.toml`
-- chunk acquisition can now come from either baked disk load or procedural generation before converging back into the same in-memory `WorldCore`
+- chunk acquisition can now come from either created-world disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain structure is currently still scalar-first in code, but the next generation revision is expected to move mountain-chain and drainage direction ownership into atlas before chunk realization

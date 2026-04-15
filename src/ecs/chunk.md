@@ -18,7 +18,7 @@
 ## Inputs
 
 - local player position
-- current baked-world availability
+- current created-world availability
 - current world chunk presence
 - jobs results
 
@@ -33,11 +33,11 @@
 
 - player movement determines the center interest chunk
 - the current minimal implementation expands horizontal interest to a `5x5` neighborhood around the player chunk
-- when a baked world is active, interest expands that `5x5` neighborhood across the baked vertical chunk range so collision has loaded columns to work with
-- if an interesting chunk is missing and the baked manifest contains it, ECS requests `LoadChunk`
+- when a created world is active, interest expands that `5x5` neighborhood across the created-world vertical chunk range so collision has loaded columns to work with
+- if an interesting chunk is missing and the created-world manifest contains it, ECS requests `LoadChunk`
 - otherwise ECS falls back to `GenerateChunk`
 - loaded but non-render-ready interesting chunks request meshing
-- when baked-world interest spans multiple `y` chunk layers, vertically loaded chunks must also become render-ready so lower terrain can render instead of only remaining selectable
+- when created-world interest spans multiple `y` chunk layers, vertically loaded chunks must also become render-ready so lower terrain can render instead of only remaining selectable
 
 ## Invariants
 

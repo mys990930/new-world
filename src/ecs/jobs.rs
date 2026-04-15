@@ -1,5 +1,5 @@
 use crate::jobs::{JobRequest, JobResult};
-use crate::world::{BakedWorldSource, ChunkCoord, WorldBlockCoord, WorldCore};
+use crate::world::{CreatedWorldSource, ChunkCoord, WorldBlockCoord, WorldCore};
 
 use super::{ChunkStates, EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 
@@ -7,10 +7,10 @@ impl EcsRuntime {
     pub fn plan_chunk_job_requests(
         &mut self,
         world: &WorldCore,
-        baked_world: Option<&BakedWorldSource>,
+        created_world: Option<&CreatedWorldSource>,
     ) -> Vec<JobRequest> {
         let target_chunk = self.focused_player_chunk();
-        let interest = interest_coords(target_chunk, baked_world);
+        let interest = interest_coords(target_chunk, created_world);
         let mut chunk_states = self.world_mut().resource_mut::<ChunkStates>();
         chunk_states.set_interest(interest.clone());
         sync_loaded_chunk_states(&mut chunk_states, world);
@@ -27,9 +27,9 @@ impl EcsRuntime {
                 continue;
             }
 
-            if baked_world.is_some_and(|source| source.contains_chunk(*coord)) {
-                let root = baked_world
-                    .expect("contains_chunk check must imply baked world exists")
+            if created_world.is_some_and(|source| source.contains_chunk(*coord)) {
+                let root = created_world
+                    .expect("contains_chunk check must imply created world exists")
                     .root()
                     .to_path_buf();
                 requests.push(JobRequest::LoadChunk { root, coord: *coord });
@@ -71,7 +71,9 @@ impl EcsRuntime {
                 chunk_states.mesh_requested.remove(coord);
                 chunk_states.render_ready.insert(*coord);
             }
+            JobResult::WorldCreated { .. } => {}
             JobResult::JobFailed { request, .. } => match request {
+                JobRequest::CreateWorld { .. } => {}
                 JobRequest::LoadChunk { coord, .. } => {
                     chunk_states.load_requested.remove(coord);
                 }
@@ -148,14 +150,14 @@ fn enqueue_mesh_requests_for_interest(
 
 fn interest_coords(
     target_chunk: ChunkCoord,
-    baked_world: Option<&BakedWorldSource>,
+    created_world: Option<&CreatedWorldSource>,
 ) -> Vec<ChunkCoord> {
     let mut coords = Vec::new();
     let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
 
     for z in (target_chunk.2 - radius)..=(target_chunk.2 + radius) {
         for x in (target_chunk.0 - radius)..=(target_chunk.0 + radius) {
-            if let Some(source) = baked_world {
+            if let Some(source) = created_world {
                 let min = source.manifest().min_chunk_coord();
                 let max = source.manifest().max_chunk_coord();
                 for y in min.1..=max.1 {

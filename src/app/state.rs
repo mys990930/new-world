@@ -5,7 +5,7 @@ use crate::ecs::EcsRuntime;
 use crate::jobs::JobSystem;
 use crate::platform::Platform;
 use crate::renderer::Renderer;
-use crate::world::{BakedWorldSource, WorldCore};
+use crate::world::{CreatedWorldSource, WorldCore};
 
 use super::AppUiState;
 
@@ -14,7 +14,7 @@ pub struct GameApp {
     pub platform: Platform,
     pub ecs: EcsRuntime,
     pub world: WorldCore,
-    pub baked_world: Option<BakedWorldSource>,
+    pub created_world: Option<CreatedWorldSource>,
     pub jobs: JobSystem,
     pub renderer: Renderer,
     pub ui: AppUiState,

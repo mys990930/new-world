@@ -12,11 +12,11 @@ use super::registry::BlockRegistry;
 use super::storage::{load_chunk, save_chunk};
 use super::{WorldBlockCoord, WorldCore};
 
-pub const BAKED_WORLD_MANIFEST_FILE: &str = "manifest.toml";
-const BAKED_WORLD_FORMAT_VERSION: u32 = 1;
+pub const CREATED_WORLD_MANIFEST_FILE: &str = "manifest.toml";
+const CREATED_WORLD_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BakedWorldManifest {
+pub struct CreatedWorldManifest {
     pub format_version: u32,
     pub seed: u64,
     pub generator_version: u32,
@@ -24,10 +24,10 @@ pub struct BakedWorldManifest {
     pub min_chunk: [i32; 3],
     pub max_chunk: [i32; 3],
     pub default_preview_center: [i32; 2],
-    pub stacks: Vec<BakedStackSummary>,
+    pub stacks: Vec<CreatedWorldStackSummary>,
 }
 
-impl BakedWorldManifest {
+impl CreatedWorldManifest {
     pub fn new(
         seed: u64,
         generator_version: u32,
@@ -35,10 +35,10 @@ impl BakedWorldManifest {
         min_chunk: ChunkCoord,
         max_chunk: ChunkCoord,
         default_preview_center: [i32; 2],
-        stacks: Vec<BakedStackSummary>,
+        stacks: Vec<CreatedWorldStackSummary>,
     ) -> Self {
         Self {
-            format_version: BAKED_WORLD_FORMAT_VERSION,
+            format_version: CREATED_WORLD_FORMAT_VERSION,
             seed,
             generator_version,
             save_format_version,
@@ -83,7 +83,7 @@ impl BakedWorldManifest {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BakedStackSummary {
+pub struct CreatedWorldStackSummary {
     pub center_x: i32,
     pub center_z: i32,
     pub relief_min_y: Option<i32>,
@@ -94,15 +94,15 @@ pub struct BakedStackSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BakedWorldSource {
+pub struct CreatedWorldSource {
     root: PathBuf,
-    manifest: BakedWorldManifest,
+    manifest: CreatedWorldManifest,
 }
 
-impl BakedWorldSource {
-    pub fn open(root: impl AsRef<Path>) -> Result<Self, BakedWorldError> {
+impl CreatedWorldSource {
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, CreatedWorldError> {
         let root = root.as_ref().to_path_buf();
-        let manifest = read_baked_world_manifest(&root)?;
+        let manifest = read_created_world_manifest(&root)?;
         Ok(Self { root, manifest })
     }
 
@@ -110,7 +110,7 @@ impl BakedWorldSource {
         self.root.as_path()
     }
 
-    pub fn manifest(&self) -> &BakedWorldManifest {
+    pub fn manifest(&self) -> &CreatedWorldManifest {
         &self.manifest
     }
 
@@ -122,14 +122,14 @@ impl BakedWorldSource {
         self.manifest.default_preview_chunk()
     }
 
-    pub fn load_chunk(&self, coord: ChunkCoord) -> Result<ChunkData, BakedWorldError> {
-        load_baked_chunk(self.root(), coord)
+    pub fn load_chunk(&self, coord: ChunkCoord) -> Result<ChunkData, CreatedWorldError> {
+        load_created_world_chunk(self.root(), coord)
     }
 }
 
 #[derive(Debug)]
-pub enum BakedWorldError {
-    InvalidBakeConfig {
+pub enum CreatedWorldError {
+    InvalidCreateWorldConfig {
         path: PathBuf,
         message: String,
     },
@@ -179,20 +179,20 @@ pub enum BakedWorldError {
     },
 }
 
-pub fn read_baked_world_manifest(root: &Path) -> Result<BakedWorldManifest, BakedWorldError> {
-    let path = baked_world_manifest_path(root);
-    let text = fs::read_to_string(&path).map_err(|source| BakedWorldError::ReadManifest {
+pub fn read_created_world_manifest(root: &Path) -> Result<CreatedWorldManifest, CreatedWorldError> {
+    let path = created_world_manifest_path(root);
+    let text = fs::read_to_string(&path).map_err(|source| CreatedWorldError::ReadManifest {
         path: path.clone(),
         source,
     })?;
-    let manifest = toml::from_str::<BakedWorldManifest>(&text).map_err(|source| {
-        BakedWorldError::ParseManifest {
+    let manifest = toml::from_str::<CreatedWorldManifest>(&text).map_err(|source| {
+        CreatedWorldError::ParseManifest {
             path: path.clone(),
             source,
         }
     })?;
-    if manifest.format_version != BAKED_WORLD_FORMAT_VERSION {
-        return Err(BakedWorldError::UnsupportedFormatVersion {
+    if manifest.format_version != CREATED_WORLD_FORMAT_VERSION {
+        return Err(CreatedWorldError::UnsupportedFormatVersion {
             path,
             found: manifest.format_version,
         });
@@ -200,61 +200,61 @@ pub fn read_baked_world_manifest(root: &Path) -> Result<BakedWorldManifest, Bake
     Ok(manifest)
 }
 
-pub fn load_baked_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, BakedWorldError> {
-    let path = baked_world_chunk_path(root, coord);
-    let bytes = fs::read(&path).map_err(|source| BakedWorldError::ReadChunk {
+pub fn load_created_world_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, CreatedWorldError> {
+    let path = created_world_chunk_path(root, coord);
+    let bytes = fs::read(&path).map_err(|source| CreatedWorldError::ReadChunk {
         path: path.clone(),
         source,
     })?;
-    load_chunk(&bytes).map_err(|source| BakedWorldError::DecodeChunk { path, source })
+    load_chunk(&bytes).map_err(|source| CreatedWorldError::DecodeChunk { path, source })
 }
 
-pub fn write_baked_world_manifest(
+pub fn write_created_world_manifest(
     root: &Path,
-    manifest: &BakedWorldManifest,
-) -> Result<(), BakedWorldError> {
-    fs::create_dir_all(root).map_err(|source| BakedWorldError::CreateDirectory {
+    manifest: &CreatedWorldManifest,
+) -> Result<(), CreatedWorldError> {
+    fs::create_dir_all(root).map_err(|source| CreatedWorldError::CreateDirectory {
         path: root.to_path_buf(),
         source,
     })?;
-    let path = baked_world_manifest_path(root);
-    let text = toml::to_string_pretty(manifest).map_err(|source| BakedWorldError::SerializeManifest {
+    let path = created_world_manifest_path(root);
+    let text = toml::to_string_pretty(manifest).map_err(|source| CreatedWorldError::SerializeManifest {
         path: path.clone(),
         source,
     })?;
-    fs::write(&path, text).map_err(|source| BakedWorldError::WriteManifest {
-        path: baked_world_manifest_path(root),
+    fs::write(&path, text).map_err(|source| CreatedWorldError::WriteManifest {
+        path: created_world_manifest_path(root),
         source,
     })
 }
 
-pub fn save_baked_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, BakedWorldError> {
-    let path = baked_world_chunk_path(root, chunk.coord());
+pub fn save_created_world_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, CreatedWorldError> {
+    let path = created_world_chunk_path(root, chunk.coord());
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| BakedWorldError::CreateDirectory {
+        fs::create_dir_all(parent).map_err(|source| CreatedWorldError::CreateDirectory {
             path: parent.to_path_buf(),
             source,
         })?;
     }
 
-    let bytes = save_chunk(&chunk.snapshot()).map_err(|source| BakedWorldError::EncodeChunk {
+    let bytes = save_chunk(&chunk.snapshot()).map_err(|source| CreatedWorldError::EncodeChunk {
         path: path.clone(),
         source,
     })?;
-    fs::write(&path, bytes).map_err(|source| BakedWorldError::WriteChunk {
+    fs::write(&path, bytes).map_err(|source| CreatedWorldError::WriteChunk {
         path: path.clone(),
         source,
     })?;
     Ok(path)
 }
 
-pub fn summarize_baked_stack(
+pub fn summarize_created_world_stack(
     world: &WorldCore,
     center_x: i32,
     center_z: i32,
     min_chunk_y: i32,
     max_chunk_y: i32,
-) -> BakedStackSummary {
+) -> CreatedWorldStackSummary {
     let min_world_y = min_chunk_y * CHUNK_EDGE_I32;
     let max_world_y = (max_chunk_y + 1) * CHUNK_EDGE_I32 - 1;
 
@@ -297,7 +297,7 @@ pub fn summarize_baked_stack(
         + i64::from(relief_range) * 1_000
         + i64::from(relief_max_y.unwrap_or(min_world_y));
 
-    BakedStackSummary {
+    CreatedWorldStackSummary {
         center_x,
         center_z,
         relief_min_y,
@@ -309,7 +309,7 @@ pub fn summarize_baked_stack(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BakeWorldConfig {
+pub struct CreateWorldConfig {
     pub seed: u64,
     pub center_x: i32,
     pub center_z: i32,
@@ -318,7 +318,7 @@ pub struct BakeWorldConfig {
     pub max_y_chunk: i32,
 }
 
-impl Default for BakeWorldConfig {
+impl Default for CreateWorldConfig {
     fn default() -> Self {
         Self {
             seed: 42,
@@ -331,16 +331,16 @@ impl Default for BakeWorldConfig {
     }
 }
 
-pub fn bake_world_to_directory(
+pub fn create_world_to_directory(
     root: &Path,
-    config: BakeWorldConfig,
+    config: CreateWorldConfig,
     block_registry: &BlockRegistry,
-) -> Result<BakedWorldManifest, BakedWorldError> {
+) -> Result<CreatedWorldManifest, CreatedWorldError> {
     if config.radius < 0 || config.min_y_chunk > config.max_y_chunk {
-        return Err(BakedWorldError::InvalidBakeConfig {
+        return Err(CreatedWorldError::InvalidCreateWorldConfig {
             path: root.to_path_buf(),
             message: format!(
-                "invalid bake config: radius={} min_y_chunk={} max_y_chunk={}",
+                "invalid create-world config: radius={} min_y_chunk={} max_y_chunk={}",
                 config.radius, config.min_y_chunk, config.max_y_chunk
             ),
         });
@@ -359,18 +359,18 @@ pub fn bake_world_to_directory(
     );
 
     if root.exists() {
-        fs::remove_dir_all(root).map_err(|source| BakedWorldError::RemoveRoot {
+        fs::remove_dir_all(root).map_err(|source| CreatedWorldError::RemoveRoot {
             path: root.to_path_buf(),
             source,
         })?;
     }
-    fs::create_dir_all(root).map_err(|source| BakedWorldError::CreateDirectory {
+    fs::create_dir_all(root).map_err(|source| CreatedWorldError::CreateDirectory {
         path: root.to_path_buf(),
         source,
     })?;
 
     let mut stack_summaries = Vec::new();
-    let mut best_stack: Option<BakedStackSummary> = None;
+    let mut best_stack: Option<CreatedWorldStackSummary> = None;
 
     for chunk_z in min_chunk.2..=max_chunk.2 {
         for chunk_x in min_chunk.0..=max_chunk.0 {
@@ -379,11 +379,11 @@ pub fn bake_world_to_directory(
             for chunk_y in min_chunk.1..=max_chunk.1 {
                 let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
                 let chunk = generate_chunk(coord, stack_world.meta(), block_registry);
-                save_baked_chunk(root, &chunk)?;
+                save_created_world_chunk(root, &chunk)?;
                 stack_world.insert_chunk(coord, chunk);
             }
 
-            let summary = summarize_baked_stack(
+            let summary = summarize_created_world_stack(
                 &stack_world,
                 chunk_x,
                 chunk_z,
@@ -412,7 +412,7 @@ pub fn bake_world_to_directory(
     let default_preview_center = best_stack
         .map(|summary| [summary.center_x, summary.center_z])
         .unwrap_or([config.center_x, config.center_z]);
-    let manifest = BakedWorldManifest::new(
+    let manifest = CreatedWorldManifest::new(
         config.seed,
         meta.generator_version,
         meta.save_format_version,
@@ -421,20 +421,20 @@ pub fn bake_world_to_directory(
         default_preview_center,
         stack_summaries,
     );
-    write_baked_world_manifest(root, &manifest)?;
+    write_created_world_manifest(root, &manifest)?;
     Ok(manifest)
 }
 
-pub fn baked_world_manifest_path(root: &Path) -> PathBuf {
-    root.join(BAKED_WORLD_MANIFEST_FILE)
+pub fn created_world_manifest_path(root: &Path) -> PathBuf {
+    root.join(CREATED_WORLD_MANIFEST_FILE)
 }
 
-pub fn baked_world_chunk_path(root: &Path, coord: ChunkCoord) -> PathBuf {
+pub fn created_world_chunk_path(root: &Path, coord: ChunkCoord) -> PathBuf {
     root.join("chunks")
         .join(format!("cx{}_cy{}_cz{}.bin", coord.0, coord.1, coord.2))
 }
 
-pub fn detect_latest_baked_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>> {
+pub fn detect_latest_created_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>> {
     if !base_dir.exists() {
         return Ok(None);
     }
@@ -443,7 +443,7 @@ pub fn detect_latest_baked_world_root(base_dir: &Path) -> io::Result<Option<Path
     for entry in fs::read_dir(base_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if !path.is_dir() || !baked_world_manifest_path(&path).exists() {
+        if !path.is_dir() || !created_world_manifest_path(&path).exists() {
             continue;
         }
 
@@ -461,36 +461,36 @@ pub fn detect_latest_baked_world_root(base_dir: &Path) -> io::Result<Option<Path
     Ok(best.map(|(_, path)| path))
 }
 
-impl std::fmt::Display for BakedWorldError {
+impl std::fmt::Display for CreatedWorldError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidBakeConfig { path, message } => {
-                write!(f, "invalid baked world config for {}: {message}", path.display())
+            Self::InvalidCreateWorldConfig { path, message } => {
+                write!(f, "invalid created world config for {}: {message}", path.display())
             }
             Self::ReadManifest { path, source } => {
-                write!(f, "failed to read baked world manifest {}: {source}", path.display())
+                write!(f, "failed to read created world manifest {}: {source}", path.display())
             }
             Self::ParseManifest { path, source } => {
-                write!(f, "failed to parse baked world manifest {}: {source}", path.display())
+                write!(f, "failed to parse created world manifest {}: {source}", path.display())
             }
             Self::SerializeManifest { path, source } => {
                 write!(
                     f,
-                    "failed to serialize baked world manifest {}: {source}",
+                    "failed to serialize created world manifest {}: {source}",
                     path.display()
                 )
             }
             Self::UnsupportedFormatVersion { path, found } => {
                 write!(
                     f,
-                    "unsupported baked world manifest version {found} in {}",
+                    "unsupported created world manifest version {found} in {}",
                     path.display()
                 )
             }
             Self::RemoveRoot { path, source } => {
                 write!(
                     f,
-                    "failed to clear baked world output root {}: {source}",
+                    "failed to clear created world output root {}: {source}",
                     path.display()
                 )
             }
@@ -498,25 +498,25 @@ impl std::fmt::Display for BakedWorldError {
                 write!(f, "failed to create directory {}: {source}", path.display())
             }
             Self::WriteManifest { path, source } => {
-                write!(f, "failed to write baked world manifest {}: {source}", path.display())
+                write!(f, "failed to write created world manifest {}: {source}", path.display())
             }
             Self::ReadChunk { path, source } => {
-                write!(f, "failed to read baked chunk {}: {source}", path.display())
+                write!(f, "failed to read created-world chunk {}: {source}", path.display())
             }
             Self::WriteChunk { path, source } => {
-                write!(f, "failed to write baked chunk {}: {source}", path.display())
+                write!(f, "failed to write created-world chunk {}: {source}", path.display())
             }
             Self::EncodeChunk { path, source } => {
                 write!(
                     f,
-                    "failed to encode baked chunk {}: {source:?}",
+                    "failed to encode created-world chunk {}: {source:?}",
                     path.display()
                 )
             }
             Self::DecodeChunk { path, source } => {
                 write!(
                     f,
-                    "failed to decode baked chunk {}: {source:?}",
+                    "failed to decode created-world chunk {}: {source:?}",
                     path.display()
                 )
             }
@@ -524,7 +524,7 @@ impl std::fmt::Display for BakedWorldError {
     }
 }
 
-impl std::error::Error for BakedWorldError {}
+impl std::error::Error for CreatedWorldError {}
 
 #[cfg(test)]
 mod tests {
@@ -532,8 +532,8 @@ mod tests {
 
     #[test]
     fn manifest_bounds_include_default_preview_chunk() {
-        let manifest = BakedWorldManifest {
-            format_version: BAKED_WORLD_FORMAT_VERSION,
+        let manifest = CreatedWorldManifest {
+            format_version: CREATED_WORLD_FORMAT_VERSION,
             seed: 42,
             generator_version: 10,
             save_format_version: 1,

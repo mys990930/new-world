@@ -3,7 +3,7 @@
 ## Role
 
 - Render a fixed-angle offscreen preview of generated chunks.
-- Support both direct seed generation and rendering from a previously baked world dump.
+- Support both direct seed generation and rendering from a previously created world dump.
 
 ## Inputs
 
@@ -35,5 +35,5 @@
 - `--lod-blocks 4` means one rendered coarse column covers `4 x 4` world blocks in plan view.
 - The current LOD path samples the generator's probe surface directly and renders a wide-angle scaffold mesh without materializing every full block face.
 - The current LOD path applies a preview-only vertical exaggeration so broad isometric shots still show sea shelves, uplands, and ridge relief.
-- LOD preview is currently supported for direct seed previews; baked-world previews still use the full mesh path.
+- LOD preview is currently supported for direct seed previews; created-world previews still use the full mesh path.
 - For an exact `xz` top-down PNG that scans realized chunk data rather than probe surfaces, use `chunk_topdown_preview`.

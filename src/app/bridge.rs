@@ -155,7 +155,7 @@ impl GameApp {
                 ui_sprites: build_world_select_ui_sprites(
                     &self.ui.world_select,
                     viewport,
-                    self.baked_world
+                    self.created_world
                         .as_ref()
                         .and_then(|source| source.root().file_name())
                         .and_then(|name| name.to_str()),
@@ -344,14 +344,14 @@ fn build_world_select_ui_sprites(
     let section_gap = 20.0;
     let section_w = ((outer.w - section_gap * 2.0) / 3.0).floor();
     let section_h = outer.h - title.h - bottom_h - 40.0;
-    let bake_panel = UiRectPx {
+    let create_world_panel = UiRectPx {
         x: outer.x,
         y: body_y,
         w: section_w,
         h: section_h,
     };
     let select_panel = UiRectPx {
-        x: bake_panel.x + section_w + section_gap,
+        x: create_world_panel.x + section_w + section_gap,
         y: body_y,
         w: section_w,
         h: section_h,
@@ -383,29 +383,29 @@ fn build_world_select_ui_sprites(
         title.x + 24.0,
         title.y + 46.0,
         1.0,
-        "PIXEL UI  BAKE  SELECT  SPAWN",
+        "PIXEL UI  CREATE  SELECT  SPAWN",
         [0.74, 0.70, 0.62, 1.0],
     );
 
     push_world_select_section(
         &mut sprites,
-        bake_panel,
-        state.section == WorldSelectSection::Bake,
-        WorldSelectSection::Bake.label(),
+        create_world_panel,
+        state.section == WorldSelectSection::CreateWorld,
+        WorldSelectSection::CreateWorld.label(),
         &[
-            format!("SEED {}", state.bake_seed),
-            format!("RADIUS {}", state.bake_radius),
+            format!("SEED {}", state.create_world_seed),
+            format!("RADIUS {}", state.create_world_radius),
             format!("CENTER {} {}", state.spawn_chunk_x, state.spawn_chunk_z),
             "ENTER OR B".to_string(),
-            "REBUILD BAKE".to_string(),
+            "CREATE WORLD".to_string(),
         ],
     );
     push_world_select_section(
         &mut sprites,
         select_panel,
-        state.section == WorldSelectSection::Bakes,
-        WorldSelectSection::Bakes.label(),
-        &build_bake_selection_lines(state),
+        state.section == WorldSelectSection::SelectCreatedWorld,
+        WorldSelectSection::SelectCreatedWorld.label(),
+        &build_created_world_selection_lines(state),
     );
     push_world_select_section(
         &mut sprites,
@@ -448,16 +448,16 @@ fn build_world_select_ui_sprites(
     sprites
 }
 
-fn build_bake_selection_lines(state: &WorldSelectState) -> [String; 5] {
-    if let Some(selected) = state.selected_bake() {
+fn build_created_world_selection_lines(state: &WorldSelectState) -> [String; 5] {
+    if let Some(selected) = state.selected_created_world() {
         let min = selected.manifest.min_chunk_coord();
         let max = selected.manifest.max_chunk_coord();
         [
             truncate_text(&selected.label, 22),
             format!(
                 "{} OF {}",
-                state.selected_bake_index.saturating_add(1),
-                state.available_bakes.len()
+                state.selected_created_world_index.saturating_add(1),
+                state.available_created_worlds.len()
             ),
             format!("SEED {}", selected.manifest.seed),
             format!("BOUNDS {} {} {} {}", min.0, min.2, max.0, max.2),
@@ -465,11 +465,11 @@ fn build_bake_selection_lines(state: &WorldSelectState) -> [String; 5] {
         ]
     } else {
         [
-            "NO BAKES".to_string(),
+            "NO WORLDS".to_string(),
             "PRESS B".to_string(),
             "TO CREATE".to_string(),
             "A RUNTIME".to_string(),
-            "BAKE".to_string(),
+            "WORLD".to_string(),
         ]
     }
 }

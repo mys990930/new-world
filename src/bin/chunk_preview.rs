@@ -21,7 +21,7 @@ use new_world::world::{
 #[path = "shared/world_dump_common.rs"]
 mod world_dump_common;
 
-use world_dump_common::{BakedWorldManifest, load_chunk_from_dump, read_manifest};
+use world_dump_common::{CreatedWorldManifest, load_chunk_from_dump, read_manifest};
 
 const DEFAULT_RENDER_RADIUS: i32 = 4;
 const DEFAULT_RENDER_PADDING: i32 = 2;
@@ -35,7 +35,7 @@ const DEFAULT_LOD_VERTICAL_EXAGGERATION: f32 = 2.4;
 #[derive(Debug, Clone)]
 enum PreviewSource {
     Seed(u64),
-    BakedWorld(PathBuf),
+    CreatedWorld(PathBuf),
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let source = if args.first().map(String::as_str) == Some("--world-dir") {
         args.remove(0);
-        PreviewSource::BakedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
+        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
     } else {
         PreviewSource::Seed(parse_required::<u64>(&mut args, "seed")?)
     };
@@ -106,9 +106,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?,
     );
 
-    let (meta, baked_world_dir, baked_manifest) = match &source {
+    let (meta, created_world_dir, created_world_manifest) = match &source {
         PreviewSource::Seed(seed) => (WorldMeta::new(*seed), None, None),
-        PreviewSource::BakedWorld(world_dir) => {
+        PreviewSource::CreatedWorld(world_dir) => {
             let manifest = read_manifest(world_dir)?;
             let meta = WorldMeta {
                 seed: manifest.seed,
@@ -122,8 +122,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let requested_center = if center_explicit {
         (center_x, center_z)
-    } else if let Some(manifest) = baked_manifest.as_ref() {
-        choose_baked_center(manifest, radius, min_y_chunk, max_y_chunk)?
+    } else if let Some(manifest) = created_world_manifest.as_ref() {
+        choose_created_world_center(manifest, radius, min_y_chunk, max_y_chunk)?
     } else {
         (center_x, center_z)
     };
@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius, lod_blocks));
     let generation_radius = radius + DEFAULT_RENDER_PADDING;
     let render_meshes = if lod_blocks > 1 {
-        if baked_world_dir.is_some() {
+        if created_world_dir.is_some() {
             return Err(cli_error(
                 "lod-blocks > 1 is currently supported only for direct seed previews",
             ));
@@ -152,12 +152,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-        match baked_world_dir.as_deref() {
+        match created_world_dir.as_deref() {
             Some(world_dir) => {
-                let manifest = baked_manifest
+                let manifest = created_world_manifest
                     .as_ref()
-                    .expect("baked preview metadata should exist");
-                ensure_baked_bounds_cover_request(
+                    .expect("created-world preview metadata should exist");
+                ensure_created_world_bounds_cover_request(
                     manifest.min_chunk_coord(),
                     manifest.max_chunk_coord(),
                     center_x,
@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     min_y_chunk,
                     max_y_chunk,
                 )?;
-                load_baked_preview_chunks(
+                load_created_world_preview_chunks(
                     &mut world,
                     world_dir,
                     manifest.min_chunk_coord(),
@@ -219,8 +219,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match &source {
         PreviewSource::Seed(seed) => println!("preview source: generated from seed {seed}"),
-        PreviewSource::BakedWorld(world_dir) => {
-            println!("preview source: baked world {}", world_dir.display())
+        PreviewSource::CreatedWorld(world_dir) => {
+            println!("preview source: created world {}", world_dir.display())
         }
     }
     println!("center chunk: ({center_x}, {center_z})");
@@ -256,7 +256,7 @@ fn default_output_path(
                 String::new()
             }
         )),
-        PreviewSource::BakedWorld(world_dir) => world_dir.join(format!(
+        PreviewSource::CreatedWorld(world_dir) => world_dir.join(format!(
             "preview_cx{center_x}_cz{center_z}_r{radius}{}.png",
             if lod_blocks > 1 {
                 format!("_lod{lod_blocks}")
@@ -267,7 +267,7 @@ fn default_output_path(
     }
 }
 
-fn ensure_baked_bounds_cover_request(
+fn ensure_created_world_bounds_cover_request(
     min_chunk: ChunkCoord,
     max_chunk: ChunkCoord,
     center_x: i32,
@@ -286,7 +286,7 @@ fn ensure_baked_bounds_cover_request(
         || requested_max.2 > max_chunk.2
     {
         return Err(cli_error(format!(
-            "requested preview area x={}..{}, y={}..{}, z={}..{} is outside baked bounds x={}..{}, y={}..{}, z={}..{}",
+            "requested preview area x={}..{}, y={}..{}, z={}..{} is outside created-world bounds x={}..{}, y={}..{}, z={}..{}",
             requested_min.0,
             requested_max.0,
             requested_min.1,
@@ -305,7 +305,7 @@ fn ensure_baked_bounds_cover_request(
     Ok(())
 }
 
-fn load_baked_preview_chunks(
+fn load_created_world_preview_chunks(
     world: &mut WorldCore,
     world_dir: &Path,
     min_chunk: ChunkCoord,
@@ -336,8 +336,8 @@ fn load_baked_preview_chunks(
     Ok(())
 }
 
-fn choose_baked_center(
-    manifest: &BakedWorldManifest,
+fn choose_created_world_center(
+    manifest: &CreatedWorldManifest,
     radius: i32,
     min_y_chunk: i32,
     max_y_chunk: i32,
@@ -360,7 +360,7 @@ fn choose_baked_center(
     }
 
     Err(cli_error(format!(
-        "no baked preview center fits radius {} inside baked bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
+        "no created-world preview center fits radius {} inside created-world bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
         radius,
         min_chunk.0,
         max_chunk.0,

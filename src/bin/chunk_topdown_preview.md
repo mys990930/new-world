@@ -3,7 +3,7 @@
 ## Role
 
 - Render a top-down `xz` PNG from exact realized chunk data.
-- Support both direct seed generation and rendering from a previously baked world dump.
+- Support both direct seed generation and rendering from a previously created world dump.
 
 ## Inputs
 
@@ -40,8 +40,8 @@
 
 ## Exactness Notes
 
-- In direct-seed mode, this tool uses the same `world::generation::generate_chunk(...)` path as `world_bake`.
-- In baked-world mode, it reads the persisted chunk `.bin` payloads and scans the actual loaded chunk contents.
+- In direct-seed mode, this tool uses the same `world::generation::generate_chunk(...)` path as `world_create`.
+- In created-world mode, it reads the persisted chunk `.bin` payloads and scans the actual loaded chunk contents.
 - That means the top-down geometry is exact for the chosen projection rule: the image represents the topmost non-air block found in each `xz` column inside the requested vertical window.
 - The colors are intentionally diagnostic and are not meant to match final renderer shading or texture sampling.
 - The stdout counters are also exact for the chosen window because they are computed from the same realized `ChunkData` and from meshes built through `world::meshing::build_chunk_mesh(...)`.

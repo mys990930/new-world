@@ -22,7 +22,7 @@ impl GameApp {
 
         let requests = self
             .ecs
-            .plan_chunk_job_requests(&self.world, self.baked_world.as_ref());
+            .plan_chunk_job_requests(&self.world, self.created_world.as_ref());
         if let Err(error) = self.jobs.submit_all(requests) {
             eprintln!("[app] jobs submit failed: {:?}", error);
         }
@@ -74,6 +74,9 @@ impl GameApp {
             self.ecs.apply_job_result(&result);
 
             match result {
+                JobResult::WorldCreated { root, manifest } => {
+                    self.handle_world_created_result(root, manifest);
+                }
                 JobResult::ChunkLoaded { coord, chunk } => {
                     self.world.insert_chunk(coord, chunk);
                 }
@@ -88,6 +91,7 @@ impl GameApp {
                     }
                 }
                 JobResult::JobFailed { request, error } => {
+                    self.handle_job_failure(&request, error.clone());
                     eprintln!("[app] job failed for {:?}: {:?}", request, error);
                 }
             }

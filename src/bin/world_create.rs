@@ -11,7 +11,7 @@ use new_world::world::{
 #[path = "shared/world_dump_common.rs"]
 mod world_dump_common;
 
-use world_dump_common::{BakedStackSummary, BakedWorldManifest, save_chunk_to_dump, summarize_stack, write_manifest};
+use world_dump_common::{CreatedWorldStackSummary, CreatedWorldManifest, save_chunk_to_dump, summarize_stack, write_manifest};
 
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
@@ -56,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output = output.unwrap_or_else(|| {
         PathBuf::from(format!(
-            "target/world-bake/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}"
+            "target/world-create/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}"
         ))
     });
     let block_registry = Arc::new(
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let max_chunk = ChunkCoord(center_x + radius, max_y_chunk, center_z + radius);
 
     let mut stack_summaries = Vec::new();
-    let mut best_stack: Option<BakedStackSummary> = None;
+    let mut best_stack: Option<CreatedWorldStackSummary> = None;
 
     for chunk_z in min_chunk.2..=max_chunk.2 {
         for chunk_x in min_chunk.0..=max_chunk.0 {
@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let default_preview_center = best_stack
         .map(|summary| [summary.center_x, summary.center_z])
         .unwrap_or([center_x, center_z]);
-    let manifest = BakedWorldManifest::new(
+    let manifest = CreatedWorldManifest::new(
         seed,
         meta.generator_version,
         meta.save_format_version,
@@ -116,7 +116,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     write_manifest(&output, &manifest)?;
 
-    println!("world bake complete");
+    println!("world create complete");
     println!("seed: {seed}");
     println!(
         "chunk bounds: x={}..{}, y={}..{}, z={}..{}",
@@ -159,7 +159,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin world_bake -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--output <path>]"
+    "usage: cargo run --bin world_create -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {

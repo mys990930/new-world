@@ -1,4 +1,4 @@
-# world_bake
+# world_create
 
 ## Role
 
@@ -8,14 +8,14 @@
 ## Inputs
 
 - `seed`
-- chunk-space bake center
-- horizontal bake radius
+- chunk-space create-world center
+- horizontal create-world radius
 - vertical chunk bounds
 - output directory
 
 ## Outputs
 
-- baked chunk files under `<output>/chunks/`
+- created-world chunk files under `<output>/chunks/`
 - `<output>/manifest.toml`
 
 ## Current Flow
@@ -29,4 +29,4 @@
 
 ## Default Vertical Window
 
-- The current default bake window is chunk `y = -2..3`, matching the surface-inspection focus on roughly world `y > -40`.
+- The current default create-world window is chunk `y = -2..3`, matching the surface-inspection focus on roughly world `y > -40`.

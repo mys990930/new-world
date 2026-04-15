@@ -18,7 +18,7 @@
 - `JobResult`
 - `ChunkStates`
 - `WorldCore`
-- optional `BakedWorldSource`
+- optional `CreatedWorldSource`
 
 ## Outputs
 
@@ -28,8 +28,8 @@
 ## State Transition Rules
 
 - chunk job planning always starts from the current interest set
-- baked-world chunks prefer `LoadChunk`
-- non-baked or out-of-bounds chunks fall back to `GenerateChunk`
+- created-world chunks prefer `LoadChunk`
+- non-created or out-of-bounds chunks fall back to `GenerateChunk`
 - load/generate success marks chunks as loaded
 - mesh success marks chunks as render-ready
 
@@ -51,12 +51,12 @@
 - `chunk.rs`
 - `fixed.rs`
 - `../jobs/jobs.md`
-- `../world/baked.md`
+- `../world/created.md`
 
 ## Notes
 
 - the current minimal chunk pipeline is:
-  - baked path: `LoadChunk -> BuildChunkMesh`
+  - created-world path: `LoadChunk -> BuildChunkMesh`
   - fallback path: `GenerateChunk -> BuildChunkMesh`
 - the current steady-state horizontal interest envelope is a fixed `5x5` neighborhood around the focused player chunk
 - app still owns the actual `world.insert_chunk(...)` and `renderer.apply_upload(...)` calls

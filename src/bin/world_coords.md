@@ -2,11 +2,11 @@
 
 ## Role
 
-- Inspect a baked world manifest and print promising preview coordinates without regenerating the world.
+- Inspect a created world manifest and print promising preview coordinates without regenerating the world.
 
 ## Inputs
 
-- baked world directory
+- created world directory
 - optional number of top candidates to print
 
 ## Outputs
@@ -17,5 +17,5 @@
 ## Current Flow
 
 1. Load `manifest.toml`.
-2. Print bake bounds and the stored default preview center.
+2. Print create-world bounds and the stored default preview center.
 3. Print the highest-scoring chunk-stack coordinates for preview selection.

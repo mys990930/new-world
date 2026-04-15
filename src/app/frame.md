@@ -52,7 +52,7 @@
 7. collect any already-completed jobs into ECS/world/renderer
 8. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
 9. `ecs.run_post_update()`
-10. plan chunk requests with `ecs.plan_chunk_job_requests(&world, baked_world.as_ref())`
+10. plan chunk requests with `ecs.plan_chunk_job_requests(&world, created_world.as_ref())`
 11. submit the planned jobs
 12. collect newly completed jobs again
 13. update `SelectionState` from the latest world state and viewport
@@ -67,7 +67,7 @@
 - block logging is click-triggered so the console does not flood every frame
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
-- world-select bake/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI
+- world-select create/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI
 
 ## Related Modules
 
@@ -79,6 +79,6 @@
 
 ## Notes
 
-- the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a baked world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
+- the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
 - the current world-select screen is a keyboard-driven app-mode that skips gameplay updates and renders only app-owned pixel-sprite UI

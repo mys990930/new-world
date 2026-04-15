@@ -8,6 +8,7 @@
 ## Owned Data
 
 ### JobResult
+- `WorldCreated { root, manifest }`
 - `ChunkLoaded { coord, chunk }`
 - `ChunkGenerated { coord, chunk }`
 - `ChunkMeshBuilt { coord, mesh }`
@@ -38,7 +39,7 @@
 
 - `JobResult` does not mutate live world state directly
 - failure results retain the original request so upper layers can clear dedupe state or retry later
-- execution failures now cover fallible baked chunk load paths
+- execution failures now cover fallible create-world and created-world chunk load paths
 
 ## Non-Responsibilities
 
@@ -54,5 +55,5 @@
 
 ## Notes
 
-- baked chunk load now uses `ExecutionFailed { message }` when disk read or decode fails
+- create-world and created-world chunk load now use `ExecutionFailed { message }` when directory, manifest, disk read, or decode work fails
 - app still decides how to log or recover from `JobFailed`

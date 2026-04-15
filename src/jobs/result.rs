@@ -1,9 +1,15 @@
-use crate::world::{ChunkCoord, ChunkData, CpuMesh};
+use std::path::PathBuf;
+
+use crate::world::{ChunkCoord, ChunkData, CpuMesh, CreatedWorldManifest};
 
 use super::request::JobRequest;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobResult {
+    WorldCreated {
+        root: PathBuf,
+        manifest: CreatedWorldManifest,
+    },
     ChunkLoaded { coord: ChunkCoord, chunk: ChunkData },
     ChunkGenerated { coord: ChunkCoord, chunk: ChunkData },
     ChunkMeshBuilt { coord: ChunkCoord, mesh: CpuMesh },
@@ -20,6 +26,9 @@ pub enum JobError {
 impl JobResult {
     pub fn coord(&self) -> ChunkCoord {
         match self {
+            Self::WorldCreated { .. } => {
+                panic!("WorldCreated result does not map to a single chunk coordinate")
+            }
             Self::ChunkLoaded { coord, .. }
             | Self::ChunkGenerated { coord, .. }
             | Self::ChunkMeshBuilt { coord, .. } => *coord,

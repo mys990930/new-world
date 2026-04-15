@@ -57,7 +57,7 @@ NOT:
 1. jobs do not own the live runtime world
 2. worker inputs are immutable snapshot/value payloads
 3. results are explicit and immutable until drained
-4. the current runtime supports both baked chunk load and procedural generation as acquisition paths
+4. the current runtime supports both created-world chunk load and procedural generation as acquisition paths
 
 ### Submodules
 
@@ -72,5 +72,5 @@ NOT:
 ### Current Implementation Notes
 
 - the current worker pool still uses `std::thread + std::sync::mpsc`
-- the active request variants are `LoadChunk`, `GenerateChunk`, and `BuildChunkMesh`
+- the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, and `BuildChunkMesh`
 - app and ECS still own result interpretation and runtime-world insertion after workers finish
