@@ -49,10 +49,9 @@ const CAMERA_DEADZONE_HALF_HEIGHT: f32 = 0.45;
 const CAMERA_FORWARD_VIEW_RATIO: f32 = 0.65;
 const CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO: f32 = (CAMERA_FORWARD_VIEW_RATIO - 0.5) * 2.0;
 const QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER: f32 = 1.732_050_8;
-const CAMERA_LERP_SLOWDOWN: f32 = 3.0;
-const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0 / CAMERA_LERP_SLOWDOWN;
-const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0 / CAMERA_LERP_SLOWDOWN;
-const CAMERA_ZOOM_LERP_PER_SECOND: f32 = CAMERA_FOLLOW_LERP_PER_SECOND;
+const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0 / 9.0;
+const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0 / 9.0;
+const CAMERA_ZOOM_LERP_PER_SECOND: f32 = 8.0 / 3.0;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
 const CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE: f32 = 2.0;
 const CAMERA_SCROLL_PIXEL_DELTA_THRESHOLD: f32 = 8.0;
@@ -153,11 +152,19 @@ pub(crate) fn update_camera_follow_system(
     let desired_target = if camera.recentering {
         player_target
     } else {
-        let anchor_target = add3(
-            player_target,
+        let mut anchor_target = add3(
+            [
+                player_target[0],
+                camera.smoothed_target[1],
+                player_target[2],
+            ],
             movement_bias_offset(*move_world_intent, basis, camera.vertical_world_size),
         );
-        resolve_deadzone_target(camera.smoothed_target, anchor_target, basis)
+        anchor_target[1] = camera.smoothed_target[1];
+        let mut desired_target =
+            resolve_deadzone_target(camera.smoothed_target, anchor_target, basis);
+        desired_target[1] = player_target[1];
+        desired_target
     };
 
     camera.desired_target = desired_target;
@@ -522,6 +529,42 @@ mod tests {
         assert!(camera.smoothed_target[0] < 3.0);
         assert!(camera.smoothed_target[2] < 3.0);
         assert_eq!(camera.desired_target, [3.0, 1.5, 3.0]);
+    }
+
+    #[test]
+    fn follow_camera_tracks_player_height_changes() {
+        let mut world = World::new();
+        world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(FrameDeltaSeconds(0.25));
+        world.insert_resource(MoveWorldIntent::default());
+        world.insert_resource(CameraState {
+            quarter_turns: 0,
+            smoothed_target: [3.0, 1.5, 3.0],
+            desired_target: [3.0, 1.5, 3.0],
+            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            desired_vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            recenter_requested: false,
+            recentering: false,
+            initialized: true,
+        });
+        let entity = world
+            .spawn((
+                Player,
+                Transform {
+                    translation: [3.0, 4.5, 3.0],
+                },
+            ))
+            .id();
+        world.resource_mut::<LocalPlayerEntity>().0 = Some(entity);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_camera_follow_system);
+        schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert_eq!(camera.desired_target[1], 4.5);
+        assert!(camera.smoothed_target[1] > 1.5);
+        assert!(camera.smoothed_target[1] < 4.5);
     }
 
     #[test]

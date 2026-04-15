@@ -51,6 +51,7 @@
 - The camera is limited to four quarter-view rotations.
 - `Q/E` rotation applies before the same frame's movement intent is interpreted.
 - The player is followed through a smoothed target rather than a hard snap.
+- Horizontal framing stays loose and deadzone-driven, but the target height should still follow the player's body-center `y`.
 - Mouse-wheel zoom updates the desired quarter-view focus-plane world size inside ECS camera state.
 - Deadzone logic is evaluated in quarter-view screen space defined by `right` and `up`.
 - Forward movement bias shifts framing toward travel direction without replacing the player-centered anchor.
@@ -96,4 +97,5 @@
 - The main zoom/framing handle lives in `src/ecs/camera.rs` as `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
 - The main gameplay render + selection path now uses a weak perspective quarter-view camera rather than a fully orthographic one.
 - Runtime zoom is clamped between a minimum and maximum vertical world size and is driven by mouse-wheel input through ECS.
-- Follow/recenter interpolation is intentionally slower than before so quarter-view transitions feel less abrupt.
+- Follow/recenter interpolation is intentionally very gentle so quarter-view transitions feel less abrupt.
+- Vertical camera motion should continue to react to player height changes from steps, slopes, jumps, or falls even while horizontal follow remains deadzone-based.
