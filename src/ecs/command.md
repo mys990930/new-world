@@ -1,77 +1,85 @@
 # command
 
-## 역할
+## Role
 
-- ECS 내부와 외부 경계에서 쓰이는 discrete gameplay command와 continuous movement intent를 정의한다.
-- 입력 해석과 실제 상태 전이를 분리하는 staging 경계를 제공한다.
+- define the ECS-side boundary between discrete gameplay commands and continuous movement intent
+- provide a staging layer between frame input interpretation and stateful gameplay systems
 
-## 소유 데이터
+## Owned Data
 
-### PlayerCommand
+### `PlayerCommand`
 - `PrimaryAction`
 - `PlaceBlock`
 - `RotateCamera { quarter_turns }`
 - `RecenterCamera`
+- `ToggleManipulationMode`
+- `ToggleInventory`
+- `CycleQuickslot { delta }`
+- `SelectQuickslot { slot_index }`
 
-### MoveWorldIntent
+### `MoveWorldIntent`
 - `east`
 - `north`
 
-### PlayerCommandBuffer
-- 현재 프레임에 생성된 discrete player command 목록
+### `PlayerCommandBuffer`
+- the current frame's ordered list of discrete gameplay commands
 
-## 입력
+## Inputs
 
-- input 단계가 생성한 discrete command
-- camera / player / selection 단계가 소비할 buffer
+- discrete commands created by `input.rs`
+- command consumers in `camera.rs`, `inventory.rs`, and future gameplay systems
 
-## 출력
+## Outputs
 
-- camera/player/selection이 소비하는 discrete command
-- player가 생성하는 world 기준 이동 intent
-- 향후 network DTO로 내려갈 수 있는 gameplay 의미
+- deterministic discrete commands for camera/inventory/gameplay state transitions
+- continuous world-relative movement intent for player locomotion
+- a multiplayer-friendly gameplay command boundary that can later feed networking
 
-## 생성 규칙
+## Creation Rules
 
-- `MoveScreen`은 더 이상 command가 아니다.
-- 화면 기준 이동 상태는 `EcsInputSnapshot`에 남는다.
-- discrete 행동만 `PlayerCommandBuffer`로 들어간다.
-- `MoveWorldIntent`는 camera orientation을 반영한 뒤 player 단계에서 만든다.
+- `MoveScreen` is no longer a command
+- screen-relative held movement remains in `EcsInputSnapshot`
+- only discrete actions enter `PlayerCommandBuffer`
+- `MoveWorldIntent` is derived later by player systems after camera rotation has been applied
 
-## 소비 규칙
+## Consumption Rules
 
-- command buffer는 프레임 경계에서 clear된다.
-- 같은 프레임에 생성된 `RotateCamera`는 그 프레임의 `MoveWorldIntent` 계산 전에 반영된다.
-- `RecenterCamera`는 quarter rotation을 바꾸지 않고, camera follow target을 player-centered anchor로 되돌리는 부드러운 recenter 요청이다.
-- `MoveWorldIntent`는 continuous movement state이며 drain 대상이 아니다.
+- the command buffer is cleared at the frame boundary
+- same-frame `RotateCamera` must be applied before `MoveWorldIntent` is generated
+- `RecenterCamera` requests camera follow recentering without changing logical quarter-turn state
+- inventory and quickslot commands mutate player-owned inventory state without mutating world blocks directly
+- `MoveWorldIntent` is continuous state and is not drained like the discrete command buffer
 
-## 순서 규칙
+## Order Rules
 
-- 같은 프레임의 처리 순서는 deterministic해야 한다.
-- 현재 update 순서는:
+- command consumption order inside `update` must stay deterministic
+- the intended current order is:
   - input interpretation
-  - camera command 적용
-  - world intent 생성
-  - local player velocity 반영
+  - inventory / mode / quickslot command application
+  - camera command application
+  - camera zoom input application
+  - move intent generation
+  - local player horizontal velocity sync
 
-## 불변식
+## Invariants
 
-- discrete 행동과 continuous movement intent는 같은 버퍼에 섞지 않는다.
-- `MoveWorldIntent`는 창 기준이 아니라 world 기준 의미다.
-- 멀티플레이 경계에서는 `MoveWorldIntent` 같은 world 기준 표현이 더 안정적이다.
+- discrete actions and continuous movement intent do not share the same buffer
+- `MoveWorldIntent` is world-relative, not window-relative
+- multiplayer-facing gameplay boundaries should prefer world-relative intent rather than renderer/view-relative state
 
-## 비책임
+## Non-Responsibilities
 
-- raw input 수집
-- world edit apply
+- raw input capture
+- world edit application
 - renderer upload
 
-## 관련 모듈
+## Related Modules
 
 - `input.rs`
+- `inventory.rs`
 - `camera.rs`
 - `player.rs`
 
-## 메모
+## Notes
 
-- 향후 block break/place, interact, use item 같은 discrete command는 여기서 늘어난다.
+- actual block break/place/use-item gameplay is still future work; current commands mainly drive camera, inventory state, and preview logic

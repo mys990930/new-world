@@ -12,6 +12,8 @@
 - `hovered_block`
 - `hovered_face`
 - `hit_point`
+- `interaction_preview_blocks`
+- `build_preview_block`
 
 ## Inputs
 
@@ -19,6 +21,7 @@
 - `EcsInputSnapshot.focused`
 - `EcsInputSnapshot.active`
 - the current `CameraState`
+- the local player `Transform` and `PlayerInventory`
 - viewport width and height
 - `WorldCore::raycast_blocks(...)`
 
@@ -27,7 +30,9 @@
 - hovered block
 - hovered face
 - hit point
-- a selection snapshot that `app::bridge` can convert into a render highlight
+- interaction preview blocks
+- build preview block
+- a selection snapshot that `app::bridge` can convert into render highlights / previews
 
 ## State Rules
 
@@ -35,6 +40,9 @@
 - The selection ray uses the same smoothed follow target and current zoom size that rendering uses.
 - During the current turn-transition implementation, selection still uses the snapped gameplay quarter-view basis while rendering may briefly ease toward that basis.
 - The current gameplay slice uses a weak perspective ray that starts at the camera eye and passes through a cursor-selected point on the quarter-view focus plane.
+- if the inventory is open, selection is cleared so world interaction previews do not compete with the inventory UI
+- interaction mode only emits preview blocks when the selected tool exists and the hit point is inside that tool's range
+- build mode only emits a placement preview when the selected quickslot holds a block stack, the adjacent cell is empty, and the preview is inside build reach
 - If focus, activity, viewport, or cursor validity checks fail, selection is cleared.
 - If raycast misses, selection is cleared.
 
@@ -44,6 +52,7 @@
 - selection does not own world raycast algorithms and uses world queries instead
 - renderers do not read `SelectionState` directly; `app::bridge` converts it into render-ready instances
 - selection and rendering must stay aligned on follow target and zoom in the same frame, even if render-only turn easing is active
+- preview generation is gameplay-owned and tool/mode-aware; the renderer only receives draw-ready cubes/slabs
 
 ## Non-Responsibilities
 
@@ -62,3 +71,4 @@
 ## Notes
 
 - Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.
+- the current preview slice is intentionally visual only: no real digging, harvesting, or block placement happens yet

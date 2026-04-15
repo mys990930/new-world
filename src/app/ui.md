@@ -59,7 +59,7 @@
 ## State Transition Rules
 
 - `F1` toggles between `InGame` and `WorldSelect`
-- `Tab` toggles the minimap overlay while `InGame`
+- `M` toggles the minimap overlay while `InGame`
 - `Escape` closes `WorldSelect`
 - left-clicking a spinner arrow or action button applies the matching world-select action immediately
 - clicking inside a panel updates the active `WorldSelectSection` for highlight and keyboard fallback
@@ -73,6 +73,7 @@
 - screen mode is app-owned rather than ECS-owned
 - world-select interaction stays app-owned and does not force renderer or ECS to learn created-world manifest details
 - menu actions call app-level create/reload helpers, then return to the normal `app -> ecs -> world/jobs -> renderer` runtime flow
+- in-game HUD and inventory overlays may read ECS inventory snapshots through `bridge`, but they do not own player inventory state
 
 ## Non-Responsibilities
 
@@ -93,3 +94,4 @@
 - the current usable sections are `Create World`, `Select World`, and `Spawn Chunk`, each rendered from the same app-owned layout used for hit testing
 - discovered created worlds are sorted by most-recent modification time
 - the current create-world flow queues a jobs request, uses app-owned defaults for vertical chunk range, and writes into `target/world-create`
+- in-game bottom HUD and inventory window are intentionally not app-owned screen modes; they are render-only projections of ECS player inventory state

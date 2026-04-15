@@ -30,6 +30,7 @@
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
 - `PlayerCommandBuffer`
+- `PlayerInventory`
 - local player entity id
 - `WorldCore` for world-aware motion helpers
 
@@ -51,6 +52,7 @@
 - if `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
 - `MoveWorldIntent` is copied into the local player horizontal velocity channels
 - vertical velocity is preserved across frames so gravity and falling can accumulate
+- inventory-open state blocks movement intent generation and leaves horizontal velocity at zero
 - world-aware motion then resolves:
   - horizontal movement against solid world blocks
   - one-block automatic step-up

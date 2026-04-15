@@ -12,12 +12,16 @@
 - `move_screen_x`
 - `move_screen_y`
 - `zoom_scroll_delta`
+- `quickslot_scroll_steps`
 - `primary_down`
 - `primary_just_pressed`
 - `secondary_down`
 - `secondary_just_pressed`
 - `rotate_camera`
 - `recenter_camera`
+- `toggle_manipulation_mode`
+- `toggle_inventory`
+- `select_quickslot`
 - `cursor_screen_pos`
 - `cursor_screen_delta`
 - `focused`
@@ -40,8 +44,14 @@
 - `rotate_camera` becomes `RotateCamera`
 - the app bridge maps `Q` and `E` into opposite-signed quarter turns so the on-screen turn direction feels natural
 - `recenter_camera` becomes `RecenterCamera`
+- `toggle_manipulation_mode` becomes `ToggleManipulationMode`
+- `toggle_inventory` becomes `ToggleInventory`
+- `quickslot_scroll_steps` becomes `CycleQuickslot`
+- `select_quickslot` becomes `SelectQuickslot`
 - `zoom_scroll_delta` is left as frame-local continuous camera input and is consumed by `camera.rs`
+- the app bridge maps plain wheel into quickslot cycling and `Ctrl + wheel` into camera zoom
 - when `active == false` or `focused == false`, gameplay commands are not produced
+- inventory-open UI still allows inventory/mode/quickslot commands to be produced, but movement/world interaction should be suppressed by downstream ECS systems
 
 ## Frame Boundary Rules
 
@@ -71,5 +81,6 @@
 
 ## Notes
 
-- The current camera zoom path is `platform wheel delta -> app bridge -> EcsInputSnapshot.zoom_scroll_delta -> camera.rs`.
-- Discrete recenter/rotate requests and continuous scroll zoom intentionally stay on different channels.
+- The current zoom path is `platform ctrl+wheel -> app bridge -> EcsInputSnapshot.zoom_scroll_delta -> camera.rs`.
+- The current quickslot path is `platform wheel / digit keys -> app bridge -> PlayerCommandBuffer -> inventory.rs`.
+- Discrete inventory/mode/slot requests and continuous scroll zoom intentionally stay on different channels.

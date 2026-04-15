@@ -68,6 +68,7 @@
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 - world-select create/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI
+- inventory-open gameplay blocking is handled inside ECS/player state, not by suspending the whole app frame
 
 ## Related Modules
 
@@ -82,3 +83,4 @@
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI
+- the current inventory / quickslot HUD remains in normal `InGame` mode and is rendered as ECS-derived pixel-atlas UI over the scene

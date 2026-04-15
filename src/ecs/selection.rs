@@ -3,14 +3,26 @@ use bevy_ecs::prelude::Resource;
 use super::camera::{
     CameraState, quarter_view_camera_pose, quarter_view_vertical_world_size,
 };
+use super::inventory::{
+    BUILD_REACH_BLOCKS, InventoryItem, ManipulationMode, PlayerInventory, ToolCatalog,
+    ToolPreviewShape,
+};
 use super::input::EcsInputSnapshot;
+use super::player::Transform;
 use crate::world::{BlockFace, Ray3, WorldBlockCoord, WorldCore};
 
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionPreviewBlock {
+    pub block: WorldBlockCoord,
+}
+
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
 pub struct SelectionState {
     pub hovered_block: Option<WorldBlockCoord>,
     pub hovered_face: Option<BlockFace>,
     pub hit_point: Option<[f32; 3]>,
+    pub interaction_preview_blocks: Vec<SelectionPreviewBlock>,
+    pub build_preview_block: Option<WorldBlockCoord>,
 }
 
 impl SelectionState {
@@ -26,12 +38,25 @@ pub fn update_selection_from_world(
     camera: CameraState,
     viewport_width: u32,
     viewport_height: u32,
+    player_transform: Option<Transform>,
+    player_inventory: Option<PlayerInventory>,
+    tool_catalog: ToolCatalog,
 ) {
+    let Some(player_transform) = player_transform else {
+        selection.clear();
+        return;
+    };
+    let Some(player_inventory) = player_inventory else {
+        selection.clear();
+        return;
+    };
+
     if !input.active
         || !input.focused
         || viewport_width == 0
         || viewport_height == 0
         || !camera.initialized
+        || player_inventory.inventory_open
     {
         selection.clear();
         return;
@@ -78,6 +103,37 @@ pub fn update_selection_from_world(
             selection.hovered_block = Some(hit.block);
             selection.hovered_face = Some(hit.face);
             selection.hit_point = Some(hit.point);
+            selection.interaction_preview_blocks.clear();
+            selection.build_preview_block = None;
+
+            match player_inventory.manipulation_mode {
+                ManipulationMode::Interaction => {
+                    if let Some(tool) = player_inventory.selected_tool() {
+                        let spec = tool_catalog.spec(tool);
+                        if distance3(player_transform.translation, hit.point) <= spec.range_blocks {
+                            selection.interaction_preview_blocks =
+                                build_interaction_preview_blocks(world, hit.block, hit.face, spec);
+                        }
+                    }
+                }
+                ManipulationMode::Build => {
+                    let Some(slot) = player_inventory.selected_block() else {
+                        return;
+                    };
+                    let InventoryItem::Block(_) = slot.item else {
+                        return;
+                    };
+                    let preview_block = adjacent_block(hit.block, hit.face);
+                    if distance3(player_transform.translation, preview_block_center(preview_block))
+                        <= BUILD_REACH_BLOCKS
+                        && world
+                            .get_block(preview_block)
+                            .is_some_and(|block_id| block_id.is_air())
+                    {
+                        selection.build_preview_block = Some(preview_block);
+                    }
+                }
+            }
         }
         None => selection.clear(),
     }
@@ -107,6 +163,79 @@ fn normalize3(value: [f32; 3]) -> Option<[f32; 3]> {
         value[1] * inv_length,
         value[2] * inv_length,
     ])
+}
+
+fn build_interaction_preview_blocks(
+    world: &WorldCore,
+    center: WorldBlockCoord,
+    face: BlockFace,
+    spec: super::inventory::ToolSpec,
+) -> Vec<SelectionPreviewBlock> {
+    match spec.preview_shape {
+        ToolPreviewShape::SingleBlock => preview_if_existing(world, center).into_iter().collect(),
+        ToolPreviewShape::FacePlane3x3 => {
+            let mut blocks = Vec::new();
+            for offset_a in -1..=1 {
+                for offset_b in -1..=1 {
+                    let block = offset_block_on_face_plane(center, face, offset_a, offset_b);
+                    if let Some(block) = preview_if_existing(world, block) {
+                        blocks.push(block);
+                    }
+                }
+            }
+            blocks
+        }
+    }
+}
+
+fn preview_if_existing(
+    world: &WorldCore,
+    block: WorldBlockCoord,
+) -> Option<SelectionPreviewBlock> {
+    world.get_block(block)
+        .filter(|block_id| !block_id.is_air())
+        .map(|_| SelectionPreviewBlock { block })
+}
+
+fn offset_block_on_face_plane(
+    center: WorldBlockCoord,
+    face: BlockFace,
+    offset_a: i32,
+    offset_b: i32,
+) -> WorldBlockCoord {
+    match face {
+        BlockFace::NegX | BlockFace::PosX => {
+            WorldBlockCoord(center.0, center.1 + offset_a, center.2 + offset_b)
+        }
+        BlockFace::NegY | BlockFace::PosY => {
+            WorldBlockCoord(center.0 + offset_a, center.1, center.2 + offset_b)
+        }
+        BlockFace::NegZ | BlockFace::PosZ => {
+            WorldBlockCoord(center.0 + offset_a, center.1 + offset_b, center.2)
+        }
+    }
+}
+
+fn adjacent_block(block: WorldBlockCoord, face: BlockFace) -> WorldBlockCoord {
+    match face {
+        BlockFace::NegX => WorldBlockCoord(block.0 - 1, block.1, block.2),
+        BlockFace::PosX => WorldBlockCoord(block.0 + 1, block.1, block.2),
+        BlockFace::NegY => WorldBlockCoord(block.0, block.1 - 1, block.2),
+        BlockFace::PosY => WorldBlockCoord(block.0, block.1 + 1, block.2),
+        BlockFace::NegZ => WorldBlockCoord(block.0, block.1, block.2 - 1),
+        BlockFace::PosZ => WorldBlockCoord(block.0, block.1, block.2 + 1),
+    }
+}
+
+fn preview_block_center(block: WorldBlockCoord) -> [f32; 3] {
+    [block.0 as f32 + 0.5, block.1 as f32 + 0.5, block.2 as f32 + 0.5]
+}
+
+fn distance3(left: [f32; 3], right: [f32; 3]) -> f32 {
+    let dx = left[0] - right[0];
+    let dy = left[1] - right[1];
+    let dz = left[2] - right[2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
 #[cfg(test)]
@@ -148,6 +277,11 @@ mod tests {
             },
             800,
             600,
+            Some(Transform {
+                translation: [3.0, 1.5, 3.0],
+            }),
+            Some(PlayerInventory::default()),
+            ToolCatalog::default(),
         );
 
         assert_eq!(selection.hovered_block, Some(WorldBlockCoord(2, 0, 3)));

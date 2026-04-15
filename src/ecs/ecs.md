@@ -10,6 +10,7 @@
 
 - frame/tick phase state transitions
 - input interpretation
+- inventory / quickslot / manipulation-mode state management
 - player entity/component management
 - moving-entity facing / pose state management
 - camera state management
@@ -35,6 +36,7 @@
 - `MoveWorldIntent`
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
+- `ToolCatalog`
 - `CameraState`
 - `LocalPlayerEntity`
 - `ChunkStates`
@@ -47,6 +49,7 @@
 - `Velocity`
 - `PlayerBody`
 - `PlayerPhysicsState`
+- `PlayerInventory`
 
 #### Discrete Commands
 
@@ -54,16 +57,31 @@
 - `PlaceBlock`
 - `RotateCamera`
 - `RecenterCamera`
+- `ToggleManipulationMode`
+- `ToggleInventory`
+- `CycleQuickslot`
+- `SelectQuickslot`
 
 ### Use Cases
 
 - raw input to gameplay meaning
   - `WASD` becomes screen-relative movement state
-  - mouse wheel becomes frame-local zoom intent for the quarter-view camera
+  - `Ctrl + wheel` becomes frame-local zoom intent for the quarter-view camera
+  - plain wheel becomes quickslot cycling for the active manipulation mode
   - left click requests primary action
   - right click requests block placement
   - `Q/E` request quarter-turn camera rotation
   - `Y` requests camera recenter
+  - `Tab` requests manipulation-mode toggle
+  - `I` requests inventory toggle
+  - `1..0` select the active mode quickslot directly
+- inventory / mode state
+  - the local player owns one inventory component with general slots plus separate tool/block quickslots
+  - tool quickslots and block quickslots each hold 10 slots
+  - the two quickslot bars keep separate selected indices
+  - `interaction` mode uses the tool quickslots
+  - `build` mode uses the block quickslots
+  - opening inventory blocks movement, world interaction, and raycast preview updates until it is closed
 - movement intent generation
   - screen-relative input remains frame input state
   - `CameraState.quarter_turns` is applied before generating `MoveWorldIntent`
@@ -86,6 +104,8 @@
 - selection update
   - app provides cursor position and viewport
   - ECS uses quarter-view camera state to build the selection ray
+  - interaction mode turns a valid raycast hit into a tool-shaped weak red preview volume
+  - build mode turns a valid raycast hit into a translucent placement preview on the adjacent face if it is inside reach and empty
 
 ### Public Interface
 ```rust
@@ -108,6 +128,7 @@ EcsRuntime::set_frame_delta_seconds(dt_seconds: f32)
 EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::local_player_body() -> Option<PlayerBody>
+EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
 EcsRuntime::update_selection_from_world(
@@ -133,15 +154,18 @@ EcsRuntime::selection_state() -> SelectionState
 4. screen-relative input and world-relative movement intent stay as separate boundaries
 5. world-aware helpers may query `WorldCore`, but ECS still does not own world storage
 6. render-facing octant / pose state for moving voxel entities is derived gameplay output, not renderer-authored state
+7. the local player inventory stays player-owned ECS state rather than app-owned HUD state
+8. inventory-open UI blocking affects gameplay interpretation inside ECS rather than changing renderer ownership
 
 ### Submodules
 - mod.rs: public facade, re-export
 - runtime.rs: `EcsRuntime`, schedule ownership, helper entry points
 - input.rs: `EcsInputSnapshot`, frame input resource, discrete command creation
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS-side command/request buffers
+- inventory.rs: player inventory/component state, manipulation mode, quickslot selection, and tool definitions
 - player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
 - camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
-- selection.rs: world-raycast-based hover target state and selection rules
+- selection.rs: world-raycast-based hover target state, tool preview, and build preview rules
 - chunk.rs: chunk interest / acquisition / render-ready meta state
 - jobs.rs: jobs result interpretation and deterministic follow-up requests
 - fixed.rs: future fixed-tick simulation flow
@@ -152,4 +176,4 @@ EcsRuntime::selection_state() -> SelectionState
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
-- hover front/back switching, placement preview separation, and network prediction are still future work
+- interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work

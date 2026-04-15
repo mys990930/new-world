@@ -625,7 +625,7 @@ impl GameApp {
             return;
         }
 
-        if self.ui.mode == AppMode::InGame && input.just_pressed_keys.contains(&KeyCode::Tab) {
+        if self.ui.mode == AppMode::InGame && input.just_pressed_keys.contains(&KeyCode::KeyM) {
             self.ui.show_minimap_overlay = !self.ui.show_minimap_overlay;
         }
 

@@ -17,6 +17,7 @@
 - Depth buffer and shadow-map creation/recreation
 - CPU render DTO -> GPU draw command conversion
 - screen-space UI sprite draw submission
+- alpha-blended gameplay preview cube submission
 - Submit / present / recoverable render error propagation
 - Offscreen terrain preview rendering for debug binaries
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
@@ -116,6 +117,7 @@ NOT:
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
 - Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
 - Screen-space app UI currently enters as `RenderUiSprite` and is rendered in a dedicated overlay pass with no camera/world dependency.
+- Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping a light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.

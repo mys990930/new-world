@@ -63,6 +63,7 @@
 - terrain and dynamic cubes share bind groups but not shader logic
 - visible-sun and shadow-map calculations are renderer-local and derive from current render state only
 - orthographic fog should be based on focal-area distance rather than raw eye distance, because the quarter-view eye sits far away only to define the view basis
+- UI overlay and gameplay preview cubes remain separate DTO channels even when they visually describe the same gameplay state
 
 ## Related Modules
 
@@ -79,3 +80,4 @@
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.
 - the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames
+- dynamic cube previews may use alpha-blended shading so ECS build previews can appear translucent without changing UI sprite ownership

@@ -6,7 +6,10 @@ use super::{
         WorldSelectSectionLayout, WorldSelectState,
     },
 };
-use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_render_camera_pose};
+use crate::ecs::{
+    CameraState, EcsInputSnapshot, InventoryItem, PlayerInventory, QUICKSLOT_COUNT,
+    quarter_view_render_camera_pose,
+};
 #[cfg(test)]
 use crate::ecs::quarter_view_camera_pose;
 use crate::renderer::{
@@ -15,8 +18,8 @@ use crate::renderer::{
     RenderUiSprite, RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
-    BlockFace, BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
-    MeshVertex as WorldMeshVertex, WorldBlockCoord,
+    BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
+    MeshVertex as WorldMeshVertex,
 };
 use winit::keyboard::KeyCode;
 
@@ -38,6 +41,7 @@ const TILE_PANEL_HEADER: (u32, u32) = (9, 0);
 const TILE_PANEL_INSET: (u32, u32) = (10, 0);
 const TILE_PANEL_MARKER: (u32, u32) = (11, 0);
 const TILE_PANEL_DIVIDER: (u32, u32) = (12, 0);
+const TILE_SLOT_FILL: (u32, u32) = (14, 0);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppRenderFrameData {
@@ -64,7 +68,16 @@ impl GameApp {
                 input.pressed_keys.contains(&KeyCode::KeyW),
                 input.pressed_keys.contains(&KeyCode::KeyS),
             ),
-            zoom_scroll_delta: input.wheel_delta.1,
+            zoom_scroll_delta: if input.modifiers.control {
+                input.wheel_delta.1
+            } else {
+                0.0
+            },
+            quickslot_scroll_steps: if input.modifiers.control {
+                0
+            } else {
+                wheel_steps(input.wheel_delta.1)
+            },
             primary_down: input.left_pressed,
             primary_just_pressed: input.left_just_pressed,
             secondary_down: input.right_pressed,
@@ -74,6 +87,9 @@ impl GameApp {
                 input.just_pressed_keys.contains(&KeyCode::KeyE),
             ),
             recenter_camera: input.just_pressed_keys.contains(&KeyCode::KeyY),
+            toggle_manipulation_mode: input.just_pressed_keys.contains(&KeyCode::Tab),
+            toggle_inventory: input.just_pressed_keys.contains(&KeyCode::KeyI),
+            select_quickslot: direct_quickslot_selection(&input.just_pressed_keys),
             cursor_screen_pos: input.mouse_position,
             cursor_screen_delta: input.mouse_delta,
             focused: window.focused,
@@ -89,6 +105,7 @@ impl GameApp {
 
         match self.ui.mode {
             AppMode::InGame => {
+                let inventory = self.ecs.local_player_inventory();
                 let mut cube_instances = self
                     .ecs
                     .local_player_transform()
@@ -115,10 +132,7 @@ impl GameApp {
                 }
 
                 let selection = self.ecs.selection_state();
-                if let (Some(block), Some(face)) = (selection.hovered_block, selection.hovered_face)
-                {
-                    cube_instances.push(build_selection_face_instance(block, face));
-                }
+                push_selection_preview_instances(&mut cube_instances, &selection);
 
                 AppRenderFrameData {
                     camera,
@@ -130,7 +144,12 @@ impl GameApp {
                         .map(world_chunk_to_render)
                         .collect(),
                     cube_instances,
-                    ui_sprites: build_ingame_ui_sprites(self.ui.show_minimap_overlay, viewport),
+                    ui_sprites: build_ingame_ui_sprites(
+                        self.ui.show_minimap_overlay,
+                        viewport,
+                        inventory,
+                        self.world.block_registry(),
+                    ),
                     clear_color_override: None,
                 }
             }
@@ -181,6 +200,35 @@ fn camera_rotation_axis(q_pressed: bool, e_pressed: bool) -> i8 {
     axis(e_pressed, q_pressed)
 }
 
+fn wheel_steps(delta_y: f32) -> i8 {
+    if !delta_y.is_finite() || delta_y.abs() <= f32::EPSILON {
+        0
+    } else if delta_y > 0.0 {
+        -1
+    } else {
+        1
+    }
+}
+
+fn direct_quickslot_selection(keys: &std::collections::HashSet<KeyCode>) -> Option<u8> {
+    const DIGITS: [(KeyCode, u8); 10] = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+        (KeyCode::Digit9, 8),
+        (KeyCode::Digit0, 9),
+    ];
+
+    DIGITS
+        .into_iter()
+        .find_map(|(key, slot)| keys.contains(&key).then_some(slot))
+}
+
 fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
     let pose = quarter_view_render_camera_pose(camera_state);
 
@@ -212,113 +260,361 @@ fn build_ground_shadow_instance(center: [f32; 3], half_extents: [f32; 3]) -> Ren
     }
 }
 
-fn build_selection_face_instance(block: WorldBlockCoord, face: BlockFace) -> RenderCubeInstance {
-    const HIGHLIGHT_HALF_THICKNESS: f32 = 0.02;
-    const HIGHLIGHT_HALF_SPAN: f32 = 0.52;
-    const HIGHLIGHT_FACE_OFFSET: f32 = 0.02;
-    let center = [
-        block.0 as f32 + 0.5,
-        block.1 as f32 + 0.5,
-        block.2 as f32 + 0.5,
-    ];
+fn push_selection_preview_instances(
+    cube_instances: &mut Vec<RenderCubeInstance>,
+    selection: &crate::ecs::SelectionState,
+) {
+    for preview in &selection.interaction_preview_blocks {
+        cube_instances.push(RenderCubeInstance {
+            center: [
+                preview.block.0 as f32 + 0.5,
+                preview.block.1 as f32 + 0.5,
+                preview.block.2 as f32 + 0.5,
+            ],
+            half_extents: [0.505, 0.505, 0.505],
+            color: [1.0, 0.22, 0.22, 0.18],
+            material_kind: RenderMaterialKind::Highlight,
+        });
+    }
 
-    match face {
-        BlockFace::NegX => RenderCubeInstance {
-            center: [center[0] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
-            half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
-            color: [1.0, 0.92, 0.20, 1.0],
+    if let Some(block) = selection.build_preview_block {
+        cube_instances.push(RenderCubeInstance {
+            center: [block.0 as f32 + 0.5, block.1 as f32 + 0.5, block.2 as f32 + 0.5],
+            half_extents: [0.49, 0.49, 0.49],
+            color: [1.0, 0.95, 0.35, 0.35],
             material_kind: RenderMaterialKind::Highlight,
-        },
-        BlockFace::PosX => RenderCubeInstance {
-            center: [center[0] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[1], center[2]],
-            half_extents: [HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN],
-            color: [1.0, 0.92, 0.20, 1.0],
-            material_kind: RenderMaterialKind::Highlight,
-        },
-        BlockFace::NegY => RenderCubeInstance {
-            center: [center[0], center[1] - 0.5 - HIGHLIGHT_FACE_OFFSET, center[2]],
-            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
-            color: [1.0, 0.92, 0.20, 1.0],
-            material_kind: RenderMaterialKind::Highlight,
-        },
-        BlockFace::PosY => RenderCubeInstance {
-            center: [center[0], center[1] + 0.5 + HIGHLIGHT_FACE_OFFSET, center[2]],
-            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS, HIGHLIGHT_HALF_SPAN],
-            color: [1.0, 0.92, 0.20, 1.0],
-            material_kind: RenderMaterialKind::Highlight,
-        },
-        BlockFace::NegZ => RenderCubeInstance {
-            center: [center[0], center[1], center[2] - 0.5 - HIGHLIGHT_FACE_OFFSET],
-            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
-            color: [1.0, 0.92, 0.20, 1.0],
-            material_kind: RenderMaterialKind::Highlight,
-        },
-        BlockFace::PosZ => RenderCubeInstance {
-            center: [center[0], center[1], center[2] + 0.5 + HIGHLIGHT_FACE_OFFSET],
-            half_extents: [HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_SPAN, HIGHLIGHT_HALF_THICKNESS],
-            color: [1.0, 0.92, 0.20, 1.0],
-            material_kind: RenderMaterialKind::Highlight,
-        },
+        });
     }
 }
 
-fn build_ingame_ui_sprites(show_minimap_overlay: bool, viewport: [f32; 2]) -> Vec<RenderUiSprite> {
-    if !show_minimap_overlay {
-        return Vec::new();
+fn build_ingame_ui_sprites(
+    show_minimap_overlay: bool,
+    viewport: [f32; 2],
+    inventory: Option<PlayerInventory>,
+    registry: &crate::world::BlockRegistry,
+) -> Vec<RenderUiSprite> {
+    let mut sprites = Vec::new();
+    if show_minimap_overlay {
+        let panel = UiRectPx {
+            x: viewport[0] - 278.0,
+            y: 22.0,
+            w: 240.0,
+            h: 188.0,
+        };
+        let inset = panel.inset(18.0);
+
+        push_panel(&mut sprites, panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
+        push_fill(&mut sprites, inset, TILE_PANEL_INSET, [0.10, 0.16, 0.12, 0.96]);
+        push_text(
+            &mut sprites,
+            panel.x + 18.0,
+            panel.y + 18.0,
+            2.0,
+            "MINIMAP",
+            [0.95, 0.88, 0.70, 1.0],
+        );
+        push_divider(
+            &mut sprites,
+            UiRectPx {
+                x: panel.x + 18.0,
+                y: panel.y + 54.0,
+                w: panel.w - 36.0,
+                h: 8.0,
+            },
+            [0.58, 0.53, 0.40, 0.95],
+        );
+        push_fill(
+            &mut sprites,
+            UiRectPx {
+                x: inset.x + 18.0,
+                y: inset.y + 24.0,
+                w: inset.w - 36.0,
+                h: inset.h - 54.0,
+            },
+            TILE_PANEL_CENTER,
+            [0.16, 0.22, 0.18, 0.90],
+        );
+        push_tile_sprite(
+            &mut sprites,
+            TILE_PANEL_MARKER,
+            UiRectPx {
+                x: inset.x + inset.w * 0.5 - 12.0,
+                y: inset.y + inset.h * 0.5 - 12.0,
+                w: 24.0,
+                h: 24.0,
+            },
+            [0.94, 0.86, 0.30, 1.0],
+        );
     }
 
-    let mut sprites = Vec::new();
-    let panel = UiRectPx {
-        x: viewport[0] - 278.0,
-        y: 22.0,
-        w: 240.0,
-        h: 188.0,
-    };
-    let inset = panel.inset(18.0);
+    if let Some(inventory) = inventory {
+        push_ingame_hud(&mut sprites, viewport, inventory, registry);
+        if inventory.inventory_open {
+            push_inventory_overlay(&mut sprites, viewport, inventory, registry);
+        }
+    }
+    sprites
+}
 
-    push_panel(&mut sprites, panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
-    push_fill(&mut sprites, inset, TILE_PANEL_INSET, [0.10, 0.16, 0.12, 0.96]);
+fn push_ingame_hud(
+    sprites: &mut Vec<RenderUiSprite>,
+    viewport: [f32; 2],
+    inventory: PlayerInventory,
+    registry: &crate::world::BlockRegistry,
+) {
+    let mode_panel = UiRectPx {
+        x: 28.0,
+        y: viewport[1] - 96.0,
+        w: 188.0,
+        h: 60.0,
+    };
+    let quickbar_panel = UiRectPx {
+        x: (viewport[0] * 0.5 - 278.0).floor(),
+        y: viewport[1] - 102.0,
+        w: 556.0,
+        h: 72.0,
+    };
+
+    push_panel(sprites, mode_panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
     push_text(
-        &mut sprites,
-        panel.x + 18.0,
-        panel.y + 18.0,
-        2.0,
-        "MINIMAP",
+        sprites,
+        mode_panel.x + 14.0,
+        mode_panel.y + 10.0,
+        1.0,
+        "MODE",
         [0.95, 0.88, 0.70, 1.0],
     );
-    push_divider(
-        &mut sprites,
-        UiRectPx {
-            x: panel.x + 18.0,
-            y: panel.y + 54.0,
-            w: panel.w - 36.0,
-            h: 8.0,
-        },
-        [0.58, 0.53, 0.40, 0.95],
+    push_text(
+        sprites,
+        mode_panel.x + 14.0,
+        mode_panel.y + 28.0,
+        2.0,
+        inventory.manipulation_mode.label(),
+        [0.93, 0.96, 1.0, 1.0],
     );
-    push_fill(
-        &mut sprites,
-        UiRectPx {
-            x: inset.x + 18.0,
-            y: inset.y + 24.0,
-            w: inset.w - 36.0,
-            h: inset.h - 54.0,
-        },
-        TILE_PANEL_CENTER,
-        [0.16, 0.22, 0.18, 0.90],
+
+    push_panel(
+        sprites,
+        quickbar_panel,
+        [0.18, 0.15, 0.13, 0.98],
+        [0.70, 0.63, 0.46, 0.98],
     );
-    push_tile_sprite(
-        &mut sprites,
-        TILE_PANEL_MARKER,
-        UiRectPx {
-            x: inset.x + inset.w * 0.5 - 12.0,
-            y: inset.y + inset.h * 0.5 - 12.0,
-            w: 24.0,
-            h: 24.0,
-        },
-        [0.94, 0.86, 0.30, 1.0],
+    push_text(
+        sprites,
+        quickbar_panel.x + 14.0,
+        quickbar_panel.y + 10.0,
+        1.0,
+        inventory.manipulation_mode.label(),
+        [0.95, 0.88, 0.70, 1.0],
     );
-    sprites
+
+    push_quickslot_row(
+        sprites,
+        UiRectPx {
+            x: quickbar_panel.x + 12.0,
+            y: quickbar_panel.y + 26.0,
+            w: quickbar_panel.w - 24.0,
+            h: 36.0,
+        },
+        inventory.active_quickslots(),
+        inventory.active_selected_slot(),
+        registry,
+    );
+}
+
+fn push_inventory_overlay(
+    sprites: &mut Vec<RenderUiSprite>,
+    viewport: [f32; 2],
+    inventory: PlayerInventory,
+    registry: &crate::world::BlockRegistry,
+) {
+    let panel = UiRectPx {
+        x: (viewport[0] * 0.5 - 360.0).floor(),
+        y: (viewport[1] * 0.5 - 226.0).floor(),
+        w: 720.0,
+        h: 452.0,
+    };
+    push_panel(sprites, panel, [0.20, 0.17, 0.14, 0.98], [0.83, 0.70, 0.44, 0.98]);
+    push_text(
+        sprites,
+        panel.x + 20.0,
+        panel.y + 16.0,
+        2.0,
+        "INVENTORY",
+        [0.97, 0.91, 0.76, 1.0],
+    );
+    push_text(
+        sprites,
+        panel.x + panel.w - 206.0,
+        panel.y + 18.0,
+        1.0,
+        "I TO CLOSE",
+        [0.80, 0.82, 0.88, 1.0],
+    );
+
+    let general_origin_x = panel.x + 18.0;
+    let general_origin_y = panel.y + 68.0;
+    let slot_size = 32.0;
+    let slot_gap = 6.0;
+
+    for row in 0..4 {
+        for column in 0..10 {
+            let index = row * 10 + column;
+            let rect = UiRectPx {
+                x: general_origin_x + column as f32 * (slot_size + slot_gap),
+                y: general_origin_y + row as f32 * (slot_size + slot_gap),
+                w: slot_size,
+                h: slot_size,
+            };
+            push_inventory_slot(
+                sprites,
+                rect,
+                inventory.general_slots[index],
+                false,
+                registry,
+            );
+        }
+    }
+
+    push_text(
+        sprites,
+        panel.x + 20.0,
+        panel.y + panel.h - 112.0,
+        1.0,
+        "TOOLS",
+        [0.95, 0.88, 0.70, 1.0],
+    );
+    push_quickslot_row(
+        sprites,
+        UiRectPx {
+            x: panel.x + 92.0,
+            y: panel.y + panel.h - 126.0,
+            w: 560.0,
+            h: 36.0,
+        },
+        inventory.tool_quickslots,
+        inventory.selected_tool_slot as usize,
+        registry,
+    );
+
+    push_text(
+        sprites,
+        panel.x + 20.0,
+        panel.y + panel.h - 64.0,
+        1.0,
+        "BLOCKS",
+        [0.95, 0.88, 0.70, 1.0],
+    );
+    push_quickslot_row(
+        sprites,
+        UiRectPx {
+            x: panel.x + 92.0,
+            y: panel.y + panel.h - 78.0,
+            w: 560.0,
+            h: 36.0,
+        },
+        inventory.block_quickslots,
+        inventory.selected_block_slot as usize,
+        registry,
+    );
+}
+
+fn push_quickslot_row(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    slots: [Option<crate::ecs::InventorySlot>; QUICKSLOT_COUNT],
+    selected_index: usize,
+    registry: &crate::world::BlockRegistry,
+) {
+    let slot_gap = 6.0;
+    let slot_width = ((rect.w - slot_gap * (QUICKSLOT_COUNT as f32 - 1.0)) / QUICKSLOT_COUNT as f32)
+        .floor();
+    for index in 0..QUICKSLOT_COUNT {
+        let slot_rect = UiRectPx {
+            x: rect.x + index as f32 * (slot_width + slot_gap),
+            y: rect.y,
+            w: slot_width,
+            h: rect.h,
+        };
+        push_inventory_slot(
+            sprites,
+            slot_rect,
+            slots[index],
+            index == selected_index,
+            registry,
+        );
+        push_text(
+            sprites,
+            slot_rect.x + 2.0,
+            slot_rect.y + slot_rect.h - 10.0,
+            1.0,
+            &format!("{}", (index + 1) % 10),
+            [0.72, 0.76, 0.84, 1.0],
+        );
+    }
+}
+
+fn push_inventory_slot(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    slot: Option<crate::ecs::InventorySlot>,
+    selected: bool,
+    registry: &crate::world::BlockRegistry,
+) {
+    let frame = if selected {
+        [0.92, 0.76, 0.30, 1.0]
+    } else {
+        [0.46, 0.42, 0.34, 0.98]
+    };
+    let fill = if selected {
+        [0.16, 0.15, 0.10, 0.98]
+    } else {
+        [0.08, 0.10, 0.12, 0.96]
+    };
+    push_small_panel(sprites, rect, frame, fill);
+    push_fill(sprites, rect.inset(6.0), TILE_SLOT_FILL, [0.07, 0.09, 0.11, 0.92]);
+
+    if let Some(slot) = slot {
+        let label = inventory_slot_short_label(slot, registry);
+        push_text_centered(
+            sprites,
+            UiRectPx {
+                x: rect.x + 2.0,
+                y: rect.y + 6.0,
+                w: rect.w - 4.0,
+                h: 12.0,
+            },
+            1.0,
+            label,
+            [0.96, 0.96, 0.98, 1.0],
+        );
+        if matches!(slot.item, InventoryItem::Block(_)) {
+            push_text(
+                sprites,
+                rect.x + 4.0,
+                rect.y + rect.h - 12.0,
+                1.0,
+                &format!("{}", slot.count),
+                [0.84, 0.88, 0.94, 1.0],
+            );
+        }
+    }
+}
+
+fn inventory_slot_short_label(
+    slot: crate::ecs::InventorySlot,
+    registry: &crate::world::BlockRegistry,
+) -> &'static str {
+    match slot.item {
+        InventoryItem::Tool(tool) => tool.short_label(),
+        InventoryItem::Block(block) => match registry.block_or_missing(block).key.as_str() {
+            "grass" => "GRAS",
+            "dirt" => "DIRT",
+            "stone" => "STON",
+            "__missing" => "MISS",
+            _ => "BLCK",
+        },
+    }
 }
 
 fn build_world_select_ui_sprites(

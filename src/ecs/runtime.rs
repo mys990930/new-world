@@ -8,6 +8,9 @@ use super::chunk::ChunkStates;
 use super::command::{
     clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
 };
+use super::inventory::{
+    PlayerInventory, ToolCatalog, apply_inventory_commands_system, local_player_inventory,
+};
 use super::input::{interpret_input_system, EcsInputSnapshot};
 use super::player::{
     place_local_player_on_surface, simulate_local_player_motion, spawn_default_player,
@@ -35,6 +38,7 @@ impl EcsRuntime {
         world.insert_resource(LocalPlayerEntity::default());
         world.insert_resource(FrameDeltaSeconds::default());
         world.insert_resource(PlayerMovementConfig::default());
+        world.insert_resource(ToolCatalog::default());
         world.insert_resource(ChunkStates::default());
         world.insert_resource(SelectionState::default());
 
@@ -45,6 +49,7 @@ impl EcsRuntime {
         update.add_systems(
             (
                 interpret_input_system,
+                apply_inventory_commands_system,
                 apply_camera_commands_system,
                 apply_camera_zoom_input_system,
                 update_move_world_intent_system,
@@ -129,6 +134,10 @@ impl EcsRuntime {
         self.world.get::<PlayerPhysicsState>(entity).copied()
     }
 
+    pub fn local_player_inventory(&self) -> Option<PlayerInventory> {
+        local_player_inventory(&self.world)
+    }
+
     pub fn simulate_local_player_motion(&mut self, world: &WorldCore) {
         simulate_local_player_motion(&mut self.world, world);
     }
@@ -149,6 +158,9 @@ impl EcsRuntime {
     ) {
         let input = self.world.resource::<EcsInputSnapshot>().clone();
         let camera = *self.world.resource::<CameraState>();
+        let tool_catalog = *self.world.resource::<ToolCatalog>();
+        let player_transform = self.local_player_transform();
+        let player_inventory = self.local_player_inventory();
         let mut selection = self.world.resource_mut::<SelectionState>();
         update_selection_from_world(
             &mut selection,
@@ -157,10 +169,13 @@ impl EcsRuntime {
             camera,
             viewport_width,
             viewport_height,
+            player_transform,
+            player_inventory,
+            tool_catalog,
         );
     }
 
     pub fn selection_state(&self) -> SelectionState {
-        *self.world.resource::<SelectionState>()
+        self.world.resource::<SelectionState>().clone()
     }
 }

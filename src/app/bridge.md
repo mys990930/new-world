@@ -42,6 +42,7 @@
 ## Invariants
 
 - `platform -> ecs` only maps raw transient/held input into frame input resources
+- `platform -> ecs` also splits wheel input into `Ctrl + wheel = zoom` and plain wheel = quickslot cycling
 - `Q/E` raw key presses are normalized here into the ECS camera-rotation axis sign convention
 - `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI sprites
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
@@ -65,3 +66,4 @@
 - the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, spinner rows, and explicit action buttons
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
+- in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes

@@ -28,6 +28,7 @@
 - `MoveWorldIntent`
 - current camera follow state
 - `SelectionState`
+- local player inventory / manipulation state
 - local player body/transform snapshot for app bridge
 
 ## Process
@@ -45,16 +46,17 @@
 - currently registered core resources:
   - `EcsInputSnapshot`
   - `PlayerCommandBuffer`
-  - `MoveWorldIntent`
-  - `FrameDeltaSeconds`
-  - `PlayerMovementConfig`
-  - `CameraState`
+- `MoveWorldIntent`
+- `FrameDeltaSeconds`
+- `PlayerMovementConfig`
+- `ToolCatalog`
+- `CameraState`
   - `LocalPlayerEntity`
   - `ChunkStates`
   - `SelectionState`
 - current frame schedule:
   - pre: clear command buffer, clear frame camera impulses
-  - update: input interpretation -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
+  - update: input interpretation -> inventory command application -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
   - post: camera follow update
 - current world-aware helpers are intentionally outside pure ECS systems because `WorldCore` stays app-owned:
   - `simulate_local_player_motion(&WorldCore)`
@@ -81,6 +83,7 @@ EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_physics_state() -> Option<PlayerPhysicsState>
+EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
 EcsRuntime::update_selection_from_world(
@@ -102,6 +105,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - `bevy_ecs`
 - `input.rs`
 - `command.rs`
+- `inventory.rs`
 - `camera.rs`
 - `player.rs`
 - `selection.rs`

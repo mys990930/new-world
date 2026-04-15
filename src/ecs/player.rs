@@ -2,6 +2,7 @@ use bevy_ecs::prelude::{Component, Entity, Query, Res, ResMut, Resource, With, W
 
 use super::camera::CameraState;
 use super::command::MoveWorldIntent;
+use super::inventory::PlayerInventory;
 use super::input::EcsInputSnapshot;
 use crate::world::{CHUNK_EDGE_I32, WorldBlockCoord, WorldCore};
 
@@ -91,9 +92,21 @@ impl Default for PlayerMovementConfig {
 pub(crate) fn update_move_world_intent_system(
     input: Res<EcsInputSnapshot>,
     camera: Res<CameraState>,
+    local_player: Option<Res<LocalPlayerEntity>>,
+    inventories: Query<&PlayerInventory, With<Player>>,
     mut move_world_intent: ResMut<MoveWorldIntent>,
 ) {
     if !input.active || !input.focused {
+        *move_world_intent = MoveWorldIntent::default();
+        return;
+    }
+
+    let inventory_open = local_player
+        .as_deref()
+        .and_then(|local_player| local_player.0)
+        .and_then(|entity| inventories.get(entity).ok())
+        .is_some_and(|inventory| inventory.inventory_open);
+    if inventory_open {
         *move_world_intent = MoveWorldIntent::default();
         return;
     }
@@ -130,6 +143,7 @@ pub(crate) fn spawn_default_player(world: &mut World) -> Entity {
     let entity = world
         .spawn((
             Player,
+            PlayerInventory::default(),
             PlayerBody::default(),
             PlayerPhysicsState::default(),
             Transform {

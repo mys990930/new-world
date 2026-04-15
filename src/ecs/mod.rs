@@ -1,6 +1,7 @@
 mod camera;
 mod chunk;
 mod command;
+mod inventory;
 mod input;
 mod jobs;
 mod player;
@@ -19,6 +20,11 @@ pub use camera::{
 pub use chunk::{ChunkStates, HORIZONTAL_INTEREST_CHUNK_RADIUS};
 #[allow(unused_imports)]
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
+#[allow(unused_imports)]
+pub use inventory::{
+    BUILD_REACH_BLOCKS, GENERAL_SLOT_COUNT, QUICKSLOT_COUNT, InventoryItem, InventorySlot,
+    ManipulationMode, PlayerInventory, ToolCatalog, ToolKind, ToolPreviewShape, ToolSpec,
+};
 pub use input::EcsInputSnapshot;
 #[allow(unused_imports)]
 pub use player::{

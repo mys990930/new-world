@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::{Query, Res, ResMut, Resource, With};
 
 use super::command::PlayerCommand;
+use super::inventory::PlayerInventory;
 use super::input::EcsInputSnapshot;
 use super::player::{FrameDeltaSeconds, LocalPlayerEntity, Player, Transform};
 use super::{MoveWorldIntent, PlayerCommandBuffer};
@@ -87,9 +88,20 @@ pub(crate) fn clear_camera_impulses_system(mut camera: ResMut<CameraState>) {
 
 pub(crate) fn apply_camera_zoom_input_system(
     input: Res<EcsInputSnapshot>,
+    local_player: Option<Res<LocalPlayerEntity>>,
+    inventories: Query<&PlayerInventory, With<Player>>,
     mut camera: ResMut<CameraState>,
 ) {
     if !input.active || !input.focused {
+        return;
+    }
+
+    let inventory_open = local_player
+        .as_deref()
+        .and_then(|local_player| local_player.0)
+        .and_then(|entity| inventories.get(entity).ok())
+        .is_some_and(|inventory| inventory.inventory_open);
+    if inventory_open {
         return;
     }
 
@@ -125,7 +137,12 @@ pub(crate) fn apply_camera_commands_system(
             PlayerCommand::RecenterCamera => {
                 camera.recenter_requested = true;
             }
-            PlayerCommand::PrimaryAction | PlayerCommand::PlaceBlock => {}
+            PlayerCommand::PrimaryAction
+            | PlayerCommand::PlaceBlock
+            | PlayerCommand::ToggleManipulationMode
+            | PlayerCommand::ToggleInventory
+            | PlayerCommand::CycleQuickslot { .. }
+            | PlayerCommand::SelectQuickslot { .. } => {}
         }
     }
 }

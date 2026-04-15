@@ -6,6 +6,10 @@ pub enum PlayerCommand {
     PlaceBlock,
     RotateCamera { quarter_turns: i8 },
     RecenterCamera,
+    ToggleManipulationMode,
+    ToggleInventory,
+    CycleQuickslot { delta: i8 },
+    SelectQuickslot { slot_index: u8 },
 }
 
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
