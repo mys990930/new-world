@@ -38,6 +38,7 @@
 - `primary_just_pressed` becomes `PrimaryAction`
 - `secondary_just_pressed` becomes `PlaceBlock`
 - `rotate_camera` becomes `RotateCamera`
+- the app bridge maps `Q` and `E` into opposite-signed quarter turns so the on-screen turn direction feels natural
 - `recenter_camera` becomes `RecenterCamera`
 - `zoom_scroll_delta` is left as frame-local continuous camera input and is consumed by `camera.rs`
 - when `active == false` or `focused == false`, gameplay commands are not produced

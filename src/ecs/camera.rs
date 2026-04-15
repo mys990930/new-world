@@ -54,7 +54,8 @@ const CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO: f32 = (CAMERA_FORWARD_VIEW_RATIO - 
 const QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER: f32 = 1.732_050_8;
 const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 2.0;
 const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 3.0;
-const CAMERA_ROTATION_LERP_PER_SECOND: f32 = 18.0;
+// About 95% of the visual turn settles within roughly 200 ms.
+const CAMERA_ROTATION_LERP_PER_SECOND: f32 = 15.0;
 const CAMERA_ZOOM_LERP_PER_SECOND: f32 = 8.0 / 3.0;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
 const CAMERA_ROTATION_COMPLETE_RADIANS: f32 = 0.001;
@@ -775,5 +776,31 @@ mod tests {
         let gameplay_pose = quarter_view_camera_pose(camera);
         assert!(render_pose.basis.right[0] > gameplay_pose.basis.right[0]);
         assert!(render_pose.basis.right[2] > gameplay_pose.basis.right[2]);
+    }
+
+    #[test]
+    fn render_rotation_is_almost_settled_after_two_hundred_ms() {
+        let mut world = World::new();
+        world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(FrameDeltaSeconds(0.2));
+        world.insert_resource(MoveWorldIntent::default());
+        world.insert_resource(CameraState {
+            render_yaw_radians: 0.0,
+            desired_render_yaw_radians: std::f32::consts::FRAC_PI_2,
+            render_rotation_initialized: true,
+            initialized: true,
+            ..CameraState::default()
+        });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_camera_follow_system);
+        schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert!(
+            camera.render_yaw_radians
+                > std::f32::consts::FRAC_PI_2 * 0.94
+        );
+        assert!(camera.render_yaw_radians < std::f32::consts::FRAC_PI_2);
     }
 }

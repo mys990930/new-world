@@ -84,7 +84,7 @@ impl GameApp {
             primary_just_pressed: input.left_just_pressed,
             secondary_down: input.right_pressed,
             secondary_just_pressed: input.right_just_pressed,
-            rotate_camera: axis(
+            rotate_camera: camera_rotation_axis(
                 input.just_pressed_keys.contains(&KeyCode::KeyQ),
                 input.just_pressed_keys.contains(&KeyCode::KeyE),
             ),
@@ -181,6 +181,10 @@ impl GameApp {
 
 fn axis(negative: bool, positive: bool) -> i8 {
     (positive as i8) - (negative as i8)
+}
+
+fn camera_rotation_axis(q_pressed: bool, e_pressed: bool) -> i8 {
+    axis(e_pressed, q_pressed)
 }
 
 fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
@@ -921,6 +925,16 @@ mod tests {
 
         assert!(render_basis.right[0] > gameplay_pose.basis.right[0]);
         assert!(render_basis.right[2] > gameplay_pose.basis.right[2]);
+    }
+
+    #[test]
+    fn q_rotation_maps_to_positive_quarter_turn() {
+        assert_eq!(camera_rotation_axis(true, false), 1);
+    }
+
+    #[test]
+    fn e_rotation_maps_to_negative_quarter_turn() {
+        assert_eq!(camera_rotation_axis(false, true), -1);
     }
 
     fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {

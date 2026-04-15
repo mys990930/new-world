@@ -54,7 +54,7 @@
 - The camera is limited to four quarter-view rotations.
 - `Q/E` rotation applies before the same frame's movement intent is interpreted.
 - Gameplay-facing quarter-turn state still snaps immediately so movement and other ECS interpretation use the new basis in the same frame.
-- Render-facing rotation may ease toward the new quarter-turn target over a very short visual transition.
+- Render-facing rotation may ease toward the new quarter-turn target over a short visual transition of roughly 200 ms.
 - The player is followed through a smoothed target rather than a hard snap.
 - Horizontal framing stays loose and deadzone-driven, but the target height should still follow the player's body-center `y`.
 - Mouse-wheel zoom updates the desired quarter-view focus-plane world size inside ECS camera state.
