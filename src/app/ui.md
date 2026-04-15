@@ -8,8 +8,9 @@
 
 - store the current top-level `AppMode`
 - store minimap overlay visibility
-- store world-select screen state such as active section, discovered created worlds, create-world draft, and spawn chunk draft
+- store world-select screen state such as active section, discovered created worlds, create-world draft, spawn chunk draft, and button/status feedback
 - handle screen-level shortcuts that should not belong to ECS
+- build and hit-test app-owned world-select layout state for mouse interaction
 - trigger app-owned create-world requests / created-world reload helpers without moving ownership into ECS or renderer
 
 ## Owned Data
@@ -46,6 +47,7 @@
 - platform raw input snapshot as read by `app`
 - current created-world runtime root
 - created-world manifests discovered under the configured created-world directory
+- current window size for world-select hit testing
 
 ## Outputs
 
@@ -59,10 +61,12 @@
 - `F1` toggles between `InGame` and `WorldSelect`
 - `Tab` toggles the minimap overlay while `InGame`
 - `Escape` closes `WorldSelect`
-- `Up/Down` changes the active world-select section
-- `CreateWorld` section: `Left/Right` changes create-world radius and `Enter` or `B` queues create-world work
-- `SelectCreatedWorld` section: `Left/Right` changes the selected created world and `Enter` loads it
-- `SpawnChunk` section: `Left/Right` adjusts chunk x, `Q/E` or `W/S` adjusts chunk z, `R` resets to the selected created-world preview chunk, and `Enter` loads
+- left-clicking a spinner arrow or action button applies the matching world-select action immediately
+- clicking inside a panel updates the active `WorldSelectSection` for highlight and keyboard fallback
+- `CreateWorld` section: seed/radius spinner arrows adjust the create draft and the create button queues create-world work
+- `SelectCreatedWorld` section: world spinner arrows change the selected created world and the load button loads it
+- `SpawnChunk` section: x/z spinner arrows adjust the load chunk, reset returns to the selected created-world preview chunk, and load-at-chunk applies it
+- `Up/Down`, `Left/Right`, `Q/E`, `W/S`, `Enter`, and `B` remain as keyboard fallback for the active section
 
 ## Invariants
 
@@ -85,7 +89,7 @@
 
 ## Notes
 
-- the current world-select screen is keyboard-driven and intentionally simple
-- the current usable sections are `Create World`, `Select World`, and `Spawn Chunk`
+- the current world-select screen is a mouse-driven three-panel layout with spinner rows and explicit action buttons
+- the current usable sections are `Create World`, `Select World`, and `Spawn Chunk`, each rendered from the same app-owned layout used for hit testing
 - discovered created worlds are sorted by most-recent modification time
 - the current create-world flow queues a jobs request, uses app-owned defaults for vertical chunk range, and writes into `target/world-create`

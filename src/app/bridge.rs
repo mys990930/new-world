@@ -1,6 +1,10 @@
 use super::{
     AppMode, GameApp,
-    ui::{WorldSelectSection, WorldSelectState},
+    ui::{
+        build_world_select_layout, UiRectPx, WorldSelectAction, WorldSelectButtonLayout,
+        WorldSelectFieldLayout, WorldSelectInfoLineLayout, WorldSelectLayout,
+        WorldSelectSectionLayout, WorldSelectState,
+    },
 };
 use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_render_camera_pose};
 #[cfg(test)]
@@ -43,25 +47,6 @@ pub struct AppRenderFrameData {
     pub cube_instances: Vec<RenderCubeInstance>,
     pub ui_sprites: Vec<RenderUiSprite>,
     pub clear_color_override: Option<[f32; 4]>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct UiRectPx {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-}
-
-impl UiRectPx {
-    fn inset(self, amount: f32) -> Self {
-        Self {
-            x: self.x + amount,
-            y: self.y + amount,
-            w: (self.w - amount * 2.0).max(0.0),
-            h: (self.h - amount * 2.0).max(0.0),
-        }
-    }
 }
 
 impl GameApp {
@@ -149,21 +134,30 @@ impl GameApp {
                     clear_color_override: None,
                 }
             }
-            AppMode::WorldSelect => AppRenderFrameData {
-                camera,
-                draw_scene: false,
-                visible_chunks: Vec::new(),
-                cube_instances: Vec::new(),
-                ui_sprites: build_world_select_ui_sprites(
-                    &self.ui.world_select,
-                    viewport,
-                    self.created_world
-                        .as_ref()
-                        .and_then(|source| source.root().file_name())
-                        .and_then(|name| name.to_str()),
-                ),
-                clear_color_override: Some([0.06, 0.07, 0.09, 1.0]),
-            },
+            AppMode::WorldSelect => {
+                let current_loaded_label = self
+                    .created_world
+                    .as_ref()
+                    .and_then(|source| source.root().file_name())
+                    .and_then(|name| name.to_str());
+                let layout =
+                    build_world_select_layout(&self.ui.world_select, viewport, current_loaded_label);
+                let hovered_action =
+                    layout.action_at(self.platform.raw_input_state().mouse_position);
+
+                AppRenderFrameData {
+                    camera,
+                    draw_scene: false,
+                    visible_chunks: Vec::new(),
+                    cube_instances: Vec::new(),
+                    ui_sprites: build_world_select_ui_sprites(
+                        &layout,
+                        &self.ui.world_select,
+                        hovered_action,
+                    ),
+                    clear_color_override: Some([0.06, 0.07, 0.09, 1.0]),
+                }
+            }
         }
     }
 
@@ -328,164 +322,84 @@ fn build_ingame_ui_sprites(show_minimap_overlay: bool, viewport: [f32; 2]) -> Ve
 }
 
 fn build_world_select_ui_sprites(
+    layout: &WorldSelectLayout,
     state: &WorldSelectState,
-    viewport: [f32; 2],
-    current_loaded_label: Option<&str>,
+    hovered_action: Option<WorldSelectAction>,
 ) -> Vec<RenderUiSprite> {
     let mut sprites = Vec::new();
-    let outer = UiRectPx {
-        x: 56.0,
-        y: 42.0,
-        w: (viewport[0] - 112.0).max(640.0),
-        h: (viewport[1] - 84.0).max(420.0),
-    };
-    let title = UiRectPx {
-        x: outer.x,
-        y: outer.y,
-        w: outer.w,
-        h: 76.0,
-    };
-    let body_y = title.y + title.h + 20.0;
-    let bottom_h = 84.0;
-    let section_gap = 20.0;
-    let section_w = ((outer.w - section_gap * 2.0) / 3.0).floor();
-    let section_h = outer.h - title.h - bottom_h - 40.0;
-    let create_world_panel = UiRectPx {
-        x: outer.x,
-        y: body_y,
-        w: section_w,
-        h: section_h,
-    };
-    let select_panel = UiRectPx {
-        x: create_world_panel.x + section_w + section_gap,
-        y: body_y,
-        w: section_w,
-        h: section_h,
-    };
-    let spawn_panel = UiRectPx {
-        x: select_panel.x + section_w + section_gap,
-        y: body_y,
-        w: section_w,
-        h: section_h,
-    };
-    let footer = UiRectPx {
-        x: outer.x,
-        y: outer.y + outer.h - bottom_h,
-        w: outer.w,
-        h: bottom_h,
-    };
 
-    push_panel(&mut sprites, title, [0.20, 0.17, 0.14, 0.98], [0.83, 0.70, 0.44, 0.98]);
+    push_panel(
+        &mut sprites,
+        layout.title_rect,
+        [0.20, 0.17, 0.14, 0.98],
+        [0.83, 0.70, 0.44, 0.98],
+    );
     push_text(
         &mut sprites,
-        title.x + 22.0,
-        title.y + 18.0,
-        3.0,
+        layout.title_rect.x + 22.0,
+        layout.title_rect.y + 18.0,
+        4.0,
         "WORLD SELECT",
         [0.97, 0.91, 0.76, 1.0],
     );
     push_text(
         &mut sprites,
-        title.x + 24.0,
-        title.y + 46.0,
-        1.0,
-        "PIXEL UI  CREATE  SELECT  SPAWN",
-        [0.74, 0.70, 0.62, 1.0],
+        layout.title_rect.x + 24.0,
+        layout.title_rect.y + 58.0,
+        2.0,
+        "MOUSE SPINNERS  CLICK BUTTONS",
+        [0.76, 0.71, 0.61, 1.0],
     );
 
-    push_world_select_section(
-        &mut sprites,
-        create_world_panel,
-        state.section == WorldSelectSection::CreateWorld,
-        WorldSelectSection::CreateWorld.label(),
-        &[
-            format!("SEED {}", state.create_world_seed),
-            format!("RADIUS {}", state.create_world_radius),
-            format!("CENTER {} {}", state.spawn_chunk_x, state.spawn_chunk_z),
-            "ENTER OR B".to_string(),
-            "CREATE WORLD".to_string(),
-        ],
-    );
-    push_world_select_section(
-        &mut sprites,
-        select_panel,
-        state.section == WorldSelectSection::SelectCreatedWorld,
-        WorldSelectSection::SelectCreatedWorld.label(),
-        &build_created_world_selection_lines(state),
-    );
-    push_world_select_section(
-        &mut sprites,
-        spawn_panel,
-        state.section == WorldSelectSection::SpawnChunk,
-        WorldSelectSection::SpawnChunk.label(),
-        &[
-            format!("X {}", state.spawn_chunk_x),
-            format!("Z {}", state.spawn_chunk_z),
-            "LEFT RIGHT X".to_string(),
-            "Q E OR W S Z".to_string(),
-            "ENTER LOAD  R RESET".to_string(),
-        ],
-    );
+    for section in &layout.sections {
+        push_world_select_section_layout(
+            &mut sprites,
+            section,
+            state.section == section.section
+                || hovered_action.and_then(WorldSelectAction::section) == Some(section.section),
+            hovered_action,
+        );
+    }
 
     push_panel(
         &mut sprites,
-        footer,
+        layout.footer_rect,
         [0.16, 0.14, 0.12, 0.98],
         [0.62, 0.56, 0.43, 0.98],
     );
     push_text(
         &mut sprites,
-        footer.x + 18.0,
-        footer.y + 16.0,
-        1.0,
-        &truncate_text(&state.status_line, 56),
+        layout.footer_status_rect.x,
+        layout.footer_status_rect.y,
+        2.0,
+        &truncate_text_to_width(&state.status_line, layout.footer_status_rect.w, 2.0),
         [0.95, 0.88, 0.72, 1.0],
     );
-    let current_label = current_loaded_label.unwrap_or("NONE");
     push_text(
         &mut sprites,
-        footer.x + 18.0,
-        footer.y + 40.0,
-        1.0,
-        &format!("CURRENT {}", truncate_text(current_label, 44)),
+        layout.footer_current_rect.x,
+        layout.footer_current_rect.y,
+        2.0,
+        &format!(
+            "CURRENT {}",
+            truncate_text_to_width(&layout.footer_current_label, layout.footer_current_rect.w - 96.0, 2.0)
+        ),
         [0.70, 0.74, 0.82, 1.0],
+    );
+    push_world_select_button(
+        &mut sprites,
+        &layout.close_button,
+        hovered_action == Some(layout.close_button.action),
     );
 
     sprites
 }
 
-fn build_created_world_selection_lines(state: &WorldSelectState) -> [String; 5] {
-    if let Some(selected) = state.selected_created_world() {
-        let min = selected.manifest.min_chunk_coord();
-        let max = selected.manifest.max_chunk_coord();
-        [
-            truncate_text(&selected.label, 22),
-            format!(
-                "{} OF {}",
-                state.selected_created_world_index.saturating_add(1),
-                state.available_created_worlds.len()
-            ),
-            format!("SEED {}", selected.manifest.seed),
-            format!("BOUNDS {} {} {} {}", min.0, min.2, max.0, max.2),
-            "ENTER LOAD".to_string(),
-        ]
-    } else {
-        [
-            "NO WORLDS".to_string(),
-            "PRESS B".to_string(),
-            "TO CREATE".to_string(),
-            "A RUNTIME".to_string(),
-            "WORLD".to_string(),
-        ]
-    }
-}
-
-fn push_world_select_section(
+fn push_world_select_section_layout(
     sprites: &mut Vec<RenderUiSprite>,
-    panel: UiRectPx,
+    section: &WorldSelectSectionLayout,
     selected: bool,
-    title: &str,
-    lines: &[String],
+    hovered_action: Option<WorldSelectAction>,
 ) {
     let frame_tint = if selected {
         [0.27, 0.22, 0.15, 1.0]
@@ -497,53 +411,175 @@ fn push_world_select_section(
     } else {
         [0.54, 0.47, 0.34, 0.98]
     };
-    let inset = panel.inset(18.0);
 
-    push_panel(sprites, panel, frame_tint, header_tint);
-    push_fill(sprites, inset, TILE_PANEL_INSET, [0.08, 0.10, 0.12, 0.96]);
-    if selected {
-        push_tile_sprite(
-            sprites,
-            TILE_PANEL_MARKER,
-            UiRectPx {
-                x: panel.x + panel.w - 30.0,
-                y: panel.y + 16.0,
-                w: 14.0,
-                h: 14.0,
-            },
-            [0.97, 0.89, 0.36, 1.0],
-        );
-    }
-
+    push_panel(sprites, section.rect, frame_tint, header_tint);
+    push_fill(
+        sprites,
+        section.rect.inset(18.0),
+        TILE_PANEL_INSET,
+        [0.08, 0.10, 0.12, 0.96],
+    );
     push_text(
         sprites,
-        panel.x + 18.0,
-        panel.y + 16.0,
+        section.rect.x + 18.0,
+        section.rect.y + 16.0,
         2.0,
-        title,
+        section.section.label(),
         [0.96, 0.91, 0.78, 1.0],
     );
     push_divider(
         sprites,
         UiRectPx {
-            x: panel.x + 18.0,
-            y: panel.y + 56.0,
-            w: panel.w - 36.0,
+            x: section.rect.x + 18.0,
+            y: section.rect.y + 56.0,
+            w: section.rect.w - 36.0,
             h: 8.0,
         },
         [0.58, 0.52, 0.40, 0.94],
     );
 
-    for (index, line) in lines.iter().enumerate() {
-        push_text(
+    for field in &section.fields {
+        push_world_select_field(
             sprites,
-            inset.x + 12.0,
-            inset.y + 18.0 + index as f32 * 28.0,
-            1.0,
-            line,
-            [0.78, 0.82, 0.89, 1.0],
+            field,
+            hovered_action == Some(field.increase_action),
+            hovered_action == Some(field.decrease_action),
         );
     }
+    for info_line in &section.info_lines {
+        push_world_select_info_line(sprites, info_line);
+    }
+    for button in &section.buttons {
+        push_world_select_button(sprites, button, hovered_action == Some(button.action));
+    }
+}
+
+fn push_world_select_field(
+    sprites: &mut Vec<RenderUiSprite>,
+    field: &WorldSelectFieldLayout,
+    increase_hovered: bool,
+    decrease_hovered: bool,
+) {
+    let label_frame = if field.enabled {
+        [0.23, 0.19, 0.15, 1.0]
+    } else {
+        [0.14, 0.12, 0.11, 0.92]
+    };
+    let value_frame = if field.enabled {
+        [0.14, 0.18, 0.22, 1.0]
+    } else {
+        [0.09, 0.10, 0.11, 0.90]
+    };
+    let label_fill = if field.enabled {
+        [0.11, 0.10, 0.09, 0.98]
+    } else {
+        [0.07, 0.07, 0.07, 0.92]
+    };
+    let value_fill = if field.enabled {
+        [0.08, 0.12, 0.16, 0.98]
+    } else {
+        [0.06, 0.07, 0.08, 0.92]
+    };
+
+    push_small_panel(sprites, field.label_rect, label_frame, label_fill);
+    push_small_panel(sprites, field.value_rect, value_frame, value_fill);
+    push_text_centered(
+        sprites,
+        field.label_rect,
+        2.0,
+        field.label,
+        [0.96, 0.90, 0.78, 1.0],
+    );
+    push_text_centered(
+        sprites,
+        field.value_rect,
+        2.0,
+        &truncate_text_to_width(&field.value, field.value_rect.w - 10.0, 2.0),
+        if field.enabled {
+            [0.78, 0.86, 0.95, 1.0]
+        } else {
+            [0.48, 0.52, 0.56, 0.98]
+        },
+    );
+
+    push_world_select_arrow_button(sprites, field.increase_rect, "UP", increase_hovered, field.enabled);
+    push_world_select_arrow_button(sprites, field.decrease_rect, "DN", decrease_hovered, field.enabled);
+}
+
+fn push_world_select_info_line(sprites: &mut Vec<RenderUiSprite>, info_line: &WorldSelectInfoLineLayout) {
+    push_text(
+        sprites,
+        info_line.rect.x,
+        info_line.rect.y,
+        1.0,
+        &truncate_text_to_width(&info_line.text, info_line.rect.w, 1.0),
+        [0.76, 0.80, 0.86, 1.0],
+    );
+}
+
+fn push_world_select_button(
+    sprites: &mut Vec<RenderUiSprite>,
+    button: &WorldSelectButtonLayout,
+    hovered: bool,
+) {
+    let (frame_tint, fill_tint, text_tint) = if button.enabled {
+        if hovered {
+            ([0.90, 0.73, 0.32, 1.0], [0.21, 0.16, 0.10, 1.0], [0.99, 0.94, 0.82, 1.0])
+        } else {
+            ([0.64, 0.55, 0.36, 1.0], [0.16, 0.13, 0.10, 0.98], [0.95, 0.88, 0.74, 1.0])
+        }
+    } else {
+        ([0.28, 0.26, 0.22, 0.94], [0.09, 0.09, 0.09, 0.90], [0.45, 0.45, 0.45, 0.96])
+    };
+
+    push_small_panel(sprites, button.rect, frame_tint, fill_tint);
+    push_text_centered(sprites, button.rect, 2.0, button.label, text_tint);
+}
+
+fn push_world_select_arrow_button(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    label: &str,
+    hovered: bool,
+    enabled: bool,
+) {
+    let (frame_tint, fill_tint, text_tint) = if enabled {
+        if hovered {
+            ([0.86, 0.70, 0.30, 1.0], [0.22, 0.16, 0.10, 1.0], [0.99, 0.94, 0.82, 1.0])
+        } else {
+            ([0.56, 0.50, 0.37, 1.0], [0.14, 0.12, 0.10, 0.98], [0.90, 0.84, 0.72, 1.0])
+        }
+    } else {
+        ([0.26, 0.24, 0.22, 0.94], [0.08, 0.08, 0.08, 0.90], [0.42, 0.42, 0.42, 0.96])
+    };
+
+    push_small_panel(sprites, rect, frame_tint, fill_tint);
+    push_text_centered(sprites, rect, 1.0, label, text_tint);
+}
+
+fn push_small_panel(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    frame_tint: [f32; 4],
+    fill_tint: [f32; 4],
+) {
+    push_nine_slice_panel(sprites, rect, 8.0, frame_tint);
+    push_fill(sprites, rect.inset(8.0), TILE_PANEL_INSET, fill_tint);
+}
+
+fn push_text_centered(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    scale: f32,
+    text: &str,
+    tint: [f32; 4],
+) {
+    let clipped = truncate_text_to_width(text, (rect.w - 8.0).max(0.0), scale);
+    let text_width = measure_text_width(&clipped, scale);
+    let text_height = UI_TILE_SIZE_PX * scale;
+    let x = rect.x + ((rect.w - text_width).max(0.0) * 0.5).floor();
+    let y = rect.y + ((rect.h - text_height).max(0.0) * 0.5).floor();
+    push_text(sprites, x, y, scale, &clipped, tint);
 }
 
 fn push_panel(
@@ -734,6 +770,19 @@ fn push_text(
         );
         x += advance;
     }
+}
+
+fn measure_text_width(text: &str, scale: f32) -> f32 {
+    text.chars().count() as f32 * UI_TILE_SIZE_PX * scale
+}
+
+fn truncate_text_to_width(text: &str, max_width: f32, scale: f32) -> String {
+    if max_width <= 0.0 {
+        return String::new();
+    }
+
+    let max_chars = (max_width / (UI_TILE_SIZE_PX * scale)).floor().max(0.0) as usize;
+    truncate_text(text, max_chars)
 }
 
 fn font_tile(character: char) -> Option<(u32, u32)> {

@@ -87,4 +87,4 @@ fn frame_deadline(&self) -> Option<Instant>
 - the real GPU surface still attaches in `runner.rs` during `resumed()`
 - the current frame path supports both created-world chunk loading and procedural generation, then meshing and renderer upload
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
-- the current app-owned screen slice can create and reload created worlds, render a sprite-based world-select layout without stepping gameplay, and add HUD frames without giving renderer any ECS/world dependency
+- the current app-owned screen slice can create and reload created worlds, render a mouse-driven sprite-based world-select layout without stepping gameplay, and add HUD frames without giving renderer any ECS/world dependency
