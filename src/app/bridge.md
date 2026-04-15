@@ -10,7 +10,7 @@
 - convert platform raw state into `EcsInputSnapshot`
 - convert app / ECS gameplay state into render-ready DTOs
 - convert app-owned menu / HUD layout into renderer-owned pixel-sprite DTOs
-- convert world top-down query results into minimap sprite cells
+- convert cached minimap viewport data into minimap sprite cells
 - convert world/jobs outputs into renderer upload requests
 
 ## Non-Responsibilities
@@ -24,6 +24,7 @@
 
 - `Platform` state
 - `AppUiState`
+- `AppMinimapViewport`
 - `EcsRuntime` state
 - `world::CpuMesh` and chunk coord
 
@@ -69,4 +70,4 @@
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
 - in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes
-- the minimap overlay now uses the same pixel-sprite path: bridge samples a one-chunk world top-down window around the player, applies the same diagnostic color rules as `chunk_topdown_preview`, and emits tinted cell sprites plus a player marker
+- the minimap overlay now uses the same pixel-sprite path, but bridge only reads app-owned cached viewport data; minimap chunk-column derivation happens earlier through jobs and cache composition

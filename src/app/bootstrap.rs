@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{AppConfig, AppTimingState, AppUiState, GameApp};
+use super::{AppConfig, AppMinimapCache, AppTimingState, AppUiState, GameApp};
 use crate::ecs::{
     EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS,
 };
@@ -53,8 +53,7 @@ impl GameApp {
         }
         let jobs = JobSystem::new(JobConfig::default());
         let timing = AppTimingState::new(&config);
-
-        Self {
+        let mut app = Self {
             config,
             platform,
             ecs,
@@ -63,8 +62,11 @@ impl GameApp {
             jobs,
             renderer,
             ui: AppUiState::default(),
+            minimap: AppMinimapCache::default(),
             timing,
-        }
+        };
+        app.queue_loaded_world_minimap_rebuilds();
+        app
     }
 
     pub(crate) fn request_create_world_from_ui(
@@ -140,6 +142,8 @@ impl GameApp {
         self.world = world;
         self.created_world = Some(source);
         self.jobs = JobSystem::new(JobConfig::default());
+        self.minimap = AppMinimapCache::default();
+        self.queue_loaded_world_minimap_rebuilds();
         println!(
             "[app] loaded created world {} at chunk {} {}",
             root.display(),

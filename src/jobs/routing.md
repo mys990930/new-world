@@ -11,6 +11,7 @@
 - `LoadChunk` -> created-world storage load
 - `GenerateChunk` -> procedural generation
 - `BuildChunkMesh` -> meshing
+- `BuildMinimapChunkColumn` -> snapshot-based top-down chunk-column derivation
 - map operation success/failure into `JobResult`
 
 ## Non-Responsibilities
@@ -50,5 +51,5 @@
 
 ## Notes
 
-- the current routing surface now covers create-world directory creation, created-world chunk load, procedural generation, and meshing
+- the current routing surface now covers create-world directory creation, created-world chunk load, procedural generation, meshing, and snapshot-based minimap chunk-column derivation
 - create-world and created-world load routes are intentionally fallible worker paths in the current runtime

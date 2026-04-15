@@ -77,6 +77,7 @@ impl EcsRuntime {
                 chunk_states.mesh_requested.remove(coord);
                 chunk_states.render_ready.insert(*coord);
             }
+            JobResult::MinimapChunkColumnBuilt { .. } => {}
             JobResult::WorldCreated { .. } => {}
             JobResult::JobFailed { request, .. } => match request {
                 JobRequest::CreateWorld { .. } => {}
@@ -89,6 +90,7 @@ impl EcsRuntime {
                 JobRequest::BuildChunkMesh { center, .. } => {
                     chunk_states.mesh_requested.remove(&center.coord());
                 }
+                JobRequest::BuildMinimapChunkColumn { .. } => {}
             },
         }
     }

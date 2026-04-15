@@ -11,8 +11,10 @@
 - bridge platform snapshot into ECS input
 - run ECS `pre/update/post` phases
 - collect completed jobs and apply them to ECS/world/renderer
+- collect completed minimap rebuild jobs and patch app-owned minimap cache
 - run world-aware local-player motion against `WorldCore`
 - plan chunk acquisition / meshing jobs from ECS chunk state
+- request minimap chunk-column rebuilds when chunk load/generate results change loaded world data
 - update world-and-viewport-based selection state
 - log the clicked block key when a click lands on the current raycast target
 - drain discrete commands for debugging
@@ -38,6 +40,7 @@
 - updated world chunk state
 - updated renderer chunk cache
 - updated `SelectionState`
+- updated app-owned minimap cache
 - optional debug logging for discrete commands
 - one renderer frame attempt
 
@@ -49,7 +52,7 @@
 4. `bridge_platform_to_ecs()`
 5. `ecs.run_pre_update()`
 6. `ecs.run_update()`
-7. collect any already-completed jobs into ECS/world/renderer
+7. collect any already-completed jobs into ECS/world/renderer/minimap cache
 8. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
 9. `ecs.run_post_update()`
 10. plan chunk requests with `ecs.plan_chunk_job_requests(&world, created_world.as_ref())`
@@ -64,6 +67,7 @@
 
 - world-aware player motion happens after job results are applied and before camera follow runs in `post_update`
 - selection update happens after world/job result application
+- minimap viewport composition must read app-owned cached data only; completed jobs and future local world edits are the only sources that mutate the cache
 - block logging is click-triggered so the console does not flood every frame
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
@@ -84,3 +88,4 @@
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - the current inventory / quickslot HUD remains in normal `InGame` mode and is rendered as ECS-derived pixel-atlas UI over the scene
+- the current minimap no longer scans `WorldCore` every frame; it composes a one-chunk viewport from cached chunk-column top-down data rebuilt through jobs

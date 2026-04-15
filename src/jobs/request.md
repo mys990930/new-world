@@ -12,6 +12,7 @@
 - `LoadChunk { root, coord }`
 - `GenerateChunk { coord, meta, registry }`
 - `BuildChunkMesh { center, neighbors, registry }`
+- `BuildMinimapChunkColumn { coord, chunks, registry }`
 
 ### Request identity / coalesce key
 - path-based dedupe identity for `CreateWorld`
@@ -23,6 +24,7 @@
 - `CreateWorldConfig`
 - created-world root path
 - immutable `ChunkSnapshot`
+- immutable chunk-column `Vec<ChunkSnapshot>`
 - `NeighborChunks`
 - `WorldMeta`
 - `Arc<BlockRegistry>`
@@ -63,3 +65,4 @@
 - the current chunk acquisition path now distinguishes created-world load from procedural generation
 - create-world requests coalesce on destination root path so duplicate button presses do not enqueue duplicate directory creation
 - chunk-scoped coalescing still keys on chunk coordinate because the current runtime owns only one active world session
+- minimap chunk-column rebuilds coalesce on chunk-column `x/z`; app cache keeps a dirty-after-pending bit so later chunk arrivals can schedule one more rebuild if a stale worker result wins the race

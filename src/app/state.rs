@@ -7,7 +7,7 @@ use crate::platform::Platform;
 use crate::renderer::Renderer;
 use crate::world::{CreatedWorldSource, WorldCore};
 
-use super::AppUiState;
+use super::{AppMinimapCache, AppUiState};
 
 pub struct GameApp {
     pub config: AppConfig,
@@ -18,6 +18,7 @@ pub struct GameApp {
     pub jobs: JobSystem,
     pub renderer: Renderer,
     pub ui: AppUiState,
+    pub minimap: AppMinimapCache,
     pub timing: AppTimingState,
 }
 

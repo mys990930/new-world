@@ -1,7 +1,8 @@
 use super::chunk::BlockId;
-use super::coord::WorldBlockCoord;
+use super::coord::{CHUNK_EDGE, CHUNK_EDGE_I32, LocalBlockCoord, WorldBlockCoord};
 use super::core::WorldCore;
 use super::generation::WORLD_FLOOR_Y;
+use super::chunk::ChunkSnapshot;
 use super::registry::{BlockDef, BlockMaterialKind, BlockRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,10 +26,70 @@ pub struct TopdownColumnScan {
     pub water_block_count: u16,
 }
 
+impl TopdownColumnScan {
+    pub const AIR: Self = Self {
+        visible: TopdownCell::AIR,
+        top_solid: TopdownCell::AIR,
+        top_water_y: None,
+        water_block_count: 0,
+    };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TopdownSurfaceRange {
     pub min_y: i32,
     pub max_y: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TopdownChunkColumnCoord {
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopdownChunkColumnPatch {
+    coord: TopdownChunkColumnCoord,
+    columns: Vec<TopdownColumnScan>,
+}
+
+impl TopdownChunkColumnPatch {
+    pub fn new(coord: TopdownChunkColumnCoord, columns: Vec<TopdownColumnScan>) -> Self {
+        debug_assert_eq!(columns.len(), CHUNK_EDGE * CHUNK_EDGE);
+        Self { coord, columns }
+    }
+
+    pub fn empty(coord: TopdownChunkColumnCoord) -> Self {
+        Self {
+            coord,
+            columns: vec![TopdownColumnScan::AIR; CHUNK_EDGE * CHUNK_EDGE],
+        }
+    }
+
+    pub fn coord(&self) -> TopdownChunkColumnCoord {
+        self.coord
+    }
+
+    pub fn columns(&self) -> &[TopdownColumnScan] {
+        &self.columns
+    }
+
+    pub fn get(&self, local_x: u32, local_z: u32) -> Option<TopdownColumnScan> {
+        let index = chunk_column_index(local_x, local_z)?;
+        self.columns.get(index).copied()
+    }
+
+    pub fn set(&mut self, local_x: u32, local_z: u32, scan: TopdownColumnScan) -> bool {
+        let Some(index) = chunk_column_index(local_x, local_z) else {
+            return false;
+        };
+        if let Some(cell) = self.columns.get_mut(index) {
+            *cell = scan;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +125,7 @@ pub fn sample_topdown_columns(
         let world_z = min_world_z + z_offset as i32;
         for x_offset in 0..width_blocks as usize {
             let world_x = min_world_x + x_offset as i32;
-            columns.push(sample_column_scan(
+            columns.push(sample_single_topdown_column(
                 world,
                 registry,
                 world_x,
@@ -75,6 +136,47 @@ pub fn sample_topdown_columns(
         }
     }
     columns
+}
+
+pub fn sample_single_topdown_column(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    world_x: i32,
+    world_z: i32,
+    min_world_y: i32,
+    max_world_y: i32,
+) -> TopdownColumnScan {
+    sample_column_scan(world, registry, world_x, world_z, min_world_y, max_world_y)
+}
+
+pub fn sample_topdown_chunk_column(
+    registry: &BlockRegistry,
+    coord: TopdownChunkColumnCoord,
+    chunks: &[ChunkSnapshot],
+) -> TopdownChunkColumnPatch {
+    let mut ordered_chunks = chunks
+        .iter()
+        .filter(|chunk| chunk.coord().0 == coord.chunk_x && chunk.coord().2 == coord.chunk_z)
+        .collect::<Vec<_>>();
+    ordered_chunks.sort_by(|left, right| right.coord().1.cmp(&left.coord().1));
+
+    if ordered_chunks.is_empty() {
+        return TopdownChunkColumnPatch::empty(coord);
+    }
+
+    let mut columns = Vec::with_capacity(CHUNK_EDGE * CHUNK_EDGE);
+    for local_z in 0..CHUNK_EDGE as u32 {
+        for local_x in 0..CHUNK_EDGE as u32 {
+            columns.push(sample_snapshot_column_scan(
+                &ordered_chunks,
+                registry,
+                local_x,
+                local_z,
+            ));
+        }
+    }
+
+    TopdownChunkColumnPatch::new(coord, columns)
 }
 
 pub fn topdown_surface_range(
@@ -242,10 +344,7 @@ fn sample_column_scan(
     min_world_y: i32,
     max_world_y: i32,
 ) -> TopdownColumnScan {
-    let mut visible = TopdownCell::AIR;
-    let mut top_solid = TopdownCell::AIR;
-    let mut top_water_y = None;
-    let mut water_block_count = 0_u16;
+    let mut scan = TopdownColumnScan::AIR;
 
     for world_y in (min_world_y..=max_world_y).rev() {
         let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z)) else {
@@ -255,33 +354,73 @@ fn sample_column_scan(
             continue;
         }
 
-        let block_def = registry.block_or_missing(block);
-        if visible.top_y.is_none() {
-            visible = TopdownCell {
-                top_y: Some(world_y),
-                block,
+        accumulate_column_hit(&mut scan, registry, block, world_y);
+    }
+
+    scan
+}
+
+fn sample_snapshot_column_scan(
+    chunks: &[&ChunkSnapshot],
+    registry: &BlockRegistry,
+    local_x: u32,
+    local_z: u32,
+) -> TopdownColumnScan {
+    let mut scan = TopdownColumnScan::AIR;
+    let local_x = local_x as u8;
+    let local_z = local_z as u8;
+
+    for chunk in chunks {
+        for local_y in (0..CHUNK_EDGE as u8).rev() {
+            let local = LocalBlockCoord::new(local_x, local_y, local_z)
+                .expect("minimap patch scan should stay in chunk bounds");
+            let Some(block) = chunk.get_block(local) else {
+                continue;
             };
-        }
-        if top_solid.top_y.is_none() && block_def.solid {
-            top_solid = TopdownCell {
-                top_y: Some(world_y),
-                block,
-            };
-        }
-        if block_def.key == "water" {
-            if top_water_y.is_none() {
-                top_water_y = Some(world_y);
+            if block.is_air() {
+                continue;
             }
-            water_block_count = water_block_count.saturating_add(1);
+
+            let world_y = chunk.coord().1 * CHUNK_EDGE_I32 + i32::from(local_y);
+            accumulate_column_hit(&mut scan, registry, block, world_y);
         }
     }
 
-    TopdownColumnScan {
-        visible,
-        top_solid,
-        top_water_y,
-        water_block_count,
+    scan
+}
+
+fn accumulate_column_hit(
+    scan: &mut TopdownColumnScan,
+    registry: &BlockRegistry,
+    block: BlockId,
+    world_y: i32,
+) {
+    let block_def = registry.block_or_missing(block);
+    if scan.visible.top_y.is_none() {
+        scan.visible = TopdownCell {
+            top_y: Some(world_y),
+            block,
+        };
     }
+    if scan.top_solid.top_y.is_none() && block_def.solid {
+        scan.top_solid = TopdownCell {
+            top_y: Some(world_y),
+            block,
+        };
+    }
+    if block_def.key == "water" {
+        if scan.top_water_y.is_none() {
+            scan.top_water_y = Some(world_y);
+        }
+        scan.water_block_count = scan.water_block_count.saturating_add(1);
+    }
+}
+
+fn chunk_column_index(local_x: u32, local_z: u32) -> Option<usize> {
+    if local_x >= CHUNK_EDGE as u32 || local_z >= CHUNK_EDGE as u32 {
+        return None;
+    }
+    Some(local_x as usize + local_z as usize * CHUNK_EDGE)
 }
 
 fn block_base_color(def: &BlockDef) -> [u8; 3] {
@@ -371,5 +510,32 @@ mod tests {
             .expect("snow definition should exist");
 
         assert_eq!(block_base_color(snow), [244, 248, 255]);
+    }
+
+    #[test]
+    fn snapshot_chunk_column_sampling_reads_highest_visible_block() {
+        let registry =
+            Arc::new(BlockRegistry::load_default().expect("default registry should load"));
+        let mut lower = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        lower
+            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::STONE)
+            .unwrap();
+        let mut upper = ChunkData::new_empty(ChunkCoord(0, 1, 0));
+        upper
+            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::GRASS)
+            .unwrap();
+
+        let patch = sample_topdown_chunk_column(
+            registry.as_ref(),
+            TopdownChunkColumnCoord {
+                chunk_x: 0,
+                chunk_z: 0,
+            },
+            &[lower.snapshot(), upper.snapshot()],
+        );
+
+        let cell = patch.get(0, 0).expect("patch cell should exist");
+        assert_eq!(cell.visible.block, BlockId::GRASS);
+        assert_eq!(cell.visible.top_y, Some(CHUNK_EDGE_I32));
     }
 }

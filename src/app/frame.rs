@@ -79,9 +79,17 @@ impl GameApp {
                 }
                 JobResult::ChunkLoaded { coord, chunk } => {
                     self.world.insert_chunk(coord, chunk);
+                    self.queue_minimap_chunk_column_rebuild(crate::world::TopdownChunkColumnCoord {
+                        chunk_x: coord.0,
+                        chunk_z: coord.2,
+                    });
                 }
                 JobResult::ChunkGenerated { coord, chunk } => {
                     self.world.insert_chunk(coord, chunk);
+                    self.queue_minimap_chunk_column_rebuild(crate::world::TopdownChunkColumnCoord {
+                        chunk_x: coord.0,
+                        chunk_z: coord.2,
+                    });
                 }
                 JobResult::ChunkMeshBuilt { coord, mesh } => {
                     if let Err(error) = self.renderer.apply_upload(
@@ -89,6 +97,9 @@ impl GameApp {
                     ) {
                         eprintln!("[app] renderer upload failed for {:?}: {:?}", coord, error);
                     }
+                }
+                JobResult::MinimapChunkColumnBuilt { coord, patch } => {
+                    self.handle_minimap_chunk_column_built(coord, patch);
                 }
                 JobResult::JobFailed { request, error } => {
                     self.handle_job_failure(&request, error.clone());

@@ -12,6 +12,7 @@
 - `ChunkLoaded { coord, chunk }`
 - `ChunkGenerated { coord, chunk }`
 - `ChunkMeshBuilt { coord, mesh }`
+- `MinimapChunkColumnBuilt { coord, patch }`
 - `JobFailed { request, error }`
 
 ### JobError
@@ -57,3 +58,4 @@
 
 - create-world and created-world chunk load now use `ExecutionFailed { message }` when directory, manifest, disk read, or decode work fails
 - app still decides how to log or recover from `JobFailed`
+- minimap chunk-column results are cache data only; app still owns how and when that cache is read by the render bridge

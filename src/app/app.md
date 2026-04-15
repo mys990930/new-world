@@ -14,6 +14,7 @@
 - created-world runtime selection ownership
 - top-level app-mode and overlay ownership
 - top-level create-world / created-world selection screen ownership
+- top-level minimap cache ownership and jobs-based refresh policy
 - top-level shutdown handling
 
 ### Non-Responsibilities
@@ -32,6 +33,7 @@
 - `JobSystem`
 - `Renderer`
 - `AppUiState`
+- `AppMinimapCache`
 - `AppConfig`
 - `AppTimingState`
 
@@ -78,6 +80,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - frame.rs: frame update pipeline orchestration
 - fixed.rs: future fixed timestep orchestration
 - bridge.rs: cross-module DTO translation
+- minimap.rs: app-owned minimap cache, chunk-column rebuild scheduling state, viewport composition
 - ui.rs: app-mode and lightweight overlay state
 - shutdown.rs: future teardown / flush
 
@@ -86,5 +89,6 @@ fn frame_deadline(&self) -> Option<Instant>
 - bootstrap still creates the renderer before the real OS window exists, so it starts from `StubSurfaceTarget`
 - the real GPU surface still attaches in `runner.rs` during `resumed()`
 - the current frame path supports both created-world chunk loading and procedural generation, then meshing and renderer upload
+- the current minimap path is app-owned cached state: chunk load/generate results trigger background minimap-column rebuild jobs, and render bridging only composes the current player-centered viewport from cached column data
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
 - the current app-owned screen slice can create and reload created worlds, render a mouse-driven sprite-based world-select layout with typed numeric fields, a scrollable created-world list, and create-job loading feedback without stepping gameplay, and add HUD frames without giving renderer any ECS/world dependency

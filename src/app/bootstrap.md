@@ -19,6 +19,7 @@
 - spawn the default local player
 - place the player on a safe surface when preload data is available
 - create `JobSystem`
+- create `AppMinimapCache`
 - create `AppTimingState`
 - assemble `GameApp`
 - provide app-owned create-world request / created-world reload helpers for the world-select screen
@@ -45,8 +46,10 @@
 11. spawn the default local player entity
 12. snap the local player to a safe loaded surface near the preload anchor when possible
 13. create `JobSystem`
-14. create app timing state
-15. return `GameApp`
+14. create an empty app-owned minimap cache
+15. queue initial minimap rebuild work for the already-preloaded chunk columns
+16. create app timing state
+17. return `GameApp`
 
 ## Output
 
@@ -59,6 +62,7 @@
 - UI atlas load is best-effort; renderer can fall back to a white dummy texture if the atlas file is missing
 - the default local player is spawned once during bootstrap
 - if preload data exists, bootstrap attempts to place the player so the `2x2x4` body does not start embedded in solid blocks
+- initial preload may still be synchronous, but minimap column derivation should be deferred to jobs so first-frame UI does not rescan the world on the main thread
 
 ## Related Modules
 
@@ -78,3 +82,4 @@
 - when a created world is found, bootstrap preloads a `5x5` horizontal neighborhood of created-world chunk columns around the created-world preview chunk so spawn placement and first-frame movement do not expose chunk edges immediately
 - when no created world is found, bootstrap falls back to generating a small procedural `5x5` neighborhood on the player plane
 - the current app-owned world-select screen reuses bootstrap-style helpers to queue create-world work and reload the runtime into a newly selected created-world root without changing lower-layer ownership
+- after bootstrap or created-world reload, the current runtime seeds minimap jobs from the already-loaded chunk columns instead of deriving minimap cells directly in `bridge.rs`

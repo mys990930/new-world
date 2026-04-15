@@ -1,5 +1,5 @@
 use super::{
-    AppMode, GameApp,
+    AppMinimapViewport, AppMode, GameApp, MINIMAP_BLOCK_SPAN,
     ui::{
         build_world_select_layout, UiRectPx, WorldSelectAction, WorldSelectButtonLayout,
         WorldSelectFieldLayout, WorldSelectInfoLineLayout, WorldSelectInputField,
@@ -19,10 +19,9 @@ use crate::renderer::{
     RenderUiSprite, RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
-    CHUNK_EDGE_I32, BlockId, BlockMaterialKind, ChunkCoord as WorldChunkCoord,
-    CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex, TopdownEdge, WorldCore,
-    color_topdown_cell, darken_topdown_color, sample_topdown_columns,
-    topdown_edge_strength_for_cell, topdown_surface_range,
+    BlockId, BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
+    MeshVertex as WorldMeshVertex, TopdownEdge, WorldCore, color_topdown_cell,
+    darken_topdown_color, topdown_edge_strength_for_cell,
 };
 use winit::keyboard::KeyCode;
 
@@ -46,7 +45,6 @@ const TILE_PANEL_MARKER: (u32, u32) = (11, 0);
 const TILE_PANEL_DIVIDER: (u32, u32) = (12, 0);
 const TILE_SLOT_FILL: (u32, u32) = (14, 0);
 const DEFAULT_PREVIEW_BLOCK_ID: BlockId = BlockId::STONE;
-const MINIMAP_BLOCK_SPAN: u32 = CHUNK_EDGE_I32 as u32;
 const MINIMAP_CELL_SIZE_PX: f32 = 5.0;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,6 +141,10 @@ impl GameApp {
                     &self.world,
                     inventory,
                 );
+                let minimap_viewport = player_transform.map(|transform| {
+                    self.minimap
+                        .compose_viewport(transform.translation[0], transform.translation[2])
+                });
 
                 AppRenderFrameData {
                     camera,
@@ -159,7 +161,8 @@ impl GameApp {
                         viewport,
                         inventory,
                         player_transform,
-                        &self.world,
+                        self.world.block_registry(),
+                        minimap_viewport.as_ref(),
                     ),
                     clear_color_override: None,
                 }
@@ -332,17 +335,24 @@ fn build_ingame_ui_sprites(
     viewport: [f32; 2],
     inventory: Option<PlayerInventory>,
     player_transform: Option<crate::ecs::Transform>,
-    world: &WorldCore,
+    block_registry: &crate::world::BlockRegistry,
+    minimap_viewport: Option<&AppMinimapViewport>,
 ) -> Vec<RenderUiSprite> {
     let mut sprites = Vec::new();
     if show_minimap_overlay {
-        push_minimap_overlay(&mut sprites, viewport, player_transform, world);
+        push_minimap_overlay(
+            &mut sprites,
+            viewport,
+            player_transform,
+            minimap_viewport,
+            block_registry,
+        );
     }
 
     if let Some(inventory) = inventory {
-        push_ingame_hud(&mut sprites, viewport, inventory, world.block_registry());
+        push_ingame_hud(&mut sprites, viewport, inventory, block_registry);
         if inventory.inventory_open {
-            push_inventory_overlay(&mut sprites, viewport, inventory, world.block_registry());
+            push_inventory_overlay(&mut sprites, viewport, inventory, block_registry);
         }
     }
     sprites
@@ -352,7 +362,8 @@ fn push_minimap_overlay(
     sprites: &mut Vec<RenderUiSprite>,
     viewport: [f32; 2],
     player_transform: Option<crate::ecs::Transform>,
-    world: &WorldCore,
+    minimap_viewport: Option<&AppMinimapViewport>,
+    block_registry: &crate::world::BlockRegistry,
 ) {
     let panel = UiRectPx {
         x: viewport[0] - 264.0,
@@ -403,37 +414,19 @@ fn push_minimap_overlay(
     let Some(player_transform) = player_transform else {
         return;
     };
-    let Some((min_chunk, max_chunk)) = world.loaded_chunk_bounds() else {
+    let Some(minimap_viewport) = minimap_viewport else {
         return;
     };
-
-    let player_block_x = player_transform.translation[0].floor() as i32;
-    let player_block_z = player_transform.translation[2].floor() as i32;
-    let half_span = MINIMAP_BLOCK_SPAN as i32 / 2;
-    let min_world_x = player_block_x - half_span;
-    let min_world_z = player_block_z - half_span;
-    let min_world_y = (min_chunk.1 * CHUNK_EDGE_I32).max(crate::world::WORLD_FLOOR_Y);
-    let max_world_y = (max_chunk.1 + 1) * CHUNK_EDGE_I32 - 1;
-    let columns = sample_topdown_columns(
-        world,
-        world.block_registry(),
-        min_world_x,
-        min_world_z,
-        MINIMAP_BLOCK_SPAN,
-        MINIMAP_BLOCK_SPAN,
-        min_world_y,
-        max_world_y,
-    );
-    let Some(surface_range) = topdown_surface_range(&columns) else {
-        return;
-    };
+    let surface_range = minimap_viewport
+        .surface_range
+        .unwrap_or(crate::world::TopdownSurfaceRange { min_y: 0, max_y: 0 });
 
     let grid_width = MINIMAP_BLOCK_SPAN as usize;
     let grid_height = MINIMAP_BLOCK_SPAN as usize;
     for z in 0..grid_height {
         for x in 0..grid_width {
-            let scan = columns[z * grid_width + x];
-            let base_color = color_topdown_cell(scan.visible, world.block_registry(), surface_range);
+            let scan = minimap_viewport.columns[z * grid_width + x];
+            let base_color = color_topdown_cell(scan.visible, block_registry, surface_range);
             let rect = UiRectPx {
                 x: map_rect.x + x as f32 * MINIMAP_CELL_SIZE_PX,
                 y: map_rect.y + z as f32 * MINIMAP_CELL_SIZE_PX,
@@ -441,14 +434,27 @@ fn push_minimap_overlay(
                 h: MINIMAP_CELL_SIZE_PX,
             };
             push_fill(sprites, rect, TILE_PANEL_CENTER, rgb8_tint(base_color, 1.0));
-            push_minimap_cell_edges(sprites, rect, &columns, grid_width, grid_height, x, z, base_color);
+            push_minimap_cell_edges(
+                sprites,
+                rect,
+                &minimap_viewport.columns,
+                grid_width,
+                grid_height,
+                x,
+                z,
+                base_color,
+            );
         }
     }
 
     let marker_center_x =
-        map_rect.x + (player_transform.translation[0] - min_world_x as f32) * MINIMAP_CELL_SIZE_PX;
+        map_rect.x
+            + (player_transform.translation[0] - minimap_viewport.min_world_x as f32)
+                * MINIMAP_CELL_SIZE_PX;
     let marker_center_y =
-        map_rect.y + (player_transform.translation[2] - min_world_z as f32) * MINIMAP_CELL_SIZE_PX;
+        map_rect.y
+            + (player_transform.translation[2] - minimap_viewport.min_world_z as f32)
+                * MINIMAP_CELL_SIZE_PX;
     push_tile_sprite(
         sprites,
         TILE_PANEL_MARKER,

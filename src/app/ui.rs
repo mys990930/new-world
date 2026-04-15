@@ -1763,16 +1763,22 @@ impl GameApp {
     }
 
     pub(crate) fn handle_job_failure(&mut self, request: &JobRequest, error: JobError) {
-        if let JobRequest::CreateWorld { root, .. } = request {
-            self.clear_pending_job_for_root(root.as_path());
-            self.ui.world_select.status_line = format!(
-                "CREATE FAILED {} {}",
-                root.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("WORLD")
-                    .to_ascii_uppercase(),
-                format_job_error(error)
-            );
+        match request {
+            JobRequest::CreateWorld { root, .. } => {
+                self.clear_pending_job_for_root(root.as_path());
+                self.ui.world_select.status_line = format!(
+                    "CREATE FAILED {} {}",
+                    root.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("WORLD")
+                        .to_ascii_uppercase(),
+                    format_job_error(error)
+                );
+            }
+            JobRequest::BuildMinimapChunkColumn { coord, .. } => {
+                self.minimap.cancel_pending_column(*coord);
+            }
+            _ => {}
         }
     }
 

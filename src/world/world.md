@@ -27,6 +27,7 @@
 - meshing input provision
 - block-grid raycast queries
 - exact top-down column sampling for previews such as debug dumps and minimap overlays
+- snapshot-based top-down chunk-column derivation for cached minimap rebuild jobs
 
 ### Non-Responsibilities
 
@@ -116,6 +117,19 @@ sample_topdown_columns(
     min_world_y: i32,
     max_world_y: i32,
 ) -> Vec<TopdownColumnScan>
+sample_single_topdown_column(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    world_x: i32,
+    world_z: i32,
+    min_world_y: i32,
+    max_world_y: i32,
+) -> TopdownColumnScan
+sample_topdown_chunk_column(
+    registry: &BlockRegistry,
+    coord: TopdownChunkColumnCoord,
+    chunks: &[ChunkSnapshot],
+) -> TopdownChunkColumnPatch
 topdown_surface_range(columns: &[TopdownColumnScan]) -> Option<TopdownSurfaceRange>
 color_topdown_cell(
     cell: TopdownCell,
@@ -178,6 +192,7 @@ NOT:
 - chunk acquisition can now come from either created-world disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
 - top-down preview sampling now also stays world-owned so app minimaps and debug tools can reuse the same realized block-column interpretation rules
+- the current minimap cache flow uses snapshot-based top-down chunk-column derivation in jobs, while render-time viewport composition stays app-owned
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells

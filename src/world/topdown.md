@@ -4,6 +4,7 @@
 
 - own exact top-down block-column sampling rules for realized world data
 - provide shared preview-color and edge-strength helpers for debug tools and app minimap overlays
+- provide worker-safe snapshot-based chunk-column derivation for cached minimap rebuild jobs
 
 ## Responsibilities
 
@@ -35,6 +36,14 @@
 - `min_y`
 - `max_y`
 
+### `TopdownChunkColumnCoord`
+- chunk `x`
+- chunk `z`
+
+### `TopdownChunkColumnPatch`
+- chunk-column coord
+- cached `TopdownColumnScan` grid for one `32x32` chunk column
+
 ### `TopdownEdge`
 - `Left`
 - `Top`
@@ -45,12 +54,14 @@
 
 - `WorldCore`
 - `BlockRegistry`
+- `ChunkSnapshot`
 - requested world-space `x/z` window in blocks
 - requested world-space vertical scan range
 
 ## Outputs
 
 - sampled `TopdownColumnScan` grid
+- snapshot-derived `TopdownChunkColumnPatch`
 - optional surface range for visible blocks
 - per-cell RGB preview colors
 - edge strengths that callers can map to outline darkening
@@ -58,6 +69,7 @@
 ## State Rules
 
 - sampling uses exact realized `WorldCore` block contents only
+- snapshot-based chunk-column derivation uses only the provided immutable chunk snapshots and never reaches back into `WorldCore`
 - sampling never generates or loads missing chunks implicitly
 - visible cells are based on the topmost non-air block in each scanned column
 - top-down preview color stays diagnostic and registry-driven rather than renderer-shaded
@@ -68,6 +80,7 @@
 - top-down helpers stay read-only
 - callers may render the same sampled data at different pixel densities, but the cell color and edge-strength rules stay world-owned
 - the same sampled rules should be reusable by both `chunk_topdown_preview` and app minimap overlays
+- the same chunk-column color and edge rules should remain reusable whether the source is a live `WorldCore` query or a jobs-built cached patch
 
 ## Related Modules
 
@@ -79,3 +92,4 @@
 
 - the current color rules intentionally match the diagnostic style used by `chunk_topdown_preview` rather than final live renderer shading
 - the current minimap overlay uses these helpers with atlas-backed UI sprites instead of a separate UI texture path
+- the current runtime now prefers snapshot-based chunk-column rebuilds in jobs, and only uses single-column live resampling for future local patch updates after world edits

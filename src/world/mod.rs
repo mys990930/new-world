@@ -75,7 +75,8 @@ pub use registry::{
 pub use storage::{StorageError, load_chunk, save_chunk};
 #[allow(unused_imports)]
 pub use topdown::{
-    TopdownCell, TopdownColumnScan, TopdownEdge, TopdownSurfaceRange, color_topdown_cell,
-    darken_topdown_color, sample_topdown_columns, topdown_edge_strength_for_cell,
-    topdown_outline_strength, topdown_surface_range,
+    TopdownCell, TopdownChunkColumnCoord, TopdownChunkColumnPatch, TopdownColumnScan,
+    TopdownEdge, TopdownSurfaceRange, color_topdown_cell, darken_topdown_color,
+    sample_single_topdown_column, sample_topdown_chunk_column, sample_topdown_columns,
+    topdown_edge_strength_for_cell, topdown_outline_strength, topdown_surface_range,
 };

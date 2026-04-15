@@ -1,5 +1,6 @@
 use crate::world::{
     build_chunk_mesh, create_world_to_directory, generate_chunk, load_created_world_chunk,
+    sample_topdown_chunk_column,
 };
 
 use super::request::JobRequest;
@@ -50,5 +51,13 @@ pub(crate) fn execute(request: JobRequest) -> JobResult {
             let mesh = build_chunk_mesh(&center, neighbors, registry.as_ref());
             JobResult::ChunkMeshBuilt { coord, mesh }
         }
+        JobRequest::BuildMinimapChunkColumn {
+            coord,
+            chunks,
+            registry,
+        } => JobResult::MinimapChunkColumnBuilt {
+            coord,
+            patch: sample_topdown_chunk_column(registry.as_ref(), coord, &chunks),
+        },
     }
 }
