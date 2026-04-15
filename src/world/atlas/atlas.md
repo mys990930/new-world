@@ -82,6 +82,7 @@ write_debug_images(
 - `tuning.md`
 - `structure.md`
 - `meso.md`
+- `meso_candidates.md`
 - `atlas_fields.md`
 - `atlas_resolver.md`
 - `atlas_debug.md`

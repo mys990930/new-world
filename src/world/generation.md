@@ -117,6 +117,7 @@ generation::sample_chunk_surface_lod(
 - Atlas is intentionally kept macro at the current scale, so the next readability pass should add a separate meso terrain layer rather than collapsing more casual terrain identity directly into atlas cells.
 - The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and richer river topology handling beyond the first explicit confluence pass.
 - A later revision should also insert a deterministic meso layer between atlas and micro detail so features such as hill groups, cliff bands, basins, coves, or terraces can span several chunks without requiring atlas to change identity every few chunks.
+- That meso layer is planned to use atlas/structure-conditioned deterministic weighted picks rather than pure thresholds or unconstrained random noise.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
   2. gather the matching meso guide window for the same terrain footprint
