@@ -40,6 +40,7 @@ const MAJOR_RIVER_STEP_LENGTH_CELLS: f32 = 1.9;
 const MINOR_RIVER_STEP_LENGTH_CELLS: f32 = 1.5;
 const MAJOR_RIVER_MAX_REACH_CELLS: i32 = 44;
 const MINOR_RIVER_MAX_REACH_CELLS: i32 = 26;
+const TRIBUTARY_CONFLUENCE_SNAP_RADIUS_CELLS: f32 = 1.15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AtlasStructureRegionCoord {
@@ -194,6 +195,8 @@ pub enum DrainageNodeKind {
 pub struct DrainageNode {
     pub coord: AtlasCoord,
     pub kind: DrainageNodeKind,
+    pub river_id: RiverPathId,
+    pub order: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,6 +323,7 @@ pub fn generate_atlas_structure_with_tuning(
         let region = AtlasStructureRegion::new(region_coord);
         generate_region_structure(meta.seed, region, area, &mut structure);
     }
+    resolve_drainage_confluences(area, structure.drainage_mut());
 
     structure
 }
@@ -568,6 +572,8 @@ fn emit_river_branch(
         graph.push_node(DrainageNode {
             coord: headwater,
             kind: DrainageNodeKind::Headwater,
+            river_id,
+            order,
         });
     }
     let mut downstream_cells = 0.0_f32;
@@ -632,7 +638,92 @@ fn emit_river_branch(
         graph.push_node(DrainageNode {
             coord: outlet,
             kind: DrainageNodeKind::Outlet,
+            river_id,
+            order,
         });
+    }
+}
+
+fn resolve_drainage_confluences(requested_area: AtlasArea, graph: &mut DrainageGraph) {
+    let target_segments = graph.segments.clone();
+    let mut tributary_last_segment_indices = Vec::<usize>::new();
+
+    for (index, segment) in graph.segments.iter().enumerate() {
+        if segment.kind != RiverPathKind::Tributary {
+            continue;
+        }
+
+        if let Some(existing_index) = tributary_last_segment_indices
+            .iter()
+            .position(|candidate_index| {
+                graph.segments[*candidate_index].river_id == segment.river_id
+            })
+        {
+            let candidate_index = tributary_last_segment_indices[existing_index];
+            if segment.downstream_cells_end > graph.segments[candidate_index].downstream_cells_end {
+                tributary_last_segment_indices[existing_index] = index;
+            }
+        } else {
+            tributary_last_segment_indices.push(index);
+        }
+    }
+
+    for source_index in tributary_last_segment_indices {
+        let source = graph.segments[source_index];
+        let outlet_point = (source.end.x as f32 + 0.5, source.end.z as f32 + 0.5);
+        let mut best_target = None::<(AtlasCoord, RiverPathSegment, f32)>;
+
+        for target in &target_segments {
+            if target.river_id == source.river_id || target.order < source.order {
+                continue;
+            }
+
+            let projection = project_point_onto_river_segment(outlet_point, *target);
+            if projection.distance_cells > TRIBUTARY_CONFLUENCE_SNAP_RADIUS_CELLS {
+                continue;
+            }
+
+            if best_target
+                .as_ref()
+                .is_none_or(|(_, _, best_distance)| projection.distance_cells < *best_distance)
+            {
+                best_target = Some((projection.coord, *target, projection.distance_cells));
+            }
+        }
+
+        let Some((confluence_coord, target, _)) = best_target else {
+            continue;
+        };
+        if !coord_in_area(requested_area, confluence_coord) {
+            continue;
+        }
+
+        let snapped_length = distance_between_coords(graph.segments[source_index].start, confluence_coord);
+        if snapped_length <= f32::EPSILON {
+            continue;
+        }
+
+        graph.segments[source_index].end = confluence_coord;
+        graph.segments[source_index].downstream_cells_end =
+            graph.segments[source_index].downstream_cells_start + snapped_length;
+
+        if let Some(node) = graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.kind == DrainageNodeKind::Outlet && node.river_id == source.river_id)
+        {
+            node.coord = confluence_coord;
+            node.kind = DrainageNodeKind::Confluence;
+            node.order = node.order.max(target.order);
+            node.river_id = target.river_id;
+        } else {
+            graph.push_node(DrainageNode {
+                coord: confluence_coord,
+                kind: DrainageNodeKind::Confluence,
+                river_id: target.river_id,
+                order: source.order.max(target.order),
+            });
+        }
     }
 }
 
@@ -909,6 +1000,47 @@ fn normalize_vec2(x: f32, z: f32) -> (f32, f32) {
 
 fn coord_in_area(area: AtlasArea, coord: AtlasCoord) -> bool {
     area.contains(coord)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RiverSegmentProjection {
+    coord: AtlasCoord,
+    distance_cells: f32,
+}
+
+fn project_point_onto_river_segment(
+    point: (f32, f32),
+    segment: RiverPathSegment,
+) -> RiverSegmentProjection {
+    let start_x = segment.start.x as f32 + 0.5;
+    let start_z = segment.start.z as f32 + 0.5;
+    let end_x = segment.end.x as f32 + 0.5;
+    let end_z = segment.end.z as f32 + 0.5;
+    let seg_x = end_x - start_x;
+    let seg_z = end_z - start_z;
+    let length_sq = seg_x * seg_x + seg_z * seg_z;
+
+    if length_sq <= f32::EPSILON {
+        return RiverSegmentProjection {
+            coord: segment.start,
+            distance_cells: ((point.0 - start_x).powi(2) + (point.1 - start_z).powi(2)).sqrt(),
+        };
+    }
+
+    let t = (((point.0 - start_x) * seg_x + (point.1 - start_z) * seg_z) / length_sq).clamp(0.0, 1.0);
+    let projected_x = start_x + seg_x * t;
+    let projected_z = start_z + seg_z * t;
+
+    RiverSegmentProjection {
+        coord: AtlasCoord::new(projected_x.round() as i32, projected_z.round() as i32),
+        distance_cells: ((point.0 - projected_x).powi(2) + (point.1 - projected_z).powi(2)).sqrt(),
+    }
+}
+
+fn distance_between_coords(start: AtlasCoord, end: AtlasCoord) -> f32 {
+    let dx = end.x as f32 - start.x as f32;
+    let dz = end.z as f32 - start.z as f32;
+    (dx * dx + dz * dz).sqrt()
 }
 
 #[cfg(test)]

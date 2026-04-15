@@ -226,6 +226,13 @@ fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {
 fn classify_river_stage(sample: ColumnAtlasSample, structure: PreparedStructureGuide) -> RiverStage {
     let downstream_factor = downstream_progress_factor(structure);
 
+    if structure.confluence_weight > 0.52 && structure.channel_order >= 2 {
+        if downstream_factor > 0.42 || sample.river_flow_potential > 0.38 {
+            return RiverStage::Lower;
+        }
+        return RiverStage::Middle;
+    }
+
     if structure.channel_order >= 2 {
         if downstream_factor > 0.62
             || sample.river_flow_potential > 0.56
@@ -308,10 +315,12 @@ fn carve_river_channel(
     structure: PreparedStructureGuide,
 ) -> Option<HydrologyRealization> {
     let downstream_factor = downstream_progress_factor(structure);
+    let confluence_factor = structure.confluence_weight;
     let river_strength = clamp01(
         sample.riverine_factor * 0.72
             + structure.channel_weight * 0.96
             + structure.channel_core * 0.74
+            + confluence_factor * 0.52
             + sample.lake_potential * 0.24
             + local_concavity * 0.24
             - 0.34,
@@ -354,6 +363,7 @@ fn carve_river_channel(
     if matches!(fill_profile, ColumnFillProfile::Coast) {
         channel_width += 0.05;
     }
+    channel_width += confluence_factor * (0.022 + structure.confluence_order as f32 * 0.010);
     let floodplain_width = channel_width * (2.1 + local_concavity * 2.0) + 0.08;
     let scalar_floodplain_mask = clamp01(1.0 - scalar_centerline_distance / floodplain_width);
     let structure_floodplain_mask = structure.channel_weight;
@@ -368,16 +378,26 @@ fn carve_river_channel(
 
     let scalar_channel_mask = clamp01(1.0 - scalar_centerline_distance / channel_width);
     let channel_mask = if structure.channel_weight > 0.0 {
-        structure.channel_core.max(scalar_channel_mask * 0.20)
+        let confluence_core = confluence_factor * (0.26 + structure.confluence_order as f32 * 0.06);
+        structure
+            .channel_core
+            .max(scalar_channel_mask * 0.20)
+            .max(confluence_core.clamp(0.0, 1.0))
     } else {
         scalar_channel_mask
     };
     let floodplain_drop =
-        (0.8 + river_strength * 2.8 + sample.wetness * 1.6 + local_concavity * 1.8) * floodplain_mask;
+        (0.8
+            + river_strength * 2.8
+            + sample.wetness * 1.6
+            + local_concavity * 1.8
+            + confluence_factor * (0.9 + structure.confluence_order as f32 * 0.5))
+            * floodplain_mask;
     let downstream_grade_drop = downstream_water_grade(structure, downstream_factor);
     let graded_surface_y = base_surface_y - downstream_grade_drop;
     let floodplain_y = graded_surface_y - floodplain_drop;
-    if channel_mask <= 0.08 {
+    let dry_channel_threshold = (0.08 - confluence_factor * 0.035).clamp(0.03, 0.08);
+    if channel_mask <= dry_channel_threshold {
         return Some(HydrologyRealization {
             surface_y: floodplain_y,
             water_top_y: None,
@@ -396,16 +416,22 @@ fn carve_river_channel(
     let channel_depth = (channel_depth_base
         + river_strength * 2.6
         + structure.channel_weight * 2.2
+        + confluence_factor * (1.4 + structure.confluence_order as f32 * 0.8)
         + sample.river_flow_potential * 1.2
         + sample.wetness * 0.8
         + local_concavity * 3.2)
         * channel_mask;
     let bed_y = (floodplain_y - channel_depth.max(1.4)).min(graded_surface_y - 0.8);
-    let bank_freeboard = (0.40 - river_strength * 0.18 - local_concavity * 0.12).clamp(0.08, 0.40);
+    let bank_freeboard = (0.40
+        - river_strength * 0.18
+        - local_concavity * 0.12
+        - confluence_factor * 0.08)
+        .clamp(0.06, 0.40);
     let water_surface_y = floodplain_y - bank_freeboard;
     let min_water_depth = water_depth_base
         + river_strength * 0.7
         + structure.channel_core * 0.9
+        + confluence_factor * (0.55 + structure.confluence_order as f32 * 0.30)
         + downstream_factor * 0.5
         + local_concavity * 0.8
         + if river_strength > 0.64 || sample.lake_potential > 0.70 {

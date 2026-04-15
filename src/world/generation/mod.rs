@@ -35,8 +35,8 @@ mod tests {
     use super::*;
     use crate::world::{
         AtlasStructureMap, AtlasStructureRegionCoord, BlockId, BlockRegistry, ChunkCoord,
-        LocalBlockCoord, MountainChainId, MountainChainScale, MountainSpineSegment, RiverPathId,
-        RiverPathKind, RiverPathSegment, WorldMeta,
+        DrainageNode, DrainageNodeKind, LocalBlockCoord, MountainChainId, MountainChainScale,
+        MountainSpineSegment, RiverPathId, RiverPathKind, RiverPathSegment, WorldMeta,
     };
 
     fn test_registry() -> BlockRegistry {
@@ -657,6 +657,14 @@ mod tests {
                 downstream_cells_start: 0.0,
                 downstream_cells_end: 1.0,
             });
+        atlas_structure
+            .drainage_mut()
+            .push_node(DrainageNode {
+                coord: crate::world::AtlasCoord::new(0, 0),
+                kind: DrainageNodeKind::Confluence,
+                river_id: RiverPathId(7),
+                order: 2,
+            });
 
         let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
         let near_origin = surface_field.column(0, 0);
@@ -665,6 +673,7 @@ mod tests {
         assert!(near_origin.structure.ridge_weight > 0.0);
         assert!(near_origin.structure.channel_weight > 0.0);
         assert_eq!(near_origin.structure.channel_order, 2);
+        assert!(near_origin.structure.confluence_weight > 0.0);
         assert!(later.structure.along_channel_cells > near_origin.structure.along_channel_cells);
     }
 

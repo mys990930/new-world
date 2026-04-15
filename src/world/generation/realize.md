@@ -27,6 +27,7 @@
 - This distinction matters because `alpine_factor` is mainly a high-elevation / high-mountain-form signal. Warm mountain ridges should stay grass-and-dirt terrain until the thermal field says they are actually cold enough for snow cover.
 - The current hydrology carve is now hybrid: atlas-owned river path proximity drives the main channel when present, while older scalar river signals and local concavity remain as support.
 - The current hydrology pass now also uses downstream progress from atlas river segments to bias river stage and lower downstream water surfaces more consistently along the branch.
-- The next revision should add explicit confluences and reduce the remaining fallback dependence on scalar meander noise.
+- Explicit confluence nodes now widen and deepen nearby channels so tributary joins read more like shared corridors than isolated puddles.
+- A later revision should still reduce the remaining fallback dependence on scalar meander noise.
 - Vegetation and ecology are still deferred.
 - Probe helpers stop before block fill and let tooling inspect the same `sample -> profile -> surface_y` path without generating a full preview image.

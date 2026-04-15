@@ -54,7 +54,8 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 ## 현재 스캐폴드 계약
 
 - current drainage scaffold now emits initial trunk/tributary river paths from generated mountain chains.
-- current drainage nodes are limited to headwater/outlet markers; confluence, pass-outlet, and sink solving remain a later step.
+- current drainage nodes now include a first explicit confluence-solving pass that snaps tributary outlets onto nearby downstream segments inside the requested area.
+- pass-outlet and sink solving still remain later steps.
 - river path segments now also carry downstream progress ranges so chunk generation can recover branch progress from the nearest segment projection.
 
 - `AtlasStructureMap`은 현재 `AtlasArea`와 비어 있을 수 있는 graph 컨테이너를 소유한다.

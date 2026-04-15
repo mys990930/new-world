@@ -73,7 +73,7 @@ generation::sample_chunk_surface_lod(
   3. Resolve a dominant generation-side `TerrainProfile` for debug and material heuristics.
   4. Blend the profile surface shapers into a raw signed `surface_y`, then bias that scaffold with ridge/channel guide weights before smoothing the local chunk heightfield in world-space.
   5. Resolve a column material profile using low-frequency boundary noise, with emergent shelf columns above sea level able to collapse into coast instead of staying as dry shallow-ocean sediment.
-  6. Carve river floodplains/channels out of the smoothed surface using structure-guided channel proximity first, then scalar hydrology and local concavity as secondary support, before assigning `water_top_y` for inland rivers or sea water.
+  6. Carve river floodplains/channels out of the smoothed surface using structure-guided channel proximity first, then scalar hydrology and local concavity as secondary support, with explicit confluence nodes widening/deepening tributary joins before assigning `water_top_y` for inland rivers or sea water.
   7. Pick a stone-core ceiling at `surface_y - random(8..=16)` from the carved final ground surface.
   8. Fill `stone` from world `y = -256` through that ceiling.
   9. Resolve column-scale surface/fill blocks, then fill the layer above the stone core through `surface_y` using atlas-informed material rules:
@@ -97,14 +97,14 @@ generation::sample_chunk_surface_lod(
 ## Next Structure-Driven Revision Target
 
 - Atlas remains the owner of macro terrain direction, and generation now reads padded structure windows and derives chunk-local guide weights from nearby mountain spines and river paths.
-- The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and explicit river topology handling.
+- The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and richer river topology handling beyond the first explicit confluence pass.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
   2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
   3. rasterize drainage and river segments into distance-to-channel / along-channel fields
   4. build the raw surface scaffold from those structural fields, then smooth and locally refine it
   5. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
-  6. enforce connected river channels with minimum wetted width/depth and explicit confluence handling
+  6. enforce connected river channels with minimum wetted width/depth, richer confluence handling, and clearer trunk/tributary continuity
   7. keep local noise as detail only, not as the source of macro ridge or river direction
 - In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.
 

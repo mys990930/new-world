@@ -1,5 +1,10 @@
 # atlas
 
+## ASCII Addendum
+
+- The current atlas structure pass now performs a first explicit confluence snap solve after trunk and tributary branches are emitted.
+- Chunk generation still owns the final carved river shape, but it can now sample confluence nodes as part of the atlas-owned drainage guide.
+
 ## 역할
 
 - 청크 생성 이전 단계에서 atlas-scale 거시 환경 필드를 계산한다.

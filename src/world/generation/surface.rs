@@ -3,8 +3,8 @@ use super::profile::{TerrainProfile, resolve_profile};
 use super::profiles::surface_height_for_sample;
 use super::sampler::sample_column_atlas;
 use super::super::atlas::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasFieldMap, AtlasStructureMap, AtlasTuning,
-    MountainChainScale, MountainSpineSegment, RiverPathKind, RiverPathSegment,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasFieldMap, AtlasStructureMap, AtlasTuning, DrainageNode,
+    DrainageNodeKind, MountainChainScale, MountainSpineSegment, RiverPathKind, RiverPathSegment,
 };
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use super::super::meta::WorldMeta;
@@ -47,6 +47,9 @@ pub(super) struct PreparedStructureGuide {
     pub channel_heading_z: f32,
     pub channel_bankfull_hint: f32,
     pub along_channel_cells: f32,
+    pub confluence_distance_cells: f32,
+    pub confluence_weight: f32,
+    pub confluence_order: u8,
 }
 
 impl Default for PreparedStructureGuide {
@@ -65,6 +68,9 @@ impl Default for PreparedStructureGuide {
             channel_heading_z: 0.0,
             channel_bankfull_hint: 0.0,
             along_channel_cells: 0.0,
+            confluence_distance_cells: f32::INFINITY,
+            confluence_weight: 0.0,
+            confluence_order: 0,
         }
     }
 }
@@ -234,8 +240,11 @@ fn apply_structure_to_surface(
             + structure.channel_core * 0.70
             + atlas_sample.river_flow_potential * 0.40
             + atlas_sample.lake_potential * 0.18);
+    let confluence_drop = structure.confluence_weight
+        * (1.2 + structure.confluence_order as f32 * 1.1)
+        * (0.45 + structure.channel_weight * 0.35 + atlas_sample.river_flow_potential * 0.20);
 
-    base_surface_y + ridge_raise - channel_drop
+    base_surface_y + ridge_raise - channel_drop - confluence_drop
 }
 
 fn sample_structure_guide(
@@ -250,6 +259,7 @@ fn sample_structure_guide(
     let mut guide = PreparedStructureGuide::default();
     let mut best_ridge_score = f32::INFINITY;
     let mut best_channel_score = f32::INFINITY;
+    let mut best_confluence_score = f32::INFINITY;
 
     for segment in atlas_structure.mountain_chains().segments() {
         let projection = project_point_onto_segment(point, segment.start, segment.end);
@@ -286,6 +296,31 @@ fn sample_structure_guide(
         }
     }
 
+    for node in atlas_structure.drainage().nodes() {
+        if node.kind != DrainageNodeKind::Confluence {
+            continue;
+        }
+
+        let distance_cells = point_distance_to_node(point, *node);
+        let influence_radius = confluence_influence_radius_cells(*node);
+        let score = distance_cells / influence_radius.max(f32::EPSILON);
+        if score < best_confluence_score {
+            best_confluence_score = score;
+            guide.confluence_distance_cells = distance_cells;
+            guide.confluence_weight = (1.0 - score).clamp(0.0, 1.0);
+            guide.confluence_order = node.order;
+        }
+    }
+
+    if guide.confluence_weight > 0.0 {
+        guide.channel_weight = guide.channel_weight.max((guide.channel_weight + guide.confluence_weight * 0.30).clamp(0.0, 1.0));
+        guide.channel_core = guide.channel_core.max((guide.channel_core + guide.confluence_weight * 0.40).clamp(0.0, 1.0));
+        guide.channel_order = guide.channel_order.max(guide.confluence_order);
+        guide.channel_bankfull_hint = guide
+            .channel_bankfull_hint
+            .max(1.0 + guide.confluence_order as f32 * 0.6);
+    }
+
     guide
 }
 
@@ -310,6 +345,10 @@ fn channel_influence_radius_cells(segment: RiverPathSegment) -> f32 {
             RiverPathKind::Trunk => 0.085,
             RiverPathKind::Tributary => 0.045,
         }
+}
+
+fn confluence_influence_radius_cells(node: DrainageNode) -> f32 {
+    0.065 + node.order as f32 * 0.030
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -353,4 +392,10 @@ fn project_point_onto_segment(
         heading_x: seg_x / length.max(f32::EPSILON),
         heading_z: seg_z / length.max(f32::EPSILON),
     }
+}
+
+fn point_distance_to_node(point: (f32, f32), node: DrainageNode) -> f32 {
+    let node_x = node.coord.x as f32 + 0.5;
+    let node_z = node.coord.z as f32 + 0.5;
+    ((point.0 - node_x).powi(2) + (point.1 - node_z).powi(2)).sqrt()
 }
