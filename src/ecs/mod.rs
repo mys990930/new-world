@@ -13,7 +13,7 @@ pub use camera::{
     QUARTER_VIEW_VERTICAL_WORLD_SIZE, QuarterViewBasis, QuarterViewCameraPose,
     quarter_view_basis, quarter_view_camera_pose, quarter_view_eye,
     quarter_view_perspective_distance, quarter_view_perspective_eye,
-    quarter_view_vertical_world_size,
+    quarter_view_render_camera_pose, quarter_view_vertical_world_size,
 };
 #[allow(unused_imports)]
 pub use chunk::{ChunkStates, HORIZONTAL_INTEREST_CHUNK_RADIUS};

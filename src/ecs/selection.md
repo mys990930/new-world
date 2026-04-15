@@ -32,7 +32,8 @@
 ## State Rules
 
 - Selection updates after app/world state has been refreshed for the current frame.
-- The selection ray uses the same smoothed quarter-view pose and current zoom size that rendering uses.
+- The selection ray uses the same smoothed follow target and current zoom size that rendering uses.
+- During the current turn-transition implementation, selection still uses the snapped gameplay quarter-view basis while rendering may briefly ease toward that basis.
 - The current gameplay slice uses a weak perspective ray that starts at the camera eye and passes through a cursor-selected point on the quarter-view focus plane.
 - If focus, activity, viewport, or cursor validity checks fail, selection is cleared.
 - If raycast misses, selection is cleared.
@@ -42,7 +43,7 @@
 - selection owns hover state only; it does not edit the world
 - selection does not own world raycast algorithms and uses world queries instead
 - renderers do not read `SelectionState` directly; `app::bridge` converts it into render-ready instances
-- selection and render camera interpretation must stay aligned within the same frame
+- selection and rendering must stay aligned on follow target and zoom in the same frame, even if render-only turn easing is active
 
 ## Non-Responsibilities
 

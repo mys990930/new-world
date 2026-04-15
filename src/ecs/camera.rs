@@ -10,10 +10,13 @@ pub struct CameraState {
     pub quarter_turns: u8,
     pub smoothed_target: [f32; 3],
     pub desired_target: [f32; 3],
+    pub render_yaw_radians: f32,
+    pub desired_render_yaw_radians: f32,
     pub vertical_world_size: f32,
     pub desired_vertical_world_size: f32,
     pub recenter_requested: bool,
     pub recentering: bool,
+    pub render_rotation_initialized: bool,
     pub initialized: bool,
 }
 
@@ -49,10 +52,12 @@ const CAMERA_DEADZONE_HALF_HEIGHT: f32 = 0.45;
 const CAMERA_FORWARD_VIEW_RATIO: f32 = 0.65;
 const CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO: f32 = (CAMERA_FORWARD_VIEW_RATIO - 0.5) * 2.0;
 const QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER: f32 = 1.732_050_8;
-const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 8.0 / 9.0;
-const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 12.0 / 9.0;
+const CAMERA_FOLLOW_LERP_PER_SECOND: f32 = 2.0;
+const CAMERA_RECENTER_LERP_PER_SECOND: f32 = 3.0;
+const CAMERA_ROTATION_LERP_PER_SECOND: f32 = 18.0;
 const CAMERA_ZOOM_LERP_PER_SECOND: f32 = 8.0 / 3.0;
 const CAMERA_RECENTER_COMPLETE_DISTANCE: f32 = 0.02;
+const CAMERA_ROTATION_COMPLETE_RADIANS: f32 = 0.001;
 const CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE: f32 = 2.0;
 const CAMERA_SCROLL_PIXEL_DELTA_THRESHOLD: f32 = 8.0;
 const CAMERA_MAX_SCROLL_LINES_PER_FRAME: f32 = 4.0;
@@ -63,10 +68,13 @@ impl Default for CameraState {
             quarter_turns: 0,
             smoothed_target: [0.0, 0.0, 0.0],
             desired_target: [0.0, 0.0, 0.0],
+            render_yaw_radians: 0.0,
+            desired_render_yaw_radians: 0.0,
             vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
             desired_vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
             recenter_requested: false,
             recentering: false,
+            render_rotation_initialized: false,
             initialized: false,
         }
     }
@@ -107,8 +115,11 @@ pub(crate) fn apply_camera_commands_system(
     for command in &command_buffer.0 {
         match command {
             PlayerCommand::RotateCamera { quarter_turns } => {
+                initialize_render_rotation_from_logical(&mut camera);
                 camera.quarter_turns =
                     ((camera.quarter_turns as i8 + quarter_turns).rem_euclid(4)) as u8;
+                camera.desired_render_yaw_radians +=
+                    *quarter_turns as f32 * std::f32::consts::FRAC_PI_2;
             }
             PlayerCommand::RecenterCamera => {
                 camera.recenter_requested = true;
@@ -125,6 +136,24 @@ pub(crate) fn update_camera_follow_system(
     mut camera: ResMut<CameraState>,
     players: Query<&Transform, With<Player>>,
 ) {
+    initialize_render_rotation_from_logical(&mut camera);
+
+    let dt = frame_delta.0.max(0.0);
+    if dt > f32::EPSILON {
+        let rotation_factor = smoothing_factor(CAMERA_ROTATION_LERP_PER_SECOND, dt);
+        camera.render_yaw_radians = lerp_wrapped_angle(
+            camera.render_yaw_radians,
+            camera.desired_render_yaw_radians,
+            rotation_factor,
+        );
+
+        if wrapped_angle_delta(camera.render_yaw_radians, camera.desired_render_yaw_radians).abs()
+            <= CAMERA_ROTATION_COMPLETE_RADIANS
+        {
+            camera.render_yaw_radians = camera.desired_render_yaw_radians;
+        }
+    }
+
     let Some(entity) = local_player.0 else {
         return;
     };
@@ -169,7 +198,6 @@ pub(crate) fn update_camera_follow_system(
 
     camera.desired_target = desired_target;
 
-    let dt = frame_delta.0.max(0.0);
     if dt > f32::EPSILON {
         let rate = if camera.recentering {
             CAMERA_RECENTER_LERP_PER_SECOND
@@ -218,6 +246,21 @@ pub fn quarter_view_camera_pose(camera: CameraState) -> QuarterViewCameraPose {
     }
 }
 
+pub fn quarter_view_render_camera_pose(camera: CameraState) -> QuarterViewCameraPose {
+    let render_yaw = current_render_yaw_radians(camera);
+    let basis = quarter_view_basis_from_yaw(render_yaw);
+    let vertical_world_size = quarter_view_vertical_world_size(camera);
+    QuarterViewCameraPose {
+        target: camera.smoothed_target,
+        eye: quarter_view_perspective_eye_from_yaw(
+            camera.smoothed_target,
+            render_yaw,
+            vertical_world_size,
+        ),
+        basis,
+    }
+}
+
 pub fn quarter_view_vertical_world_size(camera: CameraState) -> f32 {
     clamp_vertical_world_size(camera.vertical_world_size)
 }
@@ -227,13 +270,10 @@ pub fn quarter_view_perspective_eye(
     quarter_turns: u8,
     vertical_world_size: f32,
 ) -> [f32; 3] {
-    let basis = quarter_view_basis(quarter_turns);
-    add3(
+    quarter_view_perspective_eye_from_yaw(
         target,
-        scale3(
-            basis.forward,
-            -quarter_view_perspective_distance(vertical_world_size),
-        ),
+        quarter_turn_yaw_radians(quarter_turns),
+        vertical_world_size,
     )
 }
 
@@ -251,6 +291,29 @@ pub fn quarter_view_eye(target: [f32; 3], quarter_turns: u8) -> [f32; 3] {
     )
 }
 
+fn quarter_view_perspective_eye_from_yaw(
+    target: [f32; 3],
+    yaw_radians: f32,
+    vertical_world_size: f32,
+) -> [f32; 3] {
+    let basis = quarter_view_basis_from_yaw(yaw_radians);
+    add3(
+        target,
+        scale3(
+            basis.forward,
+            -quarter_view_perspective_distance(vertical_world_size),
+        ),
+    )
+}
+
+fn quarter_view_basis_from_yaw(yaw_radians: f32) -> QuarterViewBasis {
+    let right = normalize3(rotate_y(CAMERA_RIGHT_BASE, yaw_radians));
+    let up = normalize3(rotate_y(CAMERA_UP_BASE, yaw_radians));
+    let forward = normalize3(cross3(right, up));
+
+    QuarterViewBasis { right, up, forward }
+}
+
 fn rotate_y_quarter_turns(vector: [f32; 3], quarter_turns: u8) -> [f32; 3] {
     match quarter_turns % 4 {
         0 => vector,
@@ -259,6 +322,39 @@ fn rotate_y_quarter_turns(vector: [f32; 3], quarter_turns: u8) -> [f32; 3] {
         3 => [-vector[2], vector[1], vector[0]],
         _ => unreachable!(),
     }
+}
+
+fn rotate_y(vector: [f32; 3], yaw_radians: f32) -> [f32; 3] {
+    let sin = yaw_radians.sin();
+    let cos = yaw_radians.cos();
+    [
+        vector[0] * cos + vector[2] * sin,
+        vector[1],
+        -vector[0] * sin + vector[2] * cos,
+    ]
+}
+
+fn quarter_turn_yaw_radians(quarter_turns: u8) -> f32 {
+    quarter_turns as f32 * std::f32::consts::FRAC_PI_2
+}
+
+fn current_render_yaw_radians(camera: CameraState) -> f32 {
+    if camera.render_rotation_initialized {
+        camera.render_yaw_radians
+    } else {
+        quarter_turn_yaw_radians(camera.quarter_turns)
+    }
+}
+
+fn initialize_render_rotation_from_logical(camera: &mut CameraState) {
+    if camera.render_rotation_initialized {
+        return;
+    }
+
+    let logical_yaw = quarter_turn_yaw_radians(camera.quarter_turns);
+    camera.render_yaw_radians = logical_yaw;
+    camera.desired_render_yaw_radians = logical_yaw;
+    camera.render_rotation_initialized = true;
 }
 
 fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
@@ -349,6 +445,15 @@ fn movement_bias_offset(
 
 fn smoothing_factor(rate_per_second: f32, dt: f32) -> f32 {
     1.0 - (-rate_per_second * dt).exp()
+}
+
+fn lerp_wrapped_angle(current: f32, target: f32, factor: f32) -> f32 {
+    current + wrapped_angle_delta(current, target) * factor
+}
+
+fn wrapped_angle_delta(current: f32, target: f32) -> f32 {
+    (target - current + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI
 }
 
 fn clamp_vertical_world_size(value: f32) -> f32 {
@@ -507,6 +612,7 @@ mod tests {
             recenter_requested: true,
             recentering: false,
             initialized: true,
+            ..CameraState::default()
         });
         let entity = world
             .spawn((
@@ -546,6 +652,7 @@ mod tests {
             recenter_requested: false,
             recentering: false,
             initialized: true,
+            ..CameraState::default()
         });
         let entity = world
             .spawn((
@@ -614,5 +721,59 @@ mod tests {
             camera.desired_vertical_world_size,
             QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE
         );
+    }
+
+    #[test]
+    fn render_rotation_lerps_after_logical_quarter_turn_snap() {
+        let mut world = World::new();
+        world.insert_resource(PlayerCommandBuffer(vec![PlayerCommand::RotateCamera {
+            quarter_turns: 1,
+        }]));
+        world.insert_resource(LocalPlayerEntity::default());
+        world.insert_resource(FrameDeltaSeconds(0.05));
+        world.insert_resource(MoveWorldIntent::default());
+        world.insert_resource(CameraState {
+            quarter_turns: 0,
+            smoothed_target: [2.0, 1.5, 2.0],
+            desired_target: [2.0, 1.5, 2.0],
+            vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            desired_vertical_world_size: QUARTER_VIEW_VERTICAL_WORLD_SIZE,
+            initialized: true,
+            ..CameraState::default()
+        });
+        let entity = world
+            .spawn((
+                Player,
+                Transform {
+                    translation: [2.0, 1.5, 2.0],
+                },
+            ))
+            .id();
+        world.resource_mut::<LocalPlayerEntity>().0 = Some(entity);
+
+        let mut update_schedule = Schedule::default();
+        update_schedule.add_systems(apply_camera_commands_system);
+        update_schedule.run(&mut world);
+
+        let camera_after_command = *world.resource::<CameraState>();
+        assert_eq!(camera_after_command.quarter_turns, 1);
+        assert_eq!(camera_after_command.render_yaw_radians, 0.0);
+        assert!((camera_after_command.desired_render_yaw_radians
+            - std::f32::consts::FRAC_PI_2)
+            .abs()
+            < 1e-5);
+
+        let mut post_update_schedule = Schedule::default();
+        post_update_schedule.add_systems(update_camera_follow_system);
+        post_update_schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert!(camera.render_yaw_radians > 0.0);
+        assert!(camera.render_yaw_radians < std::f32::consts::FRAC_PI_2);
+
+        let render_pose = quarter_view_render_camera_pose(camera);
+        let gameplay_pose = quarter_view_camera_pose(camera);
+        assert!(render_pose.basis.right[0] > gameplay_pose.basis.right[0]);
+        assert!(render_pose.basis.right[2] > gameplay_pose.basis.right[2]);
     }
 }

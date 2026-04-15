@@ -45,6 +45,7 @@
 - `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI sprites
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code
+- render camera turn easing is authored in ECS camera state; `bridge` only exports the current render-facing pose
 - the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
 - UI text and panels are built from atlas-backed sprite pieces, not renderer-owned text shaping
 

@@ -144,6 +144,7 @@ mod tests {
                 recenter_requested: false,
                 recentering: false,
                 initialized: true,
+                ..CameraState::default()
             },
             800,
             600,

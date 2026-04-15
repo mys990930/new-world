@@ -68,6 +68,7 @@
   - screen-relative input remains frame input state
   - `CameraState.quarter_turns` is applied before generating `MoveWorldIntent`
   - same-frame rotation and movement use the post-rotation basis
+  - render-only camera turn easing must not delay gameplay basis changes
 - camera framing
   - quarter-view zoom is owned by ECS camera state rather than renderer config
   - the app bridge and selection path both consume the same current zoom size

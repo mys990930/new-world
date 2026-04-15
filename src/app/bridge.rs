@@ -2,7 +2,9 @@ use super::{
     AppMode, GameApp,
     ui::{WorldSelectSection, WorldSelectState},
 };
-use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_camera_pose};
+use crate::ecs::{CameraState, EcsInputSnapshot, quarter_view_render_camera_pose};
+#[cfg(test)]
+use crate::ecs::quarter_view_camera_pose;
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
     RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
@@ -182,7 +184,7 @@ fn axis(negative: bool, positive: bool) -> i8 {
 }
 
 fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
-    let pose = quarter_view_camera_pose(camera_state);
+    let pose = quarter_view_render_camera_pose(camera_state);
 
     RenderCameraState {
         eye: pose.eye,
@@ -810,6 +812,7 @@ mod tests {
             recenter_requested: false,
             recentering: false,
             initialized: true,
+            ..CameraState::default()
         });
         let basis = camera.basis_override.expect("quarter-view basis should exist");
 
@@ -836,6 +839,7 @@ mod tests {
             recenter_requested: false,
             recentering: false,
             initialized: true,
+            ..CameraState::default()
         });
         let basis = camera.basis_override.expect("quarter-view basis should exist");
 
@@ -892,6 +896,31 @@ mod tests {
             + (camera.eye[2] - camera.target[2]).powi(2))
         .sqrt();
         assert!((distance - crate::ecs::quarter_view_perspective_distance(28.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn render_camera_uses_visual_rotation_during_turn_transition() {
+        let camera_state = CameraState {
+            quarter_turns: 1,
+            smoothed_target: [0.0, 0.5, 0.0],
+            desired_target: [0.0, 0.5, 0.0],
+            render_yaw_radians: std::f32::consts::FRAC_PI_4,
+            desired_render_yaw_radians: std::f32::consts::FRAC_PI_2,
+            vertical_world_size: 24.0,
+            desired_vertical_world_size: 24.0,
+            render_rotation_initialized: true,
+            initialized: true,
+            ..CameraState::default()
+        };
+
+        let render_camera = build_quarter_view_camera(camera_state);
+        let gameplay_pose = quarter_view_camera_pose(camera_state);
+        let render_basis = render_camera
+            .basis_override
+            .expect("quarter-view basis should exist");
+
+        assert!(render_basis.right[0] > gameplay_pose.basis.right[0]);
+        assert!(render_basis.right[2] > gameplay_pose.basis.right[2]);
     }
 
     fn project_to_screen_axes(point: [f32; 3], basis: RenderViewBasis) -> (f32, f32) {

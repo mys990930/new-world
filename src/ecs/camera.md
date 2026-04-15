@@ -12,10 +12,13 @@
 - `quarter_turns`
 - `smoothed_target`
 - `desired_target`
+- `render_yaw_radians`
+- `desired_render_yaw_radians`
 - `vertical_world_size`
 - `desired_vertical_world_size`
 - `recenter_requested`
 - `recentering`
+- `render_rotation_initialized`
 - `initialized`
 
 ### `QuarterViewBasis`
@@ -50,13 +53,16 @@
 
 - The camera is limited to four quarter-view rotations.
 - `Q/E` rotation applies before the same frame's movement intent is interpreted.
+- Gameplay-facing quarter-turn state still snaps immediately so movement and other ECS interpretation use the new basis in the same frame.
+- Render-facing rotation may ease toward the new quarter-turn target over a very short visual transition.
 - The player is followed through a smoothed target rather than a hard snap.
 - Horizontal framing stays loose and deadzone-driven, but the target height should still follow the player's body-center `y`.
 - Mouse-wheel zoom updates the desired quarter-view focus-plane world size inside ECS camera state.
 - Deadzone logic is evaluated in quarter-view screen space defined by `right` and `up`.
 - Forward movement bias shifts framing toward travel direction without replacing the player-centered anchor.
 - Recenter keeps the current rotation and smoothly moves the target back toward the player anchor.
-- Selection and render bridging must consume the same smoothed target and basis in a given frame.
+- Selection and render bridging must consume the same smoothed target and zoom size in a given frame.
+- During a short turn transition, selection continues to use the snapped gameplay basis while rendering may use a briefly interpolated visual basis.
 
 ## Coordinate Rules
 
@@ -72,7 +78,8 @@
 ## Invariants
 
 - ECS owns quarter-view follow policy; renderer only consumes the final pose.
-- `quarter_view_basis()` and `quarter_view_camera_pose()` are shared helpers so movement, selection, and rendering stay aligned.
+- `quarter_view_basis()` and `quarter_view_camera_pose()` remain the shared gameplay helpers for movement and selection.
+- `quarter_view_render_camera_pose()` derives the render-facing pose from the same follow target while allowing a short visual turn transition.
 - The bridge must not rebuild a separate gameplay camera interpretation from raw player state.
 - Camera tuning should stay in ECS unless the change is purely GPU-side math.
 
