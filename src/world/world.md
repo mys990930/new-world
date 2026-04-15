@@ -51,6 +51,8 @@
 - `AtlasStructureRegionCoord`, `AtlasStructureRegion`
 - `MountainChainGraph`, `MountainSpineSegment`
 - `DrainageGraph`, `RiverPathSegment`
+- `MesoGuideMap`, `MesoGuideCell`, `MesoGuideSample`
+- `MesoRegionCoord`, `MesoRegion`
 - `ChunkGenerationProbe`, `ColumnGenerationProbe`
 - `WorldEdit`, `EditResult`
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
@@ -72,8 +74,21 @@ generate_atlas_structure_with_tuning(
     area: AtlasArea,
     tuning: &AtlasTuning,
 ) -> AtlasStructureMap
+generate_meso_guides(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    fields: &AtlasFieldMap,
+    structure: &AtlasStructureMap,
+) -> MesoGuideMap
+sample_meso_guides(
+    guides: &MesoGuideMap,
+    world_x: i32,
+    world_z: i32,
+) -> MesoGuideSample
 atlas_structure_region_coord_for_atlas(coord: AtlasCoord) -> AtlasStructureRegionCoord
 atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegionCoord>
+meso_region_coord_for_atlas(coord: AtlasCoord) -> MesoRegionCoord
+meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 
 WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
@@ -137,7 +152,7 @@ NOT:
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order
-8. planned meso terrain guides must also remain deterministic, span multiple chunks, and avoid whole-world precomputation
+8. atlas-owned meso terrain guides must remain deterministic, span multiple chunks, and avoid whole-world precomputation
 
 ### Submodules
 
@@ -152,7 +167,7 @@ NOT:
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
-- `atlas/meso.md`: planned atlas-owned multi-chunk terrain-guide contract
+- `atlas/meso.md`: atlas-owned multi-chunk terrain-guide contract
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
@@ -166,5 +181,6 @@ NOT:
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
-- that future meso layer is expected to sit between atlas and generation micro detail as an on-demand deterministic guide, but the concrete feature catalog is still intentionally undecided
+- atlas-owned meso guides now sit between atlas macro guidance and generation micro detail as on-demand deterministic Wave 1A terrain hints
+- the current implemented Wave 1A meso candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - the planned long-term terrain pipeline is `atlas scalar macro -> atlas structure -> atlas meso guides -> generation profile families -> local detail and smoothing -> hydrology -> material/block fill`

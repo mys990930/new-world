@@ -8,10 +8,10 @@
 
 - sample per-column atlas inputs for the target chunk plus padding
 - sample or rasterize nearby atlas structure guides for the same padded footprint
-- leave room for future meso guide sampling over that same footprint
+- sample nearby atlas-owned meso guides over that same footprint
 - resolve the dominant terrain profile for each sampled column
 - evaluate the raw profile-blended `surface_y`
-- bias that raw scaffold with ridge/channel guide weights before smoothing
+- bias that raw scaffold with meso and ridge/channel guide weights before smoothing
 - smooth that heightfield in world-space so neighboring columns read as continuous terrain
 - derive a local concavity signal that hydrology can use for river carving
 
@@ -21,6 +21,7 @@
 - `WorldMeta`
 - `AtlasFieldMap`
 - `AtlasStructureMap`
+- `MesoGuideMap`
 
 ## Outputs
 
@@ -34,5 +35,6 @@
 - Nearby mountain spines and river paths are rasterized into per-column structure weights before smoothing, so chunk-local relief can already lean toward the atlas-owned macro skeleton.
 - `along_channel_cells` now represents downstream progress along the owning river branch, not just distance inside a single projected segment.
 - Explicit drainage `Confluence` nodes are also sampled into the guide so later hydrology can widen and deepen tributary joins.
-- A later meso layer should bias broad hill, cliff, basin, or terrace shape before final smoothing. The current implementation still relies on profile families plus structure without that extra middle-scale guide.
+- Wave 1A meso guides now bias broad hill, basin, escarpment, and terrace shape before final smoothing.
+- Meso remains a guide layer rather than a hard feature label map; this module consumes blended channels and combines them with profile families plus structure.
 - This module does not place blocks; it only prepares the shared surface scaffold used by probes and realization.

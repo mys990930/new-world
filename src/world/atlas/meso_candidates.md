@@ -130,12 +130,16 @@ The first wave should favor terrain that:
 ### Wave 1A
 
 - hill clusters
+  - status: implemented
   - why: immediately improves plains and gentle inland terrain readability
 - basins
+  - status: implemented
   - why: gives lowland identity and later supports lakes/wetlands naturally
 - escarpment bands
+  - status: implemented
   - why: gives strong silhouette and readable terrain transition without needing full canyon logic
 - terraces
+  - status: implemented
   - why: useful across uplands, coasts, and basin shoulders with relatively simple heightfield logic
 
 ### Wave 1B
@@ -165,3 +169,10 @@ The first wave should favor terrain that:
 - candidate choice should be guided by atlas and structure context first
 - within that allowed set, deterministic randomness should choose whether a place becomes `hill cluster` versus `basin` versus `escarpment`
 - parameter variation such as width, elongation, depth, sharpness, and heading should also be randomized inside context-dependent bounds
+
+## Current Implementation Notes
+
+- the current implementation emits blended guide channels rather than a hard feature label map
+- hills and basins currently accumulate as broad additive/depressive relief hints
+- escarpments and terraces currently emit dominant signed-distance plus heading hints so generation can apply step-like deformation without introducing per-block noise
+- Wave 1B remains deferred until river/coast coupling is further expanded

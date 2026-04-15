@@ -4,9 +4,9 @@
 
 - The current atlas structure pass now performs a first explicit confluence snap solve after trunk and tributary branches are emitted.
 - Chunk generation still owns the final carved river shape, but it can now sample confluence nodes as part of the atlas-owned drainage guide.
-- Atlas remains intentionally macro at the current scale. The current plan is to add a separate deterministic meso layer for multi-chunk local terrain identity instead of shrinking atlas cells.
-- That future meso layer should be derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
-- Atlas is now planned as a three-part guide owner: scalar macro fields, directional structure, and a future meso terrain-guide layer.
+- Atlas remains intentionally macro at the current scale. Local readability now comes from a separate deterministic meso layer instead of shrinking atlas cells.
+- The meso layer is derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
+- Atlas now acts as a three-part guide owner: scalar macro fields, directional structure, and meso terrain guides.
 
 ## 역할
 
@@ -51,6 +51,18 @@ generate_atlas_structure_with_tuning(
     area: AtlasArea,
     tuning: &AtlasTuning,
 ) -> AtlasStructureMap
+
+generate_meso_guides(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    fields: &AtlasFieldMap,
+    structure: &AtlasStructureMap,
+) -> MesoGuideMap
+sample_meso_guides(
+    guides: &MesoGuideMap,
+    world_x: i32,
+    world_z: i32,
+) -> MesoGuideSample
 
 resolve_atlas(fields: &AtlasFieldMap) -> AtlasResolvedMap
 resolve_atlas_with_tuning(

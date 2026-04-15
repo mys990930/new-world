@@ -30,7 +30,9 @@ mod tests {
     use super::profile::TerrainProfile;
     use super::profiles::{surface_y_for_profile, surface_y_for_sample};
     use super::realize::{ColumnBlocks, block_for_world_y};
-    use super::sampler::{generate_chunk_atlas_fields, generate_chunk_atlas_structure};
+    use super::sampler::{
+        generate_chunk_atlas_fields, generate_chunk_atlas_structure, generate_chunk_meso_guides,
+    };
     use super::surface::{PreparedStructureGuide, build_chunk_surface_field};
     use super::*;
     use crate::world::{
@@ -603,7 +605,9 @@ mod tests {
         let coord = ChunkCoord(5, 0, -8);
         let atlas_fields = generate_chunk_atlas_fields(coord, &meta);
         let atlas_structure = generate_chunk_atlas_structure(coord, &meta);
-        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
+        let atlas_meso = generate_chunk_meso_guides(coord, &meta, &atlas_fields, &atlas_structure);
+        let surface_field =
+            build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure, &atlas_meso);
         let mut raw_delta_sum = 0.0_f32;
         let mut smooth_delta_sum = 0.0_f32;
         let mut samples = 0_u32;
@@ -666,7 +670,9 @@ mod tests {
                 order: 2,
             });
 
-        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
+        let atlas_meso = generate_chunk_meso_guides(coord, &meta, &atlas_fields, &atlas_structure);
+        let surface_field =
+            build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure, &atlas_meso);
         let near_origin = surface_field.column(0, 0);
         let later = surface_field.column(31, 0);
 

@@ -23,7 +23,7 @@
 - final block placement or material fill
 - whole-world precomputation
 
-## Planned Owned Data
+## Owned Data
 
 - `MesoRegionCoord`
 - `MesoRegion`
@@ -31,7 +31,7 @@
 - `MesoGuideCell`
 - `MesoGuideSample`
 
-## Planned Public Interface
+## Public Interface
 
 ```rust
 generate_meso_guides(
@@ -51,15 +51,15 @@ meso_region_coord_for_atlas(coord: AtlasCoord) -> MesoRegionCoord
 meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 ```
 
-## Planned Scale Contract
+## Scale Contract
 
 - atlas remains the macro layer
 - the initial meso target is finer than atlas and coarser than chunk-local micro detail
-- the current planning assumption is:
+- the current implementation uses:
   - one meso guide cell spans `2 x 2` chunks
   - one atlas cell footprint contains `8 x 8` meso guide cells
-  - one `MesoRegion` initially aligns to one atlas cell footprint for ownership and caching
-- those exact numbers may still change, but the layering rule should not: meso must remain a multi-chunk layer that is visibly more local than atlas
+  - one `MesoRegion` aligns to one atlas cell footprint for ownership and caching
+- those exact numbers may still change later, but the layering rule should not: meso must remain a multi-chunk layer that is visibly more local than atlas
 
 ## Relationship To Other Atlas Layers
 
@@ -67,7 +67,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - `structure.md` owns directional macro skeleton such as mountain spines and drainage paths
 - `meso.md` owns the middle-scale terrain identity that should be visible inside a small gameplay view without destroying macro coherence
 
-## Planned Selection Model
+## Selection Model
 
 - meso should not be a pure threshold map where atlas factors directly force a single result
 - meso should also not be unconstrained random noise
@@ -81,7 +81,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 4. randomize the chosen feature parameters inside context-dependent bounds
 5. rasterize the resulting feature instance as one or more blended guide fields rather than as a hard biome label
 
-## Planned Suitability Inputs
+## Suitability Inputs
 
 - atlas scalar context
   - inlandness / coastness
@@ -95,12 +95,11 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
   - downstream progress
   - confluence proximity
 - derived local context
-  - profile family
   - basin tendency
   - shoreline exposure
   - local relief budget allowed under the current macro zone
 
-## Planned Randomness Contract
+## Randomness Contract
 
 - randomness should decide `which allowed local expression appears here`, not `whether atlas rules still matter`
 - every random choice must be bounded by the current macro and structure envelope
@@ -110,16 +109,16 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
   - an upland ridge shoulder may randomly spawn a local escarpment band or stepped terrace form, but not a delta
 - all randomness must remain deterministic from `seed + generator_version + meso_region + local_cell`
 
-## Planned Output Shape
+## Output Shape
 
 - meso should emit blended guides, not final labels
-- examples of guide channels:
+- current Wave 1A channels:
   - hilliness
   - basin depth bias
   - cliff or escarpment edge bias
   - terrace band bias
-  - dune or drift bias
-  - local coastal breakup bias
+  - escarpment signed-distance and heading hints
+  - terrace signed-distance, spacing, and heading hints
 - generation can then consume those channels without having to know which exact authoring name originally produced them
 
 ## Generation Integration
@@ -128,7 +127,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 2. generation requests atlas structure for mountain/drainage direction
 3. generation requests meso guides for several-chunk terrain identity
 4. generation resolves profile families from macro context
-5. generation applies meso deformation to the profile scaffold
+5. generation applies meso deformation to the profile scaffold before structure-aware smoothing
 6. generation applies local micro detail, smoothing, hydrology, and material fill
 
 ## Invariants
@@ -141,6 +140,8 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 
 ## Current Status
 
-- this layer is not implemented yet
-- current `TerrainProfile` and profile-local surface functions partially cover some of this visual territory, but only as shape-family logic, not as a true multi-chunk terrain guide system
-- candidate families and the initial shortlist live in `meso_candidates.md`
+- Wave 1A is implemented as deterministic atlas-owned guide generation
+- current generated candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
+- selection follows the documented atlas/structure-constrained deterministic lottery model
+- generation now samples these guides per block column and uses them to bias broad relief before final structure-aware smoothing
+- candidate families and the wider backlog still live in `meso_candidates.md`

@@ -5,7 +5,9 @@ use super::noise::{
     MATERIAL_BLEND_SALT, STONE_DEPTH_SALT, centered_fbm, clamp01, hash01_2d, lerp_f32,
     ridge_signal_fbm,
 };
-use super::sampler::{generate_chunk_atlas_fields, generate_chunk_atlas_structure};
+use super::sampler::{
+    generate_chunk_atlas_fields, generate_chunk_atlas_structure, generate_chunk_meso_guides,
+};
 use super::surface::{PreparedStructureGuide, build_chunk_surface_field};
 use super::super::atlas::AtlasTuning;
 use super::super::chunk::{BlockId, ChunkData};
@@ -20,6 +22,9 @@ const RIVER_CHANNEL_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4100)
 const RIVER_CHANNEL_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4101);
 const MATERIAL_BOUNDARY_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4200);
 const MATERIAL_BOUNDARY_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4201);
+const MATERIAL_BOUNDARY_WARP_X_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4206);
+const MATERIAL_BOUNDARY_WARP_Z_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4207);
+const MATERIAL_BOUNDARY_DETAIL_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4208);
 const SEDIMENT_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4202);
 const SEDIMENT_ZONE_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4203);
 const GRAVEL_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4204);
@@ -44,7 +49,9 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
     let palette = GenerationPalette::from_registry(registry);
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
     let atlas_structure = generate_chunk_atlas_structure(coord, meta);
-    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields, &atlas_structure);
+    let atlas_meso = generate_chunk_meso_guides(coord, meta, &atlas_fields, &atlas_structure);
+    let surface_field =
+        build_chunk_surface_field(coord, meta, &atlas_fields, &atlas_structure, &atlas_meso);
     let land_threshold = AtlasTuning::default().normalization.land_threshold;
     let mut chunk = ChunkData::new_empty(coord);
 
@@ -83,7 +90,7 @@ pub fn generate_chunk(coord: ChunkCoord, meta: &WorldMeta, registry: &BlockRegis
             let surface_y = hydrology.surface_y.round() as i32;
             let water_top_y = hydrology
                 .water_top_y
-                .map(|water_top_y| water_top_y.floor() as i32)
+                .map(|water_top_y| water_top_y.ceil() as i32)
                 .filter(|water_top_y| *water_top_y > surface_y);
             let stone_ceiling_y =
                 compute_stone_ceiling(meta.seed, world_x, world_z, surface_y);
@@ -134,7 +141,13 @@ pub(super) fn classify_fill_profile(
     profile: super::profile::TerrainProfile,
     structure: PreparedStructureGuide,
 ) -> ColumnFillProfile {
-    let boundary_offset = material_boundary_offset(seed, world_x, world_z);
+    let boundary_offset = material_boundary_offset(
+        seed,
+        world_x,
+        world_z,
+        sample,
+        land_threshold,
+    );
     let warped_landness = clamp01(sample.landness + boundary_offset);
     let warped_coast_factor = clamp01(
         sample.coast_factor
@@ -199,7 +212,37 @@ fn resolves_to_frozen_surface(sample: ColumnAtlasSample) -> bool {
         && sample.temperature < ALPINE_FROZEN_MAX_TEMPERATURE
 }
 
-fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {
+fn material_boundary_offset(
+    seed: u64,
+    world_x: i32,
+    world_z: i32,
+    sample: ColumnAtlasSample,
+    land_threshold: f32,
+) -> f32 {
+    let warp_x = (centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        168.0,
+        3,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_WARP_X_SALT,
+    ) * 34.0)
+        .round() as i32;
+    let warp_z = (centered_fbm(
+        seed,
+        world_x + 941,
+        world_z - 677,
+        156.0,
+        3,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_WARP_Z_SALT,
+    ) * 34.0)
+        .round() as i32;
+    let warped_x = world_x + warp_x;
+    let warped_z = world_z + warp_z;
     let broad = centered_fbm(
         seed,
         world_x,
@@ -210,17 +253,37 @@ fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {
         0.5,
         MATERIAL_BOUNDARY_PRIMARY_SALT,
     );
-    let medium = centered_fbm(
+    let meander = centered_fbm(
         seed,
-        world_x,
-        world_z,
-        112.0,
-        2,
+        warped_x,
+        warped_z,
+        86.0,
+        4,
         2.0,
-        0.5,
+        0.52,
         MATERIAL_BOUNDARY_SECONDARY_SALT,
     );
-    (broad * 0.68 + medium * 0.32) * 0.055
+    let detail = ridge_signal_fbm(
+        seed,
+        warped_x,
+        warped_z,
+        40.0,
+        3,
+        2.0,
+        0.58,
+        MATERIAL_BOUNDARY_DETAIL_SALT,
+    ) * 2.0
+        - 1.0;
+    let near_land_boundary =
+        1.0 - ((sample.landness - land_threshold).abs() / 0.20).clamp(0.0, 1.0);
+    let near_coast_boundary = 1.0 - ((sample.coast_factor - 0.38).abs() / 0.24).clamp(0.0, 1.0);
+    let near_river_boundary =
+        1.0 - ((sample.riverine_factor - 0.42).abs() / 0.30).clamp(0.0, 1.0);
+    let edge_focus = near_land_boundary
+        .max(near_coast_boundary)
+        .max(near_river_boundary);
+
+    broad * 0.020 + (meander * 0.66 + detail * 0.34) * (0.018 + edge_focus * 0.060)
 }
 
 fn classify_river_stage(sample: ColumnAtlasSample, structure: PreparedStructureGuide) -> RiverStage {
@@ -333,7 +396,7 @@ fn carve_river_channel(
         return None;
     }
 
-    let meander_primary = centered_fbm(
+    let scalar_meander_primary = centered_fbm(
         seed,
         world_x,
         world_z,
@@ -343,7 +406,7 @@ fn carve_river_channel(
         0.5,
         RIVER_CHANNEL_PRIMARY_SALT,
     );
-    let meander_secondary = centered_fbm(
+    let scalar_meander_secondary = centered_fbm(
         seed,
         world_x,
         world_z,
@@ -353,10 +416,19 @@ fn carve_river_channel(
         0.5,
         RIVER_CHANNEL_SECONDARY_SALT,
     ) * 0.34;
-    let scalar_centerline_distance = (meander_primary * 0.72 + meander_secondary * 0.28).abs();
+    let scalar_centerline_distance =
+        (scalar_meander_primary * 0.72 + scalar_meander_secondary * 0.28).abs();
+    let structure_centerline_distance = if structure.channel_weight > 0.0 {
+        let meander_offset = structure_meander_offset_cells(seed, structure, sample, local_concavity);
+        (structure.channel_signed_distance_cells - meander_offset).abs()
+    } else {
+        f32::INFINITY
+    };
 
     let mut channel_width =
-        lerp_f32(0.044, 0.144, river_strength) + sample.lake_potential * 0.05 + local_concavity * 0.04;
+        lerp_f32(0.044, 0.144, river_strength)
+            + sample.lake_potential * 0.05
+            + local_concavity * 0.04;
     if structure.channel_weight > 0.0 {
         channel_width = channel_width.max(0.026 + structure.channel_bankfull_hint * 0.014);
     }
@@ -366,9 +438,9 @@ fn carve_river_channel(
     channel_width += confluence_factor * (0.022 + structure.confluence_order as f32 * 0.010);
     let floodplain_width = channel_width * (2.1 + local_concavity * 2.0) + 0.08;
     let scalar_floodplain_mask = clamp01(1.0 - scalar_centerline_distance / floodplain_width);
-    let structure_floodplain_mask = structure.channel_weight;
+    let structure_floodplain_mask = clamp01(1.0 - structure_centerline_distance / floodplain_width);
     let floodplain_mask = if structure.channel_weight > 0.0 {
-        structure_floodplain_mask.max(scalar_floodplain_mask * 0.35)
+        structure_floodplain_mask.max(scalar_floodplain_mask * 0.22)
     } else {
         scalar_floodplain_mask
     };
@@ -377,11 +449,12 @@ fn carve_river_channel(
     }
 
     let scalar_channel_mask = clamp01(1.0 - scalar_centerline_distance / channel_width);
+    let structure_channel_mask = clamp01(1.0 - structure_centerline_distance / channel_width);
     let channel_mask = if structure.channel_weight > 0.0 {
         let confluence_core = confluence_factor * (0.26 + structure.confluence_order as f32 * 0.06);
         structure
             .channel_core
-            .max(scalar_channel_mask * 0.20)
+            .max(structure_channel_mask.max(scalar_channel_mask * 0.12))
             .max(confluence_core.clamp(0.0, 1.0))
     } else {
         scalar_channel_mask
@@ -421,13 +494,17 @@ fn carve_river_channel(
         + sample.wetness * 0.8
         + local_concavity * 3.2)
         * channel_mask;
-    let bed_y = (floodplain_y - channel_depth.max(1.4)).min(graded_surface_y - 0.8);
-    let bank_freeboard = (0.40
-        - river_strength * 0.18
-        - local_concavity * 0.12
-        - confluence_factor * 0.08)
-        .clamp(0.06, 0.40);
-    let water_surface_y = floodplain_y - bank_freeboard;
+    let branch_waterline_inset = match river_stage {
+        RiverStage::Headwaters => 1.18,
+        RiverStage::Middle => 1.32,
+        RiverStage::Lower => 1.46,
+    };
+    let water_surface_y = graded_surface_y
+        - (branch_waterline_inset
+            + river_strength * 0.16
+            + local_concavity * 0.04
+            - confluence_factor * 0.08)
+            .clamp(0.72, 1.92);
     let min_water_depth = water_depth_base
         + river_strength * 0.7
         + structure.channel_core * 0.9
@@ -439,6 +516,8 @@ fn carve_river_channel(
         } else {
             0.0
         };
+    let min_water_depth = min_water_depth.max(1.05);
+    let bed_y = (floodplain_y - channel_depth.max(1.4)).min(water_surface_y - min_water_depth);
     let water_top_y = water_surface_y.max(bed_y + min_water_depth);
 
     Some(HydrologyRealization {
@@ -463,6 +542,48 @@ fn downstream_water_grade(structure: PreparedStructureGuide, downstream_factor: 
         _ => 2.8,
     };
     downstream_factor * grade_scale
+}
+
+fn structure_meander_offset_cells(
+    seed: u64,
+    structure: PreparedStructureGuide,
+    sample: ColumnAtlasSample,
+    local_concavity: f32,
+) -> f32 {
+    if structure.channel_order == 0 {
+        return 0.0;
+    }
+
+    let along_blocks = (structure.along_channel_cells * 512.0).round() as i32;
+    let branch_seed = seed ^ u64::from(structure.channel_id);
+    let primary = centered_fbm(
+        branch_seed,
+        along_blocks,
+        structure.channel_order as i32 * 101,
+        420.0,
+        4,
+        2.0,
+        0.52,
+        RIVER_CHANNEL_PRIMARY_SALT,
+    );
+    let secondary = centered_fbm(
+        branch_seed,
+        along_blocks,
+        structure.channel_order as i32 * 211,
+        180.0,
+        3,
+        2.0,
+        0.52,
+        RIVER_CHANNEL_SECONDARY_SALT,
+    );
+    let amplitude = (0.010
+        + structure.channel_bankfull_hint * 0.010
+        + structure.channel_order as f32 * 0.006
+        + sample.wetness * 0.010
+        + local_concavity * 0.006)
+        .clamp(0.012, 0.090);
+
+    (primary * 0.72 + secondary * 0.28) * amplitude
 }
 
 pub(super) fn block_for_world_y(
@@ -613,10 +734,11 @@ fn select_river_bed_material(
 }
 
 fn sediment_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
+    let warped = warped_material_coords(seed, world_x, world_z);
     let broad = centered_fbm(
         seed,
-        world_x,
-        world_z,
+        warped.0,
+        warped.1,
         224.0,
         4,
         2.0,
@@ -625,8 +747,8 @@ fn sediment_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
     );
     let medium = centered_fbm(
         seed,
-        world_x,
-        world_z,
+        warped.0,
+        warped.1,
         88.0,
         3,
         2.0,
@@ -637,10 +759,11 @@ fn sediment_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
 }
 
 fn gravel_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
+    let warped = warped_material_coords(seed ^ 0x9137, world_x, world_z);
     let ridged = ridge_signal_fbm(
         seed,
-        world_x,
-        world_z,
+        warped.0,
+        warped.1,
         136.0,
         3,
         2.0,
@@ -650,8 +773,8 @@ fn gravel_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
     let patch = clamp01(
         centered_fbm(
             seed,
-            world_x,
-            world_z,
+            warped.0,
+            warped.1,
             56.0,
             2,
             2.0,
@@ -661,4 +784,30 @@ fn gravel_zone_signal(seed: u64, world_x: i32, world_z: i32) -> f32 {
             + 0.5,
     );
     clamp01(ridged * 0.72 + patch * 0.28)
+}
+
+fn warped_material_coords(seed: u64, world_x: i32, world_z: i32) -> (i32, i32) {
+    let warp_x = (centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        144.0,
+        3,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_WARP_X_SALT,
+    ) * 24.0)
+        .round() as i32;
+    let warp_z = (centered_fbm(
+        seed,
+        world_x - 773,
+        world_z + 551,
+        132.0,
+        3,
+        2.0,
+        0.5,
+        MATERIAL_BOUNDARY_WARP_Z_SALT,
+    ) * 24.0)
+        .round() as i32;
+    (world_x + warp_x, world_z + warp_z)
 }

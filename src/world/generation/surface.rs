@@ -1,10 +1,12 @@
 use super::context::ColumnAtlasSample;
+use super::noise::{centered_fbm, clamp01, smoothstep_range};
 use super::profile::{TerrainProfile, resolve_profile};
 use super::profiles::surface_height_for_sample;
 use super::sampler::sample_column_atlas;
 use super::super::atlas::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasFieldMap, AtlasStructureMap, AtlasTuning, DrainageNode,
-    DrainageNodeKind, MountainChainScale, MountainSpineSegment, RiverPathKind, RiverPathSegment,
+    DrainageNodeKind, MesoGuideMap, MesoGuideSample, MountainChainScale, MountainSpineSegment,
+    RiverPathKind, RiverPathSegment, sample_meso_guides,
 };
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use super::super::meta::WorldMeta;
@@ -14,6 +16,8 @@ const SURFACE_SMOOTH_RADIUS: i32 = 2;
 const SURFACE_CONCAVITY_RADIUS: i32 = 1;
 const SURFACE_FIELD_PADDING: i32 = SURFACE_SMOOTH_RADIUS + SURFACE_CONCAVITY_RADIUS;
 const LOCAL_CONCAVITY_NORMALIZER: f32 = 3.0;
+const MESO_HILL_RELIEF_SALT: u64 = 0xA911_7200_0000_0101;
+const MESO_BASIN_RELIEF_SALT: u64 = 0xA911_7200_0000_0102;
 const SURFACE_SMOOTH_KERNEL: [[f32; 5]; 5] = [
     [1.0, 2.0, 3.0, 2.0, 1.0],
     [2.0, 4.0, 6.0, 4.0, 2.0],
@@ -26,10 +30,52 @@ const SURFACE_SMOOTH_KERNEL: [[f32; 5]; 5] = [
 pub(super) struct PreparedSurfaceColumn {
     pub atlas_sample: ColumnAtlasSample,
     pub profile: TerrainProfile,
+    pub meso: PreparedMesoGuide,
     pub raw_surface_y: f32,
     pub surface_y: f32,
     pub local_concavity: f32,
     pub structure: PreparedStructureGuide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PreparedMesoGuide {
+    pub hilliness: f32,
+    pub hill_height: f32,
+    pub basin_weight: f32,
+    pub basin_depth: f32,
+    pub escarpment_weight: f32,
+    pub escarpment_height: f32,
+    pub escarpment_heading_x: f32,
+    pub escarpment_heading_z: f32,
+    pub escarpment_signed_distance_cells: f32,
+    pub terrace_weight: f32,
+    pub terrace_step_height: f32,
+    pub terrace_spacing_cells: f32,
+    pub terrace_heading_x: f32,
+    pub terrace_heading_z: f32,
+    pub terrace_signed_distance_cells: f32,
+}
+
+impl Default for PreparedMesoGuide {
+    fn default() -> Self {
+        Self {
+            hilliness: 0.0,
+            hill_height: 0.0,
+            basin_weight: 0.0,
+            basin_depth: 0.0,
+            escarpment_weight: 0.0,
+            escarpment_height: 0.0,
+            escarpment_heading_x: 1.0,
+            escarpment_heading_z: 0.0,
+            escarpment_signed_distance_cells: 0.0,
+            terrace_weight: 0.0,
+            terrace_step_height: 0.0,
+            terrace_spacing_cells: 1.0,
+            terrace_heading_x: 1.0,
+            terrace_heading_z: 0.0,
+            terrace_signed_distance_cells: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,11 +86,15 @@ pub(super) struct PreparedStructureGuide {
     pub ridge_heading_x: f32,
     pub ridge_heading_z: f32,
     pub channel_distance_cells: f32,
+    pub channel_signed_distance_cells: f32,
     pub channel_weight: f32,
     pub channel_core: f32,
     pub channel_order: u8,
+    pub channel_id: u32,
     pub channel_heading_x: f32,
     pub channel_heading_z: f32,
+    pub channel_normal_x: f32,
+    pub channel_normal_z: f32,
     pub channel_bankfull_hint: f32,
     pub along_channel_cells: f32,
     pub confluence_distance_cells: f32,
@@ -61,11 +111,15 @@ impl Default for PreparedStructureGuide {
             ridge_heading_x: 0.0,
             ridge_heading_z: 0.0,
             channel_distance_cells: f32::INFINITY,
+            channel_signed_distance_cells: 0.0,
             channel_weight: 0.0,
             channel_core: 0.0,
             channel_order: 0,
+            channel_id: 0,
             channel_heading_x: 0.0,
             channel_heading_z: 0.0,
+            channel_normal_x: 0.0,
+            channel_normal_z: 0.0,
             channel_bankfull_hint: 0.0,
             along_channel_cells: 0.0,
             confluence_distance_cells: f32::INFINITY,
@@ -80,6 +134,7 @@ impl Default for PreparedSurfaceColumn {
         Self {
             atlas_sample: ColumnAtlasSample::default(),
             profile: TerrainProfile::Plain,
+            meso: PreparedMesoGuide::default(),
             raw_surface_y: 0.0,
             surface_y: 0.0,
             local_concavity: 0.0,
@@ -125,6 +180,7 @@ pub(super) fn build_chunk_surface_field(
     meta: &WorldMeta,
     atlas_fields: &AtlasFieldMap,
     atlas_structure: &AtlasStructureMap,
+    atlas_meso: &MesoGuideMap,
 ) -> ChunkSurfaceField {
     let land_threshold = AtlasTuning::default().normalization.land_threshold;
     let span = CHUNK_EDGE_I32 + SURFACE_FIELD_PADDING * 2;
@@ -139,14 +195,25 @@ pub(super) fn build_chunk_surface_field(
             let atlas_sample = sample_column_atlas(atlas_fields, world_x, world_z);
             let profile = resolve_profile(atlas_sample, land_threshold);
             let structure = sample_structure_guide(world_x, world_z, atlas_structure);
+            let meso = prepare_meso_guide(sample_meso_guides(atlas_meso, world_x, world_z));
             let base_surface_y =
                 surface_height_for_sample(meta.seed, world_x, world_z, atlas_sample, land_threshold);
+            let meso_surface_y = apply_meso_to_surface(
+                meta.seed,
+                world_x,
+                world_z,
+                base_surface_y,
+                atlas_sample,
+                profile,
+                meso,
+            );
             let raw_surface_y =
-                apply_structure_to_surface(base_surface_y, atlas_sample, profile, structure);
+                apply_structure_to_surface(meso_surface_y, atlas_sample, profile, structure);
             let index = (grid_z as usize) * span as usize + grid_x as usize;
             columns[index] = PreparedSurfaceColumn {
                 atlas_sample,
                 profile,
+                meso,
                 raw_surface_y,
                 surface_y: raw_surface_y,
                 local_concavity: 0.0,
@@ -209,6 +276,103 @@ pub(super) fn build_chunk_surface_field(
         padding: SURFACE_FIELD_PADDING,
         columns,
     }
+}
+
+fn prepare_meso_guide(sample: MesoGuideSample) -> PreparedMesoGuide {
+    PreparedMesoGuide {
+        hilliness: sample.hilliness,
+        hill_height: sample.hill_height,
+        basin_weight: sample.basin_weight,
+        basin_depth: sample.basin_depth,
+        escarpment_weight: sample.escarpment_weight,
+        escarpment_height: sample.escarpment_height,
+        escarpment_heading_x: sample.escarpment_heading_x,
+        escarpment_heading_z: sample.escarpment_heading_z,
+        escarpment_signed_distance_cells: sample.escarpment_signed_distance_cells,
+        terrace_weight: sample.terrace_weight,
+        terrace_step_height: sample.terrace_step_height,
+        terrace_spacing_cells: sample.terrace_spacing_cells.max(0.55),
+        terrace_heading_x: sample.terrace_heading_x,
+        terrace_heading_z: sample.terrace_heading_z,
+        terrace_signed_distance_cells: sample.terrace_signed_distance_cells,
+    }
+}
+
+fn apply_meso_to_surface(
+    seed: u64,
+    world_x: i32,
+    world_z: i32,
+    base_surface_y: f32,
+    atlas_sample: ColumnAtlasSample,
+    profile: TerrainProfile,
+    meso: PreparedMesoGuide,
+) -> f32 {
+    let profile_scale = match profile {
+        TerrainProfile::DeepOcean => 0.0,
+        TerrainProfile::Shelf => 0.42,
+        TerrainProfile::Coast => 0.82,
+        TerrainProfile::Plain => 1.0,
+        TerrainProfile::Upland => 1.08,
+        TerrainProfile::Ridge => 0.94,
+    };
+    let hill_noise = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        88.0,
+        3,
+        2.0,
+        0.52,
+        MESO_HILL_RELIEF_SALT,
+    );
+    let basin_noise = centered_fbm(
+        seed,
+        world_x,
+        world_z,
+        104.0,
+        3,
+        2.0,
+        0.52,
+        MESO_BASIN_RELIEF_SALT,
+    );
+
+    let hill_raise = meso.hilliness
+        * meso.hill_height
+        * profile_scale
+        * (0.76 + clamp01(hill_noise * 0.5 + 0.5) * 0.24);
+    let basin_drop = meso.basin_weight
+        * meso.basin_depth
+        * profile_scale
+        * (0.74 + clamp01(basin_noise * 0.5 + 0.5) * 0.18 + atlas_sample.wetness * 0.08);
+
+    let escarpment_step = if meso.escarpment_weight > 0.0 {
+        let signed = meso.escarpment_signed_distance_cells;
+        let normalized = smoothstep_range(-0.36, 0.34, signed);
+        let centered = normalized - 0.35;
+        centered * meso.escarpment_height * meso.escarpment_weight * profile_scale
+    } else {
+        0.0
+    };
+
+    let terrace_step = if meso.terrace_weight > 0.0 {
+        let phase = meso.terrace_signed_distance_cells / meso.terrace_spacing_cells.max(0.55);
+        let snapped = phase.floor();
+        let local = phase - snapped;
+        let ramp = smoothstep_range(0.24, 0.78, local);
+        let terraced = (snapped + ramp - 0.5)
+            * meso.terrace_step_height
+            * meso.terrace_weight
+            * profile_scale
+            * 0.56;
+        terraced.clamp(
+            -meso.terrace_step_height * 1.2,
+            meso.terrace_step_height * 1.2,
+        )
+    } else {
+        0.0
+    };
+
+    base_surface_y + hill_raise - basin_drop + escarpment_step + terrace_step
 }
 
 fn apply_structure_to_surface(
@@ -282,14 +446,18 @@ fn sample_structure_guide(
         if score < best_channel_score {
             best_channel_score = score;
             guide.channel_distance_cells = projection.distance_cells;
+            guide.channel_signed_distance_cells = projection.signed_distance_cells;
             guide.channel_weight = (1.0 - score).clamp(0.0, 1.0);
             guide.channel_core = (1.0
                 - projection.distance_cells
                     / channel_core_radius_cells(*segment).max(f32::EPSILON))
             .clamp(0.0, 1.0);
             guide.channel_order = segment.order;
+            guide.channel_id = segment.river_id.0;
             guide.channel_heading_x = projection.heading_x;
             guide.channel_heading_z = projection.heading_z;
+            guide.channel_normal_x = projection.normal_x;
+            guide.channel_normal_z = projection.normal_z;
             guide.channel_bankfull_hint = segment.bankfull_width_cells;
             guide.along_channel_cells = segment.downstream_cells_start
                 + (segment.downstream_cells_end - segment.downstream_cells_start) * projection.t;
@@ -354,9 +522,12 @@ fn confluence_influence_radius_cells(node: DrainageNode) -> f32 {
 #[derive(Debug, Clone, Copy)]
 struct SegmentProjection {
     distance_cells: f32,
+    signed_distance_cells: f32,
     t: f32,
     heading_x: f32,
     heading_z: f32,
+    normal_x: f32,
+    normal_z: f32,
 }
 
 fn project_point_onto_segment(
@@ -375,9 +546,12 @@ fn project_point_onto_segment(
     if length_sq <= f32::EPSILON {
         return SegmentProjection {
             distance_cells: ((point.0 - start_x).powi(2) + (point.1 - start_z).powi(2)).sqrt(),
+            signed_distance_cells: 0.0,
             t: 0.0,
             heading_x: 1.0,
             heading_z: 0.0,
+            normal_x: 0.0,
+            normal_z: 1.0,
         };
     }
 
@@ -385,12 +559,20 @@ fn project_point_onto_segment(
     let nearest_x = start_x + seg_x * t;
     let nearest_z = start_z + seg_z * t;
     let length = length_sq.sqrt();
+    let normal_x = -seg_z / length.max(f32::EPSILON);
+    let normal_z = seg_x / length.max(f32::EPSILON);
+    let offset_x = point.0 - nearest_x;
+    let offset_z = point.1 - nearest_z;
+    let signed_distance_cells = offset_x * normal_x + offset_z * normal_z;
 
     SegmentProjection {
-        distance_cells: ((point.0 - nearest_x).powi(2) + (point.1 - nearest_z).powi(2)).sqrt(),
+        distance_cells: (offset_x.powi(2) + offset_z.powi(2)).sqrt(),
+        signed_distance_cells,
         t,
         heading_x: seg_x / length.max(f32::EPSILON),
         heading_z: seg_z / length.max(f32::EPSILON),
+        normal_x,
+        normal_z,
     }
 }
 

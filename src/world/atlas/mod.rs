@@ -1,5 +1,6 @@
 mod atlas_debug;
 mod atlas_fields;
+mod meso;
 mod atlas_resolver;
 mod scale;
 mod seed;
@@ -13,6 +14,12 @@ pub use atlas_debug::{
 pub use atlas_fields::{
     AtlasCell, AtlasFieldMap, CoverPotentials, MoistureWeights, OverlayWeights,
     TerrainFormWeights, ThermalWeights, generate_atlas_fields, generate_atlas_fields_with_tuning,
+};
+pub use meso::{
+    MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
+    MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
+    generate_meso_guides, meso_region_coord_for_atlas, meso_regions_covering_area,
+    sample_meso_guides,
 };
 pub use atlas_resolver::{
     AtlasResolvedCell, AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass,
