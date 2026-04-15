@@ -31,4 +31,5 @@
 - Smoothing happens before hydrology, so rivers carve into an already-continuous terrain surface instead of trying to correct high-frequency block jitter afterward.
 - The field includes padding outside the target chunk so smoothing and local-concavity queries remain deterministic at chunk borders.
 - Nearby mountain spines and river paths are rasterized into per-column structure weights before smoothing, so chunk-local relief can already lean toward the atlas-owned macro skeleton.
+- `along_channel_cells` now represents downstream progress along the owning river branch, not just distance inside a single projected segment.
 - This module does not place blocks; it only prepares the shared surface scaffold used by probes and realization.

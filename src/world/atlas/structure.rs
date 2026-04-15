@@ -211,6 +211,8 @@ pub struct RiverPathSegment {
     pub start: AtlasCoord,
     pub end: AtlasCoord,
     pub bankfull_width_cells: f32,
+    pub downstream_cells_start: f32,
+    pub downstream_cells_end: f32,
 }
 
 impl RiverPathSegment {
@@ -568,6 +570,7 @@ fn emit_river_branch(
             kind: DrainageNodeKind::Headwater,
         });
     }
+    let mut downstream_cells = 0.0_f32;
 
     for step_index in 0..branch_steps {
         let sampled_heading = sample_drainage_heading_vector(
@@ -594,6 +597,9 @@ fn emit_river_branch(
             position.0 + heading.0 * (step_length + jitter).max(0.9),
             position.1 + heading.1 * (step_length + jitter).max(0.9),
         );
+        let segment_length_cells =
+            ((next_position.0 - position.0).powi(2) + (next_position.1 - position.1).powi(2))
+                .sqrt();
         let start = AtlasCoord::new(position.0.round() as i32, position.1.round() as i32);
         let end = AtlasCoord::new(next_position.0.round() as i32, next_position.1.round() as i32);
         if start != end {
@@ -609,12 +615,15 @@ fn emit_river_branch(
                 start,
                 end,
                 bankfull_width_cells: width,
+                downstream_cells_start: downstream_cells,
+                downstream_cells_end: downstream_cells + segment_length_cells,
             };
             if segment.touches_area(requested_area) {
                 graph.push_segment(segment);
             }
         }
 
+        downstream_cells += segment_length_cells;
         position = next_position;
     }
 
@@ -968,6 +977,18 @@ mod tests {
     }
 
     #[test]
+    fn generated_drainage_segments_keep_forward_downstream_progress() {
+        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
+        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
+
+        assert!(structure
+            .drainage()
+            .segments()
+            .iter()
+            .all(|segment| segment.downstream_cells_end > segment.downstream_cells_start));
+    }
+
+    #[test]
     fn mountain_segments_report_area_intersection_from_bounds() {
         let area = AtlasArea::new(AtlasCoord::new(10, 10), 4, 4).unwrap();
         let segment = MountainSpineSegment {
@@ -996,6 +1017,8 @@ mod tests {
             start: AtlasCoord::new(-4, -1),
             end: AtlasCoord::new(0, -1),
             bankfull_width_cells: 1.0,
+            downstream_cells_start: 0.0,
+            downstream_cells_end: 1.0,
         };
 
         assert!(segment.touches_area(area));

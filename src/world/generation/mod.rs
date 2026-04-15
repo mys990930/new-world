@@ -546,14 +546,18 @@ mod tests {
                 start: crate::world::AtlasCoord::new(0, 0),
                 end: crate::world::AtlasCoord::new(1, 0),
                 bankfull_width_cells: 2.0,
+                downstream_cells_start: 0.0,
+                downstream_cells_end: 1.0,
             });
 
         let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
         let near_origin = surface_field.column(0, 0);
+        let later = surface_field.column(31, 0);
 
         assert!(near_origin.structure.ridge_weight > 0.0);
         assert!(near_origin.structure.channel_weight > 0.0);
         assert_eq!(near_origin.structure.channel_order, 2);
+        assert!(later.structure.along_channel_cells > near_origin.structure.along_channel_cells);
     }
 
     #[test]

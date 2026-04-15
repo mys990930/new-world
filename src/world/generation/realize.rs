@@ -209,14 +209,22 @@ fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {
 }
 
 fn classify_river_stage(sample: ColumnAtlasSample, structure: PreparedStructureGuide) -> RiverStage {
+    let downstream_factor = downstream_progress_factor(structure);
+
     if structure.channel_order >= 2 {
-        if sample.river_flow_potential > 0.56 || sample.lake_potential > 0.42 {
+        if downstream_factor > 0.62
+            || sample.river_flow_potential > 0.56
+            || sample.lake_potential > 0.42
+        {
             return RiverStage::Lower;
         }
-        return RiverStage::Middle;
+        if downstream_factor > 0.18 {
+            return RiverStage::Middle;
+        }
     }
 
     if sample.river_source_potential > 0.52
+        || downstream_factor < 0.18
         || sample.river_flow_potential < 0.24
         || (sample.mountain_mass > 0.40 && sample.macro_elevation > 0.44)
     {
@@ -284,6 +292,7 @@ fn carve_river_channel(
     local_concavity: f32,
     structure: PreparedStructureGuide,
 ) -> Option<HydrologyRealization> {
+    let downstream_factor = downstream_progress_factor(structure);
     let river_strength = clamp01(
         sample.riverine_factor * 0.72
             + structure.channel_weight * 0.96
@@ -350,7 +359,9 @@ fn carve_river_channel(
     };
     let floodplain_drop =
         (0.8 + river_strength * 2.8 + sample.wetness * 1.6 + local_concavity * 1.8) * floodplain_mask;
-    let floodplain_y = base_surface_y - floodplain_drop;
+    let downstream_grade_drop = downstream_water_grade(structure, downstream_factor);
+    let graded_surface_y = base_surface_y - downstream_grade_drop;
+    let floodplain_y = graded_surface_y - floodplain_drop;
     if channel_mask <= 0.08 {
         return Some(HydrologyRealization {
             surface_y: floodplain_y,
@@ -374,12 +385,13 @@ fn carve_river_channel(
         + sample.wetness * 0.8
         + local_concavity * 3.2)
         * channel_mask;
-    let bed_y = (floodplain_y - channel_depth.max(1.4)).min(base_surface_y - 0.8);
+    let bed_y = (floodplain_y - channel_depth.max(1.4)).min(graded_surface_y - 0.8);
     let bank_freeboard = (0.40 - river_strength * 0.18 - local_concavity * 0.12).clamp(0.08, 0.40);
     let water_surface_y = floodplain_y - bank_freeboard;
     let min_water_depth = water_depth_base
         + river_strength * 0.7
         + structure.channel_core * 0.9
+        + downstream_factor * 0.5
         + local_concavity * 0.8
         + if river_strength > 0.64 || sample.lake_potential > 0.70 {
             0.8
@@ -392,6 +404,24 @@ fn carve_river_channel(
         surface_y: bed_y,
         water_top_y: (water_top_y > bed_y).then_some(water_top_y),
     })
+}
+
+fn downstream_progress_factor(structure: PreparedStructureGuide) -> f32 {
+    let normalization = match structure.channel_order {
+        0 => return 0.0,
+        1 => 10.0,
+        _ => 18.0,
+    };
+    clamp01(structure.along_channel_cells / normalization)
+}
+
+fn downstream_water_grade(structure: PreparedStructureGuide, downstream_factor: f32) -> f32 {
+    let grade_scale = match structure.channel_order {
+        0 => 0.0,
+        1 => 1.4,
+        _ => 2.8,
+    };
+    downstream_factor * grade_scale
 }
 
 pub(super) fn block_for_world_y(

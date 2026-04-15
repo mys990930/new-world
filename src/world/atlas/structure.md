@@ -55,6 +55,7 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 
 - current drainage scaffold now emits initial trunk/tributary river paths from generated mountain chains.
 - current drainage nodes are limited to headwater/outlet markers; confluence, pass-outlet, and sink solving remain a later step.
+- river path segments now also carry downstream progress ranges so chunk generation can recover branch progress from the nearest segment projection.
 
 - `AtlasStructureMap`은 현재 `AtlasArea`와 비어 있을 수 있는 graph 컨테이너를 소유한다.
 - `AtlasStructureRegionCoord`는 atlas structure cache/ownership의 기본 단위 좌표다.
@@ -115,5 +116,6 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 
 - 현재 코드는 region-based deterministic mountain chain 위에서 초기 drainage graph까지 함께 생성하는 단계다.
 - drainage는 chain anchor 양옆 또는 결정된 한쪽에서 시작하는 trunk/tributary path를 만들지만, 아직 confluence solving이나 chunk realization 연결은 하지 않는다.
+- downstream progress는 이제 generation이 river stage와 water-surface bias에 직접 사용할 수 있도록 segment에 기록된다.
 
 - confluence, pass outlet, sink 같은 더 풍부한 drainage topology는 아직 다음 단계로 남아 있다.

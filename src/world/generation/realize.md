@@ -24,6 +24,7 @@
 - Shallow-ocean and river sediment are now chosen once per column from low-frequency sediment fields, so `sand` / `mud` / `gravel` read as broad patches instead of per-block speckle.
 - River fill profiles keep river-bed material on the surface instead of reverting to grass just because the local channel is not submerged.
 - The current hydrology carve is now hybrid: atlas-owned river path proximity drives the main channel when present, while older scalar river signals and local concavity remain as support.
-- The next revision should use channel heading / along-channel data to produce downstream-directed water surfaces, explicit confluences, and less fallback dependence on scalar meander noise.
+- The current hydrology pass now also uses downstream progress from atlas river segments to bias river stage and lower downstream water surfaces more consistently along the branch.
+- The next revision should add explicit confluences and reduce the remaining fallback dependence on scalar meander noise.
 - Vegetation and ecology are still deferred.
 - Probe helpers stop before block fill and let tooling inspect the same `sample -> profile -> surface_y` path without generating a full preview image.

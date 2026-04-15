@@ -96,13 +96,13 @@ generation::sample_chunk_surface_lod(
 ## Next Structure-Driven Revision Target
 
 - Atlas remains the owner of macro terrain direction, and generation now reads padded structure windows and derives chunk-local guide weights from nearby mountain spines and river paths.
-- The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization.
+- The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and explicit river topology handling.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
   2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
   3. rasterize drainage and river segments into distance-to-channel / along-channel fields
   4. build the raw surface scaffold from those structural fields, then smooth and locally refine it
-  5. promote `along-channel` and channel heading into downstream-directed water-surface and stage resolution
+  5. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
   6. enforce connected river channels with minimum wetted width/depth and explicit confluence handling
   7. keep local noise as detail only, not as the source of macro ridge or river direction
 - In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.

@@ -281,7 +281,8 @@ fn sample_structure_guide(
             guide.channel_heading_x = projection.heading_x;
             guide.channel_heading_z = projection.heading_z;
             guide.channel_bankfull_hint = segment.bankfull_width_cells;
-            guide.along_channel_cells = projection.along_cells;
+            guide.along_channel_cells = segment.downstream_cells_start
+                + (segment.downstream_cells_end - segment.downstream_cells_start) * projection.t;
         }
     }
 
@@ -314,7 +315,7 @@ fn channel_influence_radius_cells(segment: RiverPathSegment) -> f32 {
 #[derive(Debug, Clone, Copy)]
 struct SegmentProjection {
     distance_cells: f32,
-    along_cells: f32,
+    t: f32,
     heading_x: f32,
     heading_z: f32,
 }
@@ -335,7 +336,7 @@ fn project_point_onto_segment(
     if length_sq <= f32::EPSILON {
         return SegmentProjection {
             distance_cells: ((point.0 - start_x).powi(2) + (point.1 - start_z).powi(2)).sqrt(),
-            along_cells: 0.0,
+            t: 0.0,
             heading_x: 1.0,
             heading_z: 0.0,
         };
@@ -348,7 +349,7 @@ fn project_point_onto_segment(
 
     SegmentProjection {
         distance_cells: ((point.0 - nearest_x).powi(2) + (point.1 - nearest_z).powi(2)).sqrt(),
-        along_cells: length * t,
+        t,
         heading_x: seg_x / length.max(f32::EPSILON),
         heading_z: seg_z / length.max(f32::EPSILON),
     }
