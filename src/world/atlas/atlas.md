@@ -79,8 +79,11 @@ write_debug_images(
 
 ## 현재 구현 메모
 
+- atlas structure는 이제 region-owned mountain chain과 초기 drainage path graph를 on-demand로 함께 생성한다.
+- 다만 chunk realization은 아직 structure graph를 직접 소비하지 않고 scalar-first hydrology를 유지한다.
+
 - 첫 Rust prototype은 seed와 atlas 영역 크기를 입력으로 받아 PNG 여러 장을 생성하는 오프라인 실행기를 우선 제공한다.
 - preview biome는 tuning을 위한 시각화 결과이며 authoritative biome contract가 아니다.
 - atlas 기본 tuning 값은 `tuning.rs`에 모아두고, 구현 파일은 가능하면 그 값을 읽는 쪽으로 유지한다.
-- 현재 구현은 아직 scalar field 중심이지만, 다음 revision에서는 `structure.md` 기준으로 산맥 spine과 drainage path를 atlas 소유 데이터로 끌어올린다.
+- 현재 청크 realization은 아직 scalar field 중심이지만, atlas 쪽에서는 이미 `structure.md` 기준의 산맥 spine과 초기 drainage path를 함께 소유하기 시작했다.
 - structure graph는 전역 선계산이 아니라 on-demand region 생성과 캐시를 전제로 설계한다.

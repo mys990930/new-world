@@ -94,6 +94,7 @@ generation::sample_chunk_surface_lod(
 ## Next Structure-Driven Revision Target
 
 - Atlas remains the owner of macro terrain direction, but generation becomes the owner of chunk-local realization of that structure.
+- Atlas structure already emits initial mountain/drainage guides, but chunk realization still uses the older scalar-first hydrology path until the next wiring step.
 - The next revision should stop inventing major ridge and river direction per column.
 - Instead, generation should read a padded atlas structure window assembled from nearby structure regions and derive chunk-local distance fields from nearby mountain spines and river paths.
 - Target flow for each chunk:

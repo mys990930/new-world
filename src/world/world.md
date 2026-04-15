@@ -132,4 +132,4 @@ NOT:
 - chunk acquisition can now come from either created-world disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
-- atlas terrain structure is currently still scalar-first in code, but the next generation revision is expected to move mountain-chain and drainage direction ownership into atlas before chunk realization
+- atlas terrain realization is still scalar-first, but atlas/world now already emit region-owned mountain-chain and initial drainage guides ahead of chunk realization consumption
