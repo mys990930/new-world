@@ -12,6 +12,7 @@
 - Define the chunk-generation entry point and its deterministic contract.
 - Sample atlas-scale macro environment data needed for chunk realization.
 - Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
+- Keep generation-side terrain profiles distinct from any future multi-chunk meso feature system.
 - Convert atlas fields into per-column surface elevation around a fixed sea level using blended profile surfaces rather than a single hard profile switch.
 - Build a smoothed chunk-local surface field before hydrology so contour flow stays readable at block resolution.
 - Rasterize atlas-owned mountain and drainage guides into chunk-local structure weights before final hydrology.
@@ -67,6 +68,7 @@ generation::sample_chunk_surface_lod(
 
 - Sea level is fixed at world-space `y = 0`.
 - The generator treats atlas scalar fields plus atlas-owned structure guides as macro input and performs block placement inside `world::generation`.
+- Current `TerrainProfile` categories are shape families for realization and debugging; they are not yet the planned multi-chunk meso feature layer.
 - For each `(x, z)` column in the chunk:
   1. Sample and bilerp atlas-derived scalar macro inputs from the surrounding atlas cells.
   2. Read the matching padded atlas structure window and rasterize nearby mountain spines and drainage paths into per-column guide weights.
@@ -97,7 +99,9 @@ generation::sample_chunk_surface_lod(
 ## Next Structure-Driven Revision Target
 
 - Atlas remains the owner of macro terrain direction, and generation now reads padded structure windows and derives chunk-local guide weights from nearby mountain spines and river paths.
+- Atlas is intentionally kept macro at the current scale, so the next readability pass should add a separate meso terrain layer rather than collapsing more casual terrain identity directly into atlas cells.
 - The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and richer river topology handling beyond the first explicit confluence pass.
+- A later revision should also insert a deterministic meso layer between atlas and micro detail so features such as hill groups, cliff bands, basins, coves, or terraces can span several chunks without requiring atlas to change identity every few chunks.
 - Target flow for each chunk:
   1. sample atlas scalar fields and nearby structural guides together
   2. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
@@ -106,6 +110,7 @@ generation::sample_chunk_surface_lod(
   5. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
   6. enforce connected river channels with minimum wetted width/depth, richer confluence handling, and clearer trunk/tributary continuity
   7. keep local noise as detail only, not as the source of macro ridge or river direction
+  8. add a later meso guide layer between atlas windows and profile-local detail so multi-chunk terrain can read more playfully without sacrificing macro coherence
 - In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.
 
 ## Processing Flow

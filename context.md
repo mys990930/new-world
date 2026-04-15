@@ -1,5 +1,13 @@
 # context.md
 
+## ASCII Addendum
+
+- Atlas remains intentionally macro. One atlas cell is `16 x 16` chunks, which is `512 x 512` blocks or `256m x 256m` at the current block scale.
+- We do not currently plan to shrink atlas just to make local terrain feel more casual.
+- A future deterministic meso terrain layer is planned between atlas-scale macro guidance and chunk-local micro detail.
+- That meso layer should span multiple chunks, be generated on demand, and be reproducible from seed-derived region coordinates plus nearby atlas context rather than from whole-world precomputation.
+- Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape families and realization categories, not as the final meso feature system.
+
 ## 1. 프로젝트 한줄 개요
 
 이 프로젝트는 **쿼터뷰 복셀 샌드박스 게임**이다.  

@@ -15,6 +15,7 @@
 - coordinate transformation rules
 - atlas-scale macro environment interpretation
 - atlas-scale mountain-chain / drainage structure ownership
+- future deterministic meso terrain-guide ownership between atlas macro guidance and chunk-local realization
 - snapshot/query surfaces
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -109,6 +110,7 @@ NOT:
 5. partial-height block geometry such as lowered exposed water surfaces is decided on the world side before renderer upload
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order
+8. planned meso terrain guides must also remain deterministic, span multiple chunks, and avoid whole-world precomputation
 
 ### Submodules
 
@@ -133,3 +135,5 @@ NOT:
 - meshing still operates on snapshots and renderer upload still happens outside `world`
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
+- atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
+- that future meso layer is expected to sit between atlas and generation micro detail as an on-demand deterministic guide, but the concrete feature catalog is still intentionally undecided
