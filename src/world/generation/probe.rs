@@ -1,6 +1,6 @@
 use super::context::ColumnAtlasSample;
 use super::profile::TerrainProfile;
-use super::sampler::generate_chunk_atlas_fields;
+use super::sampler::{generate_chunk_atlas_fields, generate_chunk_atlas_structure};
 use super::surface::{ChunkSurfaceField, build_chunk_surface_field};
 use super::super::atlas::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord};
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, chunk_local_to_world};
@@ -87,13 +87,15 @@ pub fn probe_column(
     meta: &WorldMeta,
 ) -> ColumnGenerationProbe {
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
-    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
+    let atlas_structure = generate_chunk_atlas_structure(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields, &atlas_structure);
     probe_column_with_surface_field(&surface_field, coord, local_x, local_z)
 }
 
 pub fn probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe {
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
-    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
+    let atlas_structure = generate_chunk_atlas_structure(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields, &atlas_structure);
     let mut surface_min_y = i32::MAX;
     let mut surface_max_y = i32::MIN;
     let mut surface_sum = 0_i64;
@@ -132,7 +134,8 @@ pub fn sample_chunk_surface_lod(
     );
 
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
-    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields);
+    let atlas_structure = generate_chunk_atlas_structure(coord, meta);
+    let surface_field = build_chunk_surface_field(coord, meta, &atlas_fields, &atlas_structure);
     let samples_per_axis = (super::super::coord::CHUNK_EDGE / step) as u8;
     let mut samples = Vec::with_capacity(usize::from(samples_per_axis) * usize::from(samples_per_axis));
 

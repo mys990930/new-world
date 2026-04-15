@@ -30,10 +30,14 @@ mod tests {
     use super::profile::TerrainProfile;
     use super::profiles::{surface_y_for_profile, surface_y_for_sample};
     use super::realize::{ColumnBlocks, block_for_world_y};
-    use super::sampler::generate_chunk_atlas_fields;
-    use super::surface::build_chunk_surface_field;
+    use super::sampler::{generate_chunk_atlas_fields, generate_chunk_atlas_structure};
+    use super::surface::{PreparedStructureGuide, build_chunk_surface_field};
     use super::*;
-    use crate::world::{BlockId, BlockRegistry, ChunkCoord, LocalBlockCoord, WorldMeta};
+    use crate::world::{
+        AtlasStructureMap, AtlasStructureRegionCoord, BlockId, BlockRegistry, ChunkCoord,
+        LocalBlockCoord, MountainChainId, MountainChainScale, MountainSpineSegment, RiverPathId,
+        RiverPathKind, RiverPathSegment, WorldMeta,
+    };
 
     fn test_registry() -> BlockRegistry {
         BlockRegistry::load_default().expect("default registry should load")
@@ -220,6 +224,7 @@ mod tests {
             2,
             0.53,
             TerrainProfile::Plain,
+            PreparedStructureGuide::default(),
         );
         assert_eq!(fill, ColumnFillProfile::Coast);
     }
@@ -255,6 +260,7 @@ mod tests {
             3,
             0.53,
             TerrainProfile::Coast,
+            PreparedStructureGuide::default(),
         );
         assert_eq!(fill, ColumnFillProfile::Coast);
     }
@@ -349,6 +355,7 @@ mod tests {
             16,
             0.53,
             TerrainProfile::Shelf,
+            PreparedStructureGuide::default(),
         );
 
         assert_eq!(fill, ColumnFillProfile::Coast);
@@ -487,7 +494,8 @@ mod tests {
         let meta = WorldMeta::new(42);
         let coord = ChunkCoord(5, 0, -8);
         let atlas_fields = generate_chunk_atlas_fields(coord, &meta);
-        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields);
+        let atlas_structure = generate_chunk_atlas_structure(coord, &meta);
+        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
         let mut raw_delta_sum = 0.0_f32;
         let mut smooth_delta_sum = 0.0_f32;
         let mut samples = 0_u32;
@@ -508,6 +516,44 @@ mod tests {
 
         assert!(samples > 0);
         assert!(smooth_delta_sum < raw_delta_sum);
+    }
+
+    #[test]
+    fn manual_structure_segments_rasterize_into_surface_guides() {
+        let meta = WorldMeta::new(42);
+        let coord = ChunkCoord(8, 0, 8);
+        let atlas_fields = generate_chunk_atlas_fields(coord, &meta);
+        let mut atlas_structure = AtlasStructureMap::empty(atlas_fields.area());
+        atlas_structure
+            .mountain_chains_mut()
+            .push_segment(MountainSpineSegment {
+                chain_id: MountainChainId(1),
+                owner_region: AtlasStructureRegionCoord::new(0, 0),
+                branch_order: 0,
+                scale: MountainChainScale::Major,
+                start: crate::world::AtlasCoord::new(0, 0),
+                end: crate::world::AtlasCoord::new(1, 0),
+                strength: 1.0,
+                half_width_cells: 2.0,
+            });
+        atlas_structure
+            .drainage_mut()
+            .push_segment(RiverPathSegment {
+                river_id: RiverPathId(7),
+                owner_region: AtlasStructureRegionCoord::new(0, 0),
+                kind: RiverPathKind::Trunk,
+                order: 2,
+                start: crate::world::AtlasCoord::new(0, 0),
+                end: crate::world::AtlasCoord::new(1, 0),
+                bankfull_width_cells: 2.0,
+            });
+
+        let surface_field = build_chunk_surface_field(coord, &meta, &atlas_fields, &atlas_structure);
+        let near_origin = surface_field.column(0, 0);
+
+        assert!(near_origin.structure.ridge_weight > 0.0);
+        assert!(near_origin.structure.channel_weight > 0.0);
+        assert_eq!(near_origin.structure.channel_order, 2);
     }
 
     #[test]

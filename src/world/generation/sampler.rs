@@ -1,6 +1,7 @@
 use super::context::ColumnAtlasSample;
 use super::super::atlas::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, AtlasFieldMap, generate_atlas_fields,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, AtlasFieldMap,
+    AtlasStructureMap, generate_atlas_fields, generate_atlas_structure,
 };
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use super::super::meta::WorldMeta;
@@ -8,7 +9,7 @@ use super::super::meta::WorldMeta;
 const ATLAS_CELL_SPAN_BLOCKS_I32: i32 = ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32;
 const GENERATION_ATLAS_PADDING_CELLS: i32 = 4;
 
-pub(super) fn generate_chunk_atlas_fields(coord: ChunkCoord, meta: &WorldMeta) -> AtlasFieldMap {
+fn chunk_generation_atlas_area(coord: ChunkCoord) -> AtlasArea {
     let base = AtlasCoord::new(
         coord.0.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
         coord.2.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
@@ -18,8 +19,18 @@ pub(super) fn generate_chunk_atlas_fields(coord: ChunkCoord, meta: &WorldMeta) -
         base.z - GENERATION_ATLAS_PADDING_CELLS,
     );
     let span = (GENERATION_ATLAS_PADDING_CELLS * 2 + 2) as u32;
-    let area = AtlasArea::new(origin, span, span).expect("generation atlas area is valid");
-    generate_atlas_fields(meta, area)
+    AtlasArea::new(origin, span, span).expect("generation atlas area is valid")
+}
+
+pub(super) fn generate_chunk_atlas_fields(coord: ChunkCoord, meta: &WorldMeta) -> AtlasFieldMap {
+    generate_atlas_fields(meta, chunk_generation_atlas_area(coord))
+}
+
+pub(super) fn generate_chunk_atlas_structure(
+    coord: ChunkCoord,
+    meta: &WorldMeta,
+) -> AtlasStructureMap {
+    generate_atlas_structure(meta, chunk_generation_atlas_area(coord))
 }
 
 pub(super) fn sample_column_atlas(
