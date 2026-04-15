@@ -24,6 +24,9 @@ const SEDIMENT_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4202)
 const SEDIMENT_ZONE_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4203);
 const GRAVEL_ZONE_PRIMARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4204);
 const GRAVEL_ZONE_SECONDARY_SALT: u64 = MATERIAL_BLEND_SALT.wrapping_add(0x4205);
+const POLAR_FROZEN_THRESHOLD: f32 = 0.52;
+const ALPINE_FROZEN_THRESHOLD: f32 = 0.72;
+const ALPINE_FROZEN_MAX_TEMPERATURE: f32 = 0.34;
 
 #[derive(Debug, Clone, Copy)]
 struct HydrologyRealization {
@@ -177,11 +180,23 @@ pub(super) fn classify_fill_profile(
         return ColumnFillProfile::Desert;
     }
 
-    if sample.alpine_factor > 0.56 || sample.polar_factor > 0.52 {
+    if resolves_to_frozen_surface(sample) {
         return ColumnFillProfile::Frozen;
     }
 
     ColumnFillProfile::SoilWithGrassTop
+}
+
+fn resolves_to_frozen_surface(sample: ColumnAtlasSample) -> bool {
+    if sample.polar_factor > POLAR_FROZEN_THRESHOLD {
+        return true;
+    }
+
+    // `alpine_factor` is driven primarily by elevation and mountain mass, so it is a
+    // mountain-ness signal rather than a guaranteed snow signal. Keep warm alpine ridges
+    // grassy unless the thermal field is also cold enough to support snow cover.
+    sample.alpine_factor > ALPINE_FROZEN_THRESHOLD
+        && sample.temperature < ALPINE_FROZEN_MAX_TEMPERATURE
 }
 
 fn material_boundary_offset(seed: u64, world_x: i32, world_z: i32) -> f32 {

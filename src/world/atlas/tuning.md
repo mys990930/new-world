@@ -263,6 +263,17 @@ These fields affect whether atlas produces strong enough mountain signals for ch
 | `wetland_river_weight` | riverine의 습지 비중 | 강변 습지 증가 | 강변 습지 약화 |
 | `wetland_slope_penalty` | slope가 습지를 깎는 정도 | 경사진 곳 습지 억제 강화 | slope 있어도 습지 유지 |
 
+`alpine_factor`는 현재 대략 아래 식으로 만들어진다.
+
+```text
+smoothstep(alpine_elevation_min..max, macro_elevation) * alpine_elevation_weight
++ smoothstep(alpine_mountain_min..max, mountain_mass) * alpine_mountain_weight
+- polar_factor * alpine_polar_penalty
+```
+
+기본값에서는 `alpine_elevation_weight = 0.45`, `alpine_mountain_weight = 0.55`다.  
+즉 `mountain_mass`가 `alpine_mountain_max = 0.42`만 넘어도 그 항만으로 이미 `0.55`를 기여한다. 그래서 `alpine_factor = 0.56`은 생각보다 매우 쉽게 도달할 수 있고, 이 값은 "춥다"보다 "높고 산악적이다"에 가까운 신호로 읽는 편이 맞다.
+
 ---
 
 ## weights

@@ -23,6 +23,8 @@
 - Atlas structure guides now feed the same carve, so explicit nearby river paths can dominate centerline placement instead of relying only on per-column meander noise.
 - Shallow-ocean and river sediment are now chosen once per column from low-frequency sediment fields, so `sand` / `mud` / `gravel` read as broad patches instead of per-block speckle.
 - River fill profiles keep river-bed material on the surface instead of reverting to grass just because the local channel is not submerged.
+- Snow fill no longer treats `alpine_factor` alone as a freeze signal. `polar_factor` still forces frozen ground, but alpine terrain now also has to be thermally cold before it resolves to `snow`.
+- This distinction matters because `alpine_factor` is mainly a high-elevation / high-mountain-form signal. Warm mountain ridges should stay grass-and-dirt terrain until the thermal field says they are actually cold enough for snow cover.
 - The current hydrology carve is now hybrid: atlas-owned river path proximity drives the main channel when present, while older scalar river signals and local concavity remain as support.
 - The current hydrology pass now also uses downstream progress from atlas river segments to bias river stage and lower downstream water surfaces more consistently along the branch.
 - The next revision should add explicit confluences and reduce the remaining fallback dependence on scalar meander noise.

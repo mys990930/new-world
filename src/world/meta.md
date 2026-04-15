@@ -29,13 +29,14 @@
 
 ## Current Notes
 
-- `generator_version = 10` corresponds to the current profile-driven atlas relief and first-pass material layering with:
+- `generator_version = 11` corresponds to the current profile-driven atlas relief and first-pass material layering with:
   - fixed sea level at world `y = 0`
   - generation-side terrain profile resolution (`DeepOcean`, `Shelf`, `Coast`, `Plain`, `Upland`, `Ridge`)
   - blended profile surface evaluation so neighboring macro profiles ease into one another instead of producing abrupt height seams
   - a stone core from world `y = -256` through `surface_y - random(8..=16)`
   - atlas-informed sediment/topsoil selection above the stone core (`mud`, `sand`, `gravel`, `snow`, `dirt`, `grass`)
   - coast-first fill classification near sea level so beach sand remains visible even when river signals are nearby
+  - snow cover gated by actual coldness, so `polar_factor` still freezes terrain outright but warm alpine ridges no longer turn into `snow` just because mountain form is strong
   - smoother river floodplain/channel carving on top of the blended terrain surface, currently only for columns already resolved as river-bearing land
   - automatic sea water fill only for `DeepOcean` / `Shelf` columns
   - coast columns clamped to at least sea level so beaches do not turn into scattered sea-filled pockets

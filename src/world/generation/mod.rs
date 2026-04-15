@@ -266,6 +266,114 @@ mod tests {
     }
 
     #[test]
+    fn warm_alpine_land_does_not_resolve_to_frozen() {
+        let sample = ColumnAtlasSample {
+            landness: 0.66,
+            ocean_distance: 0.28,
+            coast_factor: 0.06,
+            continent_core_factor: 0.34,
+            macro_elevation: 0.52,
+            ridge_factor: 0.28,
+            mountain_mass: 0.92,
+            ruggedness: 0.30,
+            river_source_potential: 0.14,
+            river_flow_potential: 0.10,
+            riverine_factor: 0.08,
+            lake_potential: 0.02,
+            temperature: 0.48,
+            humidity: 0.44,
+            aridity: 0.20,
+            wetness: 0.24,
+            polar_factor: 0.08,
+            alpine_factor: 0.74,
+        };
+
+        let fill = super::realize::classify_fill_profile(
+            7,
+            0,
+            0,
+            sample,
+            18,
+            0.53,
+            TerrainProfile::Ridge,
+            PreparedStructureGuide::default(),
+        );
+        assert_eq!(fill, ColumnFillProfile::SoilWithGrassTop);
+    }
+
+    #[test]
+    fn cold_alpine_land_resolves_to_frozen() {
+        let sample = ColumnAtlasSample {
+            landness: 0.66,
+            ocean_distance: 0.28,
+            coast_factor: 0.06,
+            continent_core_factor: 0.34,
+            macro_elevation: 0.58,
+            ridge_factor: 0.32,
+            mountain_mass: 0.95,
+            ruggedness: 0.34,
+            river_source_potential: 0.16,
+            river_flow_potential: 0.12,
+            riverine_factor: 0.08,
+            lake_potential: 0.02,
+            temperature: 0.24,
+            humidity: 0.42,
+            aridity: 0.18,
+            wetness: 0.22,
+            polar_factor: 0.16,
+            alpine_factor: 0.78,
+        };
+
+        let fill = super::realize::classify_fill_profile(
+            7,
+            0,
+            0,
+            sample,
+            22,
+            0.53,
+            TerrainProfile::Ridge,
+            PreparedStructureGuide::default(),
+        );
+        assert_eq!(fill, ColumnFillProfile::Frozen);
+    }
+
+    #[test]
+    fn polar_land_resolves_to_frozen_even_without_alpine() {
+        let sample = ColumnAtlasSample {
+            landness: 0.62,
+            ocean_distance: 0.22,
+            coast_factor: 0.04,
+            continent_core_factor: 0.28,
+            macro_elevation: 0.30,
+            ridge_factor: 0.10,
+            mountain_mass: 0.12,
+            ruggedness: 0.18,
+            river_source_potential: 0.08,
+            river_flow_potential: 0.06,
+            riverine_factor: 0.04,
+            lake_potential: 0.02,
+            temperature: 0.10,
+            humidity: 0.36,
+            aridity: 0.12,
+            wetness: 0.16,
+            polar_factor: 0.60,
+            alpine_factor: 0.14,
+        };
+
+        let fill = super::realize::classify_fill_profile(
+            7,
+            0,
+            0,
+            sample,
+            10,
+            0.53,
+            TerrainProfile::Plain,
+            PreparedStructureGuide::default(),
+        );
+        assert_eq!(fill, ColumnFillProfile::Frozen);
+    }
+
+    #[test]
     fn submerged_river_surface_uses_bed_material_and_water() {
         let registry = test_registry();
         let palette = GenerationPalette::from_registry(&registry);

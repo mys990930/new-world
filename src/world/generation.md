@@ -84,9 +84,10 @@ generation::sample_chunk_surface_lod(
      - river lower reaches: smooth `mud` / `sand` reaches
      - coast: `sand`
      - desert: `sand`
-     - alpine or polar terrain: `snow`
+     - thermally polar terrain, or alpine terrain that is also cold enough: `snow`
      - otherwise: `dirt`, with `grass` on the surface block
-  10. Any exposed land surface that is not classified as river/coast/desert/snow uses `grass` as the top block.
+10. Any exposed land surface that is not classified as river/coast/desert/snow uses `grass` as the top block.
+   Warm alpine ridges are still treated as exposed land here; `alpine_factor` alone no longer forces snow cover.
   11. If a column has `water_top_y`, fill `water` from `surface_y + 1` through that water top:
      - only `DeepOcean` / `Shelf` columns get automatic sea water up to sea level `y = 0`
      - `Coast` columns stay at or above sea level and read as beach sand rather than sea-filled low pockets
