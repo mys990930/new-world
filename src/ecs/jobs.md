@@ -11,6 +11,7 @@
 - load-requested dedupe policy
 - generate-requested dedupe policy
 - mesh-requested dedupe policy
+- remesh-needed invalidation policy
 - loaded / render-ready transition rules
 
 ## Inputs
@@ -31,6 +32,7 @@
 - created-world chunks prefer `LoadChunk`
 - non-created or out-of-bounds chunks fall back to `GenerateChunk`
 - load/generate success marks chunks as loaded
+- load/generate success also invalidates already-loaded adjacent chunk meshes so seam-sensitive terrain can rebuild against the new neighbor snapshot
 - mesh success marks chunks as render-ready
 
 ## Invariants
@@ -58,5 +60,6 @@
 - the current minimal chunk pipeline is:
   - created-world path: `LoadChunk -> BuildChunkMesh`
   - fallback path: `GenerateChunk -> BuildChunkMesh`
+- seam-sensitive terrain such as contour hints may require a second `BuildChunkMesh` pass for adjacent chunks after a neighbor chunk becomes available
 - the current steady-state horizontal interest envelope is a fixed `5x5` neighborhood around the focused player chunk
 - app still owns the actual `world.insert_chunk(...)` and `renderer.apply_upload(...)` calls

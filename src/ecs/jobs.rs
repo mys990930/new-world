@@ -62,10 +62,16 @@ impl EcsRuntime {
             JobResult::ChunkLoaded { coord, .. } => {
                 chunk_states.load_requested.remove(coord);
                 chunk_states.loaded.insert(*coord);
+                chunk_states.render_ready.remove(coord);
+                chunk_states.remesh_needed.remove(coord);
+                invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
             }
             JobResult::ChunkGenerated { coord, .. } => {
                 chunk_states.generation_requested.remove(coord);
                 chunk_states.loaded.insert(*coord);
+                chunk_states.render_ready.remove(coord);
+                chunk_states.remesh_needed.remove(coord);
+                invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
             }
             JobResult::ChunkMeshBuilt { coord, .. } => {
                 chunk_states.mesh_requested.remove(coord);
@@ -111,6 +117,7 @@ fn sync_loaded_chunk_states(chunk_states: &mut ChunkStates, world: &WorldCore) {
     chunk_states
         .generation_requested
         .retain(|coord| !world.has_chunk(*coord));
+    chunk_states.remesh_needed.retain(|coord| world.has_chunk(*coord));
     chunk_states.render_ready.retain(|coord| world.has_chunk(*coord));
 
     let interest: Vec<_> = chunk_states.interest.iter().copied().collect();
@@ -129,9 +136,14 @@ fn enqueue_mesh_requests_for_interest(
 ) {
     for &coord in interest {
         if !chunk_states.loaded.contains(&coord)
-            || chunk_states.render_ready.contains(&coord)
             || chunk_states.mesh_requested.contains(&coord)
         {
+            continue;
+        }
+
+        let needs_mesh = !chunk_states.render_ready.contains(&coord)
+            || chunk_states.remesh_needed.contains(&coord);
+        if !needs_mesh {
             continue;
         }
 
@@ -145,7 +157,27 @@ fn enqueue_mesh_requests_for_interest(
             registry: world.block_registry_handle(),
         });
         chunk_states.mesh_requested.insert(coord);
+        chunk_states.remesh_needed.remove(&coord);
     }
+}
+
+fn invalidate_loaded_neighbor_meshes(chunk_states: &mut ChunkStates, coord: ChunkCoord) {
+    for neighbor in adjacent_chunk_coords(coord) {
+        if chunk_states.loaded.contains(&neighbor) {
+            chunk_states.remesh_needed.insert(neighbor);
+        }
+    }
+}
+
+fn adjacent_chunk_coords(coord: ChunkCoord) -> [ChunkCoord; 6] {
+    [
+        coord.offset(-1, 0, 0),
+        coord.offset(1, 0, 0),
+        coord.offset(0, -1, 0),
+        coord.offset(0, 1, 0),
+        coord.offset(0, 0, -1),
+        coord.offset(0, 0, 1),
+    ]
 }
 
 fn interest_coords(
@@ -243,5 +275,73 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].coord(), fresh);
         assert!(chunk_states.mesh_requested.contains(&fresh));
+    }
+
+    #[test]
+    fn enqueue_mesh_requests_remeshes_dirty_render_ready_chunks() {
+        let mut world = test_world();
+        let dirty = ChunkCoord(0, 0, 0);
+        world.insert_chunk(dirty, ChunkData::new_empty(dirty));
+
+        let mut requests = Vec::new();
+        let mut chunk_states = ChunkStates::default();
+        chunk_states.loaded.insert(dirty);
+        chunk_states.render_ready.insert(dirty);
+        chunk_states.remesh_needed.insert(dirty);
+
+        enqueue_mesh_requests_for_interest(
+            &mut requests,
+            &[dirty],
+            &mut chunk_states,
+            &world,
+        );
+
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].coord(), dirty);
+        assert!(chunk_states.mesh_requested.contains(&dirty));
+        assert!(!chunk_states.remesh_needed.contains(&dirty));
+    }
+
+    #[test]
+    fn new_chunk_load_invalidates_loaded_neighbor_meshes() {
+        let mut runtime = EcsRuntime::new();
+        let center = ChunkCoord(0, 0, 0);
+        let east = ChunkCoord(1, 0, 0);
+        {
+            let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
+            chunk_states.loaded.extend([center, east]);
+            chunk_states.render_ready.insert(east);
+        }
+
+        runtime.apply_job_result(&JobResult::ChunkGenerated {
+            coord: center,
+            chunk: ChunkData::new_empty(center),
+        });
+
+        let chunk_states = runtime.world().resource::<ChunkStates>();
+        assert!(!chunk_states.render_ready.contains(&center));
+        assert!(chunk_states.remesh_needed.contains(&east));
+    }
+
+    #[test]
+    fn stale_mesh_completion_keeps_neighbor_remesh_pending() {
+        let mut runtime = EcsRuntime::new();
+        let coord = ChunkCoord(0, 0, 0);
+        {
+            let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
+            chunk_states.loaded.insert(coord);
+            chunk_states.mesh_requested.insert(coord);
+            chunk_states.remesh_needed.insert(coord);
+        }
+
+        runtime.apply_job_result(&JobResult::ChunkMeshBuilt {
+            coord,
+            mesh: crate::world::CpuMesh::default(),
+        });
+
+        let chunk_states = runtime.world().resource::<ChunkStates>();
+        assert!(!chunk_states.mesh_requested.contains(&coord));
+        assert!(chunk_states.render_ready.contains(&coord));
+        assert!(chunk_states.remesh_needed.contains(&coord));
     }
 }

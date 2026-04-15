@@ -101,6 +101,7 @@
   - created worlds prefer disk load through jobs
   - fallback worlds prefer procedural generation
   - vertically loaded created-world chunks that are inside the current interest set must still request meshing even when they are below or above the player's current chunk layer
+  - when a chunk becomes available, ECS may invalidate adjacent chunk meshes so seam-dependent terrain shading rebuilds with the new neighbor snapshot
 - selection update
   - app provides cursor position and viewport
   - ECS uses quarter-view camera state to build the selection ray

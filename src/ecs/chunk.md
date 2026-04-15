@@ -13,6 +13,7 @@
 - load-requested chunk set
 - generate-requested chunk set
 - mesh-requested chunk set
+- remesh-needed chunk set
 - render-ready chunk set
 
 ## Inputs
@@ -37,12 +38,14 @@
 - if an interesting chunk is missing and the created-world manifest contains it, ECS requests `LoadChunk`
 - otherwise ECS falls back to `GenerateChunk`
 - loaded but non-render-ready interesting chunks request meshing
+- loaded interesting chunks whose boundary neighbors changed may request meshing again even if they already have a render mesh
 - when created-world interest spans multiple `y` chunk layers, vertically loaded chunks must also become render-ready so lower terrain can render instead of only remaining selectable
 
 ## Invariants
 
 - ECS owns chunk meta state only, not raw chunk storage
 - load/generate/mesh request dedupe stays deterministic
+- chunk-boundary mesh refresh stays ECS-owned meta state rather than living in renderer/world upload bookkeeping
 - visible chunks come from the render-ready set in the current minimal slice, so interest chunks that should render must first pass through the mesh-request path regardless of vertical layer
 
 ## Non-Responsibilities
@@ -64,3 +67,4 @@
 - the current visible-chunk slice is still simple: it returns the render-ready set directly
 - the current interest logic is intentionally broader than the first prototype because player collision now treats missing chunks as blocking
 - bootstrap uses the same horizontal chunk radius so the first rendered frame already matches the steady-state acquisition envelope
+- when a chunk finishes loading or generation, already-loaded adjacent chunks are marked for remesh so contour/visibility at chunk seams can refresh against the new neighbor snapshot
