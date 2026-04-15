@@ -19,8 +19,10 @@ use crate::renderer::{
     RenderUiSprite, RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
-    BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
-    MeshVertex as WorldMeshVertex,
+    CHUNK_EDGE_I32, BlockId, BlockMaterialKind, ChunkCoord as WorldChunkCoord,
+    CpuMesh as WorldCpuMesh, MeshVertex as WorldMeshVertex, TopdownEdge, WorldCore,
+    color_topdown_cell, darken_topdown_color, sample_topdown_columns,
+    topdown_edge_strength_for_cell, topdown_surface_range,
 };
 use winit::keyboard::KeyCode;
 
@@ -43,6 +45,9 @@ const TILE_PANEL_INSET: (u32, u32) = (10, 0);
 const TILE_PANEL_MARKER: (u32, u32) = (11, 0);
 const TILE_PANEL_DIVIDER: (u32, u32) = (12, 0);
 const TILE_SLOT_FILL: (u32, u32) = (14, 0);
+const DEFAULT_PREVIEW_BLOCK_ID: BlockId = BlockId::STONE;
+const MINIMAP_BLOCK_SPAN: u32 = CHUNK_EDGE_I32 as u32;
+const MINIMAP_CELL_SIZE_PX: f32 = 5.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppRenderFrameData {
@@ -107,25 +112,24 @@ impl GameApp {
         match self.ui.mode {
             AppMode::InGame => {
                 let inventory = self.ecs.local_player_inventory();
-                let mut cube_instances = self
-                    .ecs
-                    .local_player_transform()
-                    .zip(self.ecs.local_player_body())
+                let player_transform = self.ecs.local_player_transform();
+                let player_body = self.ecs.local_player_body();
+                let mut cube_instances = player_transform
+                    .zip(player_body)
                     .map(|(transform, body)| {
                         vec![RenderCubeInstance {
                             center: transform.translation,
                             half_extents: body.half_extents,
                             color: [1.0, 1.0, 1.0, 1.0],
+                            top_texture_layer: 0,
+                            bottom_texture_layer: 0,
+                            side_texture_layer: 0,
                             material_kind: RenderMaterialKind::Actor,
                         }]
                     })
                     .unwrap_or_default();
 
-                if let Some((player, body)) = self
-                    .ecs
-                    .local_player_transform()
-                    .zip(self.ecs.local_player_body())
-                {
+                if let Some((player, body)) = player_transform.zip(player_body) {
                     cube_instances.insert(
                         0,
                         build_ground_shadow_instance(player.translation, body.half_extents),
@@ -133,7 +137,12 @@ impl GameApp {
                 }
 
                 let selection = self.ecs.selection_state();
-                push_selection_preview_instances(&mut cube_instances, &selection);
+                push_selection_preview_instances(
+                    &mut cube_instances,
+                    &selection,
+                    &self.world,
+                    inventory,
+                );
 
                 AppRenderFrameData {
                     camera,
@@ -149,7 +158,8 @@ impl GameApp {
                         self.ui.show_minimap_overlay,
                         viewport,
                         inventory,
-                        self.world.block_registry(),
+                        player_transform,
+                        &self.world,
                     ),
                     clear_color_override: None,
                 }
@@ -261,6 +271,9 @@ fn build_ground_shadow_instance(center: [f32; 3], half_extents: [f32; 3]) -> Ren
         ],
         half_extents: [half_extents[0] * 0.96, 0.01, half_extents[2] * 0.96],
         color: [0.08, 0.08, 0.10, 1.0],
+        top_texture_layer: 0,
+        bottom_texture_layer: 0,
+        side_texture_layer: 0,
         material_kind: RenderMaterialKind::Shadow,
     }
 }
@@ -268,8 +281,14 @@ fn build_ground_shadow_instance(center: [f32; 3], half_extents: [f32; 3]) -> Ren
 fn push_selection_preview_instances(
     cube_instances: &mut Vec<RenderCubeInstance>,
     selection: &crate::ecs::SelectionState,
+    world: &WorldCore,
+    inventory: Option<PlayerInventory>,
 ) {
     for preview in &selection.interaction_preview_blocks {
+        let face_textures = world
+            .get_block(preview.block)
+            .map(|block| block_face_texture_layers(world.block_registry(), block))
+            .unwrap_or_else(|| default_preview_texture_layers(world.block_registry()));
         cube_instances.push(RenderCubeInstance {
             center: [
                 preview.block.0 as f32 + 0.5,
@@ -278,15 +297,31 @@ fn push_selection_preview_instances(
             ],
             half_extents: [0.505, 0.505, 0.505],
             color: [1.0, 0.22, 0.22, 0.18],
+            top_texture_layer: face_textures[0],
+            bottom_texture_layer: face_textures[1],
+            side_texture_layer: face_textures[2],
             material_kind: RenderMaterialKind::Highlight,
         });
     }
 
     if let Some(block) = selection.build_preview_block {
+        let face_textures = inventory
+            .and_then(|player_inventory| player_inventory.selected_block())
+            .and_then(|slot| match slot.item {
+                InventoryItem::Block(block_id) => Some(block_face_texture_layers(
+                    world.block_registry(),
+                    block_id,
+                )),
+                InventoryItem::Tool(_) => None,
+            })
+            .unwrap_or_else(|| default_preview_texture_layers(world.block_registry()));
         cube_instances.push(RenderCubeInstance {
             center: [block.0 as f32 + 0.5, block.1 as f32 + 0.5, block.2 as f32 + 0.5],
             half_extents: [0.49, 0.49, 0.49],
             color: [1.0, 0.95, 0.35, 0.35],
+            top_texture_layer: face_textures[0],
+            bottom_texture_layer: face_textures[1],
+            side_texture_layer: face_textures[2],
             material_kind: RenderMaterialKind::Highlight,
         });
     }
@@ -296,69 +331,234 @@ fn build_ingame_ui_sprites(
     show_minimap_overlay: bool,
     viewport: [f32; 2],
     inventory: Option<PlayerInventory>,
-    registry: &crate::world::BlockRegistry,
+    player_transform: Option<crate::ecs::Transform>,
+    world: &WorldCore,
 ) -> Vec<RenderUiSprite> {
     let mut sprites = Vec::new();
     if show_minimap_overlay {
-        let panel = UiRectPx {
-            x: viewport[0] - 278.0,
-            y: 22.0,
-            w: 240.0,
-            h: 188.0,
-        };
-        let inset = panel.inset(18.0);
-
-        push_panel(&mut sprites, panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
-        push_fill(&mut sprites, inset, TILE_PANEL_INSET, [0.10, 0.16, 0.12, 0.96]);
-        push_text(
-            &mut sprites,
-            panel.x + 18.0,
-            panel.y + 18.0,
-            2.0,
-            "MINIMAP",
-            [0.95, 0.88, 0.70, 1.0],
-        );
-        push_divider(
-            &mut sprites,
-            UiRectPx {
-                x: panel.x + 18.0,
-                y: panel.y + 54.0,
-                w: panel.w - 36.0,
-                h: 8.0,
-            },
-            [0.58, 0.53, 0.40, 0.95],
-        );
-        push_fill(
-            &mut sprites,
-            UiRectPx {
-                x: inset.x + 18.0,
-                y: inset.y + 24.0,
-                w: inset.w - 36.0,
-                h: inset.h - 54.0,
-            },
-            TILE_PANEL_CENTER,
-            [0.16, 0.22, 0.18, 0.90],
-        );
-        push_tile_sprite(
-            &mut sprites,
-            TILE_PANEL_MARKER,
-            UiRectPx {
-                x: inset.x + inset.w * 0.5 - 12.0,
-                y: inset.y + inset.h * 0.5 - 12.0,
-                w: 24.0,
-                h: 24.0,
-            },
-            [0.94, 0.86, 0.30, 1.0],
-        );
+        push_minimap_overlay(&mut sprites, viewport, player_transform, world);
     }
 
     if let Some(inventory) = inventory {
-        push_ingame_hud(&mut sprites, viewport, inventory, registry);
+        push_ingame_hud(&mut sprites, viewport, inventory, world.block_registry());
         if inventory.inventory_open {
-            push_inventory_overlay(&mut sprites, viewport, inventory, registry);
+            push_inventory_overlay(&mut sprites, viewport, inventory, world.block_registry());
         }
     }
     sprites
+}
+
+fn push_minimap_overlay(
+    sprites: &mut Vec<RenderUiSprite>,
+    viewport: [f32; 2],
+    player_transform: Option<crate::ecs::Transform>,
+    world: &WorldCore,
+) {
+    let panel = UiRectPx {
+        x: viewport[0] - 264.0,
+        y: 22.0,
+        w: 232.0,
+        h: 236.0,
+    };
+    let inset = panel.inset(18.0);
+    let map_rect = UiRectPx {
+        x: inset.x + ((inset.w - MINIMAP_BLOCK_SPAN as f32 * MINIMAP_CELL_SIZE_PX) * 0.5).floor(),
+        y: panel.y + 60.0,
+        w: MINIMAP_BLOCK_SPAN as f32 * MINIMAP_CELL_SIZE_PX,
+        h: MINIMAP_BLOCK_SPAN as f32 * MINIMAP_CELL_SIZE_PX,
+    };
+
+    push_panel(sprites, panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
+    push_fill(sprites, inset, TILE_PANEL_INSET, [0.10, 0.16, 0.12, 0.96]);
+    push_text(
+        sprites,
+        panel.x + 18.0,
+        panel.y + 18.0,
+        2.0,
+        "MINIMAP",
+        [0.95, 0.88, 0.70, 1.0],
+    );
+    push_divider(
+        sprites,
+        UiRectPx {
+            x: panel.x + 18.0,
+            y: panel.y + 50.0,
+            w: panel.w - 36.0,
+            h: 8.0,
+        },
+        [0.58, 0.53, 0.40, 0.95],
+    );
+    push_small_panel(
+        sprites,
+        UiRectPx {
+            x: map_rect.x - 6.0,
+            y: map_rect.y - 6.0,
+            w: map_rect.w + 12.0,
+            h: map_rect.h + 12.0,
+        },
+        [0.42, 0.40, 0.32, 0.98],
+        [0.08, 0.10, 0.12, 0.96],
+    );
+
+    let Some(player_transform) = player_transform else {
+        return;
+    };
+    let Some((min_chunk, max_chunk)) = world.loaded_chunk_bounds() else {
+        return;
+    };
+
+    let player_block_x = player_transform.translation[0].floor() as i32;
+    let player_block_z = player_transform.translation[2].floor() as i32;
+    let half_span = MINIMAP_BLOCK_SPAN as i32 / 2;
+    let min_world_x = player_block_x - half_span;
+    let min_world_z = player_block_z - half_span;
+    let min_world_y = (min_chunk.1 * CHUNK_EDGE_I32).max(crate::world::WORLD_FLOOR_Y);
+    let max_world_y = (max_chunk.1 + 1) * CHUNK_EDGE_I32 - 1;
+    let columns = sample_topdown_columns(
+        world,
+        world.block_registry(),
+        min_world_x,
+        min_world_z,
+        MINIMAP_BLOCK_SPAN,
+        MINIMAP_BLOCK_SPAN,
+        min_world_y,
+        max_world_y,
+    );
+    let Some(surface_range) = topdown_surface_range(&columns) else {
+        return;
+    };
+
+    let grid_width = MINIMAP_BLOCK_SPAN as usize;
+    let grid_height = MINIMAP_BLOCK_SPAN as usize;
+    for z in 0..grid_height {
+        for x in 0..grid_width {
+            let scan = columns[z * grid_width + x];
+            let base_color = color_topdown_cell(scan.visible, world.block_registry(), surface_range);
+            let rect = UiRectPx {
+                x: map_rect.x + x as f32 * MINIMAP_CELL_SIZE_PX,
+                y: map_rect.y + z as f32 * MINIMAP_CELL_SIZE_PX,
+                w: MINIMAP_CELL_SIZE_PX,
+                h: MINIMAP_CELL_SIZE_PX,
+            };
+            push_fill(sprites, rect, TILE_PANEL_CENTER, rgb8_tint(base_color, 1.0));
+            push_minimap_cell_edges(sprites, rect, &columns, grid_width, grid_height, x, z, base_color);
+        }
+    }
+
+    let marker_center_x =
+        map_rect.x + (player_transform.translation[0] - min_world_x as f32) * MINIMAP_CELL_SIZE_PX;
+    let marker_center_y =
+        map_rect.y + (player_transform.translation[2] - min_world_z as f32) * MINIMAP_CELL_SIZE_PX;
+    push_tile_sprite(
+        sprites,
+        TILE_PANEL_MARKER,
+        UiRectPx {
+            x: marker_center_x - 8.0,
+            y: marker_center_y - 8.0,
+            w: 16.0,
+            h: 16.0,
+        },
+        [0.98, 0.90, 0.30, 1.0],
+    );
+}
+
+fn push_minimap_cell_edges(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    columns: &[crate::world::TopdownColumnScan],
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    base_color: [u8; 3],
+) {
+    let left = topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Left);
+    if left > 0.0 {
+        push_fill(
+            sprites,
+            UiRectPx {
+                x: rect.x,
+                y: rect.y,
+                w: 1.0,
+                h: rect.h,
+            },
+            TILE_PANEL_CENTER,
+            rgb8_tint(darken_topdown_color(base_color, left), 1.0),
+        );
+    }
+
+    let top = topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Top);
+    if top > 0.0 {
+        push_fill(
+            sprites,
+            UiRectPx {
+                x: rect.x,
+                y: rect.y,
+                w: rect.w,
+                h: 1.0,
+            },
+            TILE_PANEL_CENTER,
+            rgb8_tint(darken_topdown_color(base_color, top), 1.0),
+        );
+    }
+
+    let right = topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Right);
+    if right > 0.0 {
+        push_fill(
+            sprites,
+            UiRectPx {
+                x: rect.x + rect.w - 1.0,
+                y: rect.y,
+                w: 1.0,
+                h: rect.h,
+            },
+            TILE_PANEL_CENTER,
+            rgb8_tint(darken_topdown_color(base_color, right), 1.0),
+        );
+    }
+
+    let bottom =
+        topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Bottom);
+    if bottom > 0.0 {
+        push_fill(
+            sprites,
+            UiRectPx {
+                x: rect.x,
+                y: rect.y + rect.h - 1.0,
+                w: rect.w,
+                h: 1.0,
+            },
+            TILE_PANEL_CENTER,
+            rgb8_tint(darken_topdown_color(base_color, bottom), 1.0),
+        );
+    }
+}
+
+fn rgb8_tint(color: [u8; 3], alpha: f32) -> [f32; 4] {
+    [
+        color[0] as f32 / 255.0,
+        color[1] as f32 / 255.0,
+        color[2] as f32 / 255.0,
+        alpha.clamp(0.0, 1.0),
+    ]
+}
+
+fn default_preview_texture_layers(
+    registry: &crate::world::BlockRegistry,
+) -> [u32; 3] {
+    block_face_texture_layers(registry, DEFAULT_PREVIEW_BLOCK_ID)
+}
+
+fn block_face_texture_layers(
+    registry: &crate::world::BlockRegistry,
+    block_id: BlockId,
+) -> [u32; 3] {
+    let def = registry.block_or_missing(block_id);
+    [
+        u32::from(def.face_textures.top.0),
+        u32::from(def.face_textures.bottom.0),
+        u32::from(def.face_textures.side.0),
+    ]
 }
 
 fn push_ingame_hud(

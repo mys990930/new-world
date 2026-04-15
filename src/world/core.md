@@ -85,6 +85,7 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 - `chunk.md`
 - `edit.md`
 - `query.md`
+- `topdown.md`
 - `generation.md`
 - `storage.md`
 - `created.md`

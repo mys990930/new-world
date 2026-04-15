@@ -26,6 +26,7 @@
 - created world manifest / created-world chunk load support
 - meshing input provision
 - block-grid raycast queries
+- exact top-down column sampling for previews such as debug dumps and minimap overlays
 
 ### Non-Responsibilities
 
@@ -55,6 +56,7 @@
 - `MeshVertex`, `CpuMesh`, `RenderBounds`
 - `NeighborChunks`
 - `Ray3`, `RaycastHit`
+- `TopdownCell`, `TopdownColumnScan`, `TopdownSurfaceRange`, `TopdownEdge`
 - `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
 - `CreateWorldConfig`
 - `WorldCore`
@@ -88,6 +90,31 @@ create_world_to_directory(root: &Path, config: CreateWorldConfig, block_registry
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
+
+sample_topdown_columns(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    min_world_x: i32,
+    min_world_z: i32,
+    width_blocks: u32,
+    height_blocks: u32,
+    min_world_y: i32,
+    max_world_y: i32,
+) -> Vec<TopdownColumnScan>
+topdown_surface_range(columns: &[TopdownColumnScan]) -> Option<TopdownSurfaceRange>
+color_topdown_cell(
+    cell: TopdownCell,
+    registry: &BlockRegistry,
+    surface_range: TopdownSurfaceRange,
+) -> [u8; 3]
+topdown_edge_strength_for_cell(
+    columns: &[TopdownColumnScan],
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    edge: TopdownEdge,
+) -> f32
 ```
 
 ### Dependencies
@@ -120,6 +147,7 @@ NOT:
 - `core.md`: `WorldCore` ownership and top-level API
 - `edit.md`: `WorldEdit` / `EditResult` mutation contract
 - `query.md`: read-only block/chunk/region/raycast surface
+- `topdown.md`: exact top-down column sampling and diagnostic preview colors
 - `registry.md`: block definition, texture tile, and material contract
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
@@ -134,6 +162,7 @@ NOT:
 - the default block registry is loaded from `assets/blocks/index.toml`
 - chunk acquisition can now come from either created-world disk load or procedural generation before converging back into the same in-memory `WorldCore`
 - meshing still operates on snapshots and renderer upload still happens outside `world`
+- top-down preview sampling now also stays world-owned so app minimaps and debug tools can reuse the same realized block-column interpretation rules
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells

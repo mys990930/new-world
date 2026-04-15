@@ -6,6 +6,7 @@ use crate::world::BlockId;
 
 pub const QUICKSLOT_COUNT: usize = 10;
 pub const GENERAL_SLOT_COUNT: usize = 40;
+pub const PLAYER_REACH_BLOCKS: f32 = 6.0;
 pub const BUILD_REACH_BLOCKS: f32 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -68,11 +69,11 @@ impl Default for ToolCatalog {
     fn default() -> Self {
         Self {
             shovel: ToolSpec {
-                range_blocks: 4.0,
+                range_blocks: PLAYER_REACH_BLOCKS,
                 preview_shape: ToolPreviewShape::FacePlane3x3,
             },
             pickaxe: ToolSpec {
-                range_blocks: 6.0,
+                range_blocks: PLAYER_REACH_BLOCKS,
                 preview_shape: ToolPreviewShape::SingleBlock,
             },
         }
@@ -84,6 +85,13 @@ impl ToolCatalog {
         match tool {
             ToolKind::Shovel => self.shovel,
             ToolKind::Pickaxe => self.pickaxe,
+        }
+    }
+
+    pub const fn default_interaction_spec(self) -> ToolSpec {
+        ToolSpec {
+            range_blocks: PLAYER_REACH_BLOCKS,
+            preview_shape: ToolPreviewShape::SingleBlock,
         }
     }
 }

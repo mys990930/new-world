@@ -12,6 +12,9 @@ pub struct RenderCubeInstance {
     pub center: [f32; 3],
     pub half_extents: [f32; 3],
     pub color: [f32; 4],
+    pub top_texture_layer: u32,
+    pub bottom_texture_layer: u32,
+    pub side_texture_layer: u32,
     pub material_kind: RenderMaterialKind,
 }
 
@@ -494,16 +497,16 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
         ];
 
         let face_specs = [
-            ([4_u32, 5, 6, 7], [0.0, 0.0, 1.0]),
-            ([1_u32, 0, 3, 2], [0.0, 0.0, -1.0]),
-            ([0_u32, 4, 7, 3], [-1.0, 0.0, 0.0]),
-            ([5_u32, 1, 2, 6], [1.0, 0.0, 0.0]),
-            ([3_u32, 7, 6, 2], [0.0, 1.0, 0.0]),
-            ([0_u32, 1, 5, 4], [0.0, -1.0, 0.0]),
+            ([4_u32, 5, 6, 7], [0.0, 0.0, 1.0], cube.side_texture_layer),
+            ([1_u32, 0, 3, 2], [0.0, 0.0, -1.0], cube.side_texture_layer),
+            ([0_u32, 4, 7, 3], [-1.0, 0.0, 0.0], cube.side_texture_layer),
+            ([5_u32, 1, 2, 6], [1.0, 0.0, 0.0], cube.side_texture_layer),
+            ([3_u32, 7, 6, 2], [0.0, 1.0, 0.0], cube.top_texture_layer),
+            ([0_u32, 1, 5, 4], [0.0, -1.0, 0.0], cube.bottom_texture_layer),
         ];
         let face_uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
-        for (corner_indices, face_normal) in face_specs {
+        for (corner_indices, face_normal, texture_layer) in face_specs {
             let base_index = vertices.len() as u32;
             for (corner_index, uv) in corner_indices.into_iter().zip(face_uvs) {
                 vertices.push(MeshVertex {
@@ -511,7 +514,7 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
                     color: cube.color,
                     normal: face_normal,
                     uv,
-                    texture_layer: 0,
+                    texture_layer,
                     material_kind: cube.material_kind.as_u32(),
                     contour_edges: 0,
                 });
@@ -1462,6 +1465,9 @@ mod tests {
             center: [0.0, 0.5, 0.0],
             half_extents: [0.5, 0.5, 0.5],
             color: [1.0, 1.0, 1.0, 1.0],
+            top_texture_layer: 0,
+            bottom_texture_layer: 0,
+            side_texture_layer: 0,
             material_kind: RenderMaterialKind::Actor,
         }])
         .ok_or_else(|| "expected cube mesh".to_string())?;

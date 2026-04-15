@@ -42,6 +42,7 @@
 
 - In direct-seed mode, this tool uses the same `world::generation::generate_chunk(...)` path as `world_create`.
 - In created-world mode, it reads the persisted chunk `.bin` payloads and scans the actual loaded chunk contents.
+- The current top-down sampling and diagnostic color rules are mirrored by the shared `world::topdown` helper so app minimap overlays can match this preview style.
 - That means the top-down geometry is exact for the chosen projection rule: the image represents the topmost non-air block found in each `xz` column inside the requested vertical window.
 - The colors are intentionally diagnostic and are not meant to match final renderer shading or texture sampling.
 - The stdout counters are also exact for the chosen window because they are computed from the same realized `ChunkData` and from meshes built through `world::meshing::build_chunk_mesh(...)`.

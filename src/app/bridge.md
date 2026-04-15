@@ -10,6 +10,7 @@
 - convert platform raw state into `EcsInputSnapshot`
 - convert app / ECS gameplay state into render-ready DTOs
 - convert app-owned menu / HUD layout into renderer-owned pixel-sprite DTOs
+- convert world top-down query results into minimap sprite cells
 - convert world/jobs outputs into renderer upload requests
 
 ## Non-Responsibilities
@@ -50,6 +51,7 @@
 - render camera turn easing is authored in ECS camera state; `bridge` only exports the current render-facing pose
 - the player render body uses ECS-owned `PlayerBody.half_extents`, not a renderer-owned hardcoded size
 - UI text and panels are built from atlas-backed sprite pieces, not renderer-owned text shaping
+- dynamic gameplay preview cubes may choose block face texture layers here, but the preview coordinate/range rules still stay ECS-owned
 
 ## Related Modules
 
@@ -62,8 +64,9 @@
 ## Notes
 
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
-- `RenderCubeInstance` also carries a renderer material kind so the player body, ground shadow slab, and hovered-face highlight can be shaded differently
+- `RenderCubeInstance` also carries a renderer material kind plus block-face texture layers so the player body, ground shadow slab, and gameplay previews can be shaded differently without leaking world ownership into renderer
 - the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, editable field rows, a scrollable created-world list, explicit action buttons, and a centered loading popup
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
 - in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes
+- the minimap overlay now uses the same pixel-sprite path: bridge samples a one-chunk world top-down window around the player, applies the same diagnostic color rules as `chunk_topdown_preview`, and emits tinted cell sprites plus a player marker

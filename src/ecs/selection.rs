@@ -4,8 +4,7 @@ use super::camera::{
     CameraState, quarter_view_camera_pose, quarter_view_vertical_world_size,
 };
 use super::inventory::{
-    BUILD_REACH_BLOCKS, InventoryItem, ManipulationMode, PlayerInventory, ToolCatalog,
-    ToolPreviewShape,
+    BUILD_REACH_BLOCKS, ManipulationMode, PlayerInventory, ToolCatalog, ToolPreviewShape,
 };
 use super::input::EcsInputSnapshot;
 use super::player::Transform;
@@ -108,21 +107,16 @@ pub fn update_selection_from_world(
 
             match player_inventory.manipulation_mode {
                 ManipulationMode::Interaction => {
-                    if let Some(tool) = player_inventory.selected_tool() {
-                        let spec = tool_catalog.spec(tool);
-                        if distance3(player_transform.translation, hit.point) <= spec.range_blocks {
-                            selection.interaction_preview_blocks =
-                                build_interaction_preview_blocks(world, hit.block, hit.face, spec);
-                        }
+                    let spec = player_inventory
+                        .selected_tool()
+                        .map(|tool| tool_catalog.spec(tool))
+                        .unwrap_or_else(|| tool_catalog.default_interaction_spec());
+                    if distance3(player_transform.translation, hit.point) <= spec.range_blocks {
+                        selection.interaction_preview_blocks =
+                            build_interaction_preview_blocks(world, hit.block, hit.face, spec);
                     }
                 }
                 ManipulationMode::Build => {
-                    let Some(slot) = player_inventory.selected_block() else {
-                        return;
-                    };
-                    let InventoryItem::Block(_) = slot.item else {
-                        return;
-                    };
                     let preview_block = adjacent_block(hit.block, hit.face);
                     if distance3(player_transform.translation, preview_block_center(preview_block))
                         <= BUILD_REACH_BLOCKS

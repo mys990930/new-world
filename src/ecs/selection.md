@@ -41,8 +41,8 @@
 - During the current turn-transition implementation, selection still uses the snapped gameplay quarter-view basis while rendering may briefly ease toward that basis.
 - The current gameplay slice uses a weak perspective ray that starts at the camera eye and passes through a cursor-selected point on the quarter-view focus plane.
 - if the inventory is open, selection is cleared so world interaction previews do not compete with the inventory UI
-- interaction mode only emits preview blocks when the selected tool exists and the hit point is inside that tool's range
-- build mode only emits a placement preview when the selected quickslot holds a block stack, the adjacent cell is empty, and the preview is inside build reach
+- interaction mode emits preview blocks when the hit point is inside the current tool reach; if no tool is selected, it falls back to a default single-block preview at player reach
+- build mode emits a placement preview when the adjacent cell is empty and the preview is inside build reach, even if the current block quickslot is empty
 - If focus, activity, viewport, or cursor validity checks fail, selection is cleared.
 - If raycast misses, selection is cleared.
 
@@ -72,3 +72,4 @@
 
 - Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.
 - the current preview slice is intentionally visual only: no real digging, harvesting, or block placement happens yet
+- preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps them to actual selected-block textures or a default fallback block texture

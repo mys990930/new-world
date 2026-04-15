@@ -81,6 +81,7 @@
   - the two quickslot bars keep separate selected indices
   - `interaction` mode uses the tool quickslots
   - `build` mode uses the block quickslots
+  - the current shared player reach for interaction/build preview is `6` blocks
   - opening inventory blocks movement, world interaction, and raycast preview updates until it is closed
 - movement intent generation
   - screen-relative input remains frame input state
@@ -105,8 +106,8 @@
 - selection update
   - app provides cursor position and viewport
   - ECS uses quarter-view camera state to build the selection ray
-  - interaction mode turns a valid raycast hit into a tool-shaped weak red preview volume
-  - build mode turns a valid raycast hit into a translucent placement preview on the adjacent face if it is inside reach and empty
+  - interaction mode turns a valid raycast hit into a tool-shaped weak red preview volume, or a default single-block preview if no tool is selected
+  - build mode turns a valid raycast hit into a translucent placement preview on the adjacent face if it is inside reach and empty, even when the active block quickslot is empty
 
 ### Public Interface
 ```rust

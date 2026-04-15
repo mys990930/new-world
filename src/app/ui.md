@@ -62,7 +62,7 @@
 ## State Transition Rules
 
 - `F1` toggles between `InGame` and `WorldSelect`
-- `Tab` toggles the minimap overlay while `InGame`
+- `M` toggles the minimap overlay while `InGame`
 - `Escape` closes `WorldSelect`
 - left-clicking a numeric value focuses that input field so typed digits write into an app-owned text buffer until commit
 - left-clicking a spinner arrow or action button applies the matching world-select action immediately after committing any focused input field
@@ -101,3 +101,4 @@
 - discovered created worlds are sorted by most-recent modification time
 - the current create-world flow queues a jobs request, uses app-owned defaults for vertical chunk range, and writes into `target/world-create`
 - in-game bottom HUD and inventory window are intentionally not app-owned screen modes; they are render-only projections of ECS player inventory state
+- the current minimap overlay is still app-owned UI state, but its content is now a world-derived one-chunk top-down preview centered on the player and emitted through atlas-backed UI sprites

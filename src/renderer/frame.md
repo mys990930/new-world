@@ -19,6 +19,7 @@
 - draw uploaded chunk meshes for the current `visible_chunks`
 - draw opaque terrain before translucent terrain partitions
 - expand `cube_instances` into a cube mesh with per-face normals
+- expand `cube_instances` into a cube mesh with per-face normals and top/bottom/side texture layers
 - draw the terrain pass
 - draw the dynamic cube pass
 - draw the translucent water pass
@@ -81,3 +82,4 @@
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.
 - the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames
 - dynamic cube previews may use alpha-blended shading so ECS build previews can appear translucent without changing UI sprite ownership
+- dynamic cubes no longer assume a single white texture layer; bridge-selected preview cubes may now sample real block top/bottom/side layers while still applying tint/alpha in shader

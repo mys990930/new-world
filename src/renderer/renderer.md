@@ -18,6 +18,7 @@
 - CPU render DTO -> GPU draw command conversion
 - screen-space UI sprite draw submission
 - alpha-blended gameplay preview cube submission
+- per-face dynamic-cube texture layer submission
 - Submit / present / recoverable render error propagation
 - Offscreen terrain preview rendering for debug binaries
 - Maintain renderer-owned quality presets and a fixed environment state until gameplay systems drive them
@@ -116,6 +117,7 @@ NOT:
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
 - Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
+- Dynamic cube instances may also choose top/bottom/side texture layers per instance, so bridge-owned gameplay previews can render real block textures without giving renderer any direct block-registry dependency.
 - Screen-space app UI currently enters as `RenderUiSprite` and is rendered in a dedicated overlay pass with no camera/world dependency.
 - Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping a light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.

@@ -60,6 +60,9 @@
 - `Tab` toggles `ManipulationMode`
 - `I` toggles `inventory_open`
 - wheel cycling and `1..0` direct slot selection affect only the active mode's quickslot index
+- the current player reach for both interaction and build preview is `6` blocks
+- if no interaction tool is selected, ECS still falls back to a default single-block interaction preview at player reach
+- if no build quickslot block is selected, ECS still emits a placement-preview coordinate; the app bridge chooses a default block texture for rendering
 
 ## Invariants
 
@@ -83,4 +86,4 @@
 ## Notes
 
 - the current initial loadout is intentionally small: shovel + pickaxe in the tool quickbar, plus a few common block stacks in the build quickbar/general slots
-- current tool preview rules are minimal and visual only: pickaxe highlights a single target block, shovel highlights a small face-oriented area
+- current tool preview rules are minimal and visual only: pickaxe highlights a single target block, shovel highlights a small face-oriented area, and the no-tool fallback also highlights a single target block

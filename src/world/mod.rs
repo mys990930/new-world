@@ -10,6 +10,7 @@ mod meta;
 mod query;
 mod registry;
 mod storage;
+mod topdown;
 
 #[allow(unused_imports)]
 pub use atlas::{
@@ -20,14 +21,16 @@ pub use atlas::{
     AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasStructureMap,
     AtlasStructureRegion, AtlasStructureRegionCoord, AtlasTerrainTuning, AtlasTuning,
     AtlasWeightTuning, BiomePreview, DrainageGraph, DrainageNode, DrainageNodeKind,
-    MoistureClass, MountainChainGraph, MountainChainId, MountainChainScale,
-    MountainSpineSegment, OverlayClass, RiverPathId, RiverPathKind, RiverPathSegment,
-    TerrainFormClass, ThermalClass, ATLAS_STRUCTURE_REGION_EDGE_CELLS,
-    ATLAS_STRUCTURE_REGION_PADDING_CELLS, atlas_structure_region_coord_for_atlas,
-    atlas_structure_regions_covering_area, generate_atlas_fields, generate_atlas_fields_with_tuning,
-    generate_atlas_structure, generate_atlas_structure_with_tuning, resolve_atlas,
-    resolve_atlas_with_tuning, write_debug_images, write_debug_images_with_options,
-    write_debug_images_with_options_and_tuning,
+    MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
+    MoistureClass, MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
+    MountainChainGraph, MountainChainId, MountainChainScale, MountainSpineSegment, OverlayClass,
+    RiverPathId, RiverPathKind, RiverPathSegment, TerrainFormClass, ThermalClass,
+    ATLAS_STRUCTURE_REGION_EDGE_CELLS, ATLAS_STRUCTURE_REGION_PADDING_CELLS,
+    atlas_structure_region_coord_for_atlas, atlas_structure_regions_covering_area,
+    generate_atlas_fields, generate_atlas_fields_with_tuning, generate_atlas_structure,
+    generate_atlas_structure_with_tuning, generate_meso_guides, meso_region_coord_for_atlas,
+    meso_regions_covering_area, resolve_atlas, resolve_atlas_with_tuning, sample_meso_guides,
+    write_debug_images, write_debug_images_with_options, write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
 pub use created::{
@@ -70,3 +73,9 @@ pub use registry::{
 };
 #[allow(unused_imports)]
 pub use storage::{StorageError, load_chunk, save_chunk};
+#[allow(unused_imports)]
+pub use topdown::{
+    TopdownCell, TopdownColumnScan, TopdownEdge, TopdownSurfaceRange, color_topdown_cell,
+    darken_topdown_color, sample_topdown_columns, topdown_edge_strength_for_cell,
+    topdown_outline_strength, topdown_surface_range,
+};
