@@ -167,6 +167,7 @@ The first wave should favor terrain that:
 ## Design Preference
 
 - candidate choice should be guided by atlas and structure context first
+- candidate choice should be further constrained by resolved region archetype before local randomness is allowed
 - within that allowed set, deterministic randomness should choose whether a place becomes `hill cluster` versus `basin` versus `escarpment`
 - parameter variation such as width, elongation, depth, sharpness, and heading should also be randomized inside context-dependent bounds
 

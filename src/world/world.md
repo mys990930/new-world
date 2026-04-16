@@ -15,7 +15,8 @@
 - coordinate transformation rules
 - atlas-scale macro environment interpretation
 - atlas-scale mountain-chain / drainage structure ownership
-- future deterministic meso terrain-guide ownership between atlas macro guidance and chunk-local realization
+- deterministic region-classification ownership between atlas raw fields / skeleton guidance and chunk-local realization
+- deterministic meso terrain-guide ownership after region classification and before final chunk-local realization
 - snapshot/query surfaces
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -49,6 +50,10 @@
 - `AtlasCoord`, `AtlasArea`
 - `AtlasFieldMap`, `AtlasResolvedMap`
 - `AtlasStructureMap`
+- `RegionClassMap`, `RegionClassSample`
+- `TemperatureBand`, `MoistureBand`, `ElevationBand`
+- `ReliefClass`, `HydrologyContext`, `CoastalContext`, `ClimateRegime`
+- `BiomeFamily`, `TerrainFormFamily`, `RegionArchetype`
 - `AtlasStructureRegionCoord`, `AtlasStructureRegion`
 - `MountainChainGraph`, `MountainSpineSegment`
 - `DrainageGraph`, `RiverPathSegment`
@@ -75,6 +80,17 @@ generate_atlas_structure_with_tuning(
     area: AtlasArea,
     tuning: &AtlasTuning,
 ) -> AtlasStructureMap
+resolve_region_classes(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    fields: &AtlasFieldMap,
+    structure: &AtlasStructureMap,
+) -> RegionClassMap
+sample_region_classes(
+    classes: &RegionClassMap,
+    world_x: i32,
+    world_z: i32,
+) -> RegionClassSample
 generate_meso_guides(
     meta: &WorldMeta,
     area: AtlasArea,
@@ -180,6 +196,7 @@ NOT:
 - `registry.md`: block definition, texture tile, and material contract
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
+- `atlas/region.md`: atlas-owned region classification contract
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
 - `atlas/meso.md`: atlas-owned multi-chunk terrain-guide contract
 - `storage.md`: raw chunk byte serialization contract
@@ -196,6 +213,7 @@ NOT:
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
-- atlas-owned meso guides now sit between atlas macro guidance and generation micro detail as on-demand deterministic Wave 1A terrain hints
+- the next authoritative ownership step is atlas-owned region classification, which should resolve biome and terrain-form archetypes before base heightfield solving
+- atlas-owned meso guides should eventually sit after region classification and before generation micro detail as on-demand deterministic terrain accents
 - the current implemented Wave 1A meso candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
-- the planned long-term terrain pipeline is `atlas scalar macro -> atlas structure -> atlas meso guides -> generation profile families -> local detail and smoothing -> hydrology -> material/block fill`
+- the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`

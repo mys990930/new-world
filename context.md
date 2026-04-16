@@ -4,10 +4,11 @@
 
 - Atlas remains intentionally macro. One atlas cell is `16 x 16` chunks, which is `512 x 512` blocks or `256m x 256m` at the current block scale.
 - We do not currently plan to shrink atlas just to make local terrain feel more casual.
-- A future deterministic meso terrain layer is planned between atlas-scale macro guidance and chunk-local micro detail.
-- That meso layer should span multiple chunks, be generated on demand, and be reproducible from seed-derived region coordinates plus nearby atlas context rather than from whole-world precomputation.
-- Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape families and realization categories, not as the final meso feature system.
-- The planned terrain stack is: `atlas scalar macro -> atlas structure -> atlas meso guides -> generation profile families -> local detail/smoothing -> hydrology/material fill`.
+- A deterministic region-classification layer should sit between atlas-scale raw fields / skeleton guidance and later meso terrain accents.
+- That region layer should resolve stable biome and terrain-form archetypes from seed-derived atlas inputs before chunk-local heightfield solving.
+- Meso should no longer decide the primary local biome identity; it should modulate already-classified regions with several-chunk terrain accents.
+- Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape operators or realization families, not as the final biome system.
+- The planned terrain stack is now: `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`.
 
 ## 1. 프로젝트 한줄 개요
 

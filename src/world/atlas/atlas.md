@@ -6,7 +6,15 @@
 - Chunk generation still owns the final carved river shape, but it can now sample confluence nodes as part of the atlas-owned drainage guide.
 - Atlas remains intentionally macro at the current scale. Local readability now comes from a separate deterministic meso layer instead of shrinking atlas cells.
 - The meso layer is derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
-- Atlas now acts as a three-part guide owner: scalar macro fields, directional structure, and meso terrain guides.
+- Before meso chooses local accents, atlas should also own a deterministic region-classification layer that resolves biome and terrain-form archetypes from raw fields plus skeleton context.
+- Atlas therefore targets a four-part guide stack: raw scalar fields, directional skeleton, region classification, and meso terrain guides.
+
+## Architecture Direction
+
+- atlas raw fields stay continuous and deterministic
+- skeleton owns mountain, divide, drainage, and river-corridor direction
+- region classification resolves stable biome and terrain-form archetypes before chunk-local heightfield solving
+- meso is constrained by that classified region and only adds several-chunk local accents afterward
 
 ## 역할
 
@@ -52,6 +60,18 @@ generate_atlas_structure_with_tuning(
     tuning: &AtlasTuning,
 ) -> AtlasStructureMap
 
+resolve_region_classes(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    fields: &AtlasFieldMap,
+    structure: &AtlasStructureMap,
+) -> RegionClassMap
+sample_region_classes(
+    classes: &RegionClassMap,
+    world_x: i32,
+    world_z: i32,
+) -> RegionClassSample
+
 generate_meso_guides(
     meta: &WorldMeta,
     area: AtlasArea,
@@ -93,6 +113,7 @@ write_debug_images(
 - `scale.md`
 - `tuning.md`
 - `structure.md`
+- `region.md`
 - `meso.md`
 - `meso_candidates.md`
 - `atlas_fields.md`

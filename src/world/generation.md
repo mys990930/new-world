@@ -11,9 +11,10 @@
 
 - Define the chunk-generation entry point and its deterministic contract.
 - Sample atlas-scale macro environment data needed for chunk realization.
-- Sample atlas-owned meso terrain guides that sit between macro context and chunk-local micro detail.
-- Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge from sampled atlas fields.
-- Keep generation-side terrain profiles distinct from the multi-chunk meso feature system that now feeds them as guide weights.
+- Consume atlas-owned region classification before solving the chunk-local base heightfield.
+- Sample atlas-owned meso terrain guides after region classification and before chunk-local micro detail.
+- Resolve terrain profiles such as deep ocean, shelf, coast, plain, upland, and ridge as shape operators rather than as the final biome identity.
+- Keep generation-side terrain profiles distinct from both the region-classification system and the later meso accent system.
 - Convert atlas fields into per-column surface elevation around a fixed sea level using blended profile surfaces rather than a single hard profile switch.
 - Build a smoothed chunk-local surface field before hydrology so contour flow stays readable at block resolution.
 - Rasterize atlas-owned mountain and drainage guides into chunk-local structure weights before final hydrology.
@@ -30,10 +31,14 @@
   - climate, coastness, continent-ness, elevation tendency, wetness
 - `atlas structure`
   - mountain-range direction, ridge skeleton, drainage direction, river topology
+- `atlas region classification`
+  - biome family, terrain-form family, hydrology context, region archetype
 - `atlas meso guides`
-  - several-chunk terrain identity such as local hill groups, escarpment bands, basins, terraces, or coastal breakup
+  - several-chunk terrain accents such as local hill groups, escarpment bands, basins, terraces, or coastal breakup
 - `generation profile families`
   - `DeepOcean`, `Shelf`, `Coast`, `Plain`, `Upland`, `Ridge`
+- `biome-aware base heightfield`
+  - region/archetype-owned broad terrain solve that already respects river corridors and basin outlets
 - `generation local detail`
   - profile-local relief noise, smoothing, and small contour breakup
 - `hydrology/material fill`
@@ -81,7 +86,7 @@ generation::sample_chunk_surface_lod(
 ) -> ChunkSurfaceLodGrid
 ```
 
-## Current First-Pass Realization Contract
+## Current Generator Contract
 
 - Sea level is fixed at world-space `y = 0`.
 - The generator treats atlas scalar fields plus atlas-owned structure guides as macro input and performs block placement inside `world::generation`.
@@ -114,22 +119,22 @@ generation::sample_chunk_surface_lod(
      - inland river columns can carry water above sea level and are biased toward locally concave channel cores
 - Trees, tall grass, and ecology are still intentionally out of scope for this pass.
 
-## Next Structure-Driven Revision Target
+## V2 Architecture Target
 
-- Atlas remains the owner of macro terrain direction, and generation now reads padded structure windows and derives chunk-local guide weights from nearby mountain spines and river paths.
-- The next revision should finish replacing the remaining scalar-first river logic with fully structure-first channel realization and richer river topology handling beyond the first explicit confluence pass.
-- The deterministic meso layer now sits between atlas and micro detail, and the next readability passes should expand it beyond Wave 1A into coast-, canyon-, dune-, and crater-aware terrain guides.
+- Atlas remains the owner of macro terrain direction, but V2 should also introduce explicit region classification before meso and before base heightfield solving.
+- Region classification should resolve stable biome and terrain-form archetypes from raw continuous fields plus skeleton context, instead of asking meso or material thresholds to decide primary local identity.
+- River corridors should be defined before biome-aware base heightfield solving, so heightfield generation treats them as constraints rather than as late carve masks.
+- Meso should become a constrained local-accent layer inside those already-classified regions, not the primary biome owner.
 - Target flow for each chunk:
-  1. sample atlas scalar fields and nearby structural guides together
-  2. gather the matching meso guide window for the same terrain footprint
-  3. rasterize mountain-chain spine segments into distance-to-ridge / along-ridge fields
-  4. rasterize drainage and river segments into distance-to-channel / along-channel fields
-  5. sample meso guides into several-chunk hill/cliff/basin/terrace biases
-  6. build the raw surface scaffold from profile families, then apply meso deformation before local smoothing
-  7. continue promoting `along-channel` and channel heading into stronger downstream-directed water-surface and stage resolution
-  8. enforce connected river channels with minimum wetted width/depth, richer confluence handling, and clearer trunk/tributary continuity
-  9. keep local noise as detail only, not as the source of macro ridge or river direction
-- In that revision, headwaters should naturally emerge near mountain spines, passes, and upland drainage divides rather than appearing as isolated wet pockets.
+  1. sample atlas raw fields and nearby skeleton guides together
+  2. resolve deterministic region classification for the same terrain footprint
+  3. define river corridors, basin outlets, and downstream grade before local heightfield solving
+  4. solve a biome-aware base heightfield that avoids or accepts those corridors according to region archetype
+  5. sample meso guides into several-chunk hill/cliff/basin/terrace accents allowed by that archetype
+  6. apply meso deformation on top of the base scaffold before local smoothing
+  7. perform final hydrology using the pre-defined corridor and branch waterline model
+  8. resolve region/material ownership and then voxelize blocks
+- In V2, headwaters should naturally emerge near mountain spines, passes, upland divides, and basin outlets rather than appearing as isolated wet pockets.
 
 ## Processing Flow
 
@@ -146,20 +151,20 @@ generation::sample_chunk_surface_lod(
 11. Write block ids into `ChunkData`.
 12. Return the finished chunk without mutating any live world state.
 
-## Planned Next Processing Flow
+## Planned V2 Processing Flow
 
-1. Map the target chunk to the atlas neighborhood needed for both scalar fields and structural guides.
-2. Generate or read the atlas field window plus mountain/drainage structure window.
-   The structure window is built from deterministic structure regions rather than from a single globally materialized graph.
-3. Generate or read the matching meso guide window from atlas context and aligned meso regions.
-4. Interpolate scalar atlas signals per block column.
-5. Rasterize nearby mountain spines and river paths into chunk-local directional distance fields.
-6. Sample meso guides into several-chunk deformation weights and local headings.
-7. Build the raw surface scaffold from profile families, then apply meso deformation plus structure-aware ridge/valley terms.
-8. Smooth that surface while preserving large structural direction and meso readability, then derive local concavity only as a secondary refinement signal.
-9. Realize connected channels and ridge shoulders from the structural fields, while letting meso basin/terrace signals bias where broad local relief should gather.
-10. Resolve per-column materials and write block ids into `ChunkData`.
-11. Return the finished chunk without mutating any live world state.
+1. Map the target chunk to the atlas neighborhood needed for raw fields, skeleton, and region classification.
+2. Generate or read the atlas raw-field window plus mountain/drainage skeleton window.
+3. Resolve or sample the matching region classification window.
+4. Generate or read river corridors, basin outlets, and downstream grade for the same footprint.
+5. Solve a biome-aware base heightfield from region archetype plus water-corridor constraints.
+6. Generate or read the matching meso guide window from region context and aligned meso regions.
+7. Apply meso deformation on top of the base heightfield.
+8. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
+9. Solve final hydrology and connected water surfaces from the pre-defined branch model.
+10. Resolve region/material ownership and topsoil / sediment / cover policy.
+11. Write block ids into `ChunkData`.
+12. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
@@ -176,6 +181,7 @@ generation::sample_chunk_surface_lod(
 5. The current generator version emits layered terrain materials plus sea water and inland river water, but still no vegetation or ecology.
 6. Generation reads block meaning through `BlockRegistry`; it does not own texture or renderer policy.
 7. Major ridge and river direction must eventually come from atlas-owned structure, not from chunk-local random carve alone.
+8. In the target architecture, generation should not decide primary biome identity from material thresholds alone; it should consume atlas-owned region classification first.
 
 ## Internal Submodules
 
@@ -195,5 +201,6 @@ generation::sample_chunk_surface_lod(
 - `chunk.md`
 - `registry.md`
 - `atlas/atlas.md`
+- `atlas/region.md`
 - `atlas/meso.md`
 - `jobs/jobs.md`
