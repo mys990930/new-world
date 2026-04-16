@@ -1,20 +1,20 @@
-use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
+﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
-    id: RegionArchetype::WetLowland,
+    id: RegionArchetype::ColdWetLowland,
     biome_family: BiomeFamily::Marsh,
     terrain_form_family: TerrainFormFamily::WetLowland,
-    summary: "Cold, moisture-retaining lowland where freeze-thaw and wet margins define the surface.",
+    summary: "Cold saturated lowland with freeze-thaw margins.",
     regional_traits: &[
-        "Standing water, marshy margins, and soft basins should be regionally coherent.",
-        "Seasonal freezing should change the cover state without replacing the archetype.",
+        "Planning stub: detailed prototype solving and hydrology coupling still need a dedicated pass.",
+        "This archetype should later receive explicit seasonal, material, and ecology policy locks.",
     ],
     ecology_notes: &[
-        "Supports marsh vegetation, sedges, and sparse cold-tolerant cover later.",
-        "Winter can freeze edges and flatten some shallow water expression.",
+        "Biome family and terrain-form family are locked for this candidate.",
+        "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["shallow_basin", "ravine", "hill_cluster"],
+    allowed_meso_keys: &["shallow_basin", "ravine", "hill_cluster",],
     seasonal_profile: SeasonalSurfaceProfile::ColdFreezeThaw,
     water_response: WaterResponseHint::EmbracesFloodplain,
     ecology_density: EcologyDensityHint::Saturated,

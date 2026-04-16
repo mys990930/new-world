@@ -1,21 +1,21 @@
-use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
+﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::DesertPlain,
     biome_family: BiomeFamily::Desert,
     terrain_form_family: TerrainFormFamily::Plain,
-    summary: "Dry exposed plain where sediment ownership dominates and water is exceptional.",
+    summary: "Dry exposed desert floor dominated by sediment ownership.",
     regional_traits: &[
-        "Relief should stay readable through broad dunes, fans, and arid runoff traces.",
-        "Vegetated cover should be sparse and strongly tied to hydrology exceptions.",
+        "Planning stub: detailed prototype solving and hydrology coupling still need a dedicated pass.",
+        "This archetype should later receive explicit seasonal, material, and ecology policy locks.",
     ],
     ecology_notes: &[
-        "Supports sparse scrub, exposed sediment, and harsh heat response later.",
-        "Wet season events should create short-lived green pulses rather than permanent cover.",
+        "Biome family and terrain-form family are locked for this candidate.",
+        "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["dune_field", "crater", "ravine"],
+    allowed_meso_keys: &["dune_field", "ravine", "crater",],
     seasonal_profile: SeasonalSurfaceProfile::AridSparse,
     water_response: WaterResponseHint::AvoidsStandingWater,
-    ecology_density: EcologyDensityHint::Sparse,
+    ecology_density: EcologyDensityHint::Barren,
 };

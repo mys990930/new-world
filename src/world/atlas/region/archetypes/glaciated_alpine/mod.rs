@@ -1,20 +1,20 @@
-use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
+﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
-    id: RegionArchetype::ColdMountainUpland,
+    id: RegionArchetype::GlaciatedAlpine,
     biome_family: BiomeFamily::PolarIce,
     terrain_form_family: TerrainFormFamily::Icefield,
-    summary: "Cold high upland with persistent snow logic and glacial carve expectations.",
+    summary: "Persistent ice and snow upland with glacial control.",
     regional_traits: &[
-        "Major relief belongs to the skeleton and base prototype, not local randomness.",
-        "Snow persistence and meltwater corridors should both matter strongly.",
+        "Planning stub: detailed prototype solving and hydrology coupling still need a dedicated pass.",
+        "This archetype should later receive explicit seasonal, material, and ecology policy locks.",
     ],
     ecology_notes: &[
-        "Vegetation remains sparse and strongly elevation-limited.",
-        "Short thaw windows should expose rock and wet melt paths rather than grassland.",
+        "Biome family and terrain-form family are locked for this candidate.",
+        "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["upland_terrace", "ravine", "crater"],
+    allowed_meso_keys: &["upland_terrace", "ravine", "crater",],
     seasonal_profile: SeasonalSurfaceProfile::AlpineSnowPersistent,
     water_response: WaterResponseHint::GlacialMeltDriven,
     ecology_density: EcologyDensityHint::Barren,

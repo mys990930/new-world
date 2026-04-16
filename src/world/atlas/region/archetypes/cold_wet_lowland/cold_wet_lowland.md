@@ -1,24 +1,33 @@
-# cold_wet_lowland
+﻿# cold_wet_lowland
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- cold lowland with persistent wetness and freeze-thaw response
+- biome family: `Marsh`
+- terrain-form family: `WetLowland`
 
-## Terrain Traits
+## Summary
 
-- soft basin-like terrain
-- wet margins and shallow standing water are common
+- Cold saturated lowland with freeze-thaw margins.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- marsh vegetation and sparse cold-tolerant cover later
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- winter freezing should alter surface state without changing the region archetype
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `shallow_basin`
 - `ravine`
 - `hill_cluster`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

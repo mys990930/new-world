@@ -154,7 +154,9 @@ sample_region_classes(
 
 - an initial deterministic atlas-cell classification scaffold is now implemented in code
 - the current scaffold resolves banded classes, biome families, terrain-form families, and coarse region archetypes from atlas raw fields plus nearby skeleton presence
-- the biome-family and terrain-form-family candidate taxonomies are now locked at the planning level; the next planning step is curating the authoritative `RegionArchetype` launch set from those families
+- the biome-family and terrain-form-family candidate taxonomies are now locked at the planning level
+- a full `RegionArchetype` candidate pool with `launch`, `extended`, and `deferred` labels is now scaffolded as per-type modules and docs
+- the next planning step is to lock archetype-to-meso allowance and surface policy from that candidate pool
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
 - future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion
 

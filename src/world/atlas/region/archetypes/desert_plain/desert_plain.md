@@ -1,24 +1,33 @@
-# desert_plain
+﻿# desert_plain
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- dry exposed desert lowland
+- biome family: `Desert`
+- terrain-form family: `Plain`
 
-## Terrain Traits
+## Summary
 
-- sediment ownership dominates
-- water remains exceptional and strongly corridor-bound
+- Dry exposed desert floor dominated by sediment ownership.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- sparse scrub only in favored pockets later
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- wet events should create temporary pulses, not a different archetype
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `dune_field`
-- `crater`
 - `ravine`
+- `crater`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

@@ -1,25 +1,33 @@
-# glaciated_alpine
+﻿# glaciated_alpine
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- cold high upland with persistent snow and glacial carve expectations
+- biome family: `PolarIce`
+- terrain-form family: `Icefield`
 
-## Terrain Traits
+## Summary
 
-- major relief comes from skeleton and prototype, not local noise
-- meltwater corridors matter even when most of the surface remains frozen
+- Persistent ice and snow upland with glacial control.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- sparse exposed ecology only
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- strong snow persistence
-- short thaw windows should reveal rock and wet melt paths
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `upland_terrace`
 - `ravine`
 - `crater`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

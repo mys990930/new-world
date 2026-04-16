@@ -215,67 +215,74 @@ Examples:
 - `Icefield`
 - `CrevassedIcefield`
 
-## Draft Region Archetypes
+## Locked RegionArchetype Candidate Pool
 
-Region archetypes combine biome family and terrain-form family into something generation can actually solve.
+Region archetypes combine one locked `BiomeFamily` with one locked `TerrainFormFamily` into a playable regional identity. The pool below is now scaffolded in per-type modules and docs.
 
-This list is still provisional. `BiomeFamily` and `TerrainFormFamily` are now locked, and the next planning pass should re-cut this archetype list so every surviving archetype maps cleanly onto those locked families.
+### Launch
 
-### Coastal / Water-Adjacent
-
-- `shelf_shallows`
-- `tidal_coast`
-- `beach_plain`
+- `oceanic_shelf`
+- `sandy_beach_plain`
 - `coastal_cliffland`
-- `lagoon_lowland`
-- `delta_lowland`
-- `cold_rocky_coast`
-
-### Temperate
-
+- `cold_wet_lowland`
 - `temperate_plain`
-- `temperate_rolling_plain`
 - `temperate_hills`
 - `temperate_plateau`
-- `temperate_basin`
-- `temperate_wet_lowland`
-- `temperate_ridge_upland`
-
-### Warm / Tropical
-
+- `steppe_plain`
+- `desert_plain`
+- `desert_dune_field`
+- `savanna_plain`
 - `tropical_rainforest_lowland`
 - `tropical_rainforest_hills`
-- `tropical_seasonal_plain`
-- `savanna_plain`
-- `savanna_hills`
-- `monsoon_basin`
-- `monsoon_delta`
+- `glaciated_alpine`
+- `tundra_plain`
 
-### Dry
+### Extended
 
-- `steppe_plain`
-- `steppe_hills`
-- `semi_arid_basin`
-- `desert_plain`
-- `desert_dune_sea`
-- `desert_badlands`
-- `salt_flat_basin`
-
-### Cold / Alpine
-
+- `rocky_shore_coast`
+- `barrier_coast`
+- `lagoon_coast`
+- `estuary_lowland`
+- `coastal_delta`
+- `mangrove_lagoon`
+- `mangrove_delta`
+- `marsh_floodplain`
+- `swamp_lowland`
+- `flooded_forest_alluvial_lowland`
+- `flooded_forest_floodplain`
+- `temperate_rolling_plain`
+- `temperate_basin`
+- `temperate_broad_valley`
+- `temperate_escarpment_upland`
+- `temperate_broadleaf_plain`
+- `temperate_mixed_hills`
 - `boreal_plain`
 - `boreal_hills`
-- `tundra_plain`
-- `cold_wet_lowland`
-- `alpine_upland`
-- `glaciated_alpine`
-- `polar_basin`
+- `boreal_wet_lowland`
+- `steppe_hills`
+- `semi_desert_pediment`
+- `dry_shrubland_badlands`
+- `dry_shrubland_karst`
+- `mediterranean_shrubland_hills`
+- `desert_basin`
+- `desert_mesa_country`
+- `savanna_hills`
+- `tropical_dry_forest_hills`
+- `monsoon_floodplain`
+- `subalpine_wooded_front`
+- `alpine_meadow_mountain`
+- `polar_barrens_plain`
+- `monsoon_delta`
+- `crevassed_icefield`
+- `glacial_valley`
+- `desert_alluvial_fan`
 
-### Volcanic / Special
+### Deferred
 
-- `volcanic_upland`
-- `volcanic_plain`
-- `caldera_basin`
+- `fjord_coast`
+- `boreal_ridge_country`
+- `monsoon_plateau`
+- `alpine_ravine_country`
 
 ## Example Deterministic Resolution Rules
 
@@ -364,148 +371,14 @@ The first implementation wave should still prefer features that:
 - `dune_field`
 - `crater`
 
-## Draft Archetype -> Allowed Meso Matrix
+## Archetype-To-Meso Status
 
-This matrix is intentionally one-way. Meso may only choose from the allowed set under the current archetype.
-
-### Temperate Plain Family
-
-- `temperate_plain`
-  - `hill_cluster`
-  - `shallow_basin`
-  - `broad_valley`
-- `temperate_rolling_plain`
-  - `hill_cluster`
-  - `shallow_basin`
-  - `ridge_spur`
-- `temperate_hills`
-  - `hill_cluster`
-  - `ridge_spur`
-  - `ravine`
-- `temperate_plateau`
-  - `escarpment_band`
-  - `upland_terrace`
-  - `shallow_basin`
-- `temperate_basin`
-  - `wet_basin`
-  - `broad_valley`
-  - `upland_terrace`
-- `temperate_wet_lowland`
-  - `wet_basin`
-  - `broad_valley`
-- `temperate_ridge_upland`
-  - `ridge_spur`
-  - `escarpment_band`
-  - `ravine`
-
-### Tropical / Warm Family
-
-- `tropical_rainforest_lowland`
-  - `broad_valley`
-  - `wet_basin`
-  - `hill_cluster`
-- `tropical_rainforest_hills`
-  - `hill_cluster`
-  - `ridge_spur`
-  - `ravine`
-- `tropical_seasonal_plain`
-  - `hill_cluster`
-  - `broad_valley`
-- `savanna_plain`
-  - `hill_cluster`
-  - `shallow_basin`
-  - `alluvial_fan`
-- `savanna_hills`
-  - `hill_cluster`
-  - `ridge_spur`
-  - `ravine`
-- `monsoon_basin`
-  - `wet_basin`
-  - `broad_valley`
-  - `alluvial_fan`
-- `monsoon_delta`
-  - `broad_valley`
-  - `barrier_spit`
-  - `lagoon_rim`
-
-### Dry Family
-
-- `steppe_plain`
-  - `hill_cluster`
-  - `shallow_basin`
-  - `alluvial_fan`
-- `steppe_hills`
-  - `hill_cluster`
-  - `ridge_spur`
-  - `ravine`
-- `semi_arid_basin`
-  - `shallow_basin`
-  - `alluvial_fan`
-  - `badlands_patch`
-- `desert_plain`
-  - `dune_field`
-  - `alluvial_fan`
-- `desert_dune_sea`
-  - `dune_field`
-  - `yardang_band`
-- `desert_badlands`
-  - `badlands_patch`
-  - `yardang_band`
-  - `ravine`
-- `salt_flat_basin`
-  - `shallow_basin`
-  - `alluvial_fan`
-
-### Coastal Family
-
-- `beach_plain`
-  - `barrier_spit`
-  - `lagoon_rim`
-- `coastal_cliffland`
-  - `coastal_cliff_band`
-  - `cove_breakup`
-  - `upland_terrace`
-- `lagoon_lowland`
-  - `lagoon_rim`
-  - `wet_basin`
-- `delta_lowland`
-  - `barrier_spit`
-  - `broad_valley`
-  - `alluvial_fan`
-- `cold_rocky_coast`
-  - `coastal_cliff_band`
-  - `cove_breakup`
-
-### Cold / Alpine Family
-
-- `boreal_plain`
-  - `hill_cluster`
-  - `wet_basin`
-- `boreal_hills`
-  - `hill_cluster`
-  - `ridge_spur`
-  - `ravine`
-- `tundra_plain`
-  - `shallow_basin`
-  - `wet_basin`
-- `cold_wet_lowland`
-  - `wet_basin`
-  - `broad_valley`
-- `alpine_upland`
-  - `ridge_spur`
-  - `escarpment_band`
-  - `ravine`
-- `glaciated_alpine`
-  - `glacial_trough`
-  - `crevasse_belt`
-  - `ridge_spur`
-- `polar_basin`
-  - `shallow_basin`
-  - `wet_basin`
-
-### Deferred Special Family
-
-- volcanic or caldera archetypes are now deferred until the locked family set expands to cover them explicitly
+- every scaffolded archetype now carries an initial meso allowance stub inside its per-type module and markdown file
+- those stub allowances are intentionally provisional
+- the next planning pass should lock:
+  - which meso features remain legal per archetype
+  - which launch archetypes need stricter or broader meso sets
+  - which current stubs should be emptied until later waves
 
 ## Draft Material Policy Direction
 
@@ -536,10 +409,10 @@ Examples:
 
 ## Next Planning Step
 
-With `BiomeFamily` and `TerrainFormFamily` now locked, the next planning step is:
+With the archetype candidate pool now scaffolded, the next planning step is:
 
-1. choose the minimum `RegionArchetype` launch set
-2. map each launch archetype to one locked biome family and one locked terrain-form family
-3. decide which additional archetypes stay planned-only for later waves
-4. lock the first archetype-to-meso allowance matrix
-5. lock the first seasonal biome-state model and block-surface override policy
+1. confirm or trim the `launch` archetype set
+2. lock the authoritative archetype-to-meso allowance matrix
+3. lock the first seasonal biome-state model for launch archetypes
+4. lock the first material/block policy per launch archetype
+5. only after that, start V2 implementation against those locked policies

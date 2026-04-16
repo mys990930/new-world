@@ -160,20 +160,62 @@ pub enum TerrainFormFamily {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RegionArchetype {
     OceanicShelf,
-    CoastalBeach,
-    DesertPlain,
-    SteppePlain,
-    WetLowland,
-    TropicalRainforestLowland,
-    TropicalRainforestHills,
-    BorealHills,
-    TundraPlain,
-    ColdMountainUpland,
-    TemperatePlateau,
-    TemperateHills,
-    TemperateForestPlain,
+    SandyBeachPlain,
+    CoastalCliffland,
+    ColdWetLowland,
     #[default]
     TemperatePlain,
+    TemperateHills,
+    TemperatePlateau,
+    SteppePlain,
+    DesertPlain,
+    DesertDuneField,
+    SavannaPlain,
+    TropicalRainforestLowland,
+    TropicalRainforestHills,
+    GlaciatedAlpine,
+    TundraPlain,
+    RockyShoreCoast,
+    BarrierCoast,
+    LagoonCoast,
+    EstuaryLowland,
+    CoastalDelta,
+    MangroveLagoon,
+    MangroveDelta,
+    MarshFloodplain,
+    SwampLowland,
+    FloodedForestAlluvialLowland,
+    FloodedForestFloodplain,
+    TemperateRollingPlain,
+    TemperateBasin,
+    TemperateBroadValley,
+    TemperateEscarpmentUpland,
+    TemperateBroadleafPlain,
+    TemperateMixedHills,
+    BorealPlain,
+    BorealHills,
+    BorealWetLowland,
+    SteppeHills,
+    SemiDesertPediment,
+    DryShrublandBadlands,
+    DryShrublandKarst,
+    MediterraneanShrublandHills,
+    DesertBasin,
+    DesertMesaCountry,
+    SavannaHills,
+    TropicalDryForestHills,
+    MonsoonFloodplain,
+    SubalpineWoodedFront,
+    AlpineMeadowMountain,
+    PolarBarrensPlain,
+    MonsoonDelta,
+    CrevassedIcefield,
+    GlacialValley,
+    DesertAlluvialFan,
+    FjordCoast,
+    BorealRidgeCountry,
+    MonsoonPlateau,
+    AlpineRavineCountry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -629,18 +671,36 @@ fn classify_region_archetype(
 ) -> RegionArchetype {
     match (biome_family, terrain_form_family) {
         (BiomeFamily::Oceanic, _) => RegionArchetype::OceanicShelf,
-        (
-            BiomeFamily::RockyCoast | BiomeFamily::SandyCoast | BiomeFamily::EstuarineCoast
-            | BiomeFamily::LagoonCoast | BiomeFamily::Mangrove,
-            _,
-        ) => RegionArchetype::CoastalBeach,
+        (BiomeFamily::Mangrove, TerrainFormFamily::Delta) => RegionArchetype::MangroveDelta,
+        (BiomeFamily::Mangrove, _) => RegionArchetype::MangroveLagoon,
+        (BiomeFamily::EstuarineCoast, TerrainFormFamily::Delta) => RegionArchetype::CoastalDelta,
+        (BiomeFamily::EstuarineCoast, _) => RegionArchetype::EstuaryLowland,
+        (BiomeFamily::LagoonCoast, _) => RegionArchetype::LagoonCoast,
+        (BiomeFamily::RockyCoast, TerrainFormFamily::FjordCoast) => RegionArchetype::FjordCoast,
+        (BiomeFamily::RockyCoast, TerrainFormFamily::SeaCliff) => RegionArchetype::CoastalCliffland,
+        (BiomeFamily::RockyCoast, _) => RegionArchetype::RockyShoreCoast,
+        (BiomeFamily::SandyCoast, TerrainFormFamily::BarrierCoast) => RegionArchetype::BarrierCoast,
+        (BiomeFamily::SandyCoast, _) => RegionArchetype::SandyBeachPlain,
+        (BiomeFamily::Desert, TerrainFormFamily::DuneField) => RegionArchetype::DesertDuneField,
+        (BiomeFamily::Desert, TerrainFormFamily::Basin) => RegionArchetype::DesertBasin,
+        (BiomeFamily::Desert, TerrainFormFamily::MesaCountry) => RegionArchetype::DesertMesaCountry,
+        (BiomeFamily::Desert, TerrainFormFamily::AlluvialFan) => RegionArchetype::DesertAlluvialFan,
         (BiomeFamily::Desert, _) => RegionArchetype::DesertPlain,
-        (BiomeFamily::Steppe | BiomeFamily::SemiDesert | BiomeFamily::DryShrubland, _) => {
+        (BiomeFamily::Steppe, TerrainFormFamily::HillCountry) => RegionArchetype::SteppeHills,
+        (BiomeFamily::Steppe, _) => {
             RegionArchetype::SteppePlain
         }
-        (BiomeFamily::Marsh | BiomeFamily::Swamp | BiomeFamily::FloodedForest, _) => {
-            RegionArchetype::WetLowland
+        (BiomeFamily::SemiDesert, _) => RegionArchetype::SemiDesertPediment,
+        (BiomeFamily::DryShrubland, TerrainFormFamily::Karst) => RegionArchetype::DryShrublandKarst,
+        (BiomeFamily::DryShrubland, _) => RegionArchetype::DryShrublandBadlands,
+        (BiomeFamily::MediterraneanShrubland, _) => RegionArchetype::MediterraneanShrublandHills,
+        (BiomeFamily::Marsh, TerrainFormFamily::Floodplain) => RegionArchetype::MarshFloodplain,
+        (BiomeFamily::Marsh, _) => RegionArchetype::ColdWetLowland,
+        (BiomeFamily::Swamp, _) => RegionArchetype::SwampLowland,
+        (BiomeFamily::FloodedForest, TerrainFormFamily::AlluvialLowland) => {
+            RegionArchetype::FloodedForestAlluvialLowland
         }
+        (BiomeFamily::FloodedForest, _) => RegionArchetype::FloodedForestFloodplain,
         (
             BiomeFamily::TropicalRainforest,
             TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain,
@@ -648,24 +708,50 @@ fn classify_region_archetype(
             RegionArchetype::TropicalRainforestHills
         }
         (BiomeFamily::TropicalRainforest, _) => RegionArchetype::TropicalRainforestLowland,
-        (BiomeFamily::BorealForest, _) => RegionArchetype::BorealHills,
-        (BiomeFamily::Tundra | BiomeFamily::PolarBarrens, _) => RegionArchetype::TundraPlain,
-        (BiomeFamily::SubalpineWoodland | BiomeFamily::AlpineMeadow | BiomeFamily::PolarIce, _) => {
-            RegionArchetype::ColdMountainUpland
+        (BiomeFamily::Savanna, TerrainFormFamily::HillCountry) => RegionArchetype::SavannaHills,
+        (BiomeFamily::Savanna, _) => RegionArchetype::SavannaPlain,
+        (BiomeFamily::TropicalDryForest, _) => RegionArchetype::TropicalDryForestHills,
+        (BiomeFamily::MonsoonForest, TerrainFormFamily::Delta) => RegionArchetype::MonsoonDelta,
+        (BiomeFamily::MonsoonForest, TerrainFormFamily::Plateau) => RegionArchetype::MonsoonPlateau,
+        (BiomeFamily::MonsoonForest, _) => RegionArchetype::MonsoonFloodplain,
+        (BiomeFamily::BorealForest, TerrainFormFamily::WetLowland) => RegionArchetype::BorealWetLowland,
+        (BiomeFamily::BorealForest, TerrainFormFamily::RidgeCountry) => RegionArchetype::BorealRidgeCountry,
+        (BiomeFamily::BorealForest, TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain) => {
+            RegionArchetype::BorealHills
         }
+        (BiomeFamily::BorealForest, _) => RegionArchetype::BorealPlain,
+        (BiomeFamily::PolarIce, TerrainFormFamily::CrevassedIcefield) => {
+            RegionArchetype::CrevassedIcefield
+        }
+        (BiomeFamily::PolarIce, TerrainFormFamily::GlacialValley) => RegionArchetype::GlacialValley,
+        (BiomeFamily::PolarIce, _) => RegionArchetype::GlaciatedAlpine,
+        (BiomeFamily::Tundra, TerrainFormFamily::WetLowland) => RegionArchetype::ColdWetLowland,
+        (BiomeFamily::Tundra, _) => RegionArchetype::TundraPlain,
+        (BiomeFamily::PolarBarrens, _) => RegionArchetype::PolarBarrensPlain,
+        (BiomeFamily::SubalpineWoodland, _) => RegionArchetype::SubalpineWoodedFront,
+        (BiomeFamily::AlpineMeadow, TerrainFormFamily::RavineCountry) => RegionArchetype::AlpineRavineCountry,
+        (BiomeFamily::AlpineMeadow, _) => RegionArchetype::AlpineMeadowMountain,
         (_, TerrainFormFamily::Plateau) => RegionArchetype::TemperatePlateau,
+        (_, TerrainFormFamily::Escarpment) => RegionArchetype::TemperateEscarpmentUpland,
+        (_, TerrainFormFamily::BroadValley) => RegionArchetype::TemperateBroadValley,
+        (_, TerrainFormFamily::Basin) => RegionArchetype::TemperateBasin,
+        (_, TerrainFormFamily::RollingPlain) => RegionArchetype::TemperateRollingPlain,
+        (
+            BiomeFamily::TemperateBroadleafForest,
+            TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain,
+        ) => RegionArchetype::TemperateMixedHills,
+        (BiomeFamily::TemperateBroadleafForest, _) => RegionArchetype::TemperateBroadleafPlain,
+        (BiomeFamily::TemperateMixedForest, _) => RegionArchetype::TemperateMixedHills,
+        (BiomeFamily::TemperateRainforest, TerrainFormFamily::MountainFront) => {
+            RegionArchetype::TemperateEscarpmentUpland
+        }
+        (BiomeFamily::TemperateRainforest, _) => RegionArchetype::TemperateBroadleafPlain,
         (_, TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain)
             if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine)
                 || matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain) =>
         {
             RegionArchetype::TemperateHills
         }
-        (
-            BiomeFamily::TemperateBroadleafForest
-            | BiomeFamily::TemperateMixedForest
-            | BiomeFamily::TemperateRainforest,
-            _,
-        ) => RegionArchetype::TemperateForestPlain,
         _ => RegionArchetype::TemperatePlain,
     }
 }

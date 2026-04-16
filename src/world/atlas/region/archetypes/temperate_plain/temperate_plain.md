@@ -1,28 +1,33 @@
-# temperate_plain
+﻿# temperate_plain
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- broad inland temperate grassland plain
-- stable, readable base case for region-first terrain
+- biome family: `TemperateGrassland`
+- terrain-form family: `Plain`
 
-## Terrain Traits
+## Summary
 
-- low macro relief
-- strong contrast against river corridors and shallow basins
+- Baseline temperate lowland plain.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- open grassland first
-- later woodland patches are allowed but should not erase the plain identity
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- green in growing season
-- drier in autumn
-- snow-capable in winter
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `hill_cluster`
 - `shallow_basin`
 - `ravine`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

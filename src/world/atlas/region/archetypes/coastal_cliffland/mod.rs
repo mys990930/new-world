@@ -1,21 +1,21 @@
-use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
+﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
-    id: RegionArchetype::CoastalBeach,
+    id: RegionArchetype::CoastalCliffland,
     biome_family: BiomeFamily::RockyCoast,
     terrain_form_family: TerrainFormFamily::SeaCliff,
-    summary: "Marine-facing terrain where shore expression and cliff transitions override inland defaults.",
+    summary: "Coast-first rock wall and exposed marine slope transition.",
     regional_traits: &[
-        "Surface should read as coast-first even when upland transitions exist nearby.",
-        "Rock exposure, spray, and sediment pockets should be resolved through coast policy.",
+        "Planning stub: detailed prototype solving and hydrology coupling still need a dedicated pass.",
+        "This archetype should later receive explicit seasonal, material, and ecology policy locks.",
     ],
     ecology_notes: &[
-        "Supports sparse salt-tolerant cover and exposed rock ecology later.",
-        "Storm or cold season states may alter shoreline cover more than inland seasons do.",
+        "Biome family and terrain-form family are locked for this candidate.",
+        "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["coastal_cliff_band", "upland_terrace", "shallow_basin"],
+    allowed_meso_keys: &["coastal_cliff_band", "upland_terrace", "shallow_basin",],
     seasonal_profile: SeasonalSurfaceProfile::CoastalTemperate,
     water_response: WaterResponseHint::CoastalSprayExposed,
-    ecology_density: EcologyDensityHint::Sparse,
+    ecology_density: EcologyDensityHint::Barren,
 };

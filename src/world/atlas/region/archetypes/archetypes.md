@@ -1,4 +1,4 @@
-# archetypes
+﻿# archetypes
 
 ## Role
 
@@ -7,26 +7,78 @@
 
 ## Contract
 
-- every concrete archetype should eventually have:
+- every concrete archetype has:
   - `mod.rs`
   - `<type>.md`
-- the Rust module should expose a lightweight `RegionArchetypeDef`
-- the markdown file should hold planning content:
-  - identity
-  - terrain traits
-  - hydrology expectations
-  - ecology notes
-  - seasonal notes
-  - allowed meso
+- the Rust module exposes a lightweight `RegionArchetypeDef`
+- the markdown file holds planning content:
+  - stage label
+  - biome family
+  - terrain-form family
+  - regional identity summary
+  - ecology / seasonal planning notes
+  - current meso allowance stub
 
-## Current Stub Set
+## Current Candidate Pool
 
+### Launch
+- `oceanic_shelf`
+- `sandy_beach_plain`
+- `coastal_cliffland`
+- `cold_wet_lowland`
 - `temperate_plain`
-- `temperate_plateau`
 - `temperate_hills`
+- `temperate_plateau`
+- `steppe_plain`
+- `desert_plain`
+- `desert_dune_field`
+- `savanna_plain`
 - `tropical_rainforest_lowland`
 - `tropical_rainforest_hills`
-- `desert_plain`
-- `cold_wet_lowland`
 - `glaciated_alpine`
-- `coastal_cliffland`
+- `tundra_plain`
+
+### Extended
+- `rocky_shore_coast`
+- `barrier_coast`
+- `lagoon_coast`
+- `estuary_lowland`
+- `coastal_delta`
+- `mangrove_lagoon`
+- `mangrove_delta`
+- `marsh_floodplain`
+- `swamp_lowland`
+- `flooded_forest_alluvial_lowland`
+- `flooded_forest_floodplain`
+- `temperate_rolling_plain`
+- `temperate_basin`
+- `temperate_broad_valley`
+- `temperate_escarpment_upland`
+- `temperate_broadleaf_plain`
+- `temperate_mixed_hills`
+- `boreal_plain`
+- `boreal_hills`
+- `boreal_wet_lowland`
+- `steppe_hills`
+- `semi_desert_pediment`
+- `dry_shrubland_badlands`
+- `dry_shrubland_karst`
+- `mediterranean_shrubland_hills`
+- `desert_basin`
+- `desert_mesa_country`
+- `savanna_hills`
+- `tropical_dry_forest_hills`
+- `monsoon_floodplain`
+- `subalpine_wooded_front`
+- `alpine_meadow_mountain`
+- `polar_barrens_plain`
+- `monsoon_delta`
+- `crevassed_icefield`
+- `glacial_valley`
+- `desert_alluvial_fan`
+
+### Deferred
+- `fjord_coast`
+- `boreal_ridge_country`
+- `monsoon_plateau`
+- `alpine_ravine_country`

@@ -1,26 +1,33 @@
-# temperate_plateau
+﻿# temperate_plateau
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- elevated but comparatively calm inland tableland
+- biome family: `TemperateGrassland`
+- terrain-form family: `Plateau`
 
-## Terrain Traits
+## Summary
 
-- broad high surface
-- stronger edge transitions than center roughness
+- High but readable tableland for escarpment-led transitions.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- grassland or sparse woodland depending on moisture
-- exposed rims can thin soil and reveal rock
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- stable upland identity across the year
-- snow can persist longer on exposed edges than nearby plains
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `escarpment_band`
 - `upland_terrace`
 - `shallow_basin`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

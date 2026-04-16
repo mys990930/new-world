@@ -1,21 +1,21 @@
-use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
+﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::TropicalRainforestLowland,
     biome_family: BiomeFamily::TropicalRainforest,
     terrain_form_family: TerrainFormFamily::Plain,
-    summary: "Warm, wet lowland with heavy cover potential and broad valley wetness.",
+    summary: "Warm wet lowland with dense-cover ecological potential.",
     regional_traits: &[
-        "Surface should stay lowland-first rather than becoming accidental hills.",
-        "Water corridors and wet pockets should be common but still connected to drainage logic.",
+        "Planning stub: detailed prototype solving and hydrology coupling still need a dedicated pass.",
+        "This archetype should later receive explicit seasonal, material, and ecology policy locks.",
     ],
     ecology_notes: &[
-        "Supports dense canopy and rich undergrowth in later ecology passes.",
-        "Wet versus very wet phases should change saturation more than the archetype itself.",
+        "Biome family and terrain-form family are locked for this candidate.",
+        "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["hill_cluster", "shallow_basin", "ravine"],
+    allowed_meso_keys: &["hill_cluster", "shallow_basin", "ravine",],
     seasonal_profile: SeasonalSurfaceProfile::TropicalWetDry,
-    water_response: WaterResponseHint::EmbracesFloodplain,
+    water_response: WaterResponseHint::AllowsWetMargins,
     ecology_density: EcologyDensityHint::Dense,
 };

@@ -1,26 +1,33 @@
-# tropical_rainforest_lowland
+﻿# tropical_rainforest_lowland
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- warm, wet lowland rainforest region
+- biome family: `TropicalRainforest`
+- terrain-form family: `Plain`
 
-## Terrain Traits
+## Summary
 
-- lowland-first prototype
-- high humidity and broad wet corridors matter more than strong ridge relief
+- Warm wet lowland with dense-cover ecological potential.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- dense canopy and rich undergrowth later
-- wet pockets and channel margins can carry distinct ecology
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- archetype stays stable
-- wet and dry phases change saturation and cover intensity
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `hill_cluster`
 - `shallow_basin`
 - `ravine`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative

@@ -1,24 +1,33 @@
-# temperate_hills
+﻿# temperate_hills
+
+## Stage
+
+- `launch`
 
 ## Identity
 
-- rolling inland temperate upland
+- biome family: `TemperateGrassland`
+- terrain-form family: `HillCountry`
 
-## Terrain Traits
+## Summary
 
-- nonflat base shape even before meso deformation
-- small valleys and ridge shoulders should read naturally
+- Grassland-led temperate hill country.
+
+## Regional Traits
+
+- detailed terrain-shape solve is still a planning stub
+- drainage, seasonality, and material policies should be locked in later dedicated passes
 
 ## Ecology Notes
 
-- mosaic of grassland, shrubs, and later woodland belts
+- ecology density and vegetation placement are intentionally left provisional here
+- this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Seasonal Notes
-
-- cooler slopes can retain snow longer than neighboring flats
-
-## Allowed Meso
-
+## Initial Meso Allowance Stub
 - `hill_cluster`
 - `ravine`
 - `upland_terrace`
+
+## Follow-up
+
+- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative
