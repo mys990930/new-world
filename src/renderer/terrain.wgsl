@@ -267,7 +267,7 @@ fn terrace_contour_response(material_kind: u32) -> f32 {
 
 fn contour_band(distance_to_edge: f32) -> f32 {
     let edge_aa = max(fwidth(distance_to_edge), 0.0020);
-    return 1.0 - smoothstep(0.055, 0.085 + edge_aa * 2.5, distance_to_edge);
+    return 1.0 - smoothstep(0.01, 0.02 + edge_aa * 2.0, distance_to_edge);
 }
 
 fn top_terrace_contour_mask(
