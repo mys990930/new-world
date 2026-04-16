@@ -3,8 +3,8 @@ use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::ColdMountainUpland,
-    biome_family: BiomeFamily::Alpine,
-    terrain_form_family: TerrainFormFamily::Mountain,
+    biome_family: BiomeFamily::PolarIce,
+    terrain_form_family: TerrainFormFamily::Icefield,
     summary: "Cold high upland with persistent snow logic and glacial carve expectations.",
     regional_traits: &[
         "Major relief belongs to the skeleton and base prototype, not local randomness.",

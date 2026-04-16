@@ -87,31 +87,74 @@ pub enum ClimateRegime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BiomeFamily {
     Oceanic,
-    Coast,
+    RockyCoast,
+    SandyCoast,
+    EstuarineCoast,
+    LagoonCoast,
+    Mangrove,
+    Marsh,
+    Swamp,
+    FloodedForest,
     Desert,
+    SemiDesert,
     Steppe,
-    Wetland,
+    DryShrubland,
+    MediterraneanShrubland,
+    TemperateBroadleafForest,
+    TemperateMixedForest,
+    TemperateRainforest,
+    BorealForest,
+    Savanna,
+    TropicalDryForest,
     TropicalRainforest,
-    TropicalSeasonalForest,
-    Boreal,
+    MonsoonForest,
+    SubalpineWoodland,
+    AlpineMeadow,
     Tundra,
-    Alpine,
-    TemperateForest,
+    PolarBarrens,
+    PolarIce,
     #[default]
     TemperateGrassland,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerrainFormFamily {
-    Marine,
-    Coast,
+    MarineShelf,
+    BeachPlain,
+    BarrierCoast,
+    LagoonCoast,
+    RockyShore,
+    SeaCliff,
+    EstuaryLowland,
+    FjordCoast,
+    Delta,
+    Floodplain,
+    WetLowland,
+    AlluvialLowland,
     #[default]
     Plain,
-    Plateau,
-    Hill,
+    RollingPlain,
+    HillCountry,
+    Pediment,
+    MountainFront,
+    HillCluster,
     Mountain,
+    AlluvialFan,
+    Plateau,
+    DuneField,
+    MesaCountry,
+    Escarpment,
+    Badlands,
+    Karst,
     Basin,
-    Valley,
+    NarrowValley,
+    BroadValley,
+    GlacialValley,
+    Canyon,
+    RavineCountry,
+    RidgeCountry,
+    Icefield,
+    CrevassedIcefield,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -397,31 +440,98 @@ fn classify_biome_family(
         return BiomeFamily::Oceanic;
     }
     if matches!(coastal_context, CoastalContext::Coastal) {
-        return BiomeFamily::Coast;
+        if matches!(hydrology_context, HydrologyContext::RiverCorridor | HydrologyContext::LakeBasin) {
+            return BiomeFamily::EstuarineCoast;
+        }
+        if cell.lake_potential > 0.46 && cell.wetness > 0.40 {
+            return BiomeFamily::LagoonCoast;
+        }
+        if matches!(temperature_band, TemperatureBand::Hot)
+            && matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet)
+        {
+            return BiomeFamily::Mangrove;
+        }
+        if cell.ruggedness > 0.34 || cell.ridge_factor > 0.28 {
+            return BiomeFamily::RockyCoast;
+        }
+        return BiomeFamily::SandyCoast;
     }
-    if matches!(hydrology_context, HydrologyContext::WetLowland | HydrologyContext::LakeBasin) {
-        return BiomeFamily::Wetland;
+    if matches!(
+        hydrology_context,
+        HydrologyContext::WetLowland | HydrologyContext::LakeBasin | HydrologyContext::RiverCorridor
+    ) && cell.wetness > 0.34
+    {
+        if matches!(temperature_band, TemperatureBand::Hot | TemperatureBand::Warm)
+            && matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet)
+        {
+            if cell.riverine_factor > 0.42 || climate_regime == ClimateRegime::TropicalWet {
+                return BiomeFamily::FloodedForest;
+            }
+            return BiomeFamily::Swamp;
+        }
+        return BiomeFamily::Marsh;
     }
     if matches!(temperature_band, TemperatureBand::Polar) {
+        if cell.polar_factor > 0.78 || cell.alpine_factor > 0.82 {
+            return BiomeFamily::PolarIce;
+        }
+        if matches!(moisture_band, MoistureBand::Arid | MoistureBand::SemiArid) {
+            return BiomeFamily::PolarBarrens;
+        }
         return BiomeFamily::Tundra;
     }
     if matches!(climate_regime, ClimateRegime::ColdAlpine) || cell.alpine_factor > 0.72 {
-        return BiomeFamily::Alpine;
+        if matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet)
+            && !matches!(temperature_band, TemperatureBand::Polar)
+        {
+            return BiomeFamily::SubalpineWoodland;
+        }
+        return BiomeFamily::AlpineMeadow;
     }
     if matches!(moisture_band, MoistureBand::Arid) {
         return BiomeFamily::Desert;
     }
     if matches!(moisture_band, MoistureBand::SemiArid) {
+        if matches!(temperature_band, TemperatureBand::Hot) {
+            return BiomeFamily::SemiDesert;
+        }
+        if matches!(temperature_band, TemperatureBand::Warm | TemperatureBand::Temperate)
+            && matches!(coastal_context, CoastalContext::NearCoast)
+        {
+            return BiomeFamily::MediterraneanShrubland;
+        }
+        if cell.aridity > 0.46 {
+            return BiomeFamily::DryShrubland;
+        }
         return BiomeFamily::Steppe;
     }
     match climate_regime {
         ClimateRegime::TropicalWet => BiomeFamily::TropicalRainforest,
-        ClimateRegime::TropicalSeasonal => BiomeFamily::TropicalSeasonalForest,
+        ClimateRegime::TropicalSeasonal => {
+            if matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet) {
+                BiomeFamily::MonsoonForest
+            } else if matches!(moisture_band, MoistureBand::Subhumid) {
+                BiomeFamily::TropicalDryForest
+            } else {
+                BiomeFamily::Savanna
+            }
+        }
         ClimateRegime::Continental if matches!(temperature_band, TemperatureBand::Cold) => {
-            BiomeFamily::Boreal
+            BiomeFamily::BorealForest
         }
         _ if matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet) => {
-            BiomeFamily::TemperateForest
+            if matches!(coastal_context, CoastalContext::NearCoast) && cell.wetness > 0.54 {
+                BiomeFamily::TemperateRainforest
+            } else if matches!(moisture_band, MoistureBand::Wet) {
+                BiomeFamily::TemperateMixedForest
+            } else {
+                BiomeFamily::TemperateBroadleafForest
+            }
+        }
+        _ if matches!(temperature_band, TemperatureBand::Warm | TemperatureBand::Hot)
+            && matches!(moisture_band, MoistureBand::Subhumid) =>
+        {
+            BiomeFamily::Savanna
         }
         _ => BiomeFamily::TemperateGrassland,
     }
@@ -435,22 +545,78 @@ fn classify_terrain_form_family(
     hydrology_context: HydrologyContext,
 ) -> TerrainFormFamily {
     if matches!(coastal_context, CoastalContext::Marine) {
-        return TerrainFormFamily::Marine;
+        return TerrainFormFamily::MarineShelf;
     }
     if matches!(coastal_context, CoastalContext::Coastal) {
-        return TerrainFormFamily::Coast;
+        if matches!(hydrology_context, HydrologyContext::RiverCorridor)
+            && cell.river_flow_potential > 0.44
+        {
+            return TerrainFormFamily::EstuaryLowland;
+        }
+        if cell.lake_potential > 0.48 && cell.wetness > 0.42 {
+            return TerrainFormFamily::LagoonCoast;
+        }
+        if matches!(elevation_band, ElevationBand::Alpine) && cell.temperature < 0.34 {
+            return TerrainFormFamily::FjordCoast;
+        }
+        if cell.ruggedness > 0.42 || cell.ridge_factor > 0.36 {
+            return TerrainFormFamily::SeaCliff;
+        }
+        if cell.ruggedness > 0.24 {
+            return TerrainFormFamily::RockyShore;
+        }
+        if cell.coast_factor > 0.70 && cell.basinness > 0.38 {
+            return TerrainFormFamily::BarrierCoast;
+        }
+        return TerrainFormFamily::BeachPlain;
     }
-    if matches!(hydrology_context, HydrologyContext::LakeBasin)
-        || (cell.basinness > 0.60 && !matches!(relief_class, ReliefClass::Mountain))
-    {
+    if matches!(hydrology_context, HydrologyContext::RiverCorridor) {
+        if cell.ocean_distance < 0.10 && cell.river_flow_potential > 0.54 {
+            return TerrainFormFamily::Delta;
+        }
+        if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine) {
+            if cell.alpine_factor > 0.68 {
+                return TerrainFormFamily::GlacialValley;
+            }
+            if cell.ruggedness > 0.52 {
+                return TerrainFormFamily::NarrowValley;
+            }
+            return TerrainFormFamily::BroadValley;
+        }
+        if cell.river_flow_potential > 0.52 {
+            return TerrainFormFamily::AlluvialLowland;
+        }
+        return TerrainFormFamily::Floodplain;
+    }
+    if matches!(hydrology_context, HydrologyContext::WetLowland | HydrologyContext::LakeBasin) {
+        return TerrainFormFamily::WetLowland;
+    }
+    if cell.basinness > 0.60 && !matches!(relief_class, ReliefClass::Mountain) {
         return TerrainFormFamily::Basin;
     }
+    if cell.aridity > 0.64 && cell.ruggedness < 0.18 {
+        return TerrainFormFamily::DuneField;
+    }
+    if cell.aridity > 0.58 && cell.ruggedness > 0.42 {
+        return TerrainFormFamily::Badlands;
+    }
     match (elevation_band, relief_class) {
+        (ElevationBand::Alpine, _) if cell.alpine_factor > 0.80 && cell.polar_factor > 0.42 => {
+            if cell.ruggedness > 0.46 {
+                TerrainFormFamily::CrevassedIcefield
+            } else {
+                TerrainFormFamily::Icefield
+            }
+        }
         (ElevationBand::Alpine, _) | (_, ReliefClass::Mountain) => TerrainFormFamily::Mountain,
         (ElevationBand::Highland, ReliefClass::Plain | ReliefClass::Rolling) => {
             TerrainFormFamily::Plateau
         }
-        (_, ReliefClass::Hill) => TerrainFormFamily::Hill,
+        (_, ReliefClass::Hill) => TerrainFormFamily::HillCountry,
+        (_, ReliefClass::Rolling) => TerrainFormFamily::RollingPlain,
+        _ if cell.aridity > 0.42 && matches!(elevation_band, ElevationBand::Low | ElevationBand::Upland) => {
+            TerrainFormFamily::Pediment
+        }
         _ => TerrainFormFamily::Plain,
     }
 }
@@ -463,25 +629,43 @@ fn classify_region_archetype(
 ) -> RegionArchetype {
     match (biome_family, terrain_form_family) {
         (BiomeFamily::Oceanic, _) => RegionArchetype::OceanicShelf,
-        (BiomeFamily::Coast, _) => RegionArchetype::CoastalBeach,
+        (
+            BiomeFamily::RockyCoast | BiomeFamily::SandyCoast | BiomeFamily::EstuarineCoast
+            | BiomeFamily::LagoonCoast | BiomeFamily::Mangrove,
+            _,
+        ) => RegionArchetype::CoastalBeach,
         (BiomeFamily::Desert, _) => RegionArchetype::DesertPlain,
-        (BiomeFamily::Steppe, _) => RegionArchetype::SteppePlain,
-        (BiomeFamily::Wetland, _) => RegionArchetype::WetLowland,
-        (BiomeFamily::TropicalRainforest, TerrainFormFamily::Hill | TerrainFormFamily::Mountain) => {
+        (BiomeFamily::Steppe | BiomeFamily::SemiDesert | BiomeFamily::DryShrubland, _) => {
+            RegionArchetype::SteppePlain
+        }
+        (BiomeFamily::Marsh | BiomeFamily::Swamp | BiomeFamily::FloodedForest, _) => {
+            RegionArchetype::WetLowland
+        }
+        (
+            BiomeFamily::TropicalRainforest,
+            TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain,
+        ) => {
             RegionArchetype::TropicalRainforestHills
         }
         (BiomeFamily::TropicalRainforest, _) => RegionArchetype::TropicalRainforestLowland,
-        (BiomeFamily::Boreal, _) => RegionArchetype::BorealHills,
-        (BiomeFamily::Tundra, _) => RegionArchetype::TundraPlain,
-        (BiomeFamily::Alpine, _) => RegionArchetype::ColdMountainUpland,
+        (BiomeFamily::BorealForest, _) => RegionArchetype::BorealHills,
+        (BiomeFamily::Tundra | BiomeFamily::PolarBarrens, _) => RegionArchetype::TundraPlain,
+        (BiomeFamily::SubalpineWoodland | BiomeFamily::AlpineMeadow | BiomeFamily::PolarIce, _) => {
+            RegionArchetype::ColdMountainUpland
+        }
         (_, TerrainFormFamily::Plateau) => RegionArchetype::TemperatePlateau,
-        (_, TerrainFormFamily::Hill | TerrainFormFamily::Mountain)
+        (_, TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain)
             if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine)
                 || matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain) =>
         {
             RegionArchetype::TemperateHills
         }
-        (BiomeFamily::TemperateForest, _) => RegionArchetype::TemperateForestPlain,
+        (
+            BiomeFamily::TemperateBroadleafForest
+            | BiomeFamily::TemperateMixedForest
+            | BiomeFamily::TemperateRainforest,
+            _,
+        ) => RegionArchetype::TemperateForestPlain,
         _ => RegionArchetype::TemperatePlain,
     }
 }

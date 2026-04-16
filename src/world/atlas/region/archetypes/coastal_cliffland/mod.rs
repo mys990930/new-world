@@ -3,8 +3,8 @@ use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::CoastalBeach,
-    biome_family: BiomeFamily::Coast,
-    terrain_form_family: TerrainFormFamily::Coast,
+    biome_family: BiomeFamily::RockyCoast,
+    terrain_form_family: TerrainFormFamily::SeaCliff,
     summary: "Marine-facing terrain where shore expression and cliff transitions override inland defaults.",
     regional_traits: &[
         "Surface should read as coast-first even when upland transitions exist nearby.",

@@ -109,75 +109,117 @@ Examples:
   - short thaw: exposed rock, patchy snow retreat
   - long cold season: persistent snow and stronger ice cover
 
-## Draft Biome Families
+## Locked Biome Families
 
-### Aquatic / Coastal
+### Ocean / Coast
 
-- `open_ocean`
-- `shelf_sea`
-- `tidal_coast`
-- `beach_coast`
-- `lagoon_coast`
-- `delta_coast`
-- `cold_coast`
+- `Oceanic`
+- `RockyCoast`
+- `SandyCoast`
+- `EstuarineCoast`
+- `LagoonCoast`
+- `Mangrove`
 
-### Temperate / Mild
+### River / Lake
 
-- `temperate_grassland`
-- `temperate_forest`
-- `temperate_wetland`
-- `temperate_shrubland`
+- `Marsh`
+- `Swamp`
+- `FloodedForest`
 
-### Warm / Tropical
+### Desert / Dryland
 
-- `tropical_rainforest`
-- `tropical_seasonal_forest`
-- `savanna`
-- `monsoon_wetland`
+- `Desert`
+- `SemiDesert`
+- `Steppe`
+- `DryShrubland`
+- `MediterraneanShrubland`
 
-### Dry
+### Temperate Plain / Forest
 
-- `steppe`
-- `semi_arid_scrub`
-- `desert`
-- `salt_flat`
+- `TemperateGrassland`
+- `TemperateBroadleafForest`
+- `TemperateMixedForest`
+- `TemperateRainforest`
+- `BorealForest`
+
+### Tropical
+
+- `Savanna`
+- `TropicalDryForest`
+- `TropicalRainforest`
+- `MonsoonForest`
+
+### Mountain
+
+- `SubalpineWoodland`
+- `AlpineMeadow`
 
 ### Cold
 
-- `boreal_forest`
-- `cold_wetland`
-- `tundra`
-- `polar_desert`
-- `snowfield`
+- `Tundra`
+- `PolarBarrens`
+- `PolarIce`
 
-### Alpine / Volcanic
+## Locked Terrain Form Families
 
-- `alpine`
-- `glaciated_alpine`
-- `volcanic_barren`
+### Ocean / Coast
 
-## Draft Terrain Form Families
+- `MarineShelf`
+- `BeachPlain`
+- `BarrierCoast`
+- `LagoonCoast`
+- `RockyShore`
+- `SeaCliff`
+- `EstuaryLowland`
+- `FjordCoast`
+- `Delta`
 
-- `marine`
-- `coast`
-- `plain`
-- `rolling_plain`
-- `plateau`
-- `hill`
-- `ridge_upland`
-- `mountain`
-- `basin`
-- `valley`
-- `canyon`
-- `wet_lowland`
-- `dune`
-- `badlands`
-- `volcanic`
-- `glacial`
+### River / Lake
+
+- `Floodplain`
+- `WetLowland`
+- `AlluvialLowland`
+
+### Plain To Mountain
+
+- `Plain`
+- `RollingPlain`
+- `HillCountry`
+- `Pediment`
+- `MountainFront`
+- `HillCluster`
+- `Mountain`
+- `AlluvialFan`
+- `Plateau`
+- `DuneField`
+
+### Escarpment / Fracture
+
+- `MesaCountry`
+- `Escarpment`
+- `Badlands`
+- `Karst`
+
+### Basin / Valley / Canyon
+
+- `Basin`
+- `NarrowValley`
+- `BroadValley`
+- `GlacialValley`
+- `Canyon`
+- `RavineCountry`
+- `RidgeCountry`
+
+### Polar / Ice
+
+- `Icefield`
+- `CrevassedIcefield`
 
 ## Draft Region Archetypes
 
 Region archetypes combine biome family and terrain-form family into something generation can actually solve.
+
+This list is still provisional. `BiomeFamily` and `TerrainFormFamily` are now locked, and the next planning pass should re-cut this archetype list so every surviving archetype maps cleanly onto those locked families.
 
 ### Coastal / Water-Adjacent
 
@@ -238,24 +280,24 @@ Region archetypes combine biome family and terrain-form family into something ge
 ## Example Deterministic Resolution Rules
 
 - `temperate + subhumid + low elevation + low relief + inland`
-  - `BiomeFamily = temperate_grassland`
-  - `TerrainFormFamily = plain`
+  - `BiomeFamily = TemperateGrassland`
+  - `TerrainFormFamily = Plain`
   - `RegionArchetype = temperate_plain`
 - `temperate + subhumid + high elevation + low relief + inland`
-  - `BiomeFamily = temperate_grassland`
-  - `TerrainFormFamily = plateau`
+  - `BiomeFamily = TemperateGrassland`
+  - `TerrainFormFamily = Plateau`
   - `RegionArchetype = temperate_plateau`
 - `hot + wet + low elevation + low relief`
-  - `BiomeFamily = tropical_rainforest`
-  - `TerrainFormFamily = plain`
+  - `BiomeFamily = TropicalRainforest`
+  - `TerrainFormFamily = Plain`
   - `RegionArchetype = tropical_rainforest_lowland`
 - `hot + wet + low-to-mid elevation + medium relief`
-  - `BiomeFamily = tropical_rainforest`
-  - `TerrainFormFamily = hill`
+  - `BiomeFamily = TropicalRainforest`
+  - `TerrainFormFamily = HillCountry`
   - `RegionArchetype = tropical_rainforest_hills`
 - `cold + wet + high elevation + high relief`
-  - `BiomeFamily = glaciated_alpine`
-  - `TerrainFormFamily = glacial`
+  - `BiomeFamily = PolarIce`
+  - `TerrainFormFamily = Icefield`
   - `RegionArchetype = glaciated_alpine`
 
 ## Draft Meso Feature Catalog
@@ -461,18 +503,9 @@ This matrix is intentionally one-way. Meso may only choose from the allowed set 
   - `shallow_basin`
   - `wet_basin`
 
-### Volcanic Family
+### Deferred Special Family
 
-- `volcanic_upland`
-  - `lava_field`
-  - `crater`
-  - `escarpment_band`
-- `volcanic_plain`
-  - `lava_field`
-  - `crater`
-- `caldera_basin`
-  - `crater`
-  - `wet_basin`
+- volcanic or caldera archetypes are now deferred until the locked family set expands to cover them explicitly
 
 ## Draft Material Policy Direction
 
@@ -501,21 +534,12 @@ Examples:
   - exposed faces: stone
   - shoreline: beach sediment only where coast policy owns it
 
-## Open Questions
+## Next Planning Step
 
-- should `BiomeFamily` remain fairly broad while `RegionArchetype` carries most playable identity, or should biome families be more granular
-- do we want `plateau` and `ridge_upland` as distinct terrain-form families at V2 launch
-- should `wet_lowland` and `delta` live as terrain-form families, hydrology contexts, or only archetypes
-- how explicit should the first runtime seasonal biome-state layer be: four broad seasons, continuous year fraction, or regime-specific wet/dry plus warm/cold phases
-- how many coastal archetypes are worth carrying before coast-specific meso and material systems are rebuilt
-- which archetypes need a dedicated first-pass block palette beyond grass, dirt, sand, mud, gravel, stone, snow, and water
+With `BiomeFamily` and `TerrainFormFamily` now locked, the next planning step is:
 
-## Immediate Next Planning Step
-
-Before more V2 implementation, we should lock:
-
-1. the final `BiomeFamily` list
-2. the final `TerrainFormFamily` list
-3. the minimum `RegionArchetype` launch set
-4. the first meso matrix we are willing to support in code
-5. the first seasonal biome-state model we are willing to support in code
+1. choose the minimum `RegionArchetype` launch set
+2. map each launch archetype to one locked biome family and one locked terrain-form family
+3. decide which additional archetypes stay planned-only for later waves
+4. lock the first archetype-to-meso allowance matrix
+5. lock the first seasonal biome-state model and block-surface override policy

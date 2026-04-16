@@ -4,7 +4,7 @@ use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::TemperateHills,
     biome_family: BiomeFamily::TemperateGrassland,
-    terrain_form_family: TerrainFormFamily::Hill,
+    terrain_form_family: TerrainFormFamily::HillCountry,
     summary: "Rolling inland upland where ridge-spur and ravine accents are expected.",
     regional_traits: &[
         "Baseline shape should already feel undulating before meso detail is added.",
