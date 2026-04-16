@@ -236,5 +236,7 @@ NOT:
 - an initial code scaffold for atlas-owned region classification now exists, but it is not yet the active gameplay generator path
 - atlas-owned meso guides should eventually sit after region classification and before generation micro detail as on-demand deterministic terrain accents
 - the current implemented Wave 1A meso candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
-- the current top-level `world::generate_chunk(...)` path still aliases legacy V1 generation while V2 scaffolding grows in parallel
+- the old legacy V1 chunk generator has now been removed instead of being kept beside V2
+- the current top-level `world::generate_chunk(...)` path is an explicit TODO stub until V2 realization lands
+- the current `probe_chunk(...)`, `probe_column(...)`, and `sample_chunk_surface_lod(...)` surfaces are also compile-only TODO stubs
 - the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`

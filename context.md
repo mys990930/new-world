@@ -11,6 +11,7 @@
 - Meso should no longer decide the primary local biome identity; it should modulate already-classified regions with several-chunk terrain accents.
 - Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape operators or realization families, not as the final biome system.
 - The planned terrain stack is now: `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`.
+- The old V1 chunk generator has been removed; public generation entrypoints now remain only as compile-time TODO stubs until V2 realization is implemented.
 
 ## 1. 프로젝트 한줄 개요
 

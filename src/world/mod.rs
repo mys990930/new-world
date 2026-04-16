@@ -64,20 +64,19 @@ pub use core::WorldCore;
 pub use edit::{EditError, EditResult, WorldEdit};
 #[allow(unused_imports)]
 pub use generation::{
-    FLAT_WORLD_SURFACE_Y, LEGACY_GENERATOR_LABEL, SEA_LEVEL_Y, V2_GENERATOR_LABEL, WORLD_FLOOR_Y,
+    FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, V2_GENERATOR_LABEL, WORLD_FLOOR_Y,
     BaseHeightfieldPrototype, ChunkCorridorWindow, ChunkGenerationV2Inputs,
     ChunkGenerationV2Scaffold, HydrologySolve, MesoAppliedPrototype, PrototypeColumn,
     RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage, VoxelizationPlan,
     build_chunk_v2_scaffold, default_voxelization_plan, empty_base_heightfield_prototype,
     empty_chunk_corridor_window, empty_hydrology_solve, empty_meso_applied_prototype,
-    empty_smoothed_prototype, generate_chunk, generate_chunk_legacy, prepare_chunk_v2_inputs,
+    empty_smoothed_prototype, generate_chunk, prepare_chunk_v2_inputs,
 };
 #[allow(unused_imports)]
 pub use generation::{
     ChunkGenerationProbe, ChunkSurfaceLodGrid, ChunkSurfaceLodSample, ColumnAtlasSample,
     ColumnGenerationProbe, TerrainProfile, TerrainProfileCounts, probe_chunk,
-    probe_chunk_legacy, probe_column, probe_column_legacy, sample_chunk_surface_lod,
-    sample_chunk_surface_lod_legacy,
+    probe_column, sample_chunk_surface_lod,
 };
 #[allow(unused_imports)]
 pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};

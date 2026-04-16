@@ -2,23 +2,24 @@
 
 ## Role
 
-- Bridge from chunk-space generation to atlas-space control fields.
+- assemble the padded atlas windows that V2 generation scaffolding needs for a target chunk
 
 ## Responsibilities
 
-- map `ChunkCoord` to the atlas neighborhood required for generation
-- sample four surrounding atlas cells
-- bilerp atlas scalar fields per block column
-- build the matching padded atlas structure window for the same chunk neighborhood
-- build the matching padded region-classification window for V2 scaffolding
-- build the matching meso guide window that sits between atlas macro guidance and chunk-local realization
-- expose enough hydrology/climate signal for generation to choose bed and surface materials, not just relief
+- map `ChunkCoord` to the padded atlas footprint used by generation
+- build the matching atlas raw-field window
+- build the matching atlas skeleton window
+- build the matching region-classification window
+- build the matching meso-guide window
+
+## Non-Responsibilities
+
+- per-column bilerp sampling
+- terrain-profile resolution
+- hydrology carving
+- material selection
 
 ## Notes
 
-- Atlas cells are macro control points, not final block outcomes.
-- The sampler is intentionally separate from profile resolution so generation can evolve its own interpretation of atlas data without rewriting chunk-to-atlas lookup.
-- Distance-driven atlas fields such as coast and river proximity may depend on context outside the four bilerp corners, so generation must preserve the field semantics instead of recomputing them from a tiny local mask.
-- Generation currently asks atlas for a padded neighborhood around the target chunk so coast, continent-core, and hydrology signals do not collapse when a chunk sits inside a tiny 2x2 local slice.
-- Generation now uses that same padded neighborhood to gather mountain-spine and drainage-path structure, not just scalar corner values, so chunk-local realization can keep macro direction across chunk boundaries.
-- Generation now requests atlas scalar fields, atlas structure, region classification, and meso guides against the same padded atlas footprint so both legacy and V2 scaffolds can see macro, directional, and multi-scale context together.
+- after V1 removal, this module now exists only as a shared V2 input-assembly helper
+- it should stay small and only gather chunk-aligned atlas context
