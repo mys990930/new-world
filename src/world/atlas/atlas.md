@@ -114,6 +114,7 @@ write_debug_images(
 - `tuning.md`
 - `structure.md`
 - `region.md`
+- `region_catalog.md`
 - `meso.md`
 - `meso_candidates.md`
 - `atlas_fields.md`

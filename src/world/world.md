@@ -197,6 +197,7 @@ NOT:
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/region.md`: atlas-owned region classification contract
+- `atlas/region_catalog.md`: planning draft for biome, terrain-form, archetype, and meso catalogs
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
 - `atlas/meso.md`: atlas-owned multi-chunk terrain-guide contract
 - `storage.md`: raw chunk byte serialization contract
