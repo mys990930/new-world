@@ -1,3 +1,9 @@
+pub mod catalog;
+pub mod features;
+
+pub use catalog::{MesoCatalogEntry, MesoCatalogStatus, meso_catalog_entries};
+pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
+
 use std::f32::consts::TAU;
 
 use crate::world::WorldMeta;

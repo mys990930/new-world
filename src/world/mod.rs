@@ -10,6 +10,7 @@ mod meta;
 mod query;
 mod registry;
 mod storage;
+mod surface;
 mod topdown;
 
 #[allow(unused_imports)]
@@ -20,20 +21,25 @@ pub use atlas::{
     AtlasHydrologyTuning, AtlasNormalizationTuning, AtlasPreviewDebugTuning, AtlasResolvedCell,
     AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasStructureMap,
     AtlasStructureRegion, AtlasStructureRegionCoord, AtlasTerrainTuning, AtlasTuning,
-    AtlasWeightTuning, BiomeFamily, BiomePreview, ClimateRegime, CoastalContext,
-    DrainageGraph, DrainageNode, DrainageNodeKind, ElevationBand, HydrologyContext,
+    AtlasWeightTuning, BiomeFamily, BiomePreview, ClimateRegime, CoastalContext, DrainageGraph,
+    DrainageNode, DrainageNodeKind, ElevationBand, HydrologyContext,
     MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
-    MoistureBand, MoistureClass, MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion,
-    MesoRegionCoord, MountainChainGraph, MountainChainId, MountainChainScale,
-    MountainSpineSegment, OverlayClass, RegionArchetype, RegionClassCell, RegionClassMap,
-    RegionClassSample, ReliefClass, RiverPathId, RiverPathKind, RiverPathSegment,
-    TemperatureBand, TerrainFormClass, TerrainFormFamily, ThermalClass,
+    MoistureBand, MoistureClass, MesoCatalogEntry, MesoCatalogStatus, MesoFeatureDef,
+    MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
+    MountainChainGraph, MountainChainId, MountainChainScale, MountainSpineSegment, OverlayClass,
+    RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS, RawClassificationDimension,
+    RegionArchetype, RegionArchetypeDef, RegionCatalogEntry, RegionCatalogStatus,
+    RegionClassCell, RegionClassMap, RegionClassSample, ReliefClass, RiverPathId,
+    RiverPathKind, RiverPathSegment, TemperatureBand, TerrainFormClass, TerrainFormFamily,
+    ThermalClass,
     ATLAS_STRUCTURE_REGION_EDGE_CELLS, ATLAS_STRUCTURE_REGION_PADDING_CELLS,
     atlas_structure_region_coord_for_atlas, atlas_structure_regions_covering_area,
     generate_atlas_fields, generate_atlas_fields_with_tuning, generate_atlas_structure,
-    generate_atlas_structure_with_tuning, generate_meso_guides, meso_region_coord_for_atlas,
-    meso_regions_covering_area, resolve_atlas, resolve_atlas_with_tuning, resolve_region_classes,
-    sample_meso_guides, sample_region_classes, write_debug_images, write_debug_images_with_options,
+    generate_atlas_structure_with_tuning, generate_meso_guides, meso_catalog_entries,
+    meso_feature_def, meso_feature_defs, meso_region_coord_for_atlas, meso_regions_covering_area,
+    region_archetype_def, region_archetype_defs, region_catalog_entries, resolve_atlas,
+    resolve_atlas_with_tuning, resolve_region_classes, sample_meso_guides,
+    sample_region_classes, write_debug_images, write_debug_images_with_options,
     write_debug_images_with_options_and_tuning,
 };
 #[allow(unused_imports)]
@@ -59,8 +65,12 @@ pub use edit::{EditError, EditResult, WorldEdit};
 #[allow(unused_imports)]
 pub use generation::{
     FLAT_WORLD_SURFACE_Y, LEGACY_GENERATOR_LABEL, SEA_LEVEL_Y, V2_GENERATOR_LABEL, WORLD_FLOOR_Y,
-    ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, V2ScaffoldStage,
-    build_chunk_v2_scaffold, generate_chunk, generate_chunk_legacy, prepare_chunk_v2_inputs,
+    BaseHeightfieldPrototype, ChunkCorridorWindow, ChunkGenerationV2Inputs,
+    ChunkGenerationV2Scaffold, HydrologySolve, MesoAppliedPrototype, PrototypeColumn,
+    RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage, VoxelizationPlan,
+    build_chunk_v2_scaffold, default_voxelization_plan, empty_base_heightfield_prototype,
+    empty_chunk_corridor_window, empty_hydrology_solve, empty_meso_applied_prototype,
+    empty_smoothed_prototype, generate_chunk, generate_chunk_legacy, prepare_chunk_v2_inputs,
 };
 #[allow(unused_imports)]
 pub use generation::{
@@ -82,6 +92,12 @@ pub use registry::{
 };
 #[allow(unused_imports)]
 pub use storage::{StorageError, load_chunk, save_chunk};
+#[allow(unused_imports)]
+pub use surface::{
+    CoverOverrideRule, CoverPhase, MaterialPolicyDef, MaterialPolicyId, SeasonalBiomeStateDef,
+    SeasonalBiomeStateId, SeasonalPhase, default_cover_override_rules,
+    default_material_policies, default_seasonal_biome_states,
+};
 #[allow(unused_imports)]
 pub use topdown::{
     TopdownCell, TopdownChunkColumnCoord, TopdownChunkColumnPatch, TopdownColumnScan,

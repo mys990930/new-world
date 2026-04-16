@@ -155,3 +155,9 @@ sample_region_classes(
 - the current scaffold resolves banded classes, biome families, terrain-form families, and coarse region archetypes from atlas raw fields plus nearby skeleton presence
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
 - future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion
+
+## Submodules
+
+- `axes.md`
+- `catalog.md`
+- `archetypes/archetypes.md`

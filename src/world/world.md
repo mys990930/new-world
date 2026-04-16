@@ -17,6 +17,7 @@
 - atlas-scale mountain-chain / drainage structure ownership
 - deterministic region-classification ownership between atlas raw fields / skeleton guidance and chunk-local realization
 - deterministic meso terrain-guide ownership after region classification and before final chunk-local realization
+- surface material policy and seasonal biome-state ownership before final voxel fill
 - snapshot/query surfaces
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -54,6 +55,7 @@
 - `TemperatureBand`, `MoistureBand`, `ElevationBand`
 - `ReliefClass`, `HydrologyContext`, `CoastalContext`, `ClimateRegime`
 - `BiomeFamily`, `TerrainFormFamily`, `RegionArchetype`
+- `RegionArchetypeDef`, `MesoFeatureDef`
 - `AtlasStructureRegionCoord`, `AtlasStructureRegion`
 - `MountainChainGraph`, `MountainSpineSegment`
 - `DrainageGraph`, `RiverPathSegment`
@@ -65,6 +67,9 @@
 - `NeighborChunks`
 - `Ray3`, `RaycastHit`
 - `TopdownCell`, `TopdownColumnScan`, `TopdownSurfaceRange`, `TopdownEdge`
+- `MaterialPolicyDef`, `MaterialPolicyId`
+- `SeasonalBiomeStateDef`, `SeasonalBiomeStateId`, `SeasonalPhase`
+- `CoverOverrideRule`, `CoverPhase`
 - `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
 - `CreateWorldConfig`
 - `WorldCore`
@@ -91,6 +96,13 @@ sample_region_classes(
     world_x: i32,
     world_z: i32,
 ) -> RegionClassSample
+region_archetype_defs() -> &'static [RegionArchetypeDef]
+region_archetype_def(id: RegionArchetype) -> Option<&'static RegionArchetypeDef>
+meso_feature_defs() -> &'static [MesoFeatureDef]
+meso_feature_def(key: &str) -> Option<&'static MesoFeatureDef>
+default_material_policies() -> &'static [MaterialPolicyDef]
+default_seasonal_biome_states() -> &'static [SeasonalBiomeStateDef]
+default_cover_override_rules() -> &'static [CoverOverrideRule]
 generate_meso_guides(
     meta: &WorldMeta,
     area: AtlasArea,
@@ -198,8 +210,14 @@ NOT:
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/region.md`: atlas-owned region classification contract
 - `atlas/region_catalog.md`: planning draft for biome, terrain-form, archetype, and meso catalogs
+- `atlas/region/axes.md`: classification dimension reference
+- `atlas/region/catalog.md`: scaffolded archetype catalog index
+- `atlas/region/archetypes/archetypes.md`: per-archetype module/doc structure
 - `atlas/structure.md`: atlas-owned mountain-chain and drainage skeleton contract
 - `atlas/meso.md`: atlas-owned multi-chunk terrain-guide contract
+- `atlas/meso/catalog.md`: scaffolded meso feature catalog index
+- `atlas/meso/features/features.md`: per-feature module/doc structure
+- `surface/surface.md`: material, cover, and seasonal surface policy contract
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract

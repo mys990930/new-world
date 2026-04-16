@@ -18,14 +18,18 @@ pub use atlas_fields::{
 };
 pub use meso::{
     MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
-    MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
-    generate_meso_guides, meso_region_coord_for_atlas, meso_regions_covering_area,
-    sample_meso_guides,
+    MesoCatalogEntry, MesoCatalogStatus, MesoFeatureDef, MesoGuideCell, MesoGuideMap,
+    MesoGuideSample, MesoRegion, MesoRegionCoord, generate_meso_guides, meso_catalog_entries,
+    meso_feature_def, meso_feature_defs, meso_region_coord_for_atlas,
+    meso_regions_covering_area, sample_meso_guides,
 };
 pub use region::{
     BiomeFamily, ClimateRegime, CoastalContext, ElevationBand, HydrologyContext, MoistureBand,
-    RegionArchetype, RegionClassCell, RegionClassMap, RegionClassSample, ReliefClass,
-    TemperatureBand, TerrainFormFamily, resolve_region_classes, sample_region_classes,
+    RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS, RawClassificationDimension,
+    RegionArchetype, RegionArchetypeDef, RegionCatalogEntry, RegionCatalogStatus,
+    RegionClassCell, RegionClassMap, RegionClassSample, ReliefClass, TemperatureBand,
+    TerrainFormFamily, region_archetype_def, region_archetype_defs, region_catalog_entries,
+    resolve_region_classes, sample_region_classes,
 };
 pub use atlas_resolver::{
     AtlasResolvedCell, AtlasResolvedMap, BiomePreview, MoistureClass, OverlayClass,

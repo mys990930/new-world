@@ -218,6 +218,13 @@ generation::sample_chunk_surface_lod(
 - `profiles/profiles.md`: profile-specific surface shaping modules
 - `realize.md`: chunk fill loop and layered terrain realization
 - `v2.md`: region-first generation scaffold
+- `v2/inputs.md`: atlas, skeleton, and region input assembly scaffold
+- `v2/corridors.md`: river corridor and downstream-grade scaffold
+- `v2/prototype.md`: biome-aware base heightfield prototype scaffold
+- `v2/meso_apply.md`: meso application scaffold
+- `v2/smoothing.md`: smoothing and local refinement scaffold
+- `v2/hydrology.md`: final hydrology scaffold
+- `v2/voxelize.md`: final material and block placement scaffold
 
 ## Related Modules
 
@@ -228,4 +235,5 @@ generation::sample_chunk_surface_lod(
 - `atlas/atlas.md`
 - `atlas/region.md`
 - `atlas/meso.md`
+- `surface/surface.md`
 - `jobs/jobs.md`

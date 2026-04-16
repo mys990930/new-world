@@ -153,3 +153,8 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - generation now samples these guides per block column and uses them to bias broad relief before final structure-aware smoothing
 - candidate families and the wider backlog still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input
+
+## Submodules
+
+- `catalog.md`
+- `features/features.md`

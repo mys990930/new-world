@@ -28,8 +28,13 @@ pub use probe::{
 pub use profile::TerrainProfile;
 pub use legacy::generate_chunk;
 pub use v2::{
-    GENERATOR_LABEL as V2_GENERATOR_LABEL, ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold,
-    V2ScaffoldStage, build_chunk_v2_scaffold, prepare_chunk_v2_inputs,
+    GENERATOR_LABEL as V2_GENERATOR_LABEL, BaseHeightfieldPrototype, ChunkCorridorWindow,
+    ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, HydrologySolve,
+    MesoAppliedPrototype, PrototypeColumn, RiverCorridorConstraint, SmoothedPrototype,
+    V2ScaffoldStage, VoxelizationPlan, build_chunk_v2_scaffold,
+    default_voxelization_plan, empty_base_heightfield_prototype,
+    empty_chunk_corridor_window, empty_hydrology_solve, empty_meso_applied_prototype,
+    empty_smoothed_prototype, prepare_chunk_v2_inputs,
 };
 
 #[cfg(test)]

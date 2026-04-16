@@ -115,7 +115,12 @@ write_debug_images(
 - `structure.md`
 - `region.md`
 - `region_catalog.md`
+- `region/axes.md`
+- `region/catalog.md`
+- `region/archetypes/archetypes.md`
 - `meso.md`
+- `meso/catalog.md`
+- `meso/features/features.md`
 - `meso_candidates.md`
 - `atlas_fields.md`
 - `atlas_resolver.md`

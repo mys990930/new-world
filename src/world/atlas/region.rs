@@ -1,3 +1,14 @@
+pub mod archetypes;
+pub mod axes;
+pub mod catalog;
+
+pub use archetypes::{RegionArchetypeDef, region_archetype_def, region_archetype_defs};
+pub use axes::{
+    RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS,
+    RawClassificationDimension,
+};
+pub use catalog::{RegionCatalogEntry, RegionCatalogStatus, region_catalog_entries};
+
 use crate::world::WorldMeta;
 
 use super::atlas_fields::AtlasFieldMap;
