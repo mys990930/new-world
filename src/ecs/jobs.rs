@@ -1,19 +1,33 @@
 use crate::jobs::{JobRequest, JobResult};
 use crate::world::{CreatedWorldSource, ChunkCoord, WorldBlockCoord, WorldCore};
 
-use super::{ChunkStates, EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS};
+use super::{
+    ChunkLifecyclePlan, ChunkStates, EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS,
+    HORIZONTAL_RETAIN_CHUNK_RADIUS,
+};
 
 impl EcsRuntime {
-    pub fn plan_chunk_job_requests(
+    pub fn plan_chunk_lifecycle(
         &mut self,
         world: &WorldCore,
         created_world: Option<&CreatedWorldSource>,
-    ) -> Vec<JobRequest> {
+    ) -> ChunkLifecyclePlan {
         let target_chunk = self.focused_player_chunk();
-        let interest = interest_coords(target_chunk, created_world);
+        let interest = envelope_coords(
+            target_chunk,
+            created_world,
+            HORIZONTAL_INTEREST_CHUNK_RADIUS,
+        );
+        let retain = envelope_coords(
+            target_chunk,
+            created_world,
+            HORIZONTAL_RETAIN_CHUNK_RADIUS,
+        );
         let mut chunk_states = self.world_mut().resource_mut::<ChunkStates>();
-        chunk_states.set_interest(interest.clone());
         sync_loaded_chunk_states(&mut chunk_states, world);
+        chunk_states.set_interest(interest.iter().copied());
+        chunk_states.set_retain(retain.iter().copied());
+        let unload_coords = planned_unload_coords(&chunk_states, &retain);
 
         let mut requests = Vec::new();
         for coord in &interest {
@@ -47,12 +61,17 @@ impl EcsRuntime {
 
         enqueue_mesh_requests_for_interest(
             &mut requests,
-            &interest,
+            &interest.iter().copied().collect::<Vec<_>>(),
             &mut chunk_states,
             world,
         );
 
-        requests
+        ChunkLifecyclePlan {
+            interest,
+            retain,
+            job_requests: requests,
+            unload_coords,
+        }
     }
 
     pub fn apply_job_result(&mut self, result: &JobResult) {
@@ -61,21 +80,37 @@ impl EcsRuntime {
         match result {
             JobResult::ChunkLoaded { coord, .. } => {
                 chunk_states.load_requested.remove(coord);
-                chunk_states.loaded.insert(*coord);
-                chunk_states.render_ready.remove(coord);
-                chunk_states.remesh_needed.remove(coord);
-                invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
+                if chunk_states.retain.contains(coord) {
+                    chunk_states.loaded.insert(*coord);
+                    chunk_states.render_ready.remove(coord);
+                    chunk_states.remesh_needed.remove(coord);
+                    invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
+                } else {
+                    chunk_states.loaded.remove(coord);
+                    chunk_states.render_ready.remove(coord);
+                    chunk_states.remesh_needed.remove(coord);
+                }
             }
             JobResult::ChunkGenerated { coord, .. } => {
                 chunk_states.generation_requested.remove(coord);
-                chunk_states.loaded.insert(*coord);
-                chunk_states.render_ready.remove(coord);
-                chunk_states.remesh_needed.remove(coord);
-                invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
+                if chunk_states.retain.contains(coord) {
+                    chunk_states.loaded.insert(*coord);
+                    chunk_states.render_ready.remove(coord);
+                    chunk_states.remesh_needed.remove(coord);
+                    invalidate_loaded_neighbor_meshes(&mut chunk_states, *coord);
+                } else {
+                    chunk_states.loaded.remove(coord);
+                    chunk_states.render_ready.remove(coord);
+                    chunk_states.remesh_needed.remove(coord);
+                }
             }
             JobResult::ChunkMeshBuilt { coord, .. } => {
                 chunk_states.mesh_requested.remove(coord);
-                chunk_states.render_ready.insert(*coord);
+                if chunk_states.retain.contains(coord) {
+                    chunk_states.render_ready.insert(*coord);
+                } else {
+                    chunk_states.render_ready.remove(coord);
+                }
             }
             JobResult::MinimapChunkColumnBuilt { .. } => {}
             JobResult::WorldCreated { .. } => {}
@@ -93,6 +128,23 @@ impl EcsRuntime {
                 JobRequest::BuildMinimapChunkColumn { .. } => {}
             },
         }
+    }
+
+    pub fn apply_chunk_unloaded(&mut self, coord: ChunkCoord) {
+        let mut chunk_states = self.world_mut().resource_mut::<ChunkStates>();
+        chunk_states.interest.remove(&coord);
+        chunk_states.retain.remove(&coord);
+        chunk_states.loaded.remove(&coord);
+        chunk_states.load_requested.remove(&coord);
+        chunk_states.generation_requested.remove(&coord);
+        chunk_states.mesh_requested.remove(&coord);
+        chunk_states.remesh_needed.remove(&coord);
+        chunk_states.render_ready.remove(&coord);
+        invalidate_loaded_neighbor_meshes(&mut chunk_states, coord);
+    }
+
+    pub fn retains_chunk(&self, coord: ChunkCoord) -> bool {
+        self.world().resource::<ChunkStates>().retain.contains(&coord)
     }
 
     pub fn visible_chunks(&self) -> Vec<ChunkCoord> {
@@ -128,6 +180,18 @@ fn sync_loaded_chunk_states(chunk_states: &mut ChunkStates, world: &WorldCore) {
             chunk_states.loaded.insert(coord);
         }
     }
+}
+
+fn planned_unload_coords(
+    chunk_states: &ChunkStates,
+    retain: &std::collections::BTreeSet<ChunkCoord>,
+) -> Vec<ChunkCoord> {
+    chunk_states
+        .loaded
+        .iter()
+        .filter(|coord| !retain.contains(coord))
+        .copied()
+        .collect()
 }
 
 fn enqueue_mesh_requests_for_interest(
@@ -182,12 +246,12 @@ fn adjacent_chunk_coords(coord: ChunkCoord) -> [ChunkCoord; 6] {
     ]
 }
 
-fn interest_coords(
+fn envelope_coords(
     target_chunk: ChunkCoord,
     created_world: Option<&CreatedWorldSource>,
-) -> Vec<ChunkCoord> {
-    let mut coords = Vec::new();
-    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
+    radius: i32,
+) -> std::collections::BTreeSet<ChunkCoord> {
+    let mut coords = std::collections::BTreeSet::new();
 
     for z in (target_chunk.2 - radius)..=(target_chunk.2 + radius) {
         for x in (target_chunk.0 - radius)..=(target_chunk.0 + radius) {
@@ -197,11 +261,11 @@ fn interest_coords(
                 for y in min.1..=max.1 {
                     let coord = ChunkCoord(x, y, z);
                     if source.contains_chunk(coord) {
-                        coords.push(coord);
+                        coords.insert(coord);
                     }
                 }
             } else {
-                coords.push(ChunkCoord(x, target_chunk.1, z));
+                coords.insert(ChunkCoord(x, target_chunk.1, z));
             }
         }
     }
@@ -312,6 +376,7 @@ mod tests {
         {
             let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
             chunk_states.loaded.extend([center, east]);
+            chunk_states.retain.extend([center, east]);
             chunk_states.render_ready.insert(east);
         }
 
@@ -332,6 +397,7 @@ mod tests {
         {
             let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
             chunk_states.loaded.insert(coord);
+            chunk_states.retain.insert(coord);
             chunk_states.mesh_requested.insert(coord);
             chunk_states.remesh_needed.insert(coord);
         }
@@ -345,5 +411,42 @@ mod tests {
         assert!(!chunk_states.mesh_requested.contains(&coord));
         assert!(chunk_states.render_ready.contains(&coord));
         assert!(chunk_states.remesh_needed.contains(&coord));
+    }
+
+    #[test]
+    fn lifecycle_plan_unloads_chunks_outside_retain_envelope() {
+        let mut world = test_world();
+        let mut runtime = EcsRuntime::new();
+        let far = ChunkCoord(4, 0, 0);
+        world.insert_chunk(far, ChunkData::new_empty(far));
+        {
+            let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
+            chunk_states.loaded.insert(far);
+        }
+
+        let plan = runtime.plan_chunk_lifecycle(&world, None);
+
+        assert!(plan.unload_coords.contains(&far));
+    }
+
+    #[test]
+    fn stale_chunk_result_outside_retain_does_not_become_loaded() {
+        let mut runtime = EcsRuntime::new();
+        let coord = ChunkCoord(5, 0, 0);
+        runtime
+            .world_mut()
+            .resource_mut::<ChunkStates>()
+            .load_requested
+            .insert(coord);
+
+        runtime.apply_job_result(&JobResult::ChunkLoaded {
+            coord,
+            chunk: ChunkData::new_empty(coord),
+        });
+
+        let chunk_states = runtime.world().resource::<ChunkStates>();
+        assert!(!chunk_states.loaded.contains(&coord));
+        assert!(!chunk_states.render_ready.contains(&coord));
+        assert!(!chunk_states.load_requested.contains(&coord));
     }
 }

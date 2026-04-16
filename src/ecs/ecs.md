@@ -40,6 +40,7 @@
 - `CameraState`
 - `LocalPlayerEntity`
 - `ChunkStates`
+- `ChunkLifecyclePlan`
 - `SelectionState`
 
 #### Entities / Components
@@ -117,6 +118,7 @@ EcsRuntime::world(&self) -> &World
 EcsRuntime::world_mut(&mut self) -> &mut World
 
 pub const HORIZONTAL_INTEREST_CHUNK_RADIUS: i32
+pub const HORIZONTAL_RETAIN_CHUNK_RADIUS: i32
 
 EcsRuntime::run_pre_update()
 EcsRuntime::run_update()
@@ -139,6 +141,10 @@ EcsRuntime::update_selection_from_world(
     viewport_height: u32,
 )
 EcsRuntime::selection_state() -> SelectionState
+EcsRuntime::plan_chunk_lifecycle(
+    world: &WorldCore,
+    created_world: Option<&CreatedWorldSource>,
+) -> ChunkLifecyclePlan
 ```
 
 ### Dependencies
@@ -178,4 +184,6 @@ EcsRuntime::selection_state() -> SelectionState
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
+- chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
+- stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work

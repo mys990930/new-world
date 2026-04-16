@@ -13,7 +13,8 @@
 - collect completed jobs and apply them to ECS/world/renderer
 - collect completed minimap rebuild jobs and patch app-owned minimap cache
 - run world-aware local-player motion against `WorldCore`
-- plan chunk acquisition / meshing jobs from ECS chunk state
+- plan chunk acquisition / meshing / unload lifecycle from ECS chunk state
+- apply chunk unloads to world/renderer/minimap before submitting new jobs
 - request minimap chunk-column rebuilds when chunk load/generate results change loaded world data
 - update world-and-viewport-based selection state
 - log the clicked block key when a click lands on the current raycast target
@@ -55,19 +56,21 @@
 7. collect any already-completed jobs into ECS/world/renderer/minimap cache
 8. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
 9. `ecs.run_post_update()`
-10. plan chunk requests with `ecs.plan_chunk_job_requests(&world, created_world.as_ref())`
-11. submit the planned jobs
-12. collect newly completed jobs again
-13. update `SelectionState` from the latest world state and viewport
-14. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-15. drain and optionally log discrete commands
-16. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
+10. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
+11. apply unload coords to `WorldCore`, renderer chunk meshes, and minimap cache
+12. submit the planned jobs
+13. collect newly completed jobs again
+14. update `SelectionState` from the latest world state and viewport
+15. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
+16. drain and optionally log discrete commands
+17. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
 
 - world-aware player motion happens after job results are applied and before camera follow runs in `post_update`
 - selection update happens after world/job result application
 - minimap viewport composition must read app-owned cached data only; completed jobs and future local world edits are the only sources that mutate the cache
+- unloads happen before new frame job submission so stale load/mesh work has a clear acceptance gate
 - block logging is click-triggered so the console does not flood every frame
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
@@ -89,3 +92,4 @@
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - the current inventory / quickslot HUD remains in normal `InGame` mode and is rendered as ECS-derived pixel-atlas UI over the scene
 - the current minimap no longer scans `WorldCore` every frame; it composes a one-chunk viewport from cached chunk-column top-down data rebuilt through jobs
+- steady-state chunk lifetime now supports interest-vs-retain hysteresis and app-owned unload application

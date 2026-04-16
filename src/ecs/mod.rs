@@ -17,7 +17,10 @@ pub use camera::{
     quarter_view_render_camera_pose, quarter_view_vertical_world_size,
 };
 #[allow(unused_imports)]
-pub use chunk::{ChunkStates, HORIZONTAL_INTEREST_CHUNK_RADIUS};
+pub use chunk::{
+    ChunkLifecyclePlan, ChunkStates, HORIZONTAL_INTEREST_CHUNK_RADIUS,
+    HORIZONTAL_RETAIN_CHUNK_RADIUS,
+};
 #[allow(unused_imports)]
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
 #[allow(unused_imports)]

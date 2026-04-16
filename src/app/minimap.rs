@@ -163,8 +163,24 @@ impl GameApp {
         coord: TopdownChunkColumnCoord,
         patch: TopdownChunkColumnPatch,
     ) {
+        if loaded_world_column_snapshots(&self.world, coord).is_empty() {
+            self.minimap.remove_column(coord);
+            return;
+        }
+
         let needs_resubmit = self.minimap.apply_built_patch(coord, patch);
         if needs_resubmit {
+            self.queue_minimap_chunk_column_rebuild(coord);
+        }
+    }
+
+    pub(crate) fn refresh_minimap_chunk_column_after_world_change(
+        &mut self,
+        coord: TopdownChunkColumnCoord,
+    ) {
+        if loaded_world_column_snapshots(&self.world, coord).is_empty() {
+            self.minimap.remove_column(coord);
+        } else {
             self.queue_minimap_chunk_column_rebuild(coord);
         }
     }

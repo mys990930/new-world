@@ -9,6 +9,7 @@
 
 - store cached top-down chunk-column data keyed by chunk `x/z`
 - track pending and dirty minimap rebuild columns
+- remove cached chunk-column data when no loaded chunk remains in that column
 - compose the current player-centered one-chunk minimap viewport from cached columns
 - expose cache update helpers for completed minimap jobs
 - expose local single-column patch helpers for future world edits
@@ -37,6 +38,7 @@
 - loaded chunk-column snapshots from `WorldCore`
 - completed minimap rebuild results from `jobs`
 - optional local world-space block changes for future patching
+- chunk unload notifications from app frame orchestration
 - player world position when composing a render viewport
 
 ## Outputs
@@ -49,6 +51,7 @@
 - when a chunk column changes and no rebuild is pending, that column becomes pending and should enqueue a minimap rebuild job
 - when a chunk column changes while a rebuild is already pending, that column becomes dirty and must enqueue one more rebuild after the pending result arrives
 - completed minimap-column results replace the cached patch for that `x/z` column
+- when the last loaded chunk in a column is unloaded, that cached column should be removed instead of rebuilt
 - local future world edits may patch just one cached block column instead of rebuilding the whole viewport
 
 ## Invariants
@@ -71,4 +74,5 @@
 
 - the current minimap still covers a one-chunk `32x32` block window around the player
 - the current runtime refreshes cached minimap columns when chunk load/generate results arrive
+- chunk unload now also participates: losing one chunk in a still-loaded column should rebuild that column, while losing the last chunk in a column should drop the cached patch entirely
 - future player block edits should patch only the affected local block columns whenever possible

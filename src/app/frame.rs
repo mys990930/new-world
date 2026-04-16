@@ -20,10 +20,11 @@ impl GameApp {
         self.ecs.simulate_local_player_motion(&self.world);
         self.ecs.run_post_update();
 
-        let requests = self
+        let lifecycle = self
             .ecs
-            .plan_chunk_job_requests(&self.world, self.created_world.as_ref());
-        if let Err(error) = self.jobs.submit_all(requests) {
+            .plan_chunk_lifecycle(&self.world, self.created_world.as_ref());
+        self.apply_chunk_unloads(&lifecycle.unload_coords);
+        if let Err(error) = self.jobs.submit_all(lifecycle.job_requests) {
             eprintln!("[app] jobs submit failed: {:?}", error);
         }
 
@@ -78,24 +79,34 @@ impl GameApp {
                     self.handle_world_created_result(root, manifest);
                 }
                 JobResult::ChunkLoaded { coord, chunk } => {
-                    self.world.insert_chunk(coord, chunk);
-                    self.queue_minimap_chunk_column_rebuild(crate::world::TopdownChunkColumnCoord {
-                        chunk_x: coord.0,
-                        chunk_z: coord.2,
-                    });
+                    if self.ecs.retains_chunk(coord) {
+                        self.world.insert_chunk(coord, chunk);
+                        self.refresh_minimap_chunk_column_after_world_change(
+                            crate::world::TopdownChunkColumnCoord {
+                                chunk_x: coord.0,
+                                chunk_z: coord.2,
+                            },
+                        );
+                    }
                 }
                 JobResult::ChunkGenerated { coord, chunk } => {
-                    self.world.insert_chunk(coord, chunk);
-                    self.queue_minimap_chunk_column_rebuild(crate::world::TopdownChunkColumnCoord {
-                        chunk_x: coord.0,
-                        chunk_z: coord.2,
-                    });
+                    if self.ecs.retains_chunk(coord) {
+                        self.world.insert_chunk(coord, chunk);
+                        self.refresh_minimap_chunk_column_after_world_change(
+                            crate::world::TopdownChunkColumnCoord {
+                                chunk_x: coord.0,
+                                chunk_z: coord.2,
+                            },
+                        );
+                    }
                 }
                 JobResult::ChunkMeshBuilt { coord, mesh } => {
-                    if let Err(error) = self.renderer.apply_upload(
-                        self.bridge_world_mesh_to_render_upload(coord, mesh),
-                    ) {
-                        eprintln!("[app] renderer upload failed for {:?}: {:?}", coord, error);
+                    if self.ecs.retains_chunk(coord) && self.world.has_chunk(coord) {
+                        if let Err(error) = self.renderer.apply_upload(
+                            self.bridge_world_mesh_to_render_upload(coord, mesh),
+                        ) {
+                            eprintln!("[app] renderer upload failed for {:?}: {:?}", coord, error);
+                        }
                     }
                 }
                 JobResult::MinimapChunkColumnBuilt { coord, patch } => {
@@ -106,6 +117,26 @@ impl GameApp {
                     eprintln!("[app] job failed for {:?}: {:?}", request, error);
                 }
             }
+        }
+    }
+
+    fn apply_chunk_unloads(&mut self, unload_coords: &[crate::world::ChunkCoord]) {
+        use std::collections::BTreeSet;
+
+        let mut affected_columns = BTreeSet::new();
+        for &coord in unload_coords {
+            self.world.remove_chunk(coord);
+            self.ecs.apply_chunk_unloaded(coord);
+            self.renderer
+                .remove_chunk_mesh(crate::renderer::ChunkCoord(coord.0, coord.1, coord.2));
+            affected_columns.insert(crate::world::TopdownChunkColumnCoord {
+                chunk_x: coord.0,
+                chunk_z: coord.2,
+            });
+        }
+
+        for column in affected_columns {
+            self.refresh_minimap_chunk_column_after_world_change(column);
         }
     }
 

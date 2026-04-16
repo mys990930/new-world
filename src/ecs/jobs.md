@@ -13,6 +13,8 @@
 - mesh-requested dedupe policy
 - remesh-needed invalidation policy
 - loaded / render-ready transition rules
+- retain-envelope unload policy
+- stale-result acceptance policy
 
 ## Inputs
 
@@ -25,21 +27,25 @@
 
 - updated ECS chunk meta state
 - deterministic job requests for the jobs system
+- deterministic unload coord list for app-owned world/renderer removal
 
 ## State Transition Rules
 
-- chunk job planning always starts from the current interest set
+- chunk lifecycle planning starts from the current interest and retain sets
 - created-world chunks prefer `LoadChunk`
 - non-created or out-of-bounds chunks fall back to `GenerateChunk`
 - load/generate success marks chunks as loaded
 - load/generate success also invalidates already-loaded adjacent chunk meshes so seam-sensitive terrain can rebuild against the new neighbor snapshot
 - mesh success marks chunks as render-ready
+- chunks outside `retain` become unload candidates even if they were previously loaded/render-ready
+- job results for chunks that are no longer retained must clear dedupe state but must not resurrect runtime world/render state
 
 ## Invariants
 
 - ECS does not execute jobs directly
 - world chunk insertion still happens in app after jobs complete
 - ECS chunk meta state must stay consistent with applied job results
+- unload hysteresis is expressed through ECS-owned retain state, not through app-owned ad hoc distance checks
 
 ## Non-Responsibilities
 
@@ -62,4 +68,4 @@
   - fallback path: `GenerateChunk -> BuildChunkMesh`
 - seam-sensitive terrain such as contour hints may require a second `BuildChunkMesh` pass for adjacent chunks after a neighbor chunk becomes available
 - the current steady-state horizontal interest envelope is a fixed `5x5` neighborhood around the focused player chunk
-- app still owns the actual `world.insert_chunk(...)` and `renderer.apply_upload(...)` calls
+- app still owns the actual `world.insert_chunk(...)`, `world.remove_chunk(...)`, renderer mesh upload, and renderer mesh removal calls

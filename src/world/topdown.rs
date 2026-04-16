@@ -41,7 +41,7 @@ pub struct TopdownSurfaceRange {
     pub max_y: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TopdownChunkColumnCoord {
     pub chunk_x: i32,
     pub chunk_z: i32,
