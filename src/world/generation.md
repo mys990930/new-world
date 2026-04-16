@@ -72,6 +72,21 @@ generation::generate_chunk(
     registry: &BlockRegistry,
 ) -> ChunkData
 
+generation::generate_chunk_legacy(
+    coord: ChunkCoord,
+    meta: &WorldMeta,
+    registry: &BlockRegistry,
+) -> ChunkData
+
+generation::prepare_chunk_v2_inputs(
+    coord: ChunkCoord,
+    meta: &WorldMeta,
+) -> ChunkGenerationV2Inputs
+generation::build_chunk_v2_scaffold(
+    coord: ChunkCoord,
+    meta: &WorldMeta,
+) -> ChunkGenerationV2Scaffold
+
 generation::probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe
 generation::probe_column(
     coord: ChunkCoord,
@@ -87,6 +102,9 @@ generation::sample_chunk_surface_lod(
 ```
 
 ## Current Generator Contract
+
+- The current top-level `generation::generate_chunk(...)` alias still points at the legacy V1 generator.
+- `legacy.md` now owns that explicit compatibility surface while `v2.md` owns the region-first scaffold.
 
 - Sea level is fixed at world-space `y = 0`.
 - The generator treats atlas scalar fields plus atlas-owned structure guides as macro input and performs block placement inside `world::generation`.
@@ -186,6 +204,7 @@ generation::sample_chunk_surface_lod(
 ## Internal Submodules
 
 - `context.md`: shared generation structs such as atlas samples, palette, and column realization
+- `legacy.md`: explicit wrapper for the current V1 runtime generator
 - `sampler.md`: chunk-to-atlas neighborhood lookup and bilerp sampling
 - `profile.md`: generation-side terrain profile resolution
 - `noise.md`: deterministic block-scale relief noise helpers
@@ -193,6 +212,7 @@ generation::sample_chunk_surface_lod(
 - `probe.md`: deterministic terrain inspection helpers
 - `profiles/profiles.md`: profile-specific surface shaping modules
 - `realize.md`: chunk fill loop and layered terrain realization
+- `v2.md`: region-first generation scaffold
 
 ## Related Modules
 

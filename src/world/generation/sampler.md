@@ -10,6 +10,7 @@
 - sample four surrounding atlas cells
 - bilerp atlas scalar fields per block column
 - build the matching padded atlas structure window for the same chunk neighborhood
+- build the matching padded region-classification window for V2 scaffolding
 - build the matching meso guide window that sits between atlas macro guidance and chunk-local realization
 - expose enough hydrology/climate signal for generation to choose bed and surface materials, not just relief
 
@@ -20,4 +21,4 @@
 - Distance-driven atlas fields such as coast and river proximity may depend on context outside the four bilerp corners, so generation must preserve the field semantics instead of recomputing them from a tiny local mask.
 - Generation currently asks atlas for a padded neighborhood around the target chunk so coast, continent-core, and hydrology signals do not collapse when a chunk sits inside a tiny 2x2 local slice.
 - Generation now uses that same padded neighborhood to gather mountain-spine and drainage-path structure, not just scalar corner values, so chunk-local realization can keep macro direction across chunk boundaries.
-- Generation now requests atlas scalar fields, atlas structure, and meso guides against the same padded atlas footprint so surface preparation can see macro, directional, and several-chunk context together.
+- Generation now requests atlas scalar fields, atlas structure, region classification, and meso guides against the same padded atlas footprint so both legacy and V2 scaffolds can see macro, directional, and multi-scale context together.

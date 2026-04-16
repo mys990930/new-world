@@ -1,8 +1,8 @@
 use super::context::ColumnAtlasSample;
 use super::super::atlas::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, AtlasFieldMap,
-    AtlasStructureMap, MesoGuideMap, generate_atlas_fields, generate_atlas_structure,
-    generate_meso_guides,
+    AtlasStructureMap, MesoGuideMap, RegionClassMap, generate_atlas_fields,
+    generate_atlas_structure, generate_meso_guides, resolve_region_classes,
 };
 use super::super::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use super::super::meta::WorldMeta;
@@ -42,6 +42,16 @@ pub(super) fn generate_chunk_meso_guides(
 ) -> MesoGuideMap {
     let _ = coord;
     generate_meso_guides(meta, atlas_fields.area(), atlas_fields, atlas_structure)
+}
+
+pub(super) fn generate_chunk_region_classes(
+    coord: ChunkCoord,
+    meta: &WorldMeta,
+    atlas_fields: &AtlasFieldMap,
+    atlas_structure: &AtlasStructureMap,
+) -> RegionClassMap {
+    let _ = coord;
+    resolve_region_classes(meta, atlas_fields.area(), atlas_fields, atlas_structure)
 }
 
 pub(super) fn sample_column_atlas(

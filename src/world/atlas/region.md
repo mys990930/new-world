@@ -132,6 +132,7 @@ sample_region_classes(
 
 ## Current Status
 
-- this layer is design-authoritative but not yet implemented in code
-- current generation still resolves profile families directly from atlas-derived samples
-- future work should move primary biome and terrain-form ownership into this layer before further meso expansion
+- an initial deterministic atlas-cell classification scaffold is now implemented in code
+- the current scaffold resolves banded classes, biome families, terrain-form families, and coarse region archetypes from atlas raw fields plus nearby skeleton presence
+- current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
+- future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion

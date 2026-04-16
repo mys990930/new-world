@@ -214,6 +214,8 @@ NOT:
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
 - the next authoritative ownership step is atlas-owned region classification, which should resolve biome and terrain-form archetypes before base heightfield solving
+- an initial code scaffold for atlas-owned region classification now exists, but it is not yet the active gameplay generator path
 - atlas-owned meso guides should eventually sit after region classification and before generation micro detail as on-demand deterministic terrain accents
 - the current implemented Wave 1A meso candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
+- the current top-level `world::generate_chunk(...)` path still aliases legacy V1 generation while V2 scaffolding grows in parallel
 - the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`

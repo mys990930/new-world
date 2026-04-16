@@ -1,4 +1,5 @@
 mod context;
+pub mod legacy;
 mod noise;
 mod profile;
 mod probe;
@@ -6,6 +7,7 @@ mod profiles;
 mod realize;
 mod sampler;
 mod surface;
+pub mod v2;
 
 pub const SEA_LEVEL_Y: i32 = 0;
 pub const WORLD_FLOOR_Y: i32 = -256;
@@ -14,12 +16,21 @@ pub const WORLD_FLOOR_Y: i32 = -256;
 pub const FLAT_WORLD_SURFACE_Y: i32 = SEA_LEVEL_Y;
 
 pub use context::ColumnAtlasSample;
+pub use legacy::{
+    GENERATOR_LABEL as LEGACY_GENERATOR_LABEL, generate_chunk as generate_chunk_legacy,
+    probe_chunk as probe_chunk_legacy, probe_column as probe_column_legacy,
+    sample_chunk_surface_lod as sample_chunk_surface_lod_legacy,
+};
 pub use probe::{
     ChunkGenerationProbe, ChunkSurfaceLodGrid, ChunkSurfaceLodSample, ColumnGenerationProbe,
     TerrainProfileCounts, probe_chunk, probe_column, sample_chunk_surface_lod,
 };
 pub use profile::TerrainProfile;
-pub use realize::generate_chunk;
+pub use legacy::generate_chunk;
+pub use v2::{
+    GENERATOR_LABEL as V2_GENERATOR_LABEL, ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold,
+    V2ScaffoldStage, build_chunk_v2_scaffold, prepare_chunk_v2_inputs,
+};
 
 #[cfg(test)]
 mod tests {
@@ -43,6 +54,28 @@ mod tests {
 
     fn test_registry() -> BlockRegistry {
         BlockRegistry::load_default().expect("default registry should load")
+    }
+
+    #[test]
+    fn legacy_alias_matches_default_generate_chunk() {
+        let meta = WorldMeta::new(7);
+        let registry = test_registry();
+
+        let default_chunk = generate_chunk(ChunkCoord(0, 0, 0), &meta, &registry);
+        let legacy_chunk = generate_chunk_legacy(ChunkCoord(0, 0, 0), &meta, &registry);
+
+        assert_eq!(default_chunk, legacy_chunk);
+    }
+
+    #[test]
+    fn v2_scaffold_is_deterministic() {
+        let meta = WorldMeta::new(42);
+
+        let a = build_chunk_v2_scaffold(ChunkCoord(4, 0, -3), &meta);
+        let b = build_chunk_v2_scaffold(ChunkCoord(4, 0, -3), &meta);
+
+        assert_eq!(a, b);
+        assert_eq!(a.stage, V2ScaffoldStage::RegionClassificationReady);
     }
 
     fn blocks(surface_block: BlockId, fill_block: BlockId) -> ColumnBlocks {
