@@ -6,6 +6,8 @@
 - We do not currently plan to shrink atlas just to make local terrain feel more casual.
 - A deterministic region-classification layer should sit between atlas-scale raw fields / skeleton guidance and later meso terrain accents.
 - That region layer should resolve stable biome and terrain-form archetypes from seed-derived atlas inputs before chunk-local heightfield solving.
+- Climate regime should be treated as a derived long-pattern classification built from atlas-scale climate dimensions, not as an unrelated hand-authored biome label.
+- Region archetypes should stay relatively stable across the year, while seasonal biome state such as snow cover, freeze-thaw, wet-season greening, or dry-season browning should derive later from climate regime plus the current world calendar.
 - Meso should no longer decide the primary local biome identity; it should modulate already-classified regions with several-chunk terrain accents.
 - Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape operators or realization families, not as the final biome system.
 - The planned terrain stack is now: `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`.

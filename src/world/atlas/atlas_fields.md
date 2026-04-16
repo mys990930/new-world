@@ -14,6 +14,7 @@
 - basin / drainage / river / lake potential
 - temperature / humidity / inlandness
 - aridity / wetness / polar / alpine / ecotone factor
+- thermal-seasonality, precipitation-seasonality, snow-persistence, and freeze-thaw tendencies
 - climate-regime tendencies and other long-pattern signals used by later region classification
 - expose stable continuous axes instead of trying to decide final biome ownership directly
 
@@ -31,7 +32,8 @@
 3. compute macro elevation, ridge tendency, and mountain mass
 4. compute drainage, river, and lake potentials
 5. compute temperature, humidity, inlandness, aridity, and wetness
-6. compute climate-regime tendencies and other derived raw axes for later region classification
+6. compute thermal-seasonality, precipitation-seasonality, snow-persistence, and freeze-thaw tendencies
+7. compute climate-regime tendencies and other derived raw dimensions for later region classification
 
 ## Revision Direction
 
@@ -42,17 +44,21 @@
 - resolved biome and terrain-form classes should move out of overlapping fuzzy weights and into a separate region-classification layer
 - raw fields should stay continuous, while deterministic banding and archetype resolution should happen in `region.md`
 
-## Weight / Axis Direction
+## Weight / Dimension Direction
 
 - prefer a smaller set of clearer raw continuous axes over many partially overlapping weight packs
-- current target raw inputs for region classification are:
-  - temperature
+- current target raw classification dimensions for region classification are:
+  - temperature mean
   - moisture balance
   - macro elevation
   - relief energy / ruggedness
   - drainage potential
   - coast exposure / continentality
-  - climate regime tendency
+  - thermal seasonality
+  - precipitation seasonality
+  - snow-persistence tendency
+  - freeze-thaw tendency
+- `ClimateRegime` should be derived from those dimensions and from later regional context rather than treated as an unrelated primary raw field
 - slope should usually be treated as a downstream heightfield-derived signal rather than as the primary atlas raw field
 
 ## Invariants

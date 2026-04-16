@@ -58,14 +58,17 @@ sample_region_classes(
 ## Input Model
 
 - continuous raw fields stay in `atlas_fields.md`
-- current target raw axes:
-  - temperature
+- current target raw classification dimensions:
+  - temperature mean
   - moisture balance
   - macro elevation
   - macro relief energy / ruggedness
   - drainage potential
   - coast exposure / continentality
-  - climate-regime tendency
+  - thermal seasonality
+  - precipitation seasonality
+  - snow-persistence tendency
+  - freeze-thaw tendency
 - structure adds:
   - ridge proximity
   - drainage-path proximity
@@ -83,10 +86,26 @@ sample_region_classes(
   - `HydrologyContext`
   - `CoastalContext`
   - `ClimateRegime`
+- `ClimateRegime` is a derived long-pattern class built from climate dimensions plus regional context; it is not intended to be an unrelated standalone raw field
 - those resolved bands then combine into:
   - `BiomeFamily`
   - `TerrainFormFamily`
   - `RegionArchetype`
+
+## Seasonality And Climate Regime
+
+- `ClimateRegime` should be derived from long-pattern climate dimensions such as thermal seasonality, precipitation seasonality, continentality, and snow-persistence tendency
+- region classification should use that derived regime to choose a stable annual identity, not to decide the exact current-month visual state
+- `RegionArchetype` should stay relatively stable across the year
+- a later seasonal biome-state layer should derive from:
+  - `RegionArchetype`
+  - `ClimateRegime`
+  - current world calendar position
+  - elevation and local hydrology modifiers
+- examples:
+  - a `temperate_plain` may stay the same archetype all year while surface cover shifts between green grass, autumn-dry grass, and snowy grass
+  - a `cold_wet_lowland` may keep the same archetype while water margins freeze seasonally and thaw later
+  - a `tropical_seasonal_plain` may keep the same archetype while wet-season versus dry-season cover and saturation change
 
 ## Example Resolution Rules
 

@@ -41,6 +41,8 @@
   - region/archetype-owned broad terrain solve that already respects river corridors and basin outlets
 - `generation local detail`
   - profile-local relief noise, smoothing, and small contour breakup
+- `seasonal biome state`
+  - current in-year surface state derived from region archetype, climate regime, world calendar, elevation, and hydrology
 - `hydrology/material fill`
   - final river carve, water surface, sediment choice, topsoil, stone core, and block fill
 
@@ -141,6 +143,7 @@ generation::sample_chunk_surface_lod(
 
 - Atlas remains the owner of macro terrain direction, but V2 should also introduce explicit region classification before meso and before base heightfield solving.
 - Region classification should resolve stable biome and terrain-form archetypes from raw continuous fields plus skeleton context, instead of asking meso or material thresholds to decide primary local identity.
+- Climate regime should be treated as a derived long-pattern class, while seasonal biome state should stay a later runtime layer that changes cover/material expression without constantly reclassifying the region archetype.
 - River corridors should be defined before biome-aware base heightfield solving, so heightfield generation treats them as constraints rather than as late carve masks.
 - Meso should become a constrained local-accent layer inside those already-classified regions, not the primary biome owner.
 - Target flow for each chunk:
@@ -151,7 +154,9 @@ generation::sample_chunk_surface_lod(
   5. sample meso guides into several-chunk hill/cliff/basin/terrace accents allowed by that archetype
   6. apply meso deformation on top of the base scaffold before local smoothing
   7. perform final hydrology using the pre-defined corridor and branch waterline model
-  8. resolve region/material ownership and then voxelize blocks
+  8. resolve region/material ownership
+  9. apply seasonal biome-state overrides for cover and surface conditions
+  10. voxelize blocks
 - In V2, headwaters should naturally emerge near mountain spines, passes, upland divides, and basin outlets rather than appearing as isolated wet pockets.
 
 ## Processing Flow

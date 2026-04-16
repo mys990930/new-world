@@ -19,6 +19,7 @@
 - keep large-scale direction in atlas skeleton and hydrology, not in per-chunk noise
 - let meso add several-chunk readability without replacing the primary regional identity
 - keep material borders one-hot by region ownership, with noisy boundaries rather than blended scalar thresholds
+- keep the full planning catalog visible even if implementation still phases features in over time
 
 ## Layer Vocabulary
 
@@ -30,10 +31,14 @@
   - the combined local identity used by base heightfield, meso allowance, and material policy
 - `MesoFeature`
   - a several-chunk terrain accent applied inside an already-classified region archetype
+- `SeasonalBiomeState`
+  - the current in-year expression of that archetype under the current climate regime and calendar phase
 
-## Raw Classification Axes
+## Raw Classification Dimensions
 
-The intended resolved inputs for archetype choice are:
+This section uses `dimensions` broadly on purpose. Some entries are raw continuous fields, while others are resolved contexts derived from those fields plus skeleton context.
+
+The intended dimensions for archetype choice are:
 
 - `TemperatureBand`
 - `MoistureBand`
@@ -44,6 +49,65 @@ The intended resolved inputs for archetype choice are:
 - `ClimateRegime`
 
 These should come from atlas raw fields plus skeleton context, then resolve deterministically into region classes before meso selection.
+
+### Planned Continuous Climate Inputs
+
+- temperature mean
+- moisture balance
+- continentality / coast exposure
+- macro elevation
+- relief energy / ruggedness
+- drainage potential
+- thermal seasonality
+- precipitation seasonality
+- snow-persistence tendency
+- freeze-thaw tendency
+
+### Planned Derived Regional Contexts
+
+- `ReliefClass`
+- `HydrologyContext`
+- `CoastalContext`
+- `ClimateRegime`
+
+## Climate Regime And Seasonality Direction
+
+- `ClimateRegime` should be derived from continuous climate dimensions, not authored as a disconnected label
+- climate regime is meant to answer questions such as:
+  - how strong are the seasons
+  - how oceanic versus continental is the annual cycle
+  - whether rainfall is evenly spread, monsoonal, or persistently arid
+  - whether snow cover is brief, persistent, or nearly absent
+- region archetype should capture the stable annual identity of a place
+- seasonal biome state should capture the current in-year expression of that place
+
+### Seasonal Biome State Direction
+
+The later runtime seasonal layer should derive from:
+
+- `RegionArchetype`
+- `ClimateRegime`
+- current day-of-year or season phase
+- elevation
+- local hydrology
+
+That seasonal state can then drive surface and ecology transitions without replacing the underlying regional identity.
+
+Examples:
+
+- `temperate_plain`
+  - spring/summer: grass-dominant surface
+  - autumn: drier or browner grass variant
+  - winter under snowy regimes: snowy-grass surface policy
+- `cold_wet_lowland`
+  - warm season: wet grass and exposed mud margins
+  - cold season: frozen mud, partial ice, or snow-covered wet ground
+- `tropical_seasonal_plain`
+  - wet season: greener cover and fuller channels
+  - dry season: duller cover and more exposed sediment
+- `glaciated_alpine`
+  - short thaw: exposed rock, patchy snow retreat
+  - long cold season: persistent snow and stronger ice cover
 
 ## Draft Biome Families
 
@@ -235,7 +299,9 @@ Region archetypes combine biome family and terrain-form family into something ge
 
 ## First Implementation Candidate Set
 
-The first wave should still prefer features that:
+Planning should keep the full candidate pool from the start, even if code implementation still phases actual support over time.
+
+The first implementation wave should still prefer features that:
 
 - read clearly inside a `2..6 chunk` play view
 - do not need a separate 3D feature system
@@ -413,6 +479,7 @@ This matrix is intentionally one-way. Meso may only choose from the allowed set 
 - archetype should choose the default cover and subsoil policy
 - hydrology should then override channel, lake, wetland, and floodplain materials
 - coast context should override shoreline sediment and tidal materials
+- seasonal biome state should override time-varying surface cover such as snowy grass, freeze-thaw mud, or wet-season versus dry-season appearance
 - meso may bias local distribution, but it should not replace archetype ownership
 
 Examples:
@@ -439,6 +506,7 @@ Examples:
 - should `BiomeFamily` remain fairly broad while `RegionArchetype` carries most playable identity, or should biome families be more granular
 - do we want `plateau` and `ridge_upland` as distinct terrain-form families at V2 launch
 - should `wet_lowland` and `delta` live as terrain-form families, hydrology contexts, or only archetypes
+- how explicit should the first runtime seasonal biome-state layer be: four broad seasons, continuous year fraction, or regime-specific wet/dry plus warm/cold phases
 - how many coastal archetypes are worth carrying before coast-specific meso and material systems are rebuilt
 - which archetypes need a dedicated first-pass block palette beyond grass, dirt, sand, mud, gravel, stone, snow, and water
 
@@ -450,3 +518,4 @@ Before more V2 implementation, we should lock:
 2. the final `TerrainFormFamily` list
 3. the minimum `RegionArchetype` launch set
 4. the first meso matrix we are willing to support in code
+5. the first seasonal biome-state model we are willing to support in code
