@@ -186,7 +186,6 @@ impl PlatformRuntime {
         I: IntoIterator<Item = PlatformEvent>,
     {
         for event in events {
-            println!("[platform] emitted event: {:?}", event);
             window_state.apply_event(&event);
             input_state.apply_event(&event);
             lifecycle_state.apply_event(&event);

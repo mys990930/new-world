@@ -18,7 +18,7 @@
 - request minimap chunk-column rebuilds when chunk load/generate results change loaded world data
 - update world-and-viewport-based selection state
 - log the clicked block key when a click lands on the current raycast target
-- drain discrete commands for debugging
+- log chunk load/unload transitions when runtime world residency actually changes
 - build render-ready frame DTOs, including atlas-backed UI sprites, and call the renderer
 
 ## Non-Responsibilities
@@ -42,7 +42,7 @@
 - updated renderer chunk cache
 - updated `SelectionState`
 - updated app-owned minimap cache
-- optional debug logging for discrete commands
+- optional console logging for clicked blocks and chunk residency transitions
 - one renderer frame attempt
 
 ## Process
@@ -62,7 +62,7 @@
 13. collect newly completed jobs again
 14. update `SelectionState` from the latest world state and viewport
 15. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-16. drain and optionally log discrete commands
+16. drain discrete commands without per-frame debug output
 17. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
@@ -72,6 +72,7 @@
 - minimap viewport composition must read app-owned cached data only; completed jobs and future local world edits are the only sources that mutate the cache
 - unloads happen before new frame job submission so stale load/mesh work has a clear acceptance gate
 - block logging is click-triggered so the console does not flood every frame
+- chunk load/unload logging is tied to actual residency changes, not to every lifecycle plan recomputation
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 - world-select create/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI

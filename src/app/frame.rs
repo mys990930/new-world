@@ -35,10 +35,7 @@ impl GameApp {
             .update_selection_from_world(&self.world, window.width, window.height);
         self.log_clicked_block();
 
-        let commands = self.ecs.drain_player_commands();
-        if !commands.is_empty() {
-            println!("[app] ecs commands: {:?}", commands);
-        }
+        let _ = self.ecs.drain_player_commands();
     }
 
     pub fn render(&mut self) {
@@ -81,6 +78,10 @@ impl GameApp {
                 JobResult::ChunkLoaded { coord, chunk } => {
                     if self.ecs.retains_chunk(coord) {
                         self.world.insert_chunk(coord, chunk);
+                        println!(
+                            "[app] chunk loaded: pos=({}, {}, {}) source=disk",
+                            coord.0, coord.1, coord.2
+                        );
                         self.refresh_minimap_chunk_column_after_world_change(
                             crate::world::TopdownChunkColumnCoord {
                                 chunk_x: coord.0,
@@ -92,6 +93,10 @@ impl GameApp {
                 JobResult::ChunkGenerated { coord, chunk } => {
                     if self.ecs.retains_chunk(coord) {
                         self.world.insert_chunk(coord, chunk);
+                        println!(
+                            "[app] chunk loaded: pos=({}, {}, {}) source=generated",
+                            coord.0, coord.1, coord.2
+                        );
                         self.refresh_minimap_chunk_column_after_world_change(
                             crate::world::TopdownChunkColumnCoord {
                                 chunk_x: coord.0,
@@ -125,10 +130,17 @@ impl GameApp {
 
         let mut affected_columns = BTreeSet::new();
         for &coord in unload_coords {
+            let had_chunk = self.world.has_chunk(coord);
             self.world.remove_chunk(coord);
             self.ecs.apply_chunk_unloaded(coord);
             self.renderer
                 .remove_chunk_mesh(crate::renderer::ChunkCoord(coord.0, coord.1, coord.2));
+            if had_chunk {
+                println!(
+                    "[app] chunk unloaded: pos=({}, {}, {})",
+                    coord.0, coord.1, coord.2
+                );
+            }
             affected_columns.insert(crate::world::TopdownChunkColumnCoord {
                 chunk_x: coord.0,
                 chunk_z: coord.2,
