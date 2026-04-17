@@ -1,0 +1,9 @@
+id = 30
+key = "laterite"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "laterite"
+bottom = "laterite"
+side = "laterite"

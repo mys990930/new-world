@@ -1,0 +1,9 @@
+id = 22
+key = "wet_sand"
+solid = true
+opaque = true
+render = "cube"
+material = "sand"
+top = "wet_sand"
+bottom = "wet_sand"
+side = "wet_sand"

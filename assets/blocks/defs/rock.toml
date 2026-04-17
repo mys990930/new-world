@@ -1,0 +1,9 @@
+id = 25
+key = "rock"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "rock"
+bottom = "rock"
+side = "rock"

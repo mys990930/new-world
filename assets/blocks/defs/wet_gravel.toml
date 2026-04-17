@@ -1,0 +1,9 @@
+id = 23
+key = "wet_gravel"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "wet_gravel"
+bottom = "wet_gravel"
+side = "wet_gravel"

@@ -1,0 +1,9 @@
+id = 26
+key = "sandstone"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "sandstone"
+bottom = "sandstone"
+side = "sandstone"

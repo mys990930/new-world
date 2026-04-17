@@ -1,0 +1,9 @@
+id = 12
+key = "ice"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "ice"
+bottom = "ice"
+side = "ice"

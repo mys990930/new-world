@@ -1,0 +1,9 @@
+id = 18
+key = "podzol"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "podzol"
+bottom = "podzol"
+side = "podzol"

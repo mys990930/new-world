@@ -1,0 +1,9 @@
+id = 27
+key = "scree"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "scree"
+bottom = "scree"
+side = "scree"

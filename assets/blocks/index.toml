@@ -10,12 +10,33 @@ block_files = [
   "defs/grass.toml",
   "defs/dirt.toml",
   "defs/stone.toml",
-  "defs/terrain_debug.toml",
   "defs/sand.toml",
   "defs/gravel.toml",
   "defs/mud.toml",
   "defs/snow.toml",
   "defs/water.toml",
+  "defs/terrain_debug.toml",
+  "defs/coarse_dirt.toml",
+  "defs/clay.toml",
+  "defs/ice.toml",
+  "defs/peat.toml",
+  "defs/silt.toml",
+  "defs/humus.toml",
+  "defs/leaf_litter.toml",
+  "defs/moss.toml",
+  "defs/podzol.toml",
+  "defs/thin_soil.toml",
+  "defs/red_sand.toml",
+  "defs/dry_grass.toml",
+  "defs/wet_sand.toml",
+  "defs/wet_gravel.toml",
+  "defs/exposed_rock.toml",
+  "defs/rock.toml",
+  "defs/sandstone.toml",
+  "defs/scree.toml",
+  "defs/alpine_soil.toml",
+  "defs/moraine.toml",
+  "defs/laterite.toml",
 ]
 
 [[textures]]
@@ -53,3 +74,87 @@ path = "textures/snow.png"
 [[textures]]
 key = "water"
 path = "textures/water.png"
+
+[[textures]]
+key = "coarse_dirt"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "clay"
+path = "textures/mud.png"
+
+[[textures]]
+key = "ice"
+path = "textures/snow.png"
+
+[[textures]]
+key = "peat"
+path = "textures/mud.png"
+
+[[textures]]
+key = "silt"
+path = "textures/mud.png"
+
+[[textures]]
+key = "humus"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "leaf_litter"
+path = "textures/grass_side.png"
+
+[[textures]]
+key = "moss"
+path = "textures/grass_top.png"
+
+[[textures]]
+key = "podzol"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "thin_soil"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "red_sand"
+path = "textures/sand.png"
+
+[[textures]]
+key = "dry_grass"
+path = "textures/grass_top.png"
+
+[[textures]]
+key = "wet_sand"
+path = "textures/sand.png"
+
+[[textures]]
+key = "wet_gravel"
+path = "textures/gravel.png"
+
+[[textures]]
+key = "exposed_rock"
+path = "textures/stone.png"
+
+[[textures]]
+key = "rock"
+path = "textures/stone.png"
+
+[[textures]]
+key = "sandstone"
+path = "textures/stone.png"
+
+[[textures]]
+key = "scree"
+path = "textures/gravel.png"
+
+[[textures]]
+key = "alpine_soil"
+path = "textures/dirt.png"
+
+[[textures]]
+key = "moraine"
+path = "textures/gravel.png"
+
+[[textures]]
+key = "laterite"
+path = "textures/dirt.png"

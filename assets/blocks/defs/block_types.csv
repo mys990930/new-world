@@ -1,0 +1,32 @@
+id,key,solid,opaque,render,material,surface_height,top,bottom,side,tint,description
+0,air,false,false,empty,,,,,,,비어 있는 공간.
+1,grass,true,true,cube,grass,,grass_top,dirt,grass_side,,온대 초원 계열의 풀 덮인 지면.
+2,dirt,true,true,cube,soil,,dirt,dirt,dirt,,기본 토양.
+3,stone,true,true,cube,stone,,stone,stone,stone,,기본 암석.
+4,sand,true,true,cube,sand,,sand,sand,sand,,기본 모래.
+5,gravel,true,true,cube,stone,,gravel,gravel,gravel,,자갈 바닥.
+6,mud,true,true,cube,soil,,mud,mud,mud,,젖은 흙.
+7,snow,true,true,cube,generic_opaque,,snow,snow,snow,,표면 적설.
+8,water,false,false,cube,water,0.90,water,water,water,,물.
+9,terrain_debug,true,true,cube,stone,,__white,__white,__white,"[108,118,130,255]",테라인 디버그용 블록.
+10,coarse_dirt,true,true,cube,soil,,coarse_dirt,coarse_dirt,coarse_dirt,,거칠고 마른 흙.
+11,clay,true,true,cube,soil,,clay,clay,clay,,점토질 토양.
+12,ice,true,true,cube,generic_opaque,,ice,ice,ice,,얼음.
+13,peat,true,true,cube,soil,,peat,peat,peat,,습지 유기토.
+14,silt,true,true,cube,soil,,silt,silt,silt,,고운 퇴적 토양.
+15,humus,true,true,cube,soil,,humus,humus,humus,,유기물이 풍부한 부식토.
+16,leaf_litter,true,true,cube,foliage,,leaf_litter,leaf_litter,leaf_litter,,낙엽층.
+17,moss,true,true,cube,grass,,moss,moss,moss,,이끼 덮인 바닥.
+18,podzol,true,true,cube,soil,,podzol,podzol,podzol,,산성 냉대 토양.
+19,thin_soil,true,true,cube,soil,,thin_soil,thin_soil,thin_soil,,아주 얇은 토양층.
+20,red_sand,true,true,cube,sand,,red_sand,red_sand,red_sand,,붉은 사막 모래.
+21,dry_grass,true,true,cube,grass,,dry_grass,dry_grass,dry_grass,,마른 초지 표면.
+22,wet_sand,true,true,cube,sand,,wet_sand,wet_sand,wet_sand,,젖은 모래.
+23,wet_gravel,true,true,cube,stone,,wet_gravel,wet_gravel,wet_gravel,,젖은 자갈.
+24,exposed_rock,true,true,cube,stone,,exposed_rock,exposed_rock,exposed_rock,,노출된 암반.
+25,rock,true,true,cube,stone,,rock,rock,rock,,일반 암석.
+26,sandstone,true,true,cube,stone,,sandstone,sandstone,sandstone,,사암.
+27,scree,true,true,cube,stone,,scree,scree,scree,,산비탈 자갈성 붕적층.
+28,alpine_soil,true,true,cube,soil,,alpine_soil,alpine_soil,alpine_soil,,고산대의 얇은 토양.
+29,moraine,true,true,cube,stone,,moraine,moraine,moraine,,빙하 퇴적물.
+30,laterite,true,true,cube,soil,,laterite,laterite,laterite,,열대 풍화토.

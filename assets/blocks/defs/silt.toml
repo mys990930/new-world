@@ -1,0 +1,9 @@
+id = 14
+key = "silt"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "silt"
+bottom = "silt"
+side = "silt"
