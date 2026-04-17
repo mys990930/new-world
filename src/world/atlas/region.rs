@@ -11,7 +11,7 @@ pub use catalog::{RegionCatalogEntry, RegionCatalogStatus, region_catalog_entrie
 
 use crate::world::WorldMeta;
 
-use super::atlas_fields::AtlasFieldMap;
+use super::atlas_fields::{AtlasCell, AtlasFieldMap};
 use super::scale::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, AtlasGrid};
 use super::structure::AtlasStructureMap;
 
@@ -278,6 +278,16 @@ impl PartialEq for RegionClassMap {
 }
 
 pub fn resolve_region_classes(
+    meta: &WorldMeta,
+    area: AtlasArea,
+    fields: &AtlasFieldMap,
+    structure: &AtlasStructureMap,
+) -> RegionClassMap {
+    let raw = resolve_region_classes_raw(meta, area, fields, structure);
+    apply_launch_fallback_to_region_map(&raw)
+}
+
+fn resolve_region_classes_raw(
     _meta: &WorldMeta,
     area: AtlasArea,
     fields: &AtlasFieldMap,
@@ -291,7 +301,7 @@ pub fn resolve_region_classes(
             .expect("region classification field sample must exist");
         let touches_ridge = area_has_ridge(coord, structure);
         let touches_river = area_has_river(coord, structure);
-        let cell = classify_region_cell(*atlas_cell, touches_ridge, touches_river);
+        let cell = classify_region_cell_raw(*atlas_cell, touches_ridge, touches_river);
         *cells
             .get_mut(coord)
             .expect("region classification output cell must exist") = cell;
@@ -315,8 +325,107 @@ pub fn sample_region_classes(
         .expect("region classification sample must exist")
 }
 
-fn classify_region_cell(
-    cell: super::atlas_fields::AtlasCell,
+fn apply_launch_fallback_to_region_map(classes: &RegionClassMap) -> RegionClassMap {
+    let mut cells = AtlasGrid::defaulted(classes.area());
+
+    for coord in classes.area().coords() {
+        let classified = classes
+            .get(coord)
+            .copied()
+            .expect("region classification sample must exist while applying fallback");
+        *cells
+            .get_mut(coord)
+            .expect("region classification output cell must exist while applying fallback") =
+            apply_launch_fallback_to_region_cell(classified);
+    }
+
+    RegionClassMap {
+        area: classes.area(),
+        cells,
+    }
+}
+
+fn apply_launch_fallback_to_region_cell(mut cell: RegionClassCell) -> RegionClassCell {
+    cell.archetype = launch_fallback_archetype(cell.archetype);
+    cell
+}
+
+fn launch_fallback_archetype(archetype: RegionArchetype) -> RegionArchetype {
+    if is_launch_candidate(archetype) {
+        return archetype;
+    }
+
+    match archetype {
+        RegionArchetype::RockyShoreCoast | RegionArchetype::FjordCoast => {
+            RegionArchetype::CoastalCliffland
+        }
+        RegionArchetype::BarrierCoast | RegionArchetype::LagoonCoast => {
+            RegionArchetype::SandyBeachPlain
+        }
+        RegionArchetype::EstuaryLowland
+        | RegionArchetype::CoastalDelta
+        | RegionArchetype::MarshFloodplain
+        | RegionArchetype::SwampLowland
+        | RegionArchetype::BorealWetLowland => RegionArchetype::ColdWetLowland,
+        RegionArchetype::MangroveLagoon
+        | RegionArchetype::MangroveDelta
+        | RegionArchetype::FloodedForestAlluvialLowland
+        | RegionArchetype::FloodedForestFloodplain
+        | RegionArchetype::MonsoonFloodplain
+        | RegionArchetype::MonsoonDelta => RegionArchetype::TropicalRainforestLowland,
+        RegionArchetype::TemperateRollingPlain
+        | RegionArchetype::TemperateBasin
+        | RegionArchetype::TemperateBroadValley
+        | RegionArchetype::TemperateBroadleafPlain
+        | RegionArchetype::BorealPlain => RegionArchetype::TemperatePlain,
+        RegionArchetype::TemperateEscarpmentUpland
+        | RegionArchetype::TemperateMixedHills
+        | RegionArchetype::BorealHills
+        | RegionArchetype::BorealRidgeCountry
+        | RegionArchetype::MediterraneanShrublandHills => RegionArchetype::TemperateHills,
+        RegionArchetype::SteppeHills => RegionArchetype::SteppePlain,
+        RegionArchetype::SemiDesertPediment
+        | RegionArchetype::DryShrublandBadlands
+        | RegionArchetype::DryShrublandKarst
+        | RegionArchetype::DesertBasin
+        | RegionArchetype::DesertMesaCountry
+        | RegionArchetype::DesertAlluvialFan => RegionArchetype::DesertPlain,
+        RegionArchetype::SavannaHills | RegionArchetype::TropicalDryForestHills => {
+            RegionArchetype::SavannaPlain
+        }
+        RegionArchetype::SubalpineWoodedFront
+        | RegionArchetype::AlpineMeadowMountain
+        | RegionArchetype::CrevassedIcefield
+        | RegionArchetype::GlacialValley
+        | RegionArchetype::AlpineRavineCountry => RegionArchetype::GlaciatedAlpine,
+        RegionArchetype::PolarBarrensPlain => RegionArchetype::TundraPlain,
+        RegionArchetype::MonsoonPlateau => RegionArchetype::TemperatePlateau,
+        RegionArchetype::OceanicShelf
+        | RegionArchetype::SandyBeachPlain
+        | RegionArchetype::CoastalCliffland
+        | RegionArchetype::ColdWetLowland
+        | RegionArchetype::TemperatePlain
+        | RegionArchetype::TemperateHills
+        | RegionArchetype::TemperatePlateau
+        | RegionArchetype::SteppePlain
+        | RegionArchetype::DesertPlain
+        | RegionArchetype::DesertDuneField
+        | RegionArchetype::SavannaPlain
+        | RegionArchetype::TropicalRainforestLowland
+        | RegionArchetype::TropicalRainforestHills
+        | RegionArchetype::GlaciatedAlpine
+        | RegionArchetype::TundraPlain => archetype,
+    }
+}
+
+fn is_launch_candidate(archetype: RegionArchetype) -> bool {
+    region_catalog_entries().iter().any(|entry| {
+        entry.archetype == archetype && matches!(entry.status, RegionCatalogStatus::LaunchCandidate)
+    })
+}
+
+fn classify_region_cell_raw(
+    cell: AtlasCell,
     touches_ridge: bool,
     touches_river: bool,
 ) -> RegionClassCell {
@@ -338,7 +447,7 @@ fn classify_region_cell(
         climate_regime,
     );
     let archetype =
-        classify_region_archetype(biome_family, terrain_form_family, elevation_band, relief_class);
+        classify_region_archetype_raw(biome_family, terrain_form_family, elevation_band, relief_class);
 
     RegionClassCell {
         temperature_band,
@@ -354,7 +463,7 @@ fn classify_region_cell(
     }
 }
 
-fn classify_temperature_band(cell: super::atlas_fields::AtlasCell) -> TemperatureBand {
+fn classify_temperature_band(cell: AtlasCell) -> TemperatureBand {
     if cell.polar_factor > 0.68 || cell.temperature < 0.16 {
         TemperatureBand::Polar
     } else if cell.temperature < 0.34 {
@@ -368,7 +477,7 @@ fn classify_temperature_band(cell: super::atlas_fields::AtlasCell) -> Temperatur
     }
 }
 
-fn classify_moisture_band(cell: super::atlas_fields::AtlasCell) -> MoistureBand {
+fn classify_moisture_band(cell: AtlasCell) -> MoistureBand {
     let moisture_balance = (cell.humidity * 0.62 + cell.wetness * 0.38) - cell.aridity * 0.56;
     if moisture_balance < -0.24 {
         MoistureBand::Arid
@@ -383,10 +492,7 @@ fn classify_moisture_band(cell: super::atlas_fields::AtlasCell) -> MoistureBand 
     }
 }
 
-fn classify_elevation_band(
-    cell: super::atlas_fields::AtlasCell,
-    touches_ridge: bool,
-) -> ElevationBand {
+fn classify_elevation_band(cell: AtlasCell, touches_ridge: bool) -> ElevationBand {
     let lifted = cell.macro_elevation + cell.mountain_mass * 0.18 + if touches_ridge { 0.08 } else { 0.0 };
     if cell.alpine_factor > 0.72 || lifted > 0.82 {
         ElevationBand::Alpine
@@ -399,10 +505,7 @@ fn classify_elevation_band(
     }
 }
 
-fn classify_relief_class(
-    cell: super::atlas_fields::AtlasCell,
-    touches_ridge: bool,
-) -> ReliefClass {
+fn classify_relief_class(cell: AtlasCell, touches_ridge: bool) -> ReliefClass {
     let relief = cell.ruggedness * 0.58
         + cell.mountain_mass * 0.28
         + cell.ridge_factor * 0.14
@@ -418,10 +521,7 @@ fn classify_relief_class(
     }
 }
 
-fn classify_hydrology_context(
-    cell: super::atlas_fields::AtlasCell,
-    touches_river: bool,
-) -> HydrologyContext {
+fn classify_hydrology_context(cell: AtlasCell, touches_river: bool) -> HydrologyContext {
     if cell.lake_potential > 0.62 {
         HydrologyContext::LakeBasin
     } else if touches_river || cell.river_flow_potential > 0.42 || cell.riverine_factor > 0.46 {
@@ -435,7 +535,7 @@ fn classify_hydrology_context(
     }
 }
 
-fn classify_coastal_context(cell: super::atlas_fields::AtlasCell) -> CoastalContext {
+fn classify_coastal_context(cell: AtlasCell) -> CoastalContext {
     if cell.landness < 0.53 {
         CoastalContext::Marine
     } else if cell.coast_factor > 0.54 {
@@ -448,7 +548,7 @@ fn classify_coastal_context(cell: super::atlas_fields::AtlasCell) -> CoastalCont
 }
 
 fn classify_climate_regime(
-    cell: super::atlas_fields::AtlasCell,
+    cell: AtlasCell,
     temperature_band: TemperatureBand,
     moisture_band: MoistureBand,
 ) -> ClimateRegime {
@@ -456,7 +556,11 @@ fn classify_climate_regime(
         TemperatureBand::Polar => ClimateRegime::Polar,
         TemperatureBand::Cold if cell.alpine_factor > 0.62 => ClimateRegime::ColdAlpine,
         TemperatureBand::Hot if matches!(moisture_band, MoistureBand::Wet | MoistureBand::Humid) => {
-            ClimateRegime::TropicalWet
+            if cell.aridity > 0.32 || (cell.inlandness > 0.40 && cell.wetness < 0.72) {
+                ClimateRegime::TropicalSeasonal
+            } else {
+                ClimateRegime::TropicalWet
+            }
         }
         TemperatureBand::Hot => ClimateRegime::TropicalSeasonal,
         TemperatureBand::Warm | TemperatureBand::Temperate
@@ -471,7 +575,7 @@ fn classify_climate_regime(
 }
 
 fn classify_biome_family(
-    cell: super::atlas_fields::AtlasCell,
+    cell: AtlasCell,
     temperature_band: TemperatureBand,
     moisture_band: MoistureBand,
     coastal_context: CoastalContext,
@@ -580,7 +684,7 @@ fn classify_biome_family(
 }
 
 fn classify_terrain_form_family(
-    cell: super::atlas_fields::AtlasCell,
+    cell: AtlasCell,
     coastal_context: CoastalContext,
     elevation_band: ElevationBand,
     relief_class: ReliefClass,
@@ -591,12 +695,19 @@ fn classify_terrain_form_family(
     }
     if matches!(coastal_context, CoastalContext::Coastal) {
         if matches!(hydrology_context, HydrologyContext::RiverCorridor)
-            && cell.river_flow_potential > 0.44
+            && cell.ocean_distance < 0.08
+            && cell.river_flow_potential > 0.62
         {
+            return TerrainFormFamily::Delta;
+        }
+        if matches!(hydrology_context, HydrologyContext::RiverCorridor) && cell.river_flow_potential > 0.44 {
             return TerrainFormFamily::EstuaryLowland;
         }
         if cell.lake_potential > 0.48 && cell.wetness > 0.42 {
             return TerrainFormFamily::LagoonCoast;
+        }
+        if cell.coast_factor > 0.70 && cell.basinness > 0.38 && cell.ruggedness < 0.26 {
+            return TerrainFormFamily::BarrierCoast;
         }
         if matches!(elevation_band, ElevationBand::Alpine) && cell.temperature < 0.34 {
             return TerrainFormFamily::FjordCoast;
@@ -607,18 +718,25 @@ fn classify_terrain_form_family(
         if cell.ruggedness > 0.24 {
             return TerrainFormFamily::RockyShore;
         }
-        if cell.coast_factor > 0.70 && cell.basinness > 0.38 {
-            return TerrainFormFamily::BarrierCoast;
-        }
         return TerrainFormFamily::BeachPlain;
     }
     if matches!(hydrology_context, HydrologyContext::RiverCorridor) {
         if cell.ocean_distance < 0.10 && cell.river_flow_potential > 0.54 {
             return TerrainFormFamily::Delta;
         }
+        if cell.aridity > 0.52
+            && matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
+            && cell.river_flow_potential > 0.34
+            && cell.ruggedness < 0.52
+        {
+            return TerrainFormFamily::AlluvialFan;
+        }
         if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine) {
             if cell.alpine_factor > 0.68 {
                 return TerrainFormFamily::GlacialValley;
+            }
+            if cell.ruggedness > 0.64 && cell.slope > 0.28 {
+                return TerrainFormFamily::Canyon;
             }
             if cell.ruggedness > 0.52 {
                 return TerrainFormFamily::NarrowValley;
@@ -632,6 +750,41 @@ fn classify_terrain_form_family(
     }
     if matches!(hydrology_context, HydrologyContext::WetLowland | HydrologyContext::LakeBasin) {
         return TerrainFormFamily::WetLowland;
+    }
+    if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine)
+        && cell.ridge_factor > 0.58
+        && cell.mountain_mass > 0.34
+        && matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain)
+    {
+        return TerrainFormFamily::RidgeCountry;
+    }
+    if matches!(elevation_band, ElevationBand::Alpine)
+        && cell.ruggedness > 0.58
+        && cell.river_distance_estimate < 0.28
+    {
+        return TerrainFormFamily::RavineCountry;
+    }
+    if matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
+        && cell.ridge_factor > 0.44
+        && (0.32..=0.58).contains(&cell.ruggedness)
+        && cell.basinness < 0.34
+    {
+        return TerrainFormFamily::Escarpment;
+    }
+    if cell.aridity > 0.62
+        && matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
+        && (0.22..=0.52).contains(&cell.ruggedness)
+        && cell.basinness < 0.38
+    {
+        return TerrainFormFamily::MesaCountry;
+    }
+    if cell.aridity > 0.44
+        && (0.18..=0.46).contains(&cell.wetness)
+        && cell.basinness > 0.20
+        && (0.20..=0.52).contains(&cell.ruggedness)
+        && cell.slope < 0.42
+    {
+        return TerrainFormFamily::Karst;
     }
     if cell.basinness > 0.60 && !matches!(relief_class, ReliefClass::Mountain) {
         return TerrainFormFamily::Basin;
@@ -663,7 +816,7 @@ fn classify_terrain_form_family(
     }
 }
 
-fn classify_region_archetype(
+fn classify_region_archetype_raw(
     biome_family: BiomeFamily,
     terrain_form_family: TerrainFormFamily,
     elevation_band: ElevationBand,
@@ -781,6 +934,45 @@ mod tests {
     use super::*;
     use crate::world::{AtlasArea, AtlasCoord, WorldMeta, generate_atlas_fields, generate_atlas_structure};
 
+    #[derive(Debug)]
+    struct ClassificationScenario {
+        name: &'static str,
+        cell: AtlasCell,
+        touches_ridge: bool,
+        touches_river: bool,
+        expected_raw: RegionArchetype,
+        expected_launch: RegionArchetype,
+    }
+
+    fn classify_pre_and_post_launch_fallback(
+        cell: AtlasCell,
+        touches_ridge: bool,
+        touches_river: bool,
+    ) -> (RegionClassCell, RegionClassCell) {
+        let raw = classify_region_cell_raw(cell, touches_ridge, touches_river);
+        let launch = apply_launch_fallback_to_region_cell(raw);
+        (raw, launch)
+    }
+
+    fn scenario_cell(mut update: impl FnMut(&mut AtlasCell)) -> AtlasCell {
+        let mut cell = AtlasCell {
+            landness: 0.90,
+            ocean_distance: 0.45,
+            coast_distance: 0.40,
+            macro_elevation: 0.30,
+            ruggedness: 0.10,
+            river_distance_estimate: 0.80,
+            temperature: 0.50,
+            humidity: 0.40,
+            inlandness: 0.45,
+            aridity: 0.20,
+            wetness: 0.30,
+            ..AtlasCell::default()
+        };
+        update(&mut cell);
+        cell
+    }
+
     #[test]
     fn region_classification_is_deterministic() {
         let meta = WorldMeta::new(42);
@@ -810,5 +1002,159 @@ mod tests {
         }
 
         assert!(unique.len() >= 3);
+    }
+
+    #[test]
+    fn launch_fallback_maps_every_catalog_archetype_to_a_launch_candidate() {
+        for entry in region_catalog_entries() {
+            let fallback = launch_fallback_archetype(entry.archetype);
+            assert!(
+                is_launch_candidate(fallback),
+                "fallback for {:?} should land on a launch archetype, got {:?}",
+                entry.archetype,
+                fallback
+            );
+
+            if matches!(entry.status, RegionCatalogStatus::LaunchCandidate) {
+                assert_eq!(fallback, entry.archetype);
+            }
+        }
+    }
+
+    #[test]
+    fn region_classification_examples_show_pre_and_post_launch_fallback() {
+        let scenarios = [
+            ClassificationScenario {
+                name: "coastal_delta_falls_back_to_launch_wetland",
+                cell: scenario_cell(|cell| {
+                    cell.ocean_distance = 0.04;
+                    cell.coast_distance = 0.03;
+                    cell.coast_factor = 0.88;
+                    cell.river_flow_potential = 0.82;
+                    cell.riverine_factor = 0.74;
+                    cell.wetness = 0.62;
+                    cell.humidity = 0.58;
+                    cell.aridity = 0.10;
+                    cell.temperature = 0.56;
+                    cell.inlandness = 0.06;
+                }),
+                touches_ridge: false,
+                touches_river: true,
+                expected_raw: RegionArchetype::CoastalDelta,
+                expected_launch: RegionArchetype::ColdWetLowland,
+            },
+            ClassificationScenario {
+                name: "desert_mesa_country_falls_back_to_desert_plain",
+                cell: scenario_cell(|cell| {
+                    cell.ocean_distance = 0.72;
+                    cell.coast_distance = 0.74;
+                    cell.coast_factor = 0.06;
+                    cell.macro_elevation = 0.70;
+                    cell.ruggedness = 0.38;
+                    cell.slope = 0.22;
+                    cell.mountain_mass = 0.24;
+                    cell.ridge_factor = 0.18;
+                    cell.basinness = 0.14;
+                    cell.temperature = 0.90;
+                    cell.humidity = 0.05;
+                    cell.wetness = 0.08;
+                    cell.aridity = 0.88;
+                    cell.inlandness = 0.78;
+                }),
+                touches_ridge: false,
+                touches_river: false,
+                expected_raw: RegionArchetype::DesertMesaCountry,
+                expected_launch: RegionArchetype::DesertPlain,
+            },
+            ClassificationScenario {
+                name: "boreal_ridge_country_falls_back_to_temperate_hills",
+                cell: scenario_cell(|cell| {
+                    cell.macro_elevation = 0.66;
+                    cell.ruggedness = 0.44;
+                    cell.slope = 0.28;
+                    cell.mountain_mass = 0.42;
+                    cell.ridge_factor = 0.72;
+                    cell.temperature = 0.24;
+                    cell.humidity = 0.46;
+                    cell.wetness = 0.34;
+                    cell.aridity = 0.22;
+                    cell.inlandness = 0.36;
+                }),
+                touches_ridge: true,
+                touches_river: false,
+                expected_raw: RegionArchetype::BorealRidgeCountry,
+                expected_launch: RegionArchetype::TemperateHills,
+            },
+            ClassificationScenario {
+                name: "alpine_ravine_country_falls_back_to_glaciated_alpine",
+                cell: scenario_cell(|cell| {
+                    cell.macro_elevation = 0.88;
+                    cell.ruggedness = 0.66;
+                    cell.slope = 0.34;
+                    cell.mountain_mass = 0.58;
+                    cell.ridge_factor = 0.36;
+                    cell.river_distance_estimate = 0.12;
+                    cell.alpine_factor = 0.82;
+                    cell.temperature = 0.32;
+                    cell.humidity = 0.28;
+                    cell.wetness = 0.24;
+                    cell.aridity = 0.38;
+                    cell.inlandness = 0.42;
+                }),
+                touches_ridge: true,
+                touches_river: false,
+                expected_raw: RegionArchetype::AlpineRavineCountry,
+                expected_launch: RegionArchetype::GlaciatedAlpine,
+            },
+            ClassificationScenario {
+                name: "launch_archetype_passes_through_unchanged",
+                cell: scenario_cell(|cell| {
+                    cell.macro_elevation = 0.42;
+                    cell.ruggedness = 0.56;
+                    cell.slope = 0.26;
+                    cell.mountain_mass = 0.30;
+                    cell.ridge_factor = 0.30;
+                    cell.temperature = 0.92;
+                    cell.humidity = 0.88;
+                    cell.wetness = 0.58;
+                    cell.aridity = 0.06;
+                    cell.inlandness = 0.26;
+                }),
+                touches_ridge: false,
+                touches_river: false,
+                expected_raw: RegionArchetype::TropicalRainforestHills,
+                expected_launch: RegionArchetype::TropicalRainforestHills,
+            },
+        ];
+
+        for scenario in scenarios {
+            let (raw, launch) = classify_pre_and_post_launch_fallback(
+                scenario.cell,
+                scenario.touches_ridge,
+                scenario.touches_river,
+            );
+
+            println!(
+                "{}: temp={:.2} humidity={:.2} aridity={:.2} elev={:.2} rugged={:.2} ridge={:.2} flow={:.2} raw={:?} launch={:?}",
+                scenario.name,
+                scenario.cell.temperature,
+                scenario.cell.humidity,
+                scenario.cell.aridity,
+                scenario.cell.macro_elevation,
+                scenario.cell.ruggedness,
+                scenario.cell.ridge_factor,
+                scenario.cell.river_flow_potential,
+                raw.archetype,
+                launch.archetype
+            );
+
+            assert_eq!(raw.archetype, scenario.expected_raw, "raw classification mismatch for {}", scenario.name);
+            assert_eq!(
+                launch.archetype,
+                scenario.expected_launch,
+                "launch fallback mismatch for {}",
+                scenario.name
+            );
+        }
     }
 }

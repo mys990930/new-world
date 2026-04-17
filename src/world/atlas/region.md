@@ -157,6 +157,7 @@ sample_region_classes(
 
 - an initial deterministic atlas-cell classification scaffold is now implemented in code
 - the current scaffold resolves banded classes, biome families, terrain-form families, and coarse region archetypes from atlas raw fields plus nearby skeleton presence
+- raw classifier logic may now resolve the broader scaffolded archetype pool first, while the public `resolve_region_classes(...)` path still applies launch fallback at the final step for downstream safety
 - the biome-family and terrain-form-family candidate taxonomies are now locked at the planning level
 - the launch candidate pool in `region_catalog.md` is now the authoritative planning contract for classifier-facing regional identity
 - a full `RegionArchetype` candidate pool with `launch`, `extended`, and `deferred` labels is now scaffolded as per-type modules and docs

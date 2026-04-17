@@ -209,7 +209,7 @@ NOT:
 - `generation.md`: chunk generation rules
 - `atlas/atlas.md`: atlas prototype contracts
 - `atlas/region.md`: atlas-owned region classification contract
-- `atlas/region_catalog.md`: planning draft for biome, terrain-form, archetype, and meso catalogs
+- `atlas/region_catalog.md`: authoritative launch catalog for biome, terrain-form, archetype, and meso planning
 - `atlas/region/axes.md`: classification dimension reference
 - `atlas/region/catalog.md`: scaffolded archetype catalog index
 - `atlas/region/archetypes/archetypes.md`: per-archetype module/doc structure
@@ -234,6 +234,7 @@ NOT:
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
 - the next authoritative ownership step is atlas-owned region classification, which should resolve biome and terrain-form archetypes before base heightfield solving
 - an initial code scaffold for atlas-owned region classification now exists, but it is not yet the active gameplay generator path
+- the current public `resolve_region_classes(...)` surface remains launch-safe by applying launch fallback at the final step, while the internal raw classifier may still emit broader scaffolded archetypes for testing and future downstream work
 - atlas-owned meso guides should eventually sit after region classification and before generation micro detail as on-demand deterministic terrain accents
 - the full per-feature meso taxonomy is now scaffolded in `atlas/meso/features/*`, but the currently emitted runtime subset is still only the Wave 1A guides: `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - the old legacy V1 chunk generator has now been removed instead of being kept beside V2
