@@ -1,18 +1,28 @@
 # hill_cluster
 
-## Visual Intent
+## Stage
 
-- broad low upland bumps inside otherwise readable plains or gentle uplands
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- raises clustered local relief without changing the owner archetype
+- placement family: `InteriorLandform`
+- hydrology coupling: `AvoidPrimaryCorridor`
 
-## Hydrology Relationship
+## Summary
 
-- avoid primary river corridors
-- can sit near but not on major basin outlets
+- Hill Cluster planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports open woodland or shrub clustering
+- Biases inland terrain prototypes without taking over the owning region identity.
+- Should avoid displacing major river corridors and instead sit beside or above them.
+
+## Ecology Notes
+
+- Later ecology can use this feature to break uniform cover into readable local habitat patches.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

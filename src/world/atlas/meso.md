@@ -148,10 +148,11 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 ## Current Status
 
 - Wave 1A is implemented as deterministic atlas-owned guide generation
-- current generated candidates are `hill clusters`, `basins`, `escarpment bands`, and `terraces`
+- the full per-feature taxonomy is now scaffolded in `meso/catalog.md` and `meso/features/*` with `launch`, `extended`, and `deferred` labels
+- current generated candidates are still only `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - current implemented selection still follows an atlas/structure-constrained deterministic lottery model
 - generation now samples these guides per block column and uses them to bias broad relief before final structure-aware smoothing
-- candidate families and the wider backlog still live in `meso_candidates.md`
+- candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input
 
 ## Submodules

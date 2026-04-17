@@ -2,15 +2,15 @@ use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 
 pub const DEF: MesoFeatureDef = MesoFeatureDef {
     key: "crater",
-    summary: "Round impact or volcanic depression accent used sparingly for strong local identity.",
-    placement_family: MesoPlacementFamily::InteriorLandform,
-    hydrology_coupling: MesoHydrologyCoupling::SupportsFloodplain,
+    summary: "Crater planning stub for a multi-chunk terrain accent.",
+    placement_family: MesoPlacementFamily::VolcanicField,
+    hydrology_coupling: MesoHydrologyCoupling::None,
     terrain_effects: &[
-        "Creates a clear circular basin with rim emphasis.",
-        "Can host later water, lava, or bare-rock fill policies depending on archetype.",
+        "Introduces volcanic relief accents without redefining macro mountain ownership.",
+        "Should be resolved mainly through archetype context and local relief budget.",
     ],
     ecology_notes: &[
-        "Supports unusual localized ecology compared with the surrounding region.",
-        "Can remain barren or hold wet pockets depending on material policy later.",
+        "Later ecology can emphasize sparse pioneer cover and exposed mineral surfaces.",
+        "This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.",
     ],
 };

@@ -1,18 +1,28 @@
 # coastal_cliff_band
 
-## Visual Intent
+## Stage
 
-- marine-facing cliff accent distinct from inland escarpments
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- creates a coast-first vertical break and exposed shore wall
+- placement family: `CoastalEdge`
+- hydrology coupling: `RequiresCoast`
 
-## Hydrology Relationship
+## Summary
 
-- requires coast context
-- should cooperate with surf and shoreline material policy
+- Coastal Cliff Band planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports sparse salt-tolerant cover
+- Breaks up shoreline or coast-parallel terrain without replacing the owning coastal archetype.
+- Only valid when coastal context has already been resolved.
+
+## Ecology Notes
+
+- Later ecology can separate exposed cliff or spray-tolerant cover from inland cover.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

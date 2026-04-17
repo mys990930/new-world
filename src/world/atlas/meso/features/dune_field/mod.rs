@@ -2,15 +2,15 @@ use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 
 pub const DEF: MesoFeatureDef = MesoFeatureDef {
     key: "dune_field",
-    summary: "Wind-shaped arid relief patch that gives deserts readable local identity.",
+    summary: "Dune Field planning stub for a multi-chunk terrain accent.",
     placement_family: MesoPlacementFamily::AridExposure,
     hydrology_coupling: MesoHydrologyCoupling::PrefersAridRunoff,
     terrain_effects: &[
-        "Adds directional sand relief without turning the whole desert into uniform waves.",
-        "Should remain bounded and archetype-driven rather than everywhere in arid land.",
+        "Introduces erosion- or aridity-driven forms under dry regional conditions.",
+        "Favors dry runoff, sediment, or wind-shaped settings over wet lowlands.",
     ],
     ecology_notes: &[
-        "Keeps vegetation sparse and tied to exceptional moisture pockets.",
-        "Can create lee-side accumulation and exposed crests for later ecology bias.",
+        "Later ecology can bias sparse scrub, exposed sediment, or dune-tolerant cover here.",
+        "This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.",
     ],
 };

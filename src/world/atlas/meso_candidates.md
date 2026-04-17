@@ -6,6 +6,11 @@
 - record which candidates are true meso fits versus hybrid cases
 - keep a deliberately small first-wave shortlist for implementation order
 
+## Status
+
+- the authoritative scaffolded per-feature pool now lives in `meso/catalog.md` and `meso/features/*`
+- this file now acts as the grouping and wave-planning companion to that scaffold, not as the exact exhaustive index
+
 ## Candidate Pool
 
 ### Highland / Raised Landforms

@@ -1,17 +1,28 @@
 # dune_field
 
-## Visual Intent
+## Stage
 
-- bounded directional sand relief inside arid regions
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- adds wind-shaped sediment forms without turning the whole desert into noise
+- placement family: `AridExposure`
+- hydrology coupling: `PrefersAridRunoff`
 
-## Hydrology Relationship
+## Summary
 
-- prefers arid runoff context and should avoid persistent water ownership
+- Dune Field planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports sparse scrub only in favorable pockets
+- Introduces erosion- or aridity-driven forms under dry regional conditions.
+- Favors dry runoff, sediment, or wind-shaped settings over wet lowlands.
+
+## Ecology Notes
+
+- Later ecology can bias sparse scrub, exposed sediment, or dune-tolerant cover here.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

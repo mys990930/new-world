@@ -2,15 +2,15 @@ use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 
 pub const DEF: MesoFeatureDef = MesoFeatureDef {
     key: "upland_terrace",
-    summary: "Step-like slope deformation for plateaus, basin shoulders, and selected coasts.",
+    summary: "Upland Terrace planning stub for a multi-chunk terrain accent.",
     placement_family: MesoPlacementFamily::RidgeShoulder,
     hydrology_coupling: MesoHydrologyCoupling::AvoidPrimaryCorridor,
     terrain_effects: &[
-        "Introduces broad stepped elevation rather than smooth only or jagged random relief.",
-        "Helps upland transitions feel authored without using hard vertical cliffs everywhere.",
+        "Modulates ridge shoulders, upland steps, or slope breaks under an already-classified archetype.",
+        "Should avoid displacing major river corridors and instead sit beside or above them.",
     ],
     ecology_notes: &[
-        "Creates repeated shelf-like habitat bands for later ecology systems.",
-        "Encourages alternating soil depth and rock exposure zones.",
+        "Later ecology can bias sparse cover, wind exposure, or stepped vegetation belts here.",
+        "This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.",
     ],
 };

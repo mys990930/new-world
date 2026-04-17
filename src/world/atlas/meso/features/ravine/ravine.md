@@ -1,17 +1,28 @@
 # ravine
 
-## Visual Intent
+## Stage
 
-- narrow incision feature that makes hilly runoff feel intentional
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- cuts a localized valley into already nonflat terrain
+- placement family: `ValleyFloor`
+- hydrology coupling: `AvoidPrimaryCorridor`
 
-## Hydrology Relationship
+## Summary
 
-- should align with real drainage logic, not random carve
+- Ravine planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports wetter, shadier micro-belts
+- Sharpens valley-like incision or localized linear lowland structure.
+- Should avoid displacing major river corridors and instead sit beside or above them.
+
+## Ecology Notes
+
+- Later ecology can use these cuts to channel denser vegetation, shade, or runoff-biased cover.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

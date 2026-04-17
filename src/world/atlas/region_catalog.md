@@ -309,6 +309,9 @@ Region archetypes combine one locked `BiomeFamily` with one locked `TerrainFormF
 
 ## Draft Meso Feature Catalog
 
+The exact scaffolded per-feature index now lives in `atlas/meso/catalog.md` and `atlas/meso/features/*`.
+The grouped list below stays useful as a design-sheet view for clustering and later allowance discussion.
+
 ### Core Upland Features
 
 - `hill_cluster`

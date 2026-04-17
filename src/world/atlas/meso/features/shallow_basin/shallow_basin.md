@@ -1,17 +1,28 @@
 # shallow_basin
 
-## Visual Intent
+## Stage
 
-- broad depressed area that reads as local lowland identity
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- lowers the base prototype gently over several chunks
+- placement family: `BasinFloor`
+- hydrology coupling: `PrefersClosedBasin`
 
-## Hydrology Relationship
+## Summary
 
-- can support wetland, pond, or later lake logic
+- Shallow Basin planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports marsh, wet meadow, or exposed mud margins
+- Adds localized lowland or depression structure inside broader regional terrain.
+- Prefers internally drained or weakly connected depressions.
+
+## Ecology Notes
+
+- Later ecology can thicken wetland, pond-edge, or dense grass cover in these pockets.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

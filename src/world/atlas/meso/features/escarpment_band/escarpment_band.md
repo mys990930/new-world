@@ -1,18 +1,28 @@
 # escarpment_band
 
-## Visual Intent
+## Stage
 
-- long readable terrain edge for plateau and upland transitions
+- `launch`
 
-## Terrain Effect
+## Identity
 
-- imposes a strong elevation break without noisy per-block cliffs
+- placement family: `RidgeShoulder`
+- hydrology coupling: `AvoidPrimaryCorridor`
 
-## Hydrology Relationship
+## Summary
 
-- avoid becoming the primary river path itself
-- can redirect runoff and later shadow moisture
+- Escarpment Band planning stub for a multi-chunk terrain accent.
 
-## Ecology Hooks
+## Terrain Traits
 
-- later supports exposed rock and slope-specialized cover
+- Modulates ridge shoulders, upland steps, or slope breaks under an already-classified archetype.
+- Should avoid displacing major river corridors and instead sit beside or above them.
+
+## Ecology Notes
+
+- Later ecology can bias sparse cover, wind exposure, or stepped vegetation belts here.
+- This candidate is in the near-term planning set, so archetype allowances and deformation operators should be locked first.
+
+## Follow-up
+
+- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative

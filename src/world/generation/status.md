@@ -101,7 +101,9 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - atlas ownership: `atlas/meso.rs`
   - chunk-side application scaffold: `v2/meso_apply.rs`
 - note:
-  - guide ownership and feature catalog exist
+  - guide ownership and a full per-feature scaffolded catalog exist
+  - the scaffolded pool now carries `launch / extended / deferred` labels and per-feature planning stubs
+  - runtime guide generation still only emits the current Wave 1A subset from `atlas/meso.rs`
   - authoritative per-archetype allowance matrix still needs to be locked
   - no V2 chunk deformation pass is implemented yet
 
