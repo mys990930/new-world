@@ -8,6 +8,7 @@
 ## Inputs
 
 - either `seed` or `--world-dir <path>`
+- optional `--stage <full|prototype>` when previewing from a seed
 - preview center in chunk coordinates
 - horizontal render radius
 - vertical chunk bounds
@@ -26,6 +27,19 @@
 4. Render them with a fixed quarter-view camera and a relief-friendly preview lighting setup.
 5. Save the PNG to disk.
 
+## Prototype Stage
+
+- `--stage prototype` is seed-only and renders the base-heightfield solve instead of realized chunk meshes.
+- The prototype path builds `ChunkGenerationV2Inputs` for each chunk in the requested window, then calls the V2 scaffold and base-heightfield prototype solve before meshing the result for preview.
+- Vertical chunk bounds are ignored in prototype mode; the render footprint is controlled by `--center-x`, `--center-z`, and `--radius`.
+- The default output name includes `_prototype` so the image is easy to tell apart from the full chunk preview.
+
+Example:
+
+```bash
+cargo run --bin chunk_preview -- 42 --stage prototype --center-x 4 --center-z -3 --radius 2 --output target/chunk-preview/prototype.png
+```
+
 ## Default Vertical Window
 
 - The current default preview window is chunk `y = -2..3`, which keeps rendering focused on approximately world `y > -40` while still capturing surface relief.
@@ -36,4 +50,5 @@
 - The current LOD path samples the generator's probe surface directly and renders a wide-angle scaffold mesh without materializing every full block face.
 - The current LOD path applies a preview-only vertical exaggeration so broad isometric shots still show sea shelves, uplands, and ridge relief.
 - LOD preview is currently supported for direct seed previews; created-world previews still use the full mesh path.
+- LOD and prototype stages are mutually exclusive; prototype preview currently uses the full block-resolution surface rather than probe LOD sampling.
 - For an exact `xz` top-down PNG that scans realized chunk data rather than probe surfaces, use `chunk_topdown_preview`.

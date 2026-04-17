@@ -14,7 +14,8 @@ use new_world::renderer::{
 };
 use new_world::world::{
     BlockFace, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
-    TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta, build_chunk_mesh,
+    TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
+    build_chunk_base_heightfield_prototype, build_chunk_mesh, build_chunk_v2_scaffold,
     generate_chunk, sample_chunk_surface_lod,
 };
 
@@ -31,11 +32,18 @@ const DEFAULT_MIN_Y_CHUNK: i32 = -2;
 const DEFAULT_MAX_Y_CHUNK: i32 = 3;
 const DEFAULT_LOD_BLOCKS: u8 = 1;
 const DEFAULT_LOD_VERTICAL_EXAGGERATION: f32 = 2.4;
+const DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION: f32 = 1.9;
 
 #[derive(Debug, Clone)]
 enum PreviewSource {
     Seed(u64),
     CreatedWorld(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewStage {
+    Full,
+    Prototype,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -61,6 +69,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut min_y_chunk = DEFAULT_MIN_Y_CHUNK;
     let mut max_y_chunk = DEFAULT_MAX_Y_CHUNK;
     let mut lod_blocks = DEFAULT_LOD_BLOCKS;
+    let mut stage = PreviewStage::Full;
     let mut output: Option<PathBuf> = None;
 
     while let Some(flag) = args.first().cloned() {
@@ -81,6 +90,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--min-y-chunk" => min_y_chunk = parse_required::<i32>(&mut args, "min-y-chunk")?,
             "--max-y-chunk" => max_y_chunk = parse_required::<i32>(&mut args, "max-y-chunk")?,
             "--lod-blocks" => lod_blocks = parse_required::<u8>(&mut args, "lod-blocks")?,
+            "--stage" => {
+                stage = parse_preview_stage(parse_required::<String>(&mut args, "stage")?)?;
+            }
             "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
@@ -99,6 +111,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(cli_error(format!(
             "lod-blocks must evenly divide CHUNK_EDGE ({CHUNK_EDGE})"
         )));
+    }
+    if stage == PreviewStage::Prototype && lod_blocks > 1 {
+        return Err(cli_error(
+            "prototype stage currently supports only the default block resolution; omit --lod-blocks or use --lod-blocks 1",
+        ));
     }
 
     let block_registry = Arc::new(
@@ -130,74 +147,94 @@ fn main() -> Result<(), Box<dyn Error>> {
     center_x = requested_center.0;
     center_z = requested_center.1;
 
-    let output =
-        output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius, lod_blocks));
+    let output = output.unwrap_or_else(|| {
+        default_output_path(&source, center_x, center_z, radius, lod_blocks, stage)
+    });
     let generation_radius = radius + DEFAULT_RENDER_PADDING;
-    let render_meshes = if lod_blocks > 1 {
+    if stage == PreviewStage::Prototype {
         if created_world_dir.is_some() {
             return Err(cli_error(
-                "lod-blocks > 1 is currently supported only for direct seed previews",
+                "prototype stage is currently supported only for direct seed previews",
             ));
         }
+    }
 
-        collect_lod_render_meshes(
+    let render_meshes = match stage {
+        PreviewStage::Prototype => collect_prototype_render_meshes(
             &meta,
             block_registry.as_ref(),
             center_x,
             center_z,
             radius,
-            min_y_chunk,
-            lod_blocks,
-        )?
-    } else {
-        let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
+            generation_radius,
+        )?,
+        PreviewStage::Full if lod_blocks > 1 => {
+            if created_world_dir.is_some() {
+                return Err(cli_error(
+                    "lod-blocks > 1 is currently supported only for direct seed previews",
+                ));
+            }
 
-        match created_world_dir.as_deref() {
-            Some(world_dir) => {
-                let manifest = created_world_manifest
-                    .as_ref()
-                    .expect("created-world preview metadata should exist");
-                ensure_created_world_bounds_cover_request(
-                    manifest.min_chunk_coord(),
-                    manifest.max_chunk_coord(),
-                    center_x,
-                    center_z,
-                    radius,
-                    min_y_chunk,
-                    max_y_chunk,
-                )?;
-                load_created_world_preview_chunks(
+            collect_lod_render_meshes(
+                &meta,
+                block_registry.as_ref(),
+                center_x,
+                center_z,
+                radius,
+                min_y_chunk,
+                lod_blocks,
+            )?
+        }
+        PreviewStage::Full => {
+            let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
+
+            match created_world_dir.as_deref() {
+                Some(world_dir) => {
+                    let manifest = created_world_manifest
+                        .as_ref()
+                        .expect("created-world preview metadata should exist");
+                    ensure_created_world_bounds_cover_request(
+                        manifest.min_chunk_coord(),
+                        manifest.max_chunk_coord(),
+                        center_x,
+                        center_z,
+                        radius,
+                        min_y_chunk,
+                        max_y_chunk,
+                    )?;
+                    load_created_world_preview_chunks(
+                        &mut world,
+                        world_dir,
+                        manifest.min_chunk_coord(),
+                        manifest.max_chunk_coord(),
+                        center_x,
+                        center_z,
+                        generation_radius,
+                        min_y_chunk,
+                        max_y_chunk,
+                    )?;
+                }
+                None => generate_preview_chunks(
                     &mut world,
-                    world_dir,
-                    manifest.min_chunk_coord(),
-                    manifest.max_chunk_coord(),
+                    block_registry.as_ref(),
                     center_x,
                     center_z,
                     generation_radius,
                     min_y_chunk,
                     max_y_chunk,
-                )?;
+                ),
             }
-            None => generate_preview_chunks(
-                &mut world,
+
+            collect_render_meshes(
+                &world,
                 block_registry.as_ref(),
                 center_x,
                 center_z,
-                generation_radius,
+                radius,
                 min_y_chunk,
                 max_y_chunk,
-            ),
+            )
         }
-
-        collect_render_meshes(
-            &world,
-            block_registry.as_ref(),
-            center_x,
-            center_z,
-            radius,
-            min_y_chunk,
-            max_y_chunk,
-        )
     };
     if render_meshes.is_empty() {
         return Err(cli_error("no visible meshes were produced for the requested preview area"));
@@ -223,11 +260,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("preview source: created world {}", world_dir.display())
         }
     }
+    println!("preview stage: {}", preview_stage_label(stage));
     println!("center chunk: ({center_x}, {center_z})");
-    println!(
-        "render footprint: xz radius={}, y={}..{}, lod_blocks={}",
-        radius, min_y_chunk, max_y_chunk, lod_blocks
-    );
+    match stage {
+        PreviewStage::Prototype => {
+            println!("render footprint: xz radius={}, prototype stage, y bounds ignored", radius);
+        }
+        PreviewStage::Full => {
+            println!(
+                "render footprint: xz radius={}, y={}..{}, lod_blocks={}",
+                radius, min_y_chunk, max_y_chunk, lod_blocks
+            );
+        }
+    }
     println!("output: {}", output.display());
     println!(
         "image: {}x{}, meshes={}, draw_calls={}",
@@ -246,16 +291,23 @@ fn default_output_path(
     center_z: i32,
     radius: i32,
     lod_blocks: u8,
+    stage: PreviewStage,
 ) -> PathBuf {
     match source {
-        PreviewSource::Seed(seed) => PathBuf::from(format!(
-            "target/chunk-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}{}.png",
-            if lod_blocks > 1 {
-                format!("_lod{lod_blocks}")
-            } else {
-                String::new()
-            }
-        )),
+        PreviewSource::Seed(seed) => {
+            let stage_suffix = match stage {
+                PreviewStage::Full => String::new(),
+                PreviewStage::Prototype => String::from("_prototype"),
+            };
+            PathBuf::from(format!(
+                "target/chunk-preview/seed_{seed}{stage_suffix}_cx{center_x}_cz{center_z}_r{radius}{}.png",
+                if lod_blocks > 1 {
+                    format!("_lod{lod_blocks}")
+                } else {
+                    String::new()
+                }
+            ))
+        }
         PreviewSource::CreatedWorld(world_dir) => world_dir.join(format!(
             "preview_cx{center_x}_cz{center_z}_r{radius}{}.png",
             if lod_blocks > 1 {
@@ -389,6 +441,291 @@ fn generate_preview_chunks(
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrototypePreviewCell {
+    min_x: i32,
+    min_z: i32,
+    top_y: i32,
+    base_height: f32,
+    relief_budget: f32,
+}
+
+#[derive(Debug, Clone)]
+struct PrototypePreviewGrid {
+    origin_x: i32,
+    origin_z: i32,
+    width: usize,
+    depth: usize,
+    base_y: i32,
+    cells: Vec<PrototypePreviewCell>,
+}
+
+impl PrototypePreviewGrid {
+    fn index_of(&self, world_x: i32, world_z: i32) -> Option<usize> {
+        if world_x < self.origin_x || world_z < self.origin_z {
+            return None;
+        }
+
+        let dx = usize::try_from(world_x - self.origin_x).ok()?;
+        let dz = usize::try_from(world_z - self.origin_z).ok()?;
+        if dx >= self.width || dz >= self.depth {
+            return None;
+        }
+
+        Some(dz * self.width + dx)
+    }
+
+    fn cell(&self, world_x: i32, world_z: i32) -> Option<PrototypePreviewCell> {
+        self.index_of(world_x, world_z).map(|index| self.cells[index])
+    }
+
+    fn top_y_or_base(&self, world_x: i32, world_z: i32) -> i32 {
+        self.cell(world_x, world_z)
+            .map(|cell| cell.top_y.max(self.base_y + 1))
+            .unwrap_or(self.base_y)
+    }
+}
+
+fn collect_prototype_render_meshes(
+    meta: &WorldMeta,
+    registry: &BlockRegistry,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    generation_radius: i32,
+) -> Result<Vec<RenderCpuMesh>, Box<dyn Error>> {
+    let grid = build_prototype_preview_grid(meta, center_x, center_z, generation_radius)?;
+    let mut render_meshes = Vec::new();
+
+    for chunk_z in (center_z - radius)..=(center_z + radius) {
+        for chunk_x in (center_x - radius)..=(center_x + radius) {
+            let mesh = build_prototype_heightfield_mesh(&grid, chunk_x, chunk_z, registry);
+            if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+                continue;
+            }
+            render_meshes.push(mesh);
+        }
+    }
+
+    Ok(render_meshes)
+}
+
+fn build_prototype_preview_grid(
+    meta: &WorldMeta,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+) -> Result<PrototypePreviewGrid, Box<dyn Error>> {
+    let min_chunk_x = center_x - generation_radius;
+    let max_chunk_x = center_x + generation_radius;
+    let min_chunk_z = center_z - generation_radius;
+    let max_chunk_z = center_z + generation_radius;
+    let width_chunks = usize::try_from(max_chunk_x - min_chunk_x + 1)
+        .map_err(|_| cli_error("invalid prototype preview width"))?;
+    let depth_chunks = usize::try_from(max_chunk_z - min_chunk_z + 1)
+        .map_err(|_| cli_error("invalid prototype preview depth"))?;
+    let width = width_chunks * CHUNK_EDGE;
+    let depth = depth_chunks * CHUNK_EDGE;
+    let origin_x = min_chunk_x * CHUNK_EDGE_I32;
+    let origin_z = min_chunk_z * CHUNK_EDGE_I32;
+    let mut cells = vec![
+        PrototypePreviewCell {
+            min_x: origin_x,
+            min_z: origin_z,
+            top_y: WORLD_FLOOR_Y,
+            base_height: WORLD_FLOOR_Y as f32,
+            relief_budget: 0.0,
+        };
+        width * depth
+    ];
+    let mut base_y = i32::MAX;
+
+    for chunk_z in min_chunk_z..=max_chunk_z {
+        let chunk_row = usize::try_from(chunk_z - min_chunk_z)
+            .map_err(|_| cli_error("invalid prototype preview chunk row"))?;
+        for chunk_x in min_chunk_x..=max_chunk_x {
+            let scaffold = build_chunk_v2_scaffold(ChunkCoord(chunk_x, 0, chunk_z), meta);
+            let prototype = build_chunk_base_heightfield_prototype(
+                scaffold.chunk,
+                &scaffold.inputs,
+                &scaffold.corridor_window,
+            );
+            let chunk_col = usize::try_from(chunk_x - min_chunk_x)
+                .map_err(|_| cli_error("invalid prototype preview chunk column"))?;
+            let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
+            let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
+
+            for local_z in 0..CHUNK_EDGE_I32 {
+                let global_z = chunk_row * CHUNK_EDGE + usize::try_from(local_z)
+                    .map_err(|_| cli_error("invalid prototype preview local z"))?;
+                let row_offset = global_z * width;
+                for local_x in 0..CHUNK_EDGE_I32 {
+                    let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
+                        .map_err(|_| cli_error("invalid prototype preview column index"))?;
+                    let column = prototype.columns[column_index];
+                    let global_x = chunk_col * CHUNK_EDGE + usize::try_from(local_x)
+                        .map_err(|_| cli_error("invalid prototype preview local x"))?;
+                    let index = row_offset + global_x;
+                    let top_y = column.base_height.ceil() as i32;
+                    base_y = base_y.min(top_y);
+                    cells[index] = PrototypePreviewCell {
+                        min_x: chunk_origin_x + local_x,
+                        min_z: chunk_origin_z + local_z,
+                        top_y,
+                        base_height: column.base_height,
+                        relief_budget: column.relief_budget,
+                    };
+                }
+            }
+        }
+    }
+
+    Ok(PrototypePreviewGrid {
+        origin_x,
+        origin_z,
+        width,
+        depth,
+        base_y: base_y.saturating_sub(16).max(WORLD_FLOOR_Y),
+        cells,
+    })
+}
+
+fn build_prototype_heightfield_mesh(
+    grid: &PrototypePreviewGrid,
+    chunk_x: i32,
+    chunk_z: i32,
+    registry: &BlockRegistry,
+) -> RenderCpuMesh {
+    let mut mesh = RenderCpuMesh::default();
+    let Some(block_id) = registry.block_id("terrain_debug") else {
+        return mesh;
+    };
+    let block_def = registry.block_or_missing(block_id);
+    let texture_layer = u32::from(block_def.texture_for_face(BlockFace::PosY).0);
+    let material_kind = render_material_kind_from_world(block_def.material).as_u32();
+    let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
+    let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
+
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            let world_x = chunk_origin_x + local_x;
+            let world_z = chunk_origin_z + local_z;
+            let Some(cell) = grid.cell(world_x, world_z) else {
+                continue;
+            };
+            let top_y = cell.top_y.max(grid.base_y + 1);
+            if top_y <= grid.base_y {
+                continue;
+            }
+
+            let color = prototype_column_color(block_def.tint_as_linear_rgba(), cell, grid.base_y);
+            append_box_face(
+                &mut mesh,
+                cell.min_x,
+                grid.base_y,
+                cell.min_z,
+                cell.min_x + 1,
+                top_y,
+                cell.min_z + 1,
+                BlockFace::PosY,
+                color,
+                texture_layer,
+                material_kind,
+                grid.base_y,
+                DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+            );
+
+            let left_top = grid.top_y_or_base(world_x - 1, world_z);
+            if top_y > left_top {
+                append_box_face(
+                    &mut mesh,
+                    cell.min_x,
+                    left_top,
+                    cell.min_z,
+                    cell.min_x + 1,
+                    top_y,
+                    cell.min_z + 1,
+                    BlockFace::NegX,
+                    color,
+                    texture_layer,
+                    material_kind,
+                    grid.base_y,
+                    DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                );
+            }
+
+            let right_top = grid.top_y_or_base(world_x + 1, world_z);
+            if top_y > right_top {
+                append_box_face(
+                    &mut mesh,
+                    cell.min_x,
+                    right_top,
+                    cell.min_z,
+                    cell.min_x + 1,
+                    top_y,
+                    cell.min_z + 1,
+                    BlockFace::PosX,
+                    color,
+                    texture_layer,
+                    material_kind,
+                    grid.base_y,
+                    DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                );
+            }
+
+            let back_top = grid.top_y_or_base(world_x, world_z - 1);
+            if top_y > back_top {
+                append_box_face(
+                    &mut mesh,
+                    cell.min_x,
+                    back_top,
+                    cell.min_z,
+                    cell.min_x + 1,
+                    top_y,
+                    cell.min_z + 1,
+                    BlockFace::NegZ,
+                    color,
+                    texture_layer,
+                    material_kind,
+                    grid.base_y,
+                    DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                );
+            }
+
+            let front_top = grid.top_y_or_base(world_x, world_z + 1);
+            if top_y > front_top {
+                append_box_face(
+                    &mut mesh,
+                    cell.min_x,
+                    front_top,
+                    cell.min_z,
+                    cell.min_x + 1,
+                    top_y,
+                    cell.min_z + 1,
+                    BlockFace::PosZ,
+                    color,
+                    texture_layer,
+                    material_kind,
+                    grid.base_y,
+                    DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                );
+            }
+        }
+    }
+
+    mesh
+}
+
+fn prototype_column_color(base: [f32; 4], cell: PrototypePreviewCell, base_y: i32) -> [f32; 4] {
+    let height_ratio = ((cell.base_height - base_y as f32) / 256.0).clamp(0.0, 1.0);
+    let relief_ratio = ((cell.relief_budget - 4.0) / 36.0).clamp(0.0, 1.0);
+    let mut color = base;
+    color[0] = (color[0] * (0.78 + height_ratio * 0.18) + relief_ratio * 0.08).clamp(0.0, 1.0);
+    color[1] = (color[1] * (0.82 + height_ratio * 0.10) + relief_ratio * 0.05).clamp(0.0, 1.0);
+    color[2] = (color[2] * (0.86 + relief_ratio * 0.08)).clamp(0.0, 1.0);
+    color
 }
 
 fn collect_render_meshes(
@@ -610,6 +947,23 @@ fn build_lod_heightfield_mesh(
     }
 
     mesh
+}
+
+fn parse_preview_stage(value: String) -> Result<PreviewStage, Box<dyn Error>> {
+    match value.to_ascii_lowercase().as_str() {
+        "full" | "default" => Ok(PreviewStage::Full),
+        "prototype" => Ok(PreviewStage::Prototype),
+        other => Err(cli_error(format!(
+            "unknown stage '{other}'; expected 'full' or 'prototype'"
+        ))),
+    }
+}
+
+fn preview_stage_label(stage: PreviewStage) -> &'static str {
+    match stage {
+        PreviewStage::Full => "full",
+        PreviewStage::Prototype => "prototype",
+    }
 }
 
 fn lod_profile_color(base: [f32; 4], profile: TerrainProfile, surface_y: i32) -> [f32; 4] {
@@ -987,9 +1341,48 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]"
+    "usage: cargo run --bin chunk_preview -- <seed> [--stage <full|prototype>] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--stage full] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n\nPrototype stage is seed-only and renders the base heightfield / prototype solve instead of realized chunk meshes."
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
     Box::new(io::Error::new(ErrorKind::InvalidInput, message.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use new_world::world::{BlockRegistry, WorldMeta};
+
+    #[test]
+    fn parse_preview_stage_accepts_full_and_prototype() {
+        assert_eq!(parse_preview_stage("full".to_string()).unwrap(), PreviewStage::Full);
+        assert_eq!(
+            parse_preview_stage("prototype".to_string()).unwrap(),
+            PreviewStage::Prototype
+        );
+        assert!(parse_preview_stage("probe".to_string()).is_err());
+    }
+
+    #[test]
+    fn prototype_stage_default_output_path_marks_the_stage() {
+        let source = PreviewSource::Seed(42);
+        let output = default_output_path(&source, 3, -2, 5, 1, PreviewStage::Prototype);
+        let output = output.to_string_lossy();
+
+        assert!(output.contains("seed_42_prototype_cx3_cz-2_r5.png"));
+    }
+
+    #[test]
+    fn prototype_stage_collects_visible_meshes_from_a_seed() {
+        let meta = WorldMeta::new(42);
+        let registry = BlockRegistry::load_default().expect("default registry should load");
+        let meshes = collect_prototype_render_meshes(&meta, &registry, 4, -3, 0, 1)
+            .expect("prototype preview should build");
+
+        assert!(!meshes.is_empty());
+        assert!(meshes
+            .iter()
+            .any(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty()));
+        assert!(meshes.iter().all(|mesh| mesh.bounds.is_some()));
+    }
 }
