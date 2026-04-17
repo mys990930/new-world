@@ -88,6 +88,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 - owner: `v2/corridors.rs`
 - note:
   - corridor data types exist, but no real solve is wired yet
+  - the stage contract is now documented: corridor solve consumes structure + region context and emits prototype-facing branch constraints before base heightfield solving
 
 ### 5. Biome-Aware Base Heightfield
 
@@ -95,6 +96,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 - owner: `v2/prototype.rs`
 - note:
   - prototype container exists, but no actual archetype-driven terrain solve exists yet
+  - prototype is expected to consume `ChunkCorridorWindow` as a hard drainage-shape input before meso
 
 ### 6. Meso Solve
 
