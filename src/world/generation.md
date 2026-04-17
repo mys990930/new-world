@@ -138,6 +138,12 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 5. Generation should not decide primary biome identity from material thresholds alone; it should consume atlas-owned region classification first.
 6. Legacy V1 should not silently reappear as a fallback path.
 
+## Stage Contract Notes
+
+- `v2/corridors.md` defines the river-corridor contract that feeds the base-heightfield solve.
+- `v2/prototype.md` is the authoritative design for the base-heightfield solve stage.
+- later V2 stages should treat prototype output as the broad landform source of truth, not as a late convenience mask.
+
 ## Internal Submodules
 
 - `sampler.md`: chunk-to-atlas neighborhood lookup and bilerp sampling
