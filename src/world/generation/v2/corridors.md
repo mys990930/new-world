@@ -35,7 +35,7 @@
 
 - `ChunkCorridorWindow`
 
-## Planned Interface
+## Current Interface
 
 ```rust
 build_chunk_corridor_window(
@@ -44,7 +44,7 @@ build_chunk_corridor_window(
 ) -> ChunkCorridorWindow
 ```
 
-The exact function name may still change, but the stage boundary should remain:
+The initial implementation now exists in code and keeps this stage boundary:
 
 1. `inputs` owns atlas raw fields, skeleton, and region classification.
 2. `corridors` turns those into branch-local water constraints.
@@ -136,5 +136,6 @@ The exact function name may still change, but the stage boundary should remain:
 
 ## Notes
 
-- final corridor solve is still unimplemented in code
-- this document now locks the stage boundary and solve semantics so implementation can follow without inventing ownership on the fly
+- an initial deterministic solve now projects nearby drainage segments into a bounded per-chunk corridor set
+- the current solver ranks nearby reaches, keeps the highest-priority chunk influencers, and allows centers outside the strict chunk footprint when wide corridors still matter
+- prototype consumption is still not wired, so corridor solve currently exists as a standalone V2 builder rather than an end-to-end realization step

@@ -84,11 +84,13 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 4. River Corridor Solve
 
-- status: `scaffold only`
+- status: `implemented as initial standalone solve`
 - owner: `v2/corridors.rs`
 - note:
-  - corridor data types exist, but no real solve is wired yet
-  - the stage contract is now documented: corridor solve consumes structure + region context and emits prototype-facing branch constraints before base heightfield solving
+  - `build_chunk_corridor_window(...)` now converts nearby drainage segments plus region / field context into deterministic chunk-local corridor constraints
+  - corridor centers may sit outside the strict chunk bounds when broad neighboring reaches still influence prototype shaping
+  - the stage contract remains the same: corridor solve consumes structure + region context and emits prototype-facing branch constraints before base heightfield solving
+  - scaffold assembly still stops at region classification; prototype does not consume corridor output yet
 
 ### 5. Biome-Aware Base Heightfield
 
@@ -154,7 +156,7 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 2. lock launch material policy per archetype
 3. lock launch seasonal biome-state policy
 4. document launch fallback behavior for extended and deferred archetypes
-5. implement real river corridor solving in `v2/corridors.rs`
+5. wire corridor output into scaffold assembly and prototype consumption
 6. implement biome-aware base heightfield solving in `v2/prototype.rs`
 7. implement meso application in `v2/meso_apply.rs`
 8. implement smoothing/local refinement in `v2/smoothing.rs`

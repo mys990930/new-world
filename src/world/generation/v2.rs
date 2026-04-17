@@ -8,7 +8,10 @@ pub mod voxelize;
 
 pub const GENERATOR_LABEL: &str = "v2_scaffold";
 
-pub use corridors::{ChunkCorridorWindow, RiverCorridorConstraint, empty_chunk_corridor_window};
+pub use corridors::{
+    ChunkCorridorWindow, RiverCorridorConstraint, build_chunk_corridor_window,
+    empty_chunk_corridor_window,
+};
 pub use hydrology::{HydrologySolve, empty_hydrology_solve};
 pub use inputs::{
     ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, V2ScaffoldStage, build_chunk_v2_scaffold,
