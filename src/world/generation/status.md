@@ -94,12 +94,13 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 5. Biome-Aware Base Heightfield
 
-- status: `design locked, stub boundary wired`
+- status: `implemented as initial broad-shape solve`
 - owner: `v2/prototype.rs`
 - note:
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
-  - prototype now accepts `ChunkCorridorWindow` explicitly, but the realization still returns an empty stub
-  - implementation should turn region archetype and corridor constraints into broad landform identity before meso and hydrology
+  - prototype now emits one `PrototypeColumn` per in-chunk column, using region/archetype context plus corridor constraints to produce a deterministic broad landform scaffold
+  - current implementation groups regions into broad prototype policy families and keeps corridor response, valley seats, and relief budgets explicit
+  - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
 ### 6. Meso Solve
 
@@ -157,7 +158,7 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 2. lock launch material policy per archetype
 3. lock launch seasonal biome-state policy
 4. document launch fallback behavior for extended and deferred archetypes
-5. implement biome-aware base heightfield solving in `v2/prototype.rs` from the now-authoritative prototype contract
+5. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online
 6. implement meso application in `v2/meso_apply.rs`
 7. implement smoothing/local refinement in `v2/smoothing.rs`
 8. implement connected hydrology in `v2/hydrology.rs`
