@@ -2,7 +2,7 @@
 
 ## Role
 
-- hold the first assembled atlas, skeleton, and region-classification inputs for V2 chunk generation
+- hold the first assembled atlas, skeleton, region-classification, and corridor handoff inputs for V2 chunk generation
 
 ## Current Types
 
@@ -12,4 +12,5 @@
 
 ## Notes
 
-- this module currently stops at the region-classification-ready checkpoint
+- this module now stops at the corridor-window-ready checkpoint
+- `ChunkGenerationV2Scaffold` carries the corridor window forward so prototype can consume it explicitly

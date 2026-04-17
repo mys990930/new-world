@@ -90,15 +90,15 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - `build_chunk_corridor_window(...)` now converts nearby drainage segments plus region / field context into deterministic chunk-local corridor constraints
   - corridor centers may sit outside the strict chunk bounds when broad neighboring reaches still influence prototype shaping
   - the stage contract remains the same: corridor solve consumes structure + region context and emits prototype-facing branch constraints before base heightfield solving
-  - scaffold assembly still stops at region classification; prototype does not consume corridor output yet
+  - scaffold assembly now carries corridor output forward, and the prototype boundary accepts it explicitly
 
 ### 5. Biome-Aware Base Heightfield
 
-- status: `scaffold only`
+- status: `stub boundary wired`
 - owner: `v2/prototype.rs`
 - note:
   - prototype container exists, but no actual archetype-driven terrain solve exists yet
-  - prototype is expected to consume `ChunkCorridorWindow` as a hard drainage-shape input before meso
+  - prototype now accepts `ChunkCorridorWindow` explicitly, but the realization still returns an empty stub
 
 ### 6. Meso Solve
 
@@ -156,13 +156,12 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 2. lock launch material policy per archetype
 3. lock launch seasonal biome-state policy
 4. document launch fallback behavior for extended and deferred archetypes
-5. wire corridor output into scaffold assembly and prototype consumption
-6. implement biome-aware base heightfield solving in `v2/prototype.rs`
-7. implement meso application in `v2/meso_apply.rs`
-8. implement smoothing/local refinement in `v2/smoothing.rs`
-9. implement connected hydrology in `v2/hydrology.rs`
-10. implement final material + block voxelization in `v2/voxelize.rs`
-11. replace the compile-only generation stubs with real V2 behavior
+5. implement biome-aware base heightfield solving in `v2/prototype.rs`
+6. implement meso application in `v2/meso_apply.rs`
+7. implement smoothing/local refinement in `v2/smoothing.rs`
+8. implement connected hydrology in `v2/hydrology.rs`
+9. implement final material + block voxelization in `v2/voxelize.rs`
+10. replace the compile-only generation stubs with real V2 behavior
 
 ## Short Summary
 

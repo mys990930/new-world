@@ -21,6 +21,16 @@
 
 - `BaseHeightfieldPrototype`
 
+## Current Interface
+
+```rust
+build_chunk_base_heightfield_prototype(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationV2Inputs,
+    corridor_window: &ChunkCorridorWindow,
+) -> BaseHeightfieldPrototype
+```
+
 ## Current Types
 
 - `PrototypeColumn`
@@ -28,6 +38,7 @@
 
 ## Notes
 
-- this is intentionally a stub
+- this builder is intentionally a stub for now
+- it already accepts the corridor window so the scaffold/prototype boundary is explicit
 - later implementation should turn region archetype and corridor constraints into broad terrain shape here
 - prototype should treat corridor output as authoritative drainage-shape guidance rather than rediscovering rivers from raw atlas scalar fields

@@ -68,8 +68,8 @@ pub use generation::{
     BaseHeightfieldPrototype, ChunkCorridorWindow, ChunkGenerationV2Inputs,
     ChunkGenerationV2Scaffold, HydrologySolve, MesoAppliedPrototype, PrototypeColumn,
     RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage, VoxelizationPlan,
-    build_chunk_corridor_window, build_chunk_v2_scaffold, default_voxelization_plan,
-    empty_base_heightfield_prototype,
+    build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
+    build_chunk_v2_scaffold, default_voxelization_plan, empty_base_heightfield_prototype,
     empty_chunk_corridor_window, empty_hydrology_solve, empty_meso_applied_prototype,
     empty_smoothed_prototype, generate_chunk, prepare_chunk_v2_inputs,
 };

@@ -18,6 +18,9 @@ pub use inputs::{
     prepare_chunk_v2_inputs,
 };
 pub use meso_apply::{MesoAppliedPrototype, empty_meso_applied_prototype};
-pub use prototype::{BaseHeightfieldPrototype, PrototypeColumn, empty_base_heightfield_prototype};
+pub use prototype::{
+    BaseHeightfieldPrototype, PrototypeColumn, build_chunk_base_heightfield_prototype,
+    empty_base_heightfield_prototype,
+};
 pub use smoothing::{SmoothedPrototype, empty_smoothed_prototype};
 pub use voxelize::{VoxelizationPlan, default_voxelization_plan};

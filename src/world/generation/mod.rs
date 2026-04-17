@@ -24,10 +24,10 @@ pub use v2::{
     GENERATOR_LABEL as V2_GENERATOR_LABEL, BaseHeightfieldPrototype, ChunkCorridorWindow,
     ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, HydrologySolve,
     MesoAppliedPrototype, PrototypeColumn, RiverCorridorConstraint, SmoothedPrototype,
-    V2ScaffoldStage, VoxelizationPlan, build_chunk_corridor_window, build_chunk_v2_scaffold,
-    default_voxelization_plan, empty_base_heightfield_prototype,
-    empty_chunk_corridor_window, empty_hydrology_solve, empty_meso_applied_prototype,
-    empty_smoothed_prototype, prepare_chunk_v2_inputs,
+    V2ScaffoldStage, VoxelizationPlan, build_chunk_base_heightfield_prototype,
+    build_chunk_corridor_window, build_chunk_v2_scaffold, default_voxelization_plan,
+    empty_base_heightfield_prototype, empty_chunk_corridor_window, empty_hydrology_solve,
+    empty_meso_applied_prototype, empty_smoothed_prototype, prepare_chunk_v2_inputs,
 };
 
 pub fn generate_chunk(
@@ -50,6 +50,9 @@ mod tests {
         let b = build_chunk_v2_scaffold(ChunkCoord(4, 0, -3), &meta);
 
         assert_eq!(a, b);
-        assert_eq!(a.stage, V2ScaffoldStage::RegionClassificationReady);
+        assert_eq!(a.stage, V2ScaffoldStage::CorridorWindowReady);
+        assert_eq!(a.chunk, a.corridor_window.chunk);
+        assert_eq!(a.inputs.chunk, a.chunk);
+        assert_eq!(a.center_region, b.center_region);
     }
 }
