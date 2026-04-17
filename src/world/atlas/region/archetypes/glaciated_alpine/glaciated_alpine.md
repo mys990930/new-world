@@ -23,11 +23,18 @@
 - ecology density and vegetation placement are intentionally left provisional here
 - this file should later hold concrete seasonal and ecological notes for the archetype
 
-## Initial Meso Allowance Stub
-- `upland_terrace`
-- `ravine`
-- `crater`
+## Launch Meso Direction
+
+- launch-primary meso: none
+- keep launch meso intentionally empty for this archetype until cold-specific meso is explicitly promoted
+- primary icefield and snow-upland identity must come from prototype solving, corridor constraints, and later hydrology coupling rather than from generic meso accents
+
+## Later Allowed Meso
+
+- `glacial_trough`
+- `crevasse_belt`
+- `snow_basin`
 
 ## Follow-up
 
-- lock final meso allowance, seasonal profile detail, and material/block policy before implementation becomes authoritative
+- lock final seasonal profile detail and material/block policy before implementation becomes authoritative

@@ -91,7 +91,8 @@ sample_region_classes(
   - `BiomeFamily`
   - `TerrainFormFamily`
   - `RegionArchetype`
-- the authoritative candidate lists for `BiomeFamily` and `TerrainFormFamily` now live in `region_catalog.md`
+- the authoritative launch candidate lists and launch policy direction for `BiomeFamily`, `TerrainFormFamily`, and `RegionArchetype` now live in `region_catalog.md`
+- `region/catalog.md` mirrors the same launch `RegionArchetype` pool as the implementation-facing index
 
 ## Seasonality And Climate Regime
 
@@ -140,6 +141,8 @@ sample_region_classes(
 
 - drainage skeleton and river corridors should be defined before solving the biome-aware base heightfield
 - region classification may use hydrology context, but it should not wait for final voxel water fill
+- launch policy allows `HydrologyContext` to override otherwise generic inland biome or terrain-form resolution when wetland, alluvial, or lake-basin ownership is strong enough to claim a dedicated archetype
+- that override should happen during region resolution, not later as a surface-only material exception
 - base heightfield solving should treat river corridors and basin outlets as constraints, not as late afterthought carve masks
 
 ## Invariants
@@ -155,7 +158,9 @@ sample_region_classes(
 - an initial deterministic atlas-cell classification scaffold is now implemented in code
 - the current scaffold resolves banded classes, biome families, terrain-form families, and coarse region archetypes from atlas raw fields plus nearby skeleton presence
 - the biome-family and terrain-form-family candidate taxonomies are now locked at the planning level
+- the launch candidate pool in `region_catalog.md` is now the authoritative planning contract for classifier-facing regional identity
 - a full `RegionArchetype` candidate pool with `launch`, `extended`, and `deferred` labels is now scaffolded as per-type modules and docs
+- launch policy now treats strong hydrology context as eligible to override generic inland archetype selection
 - the next planning step is to lock archetype-to-meso allowance and surface policy from that candidate pool
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
 - future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion

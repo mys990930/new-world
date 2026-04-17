@@ -2,12 +2,12 @@
 
 ## Role
 
-- list the current launch, extended, and deferred `RegionArchetype` modules
+- list the authoritative launch and scaffolded extended/deferred `RegionArchetype` modules
 - keep planning and implementation on the same candidate pool while V2 is still scaffold-first
 
 ## Candidate Labels
 
-- `launch`: intended first implementation set
+- `launch`: locked first implementation set unless policy is explicitly revised
 - `extended`: planned after launch but worth scaffolding now
 - `deferred`: known candidate that should stay documented but inactive for a while
 
@@ -75,5 +75,5 @@
 
 ## Notes
 
-- broader planning rationale still lives in `../region_catalog.md`
-- this file is the implementation-facing index for per-type archetype stubs
+- broader planning rationale and launch policy direction live in `../region_catalog.md`
+- this file mirrors the same locked launch pool as the implementation-facing index for per-type archetype stubs

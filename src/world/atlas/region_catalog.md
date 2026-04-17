@@ -2,15 +2,15 @@
 
 ## Role
 
-- hold the planning draft for region-facing biome, terrain-form, archetype, and meso catalogs
-- keep feature taxonomy visible in one place before further V2 implementation work
-- act as the working design sheet that `region.md` and `meso.md` can later tighten into contracts
+- hold the authoritative launch contract for region-facing biome, terrain-form, archetype, and meso catalogs
+- keep the full feature taxonomy visible in one place while extended and deferred waves remain scaffolded
+- act as the source of truth for launch classifier and downstream surface/meso policy planning
 
 ## Status
 
-- this file is a planning draft, not an implementation contract
-- names, splits, and allowed combinations may still change before V2 becomes authoritative
-- the goal is to finish taxonomy and ownership first, then implement against that plan
+- the launch taxonomy and launch `RegionArchetype` set in this file are authoritative for V2 planning
+- `src/world/atlas/region/catalog.md` mirrors the same launch pool as the implementation-facing index
+- extended and deferred candidates may still change until their waves are explicitly promoted
 
 ## Design Goals
 
@@ -108,6 +108,17 @@ Examples:
 - `glaciated_alpine`
   - short thaw: exposed rock, patchy snow retreat
   - long cold season: persistent snow and stronger ice cover
+
+## Launch Authority Notes
+
+- launch classifier work should treat this file as the authoritative catalog for:
+  - launch `BiomeFamily`
+  - launch `TerrainFormFamily`
+  - launch `RegionArchetype`
+  - launch archetype-to-meso/material/seasonal policy hooks
+- `HydrologyContext` is allowed to override otherwise generic inland archetype selection during launch when strong river, floodplain, wet-lowland, or lake-basin context is present
+- that hydrology override is a region-resolution decision, not only a later surface-material modifier
+- archetypes whose landform identity is already the core regional promise may intentionally keep launch meso empty or nearly empty until prototype solving exists
 
 ## Locked Biome Families
 
@@ -218,6 +229,7 @@ Examples:
 ## Locked RegionArchetype Candidate Pool
 
 Region archetypes combine one locked `BiomeFamily` with one locked `TerrainFormFamily` into a playable regional identity. The pool below is now scaffolded in per-type modules and docs.
+The launch set below is now locked for the first V2 implementation wave.
 
 ### Launch
 
@@ -374,10 +386,15 @@ The first implementation wave should still prefer features that:
 - `dune_field`
 - `crater`
 
+Wave 1 Core is the default launch-now expectation for per-archetype meso allowances.
+Wave 1 Extension stays documented, but each feature must still be explicitly promoted by archetype before it becomes launch-authoritative.
+
 ## Archetype-To-Meso Status
 
 - every scaffolded archetype now carries an initial meso allowance stub inside its per-type module and markdown file
-- those stub allowances are intentionally provisional
+- those stub allowances are intentionally provisional until the per-archetype matrix is published
+- launch-now default expectation remains the Wave 1 Core subset unless an archetype document explicitly promotes a later feature
+- `glaciated_alpine` and `desert_dune_field` intentionally keep launch meso empty or nearly empty because prototype solving must own their primary landform identity first
 - the next planning pass should lock:
   - which meso features remain legal per archetype
   - which launch archetypes need stricter or broader meso sets
@@ -412,10 +429,10 @@ Examples:
 
 ## Next Planning Step
 
-With the archetype candidate pool now scaffolded, the next planning step is:
+With the launch archetype set now locked, the next planning step is:
 
-1. confirm or trim the `launch` archetype set
-2. lock the authoritative archetype-to-meso allowance matrix
-3. lock the first seasonal biome-state model for launch archetypes
-4. lock the first material/block policy per launch archetype
+1. publish the authoritative archetype-to-meso allowance matrix for the locked launch set
+2. lock the first seasonal biome-state model for launch archetypes
+3. lock the first material/block policy per launch archetype
+4. document launch fallback behavior for extended and deferred archetypes
 5. only after that, start V2 implementation against those locked policies

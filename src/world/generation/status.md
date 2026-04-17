@@ -78,6 +78,8 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 - owner: `region.rs`, `region/catalog.rs`, `region/archetypes/*`
 - note:
   - dimensions, family taxonomies, and the scaffolded `RegionArchetype` candidate pool are in place
+  - `src/world/atlas/region_catalog.md` is now the authoritative launch design contract for that candidate pool
+  - launch policy now allows strong hydrology context to override otherwise generic inland archetype resolution
   - archetype-to-meso, seasonal, and material policy still need locking
 
 ### 4. River Corridor Solve
@@ -104,6 +106,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - guide ownership and a full per-feature scaffolded catalog exist
   - the scaffolded pool now carries `launch / extended / deferred` labels and per-feature planning stubs
   - runtime guide generation still only emits the current Wave 1A subset from `atlas/meso.rs`
+  - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - authoritative per-archetype allowance matrix still needs to be locked
   - no V2 chunk deformation pass is implemented yet
 
@@ -145,10 +148,10 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 
 ## What Still Remains Before V2 Can Replace It
 
-1. lock the launch `RegionArchetype` set
-2. lock the authoritative archetype-to-meso allowance matrix
-3. lock launch material policy per archetype
-4. lock launch seasonal biome-state policy
+1. publish the authoritative archetype-to-meso allowance matrix for the locked launch set
+2. lock launch material policy per archetype
+3. lock launch seasonal biome-state policy
+4. document launch fallback behavior for extended and deferred archetypes
 5. implement real river corridor solving in `v2/corridors.rs`
 6. implement biome-aware base heightfield solving in `v2/prototype.rs`
 7. implement meso application in `v2/meso_apply.rs`

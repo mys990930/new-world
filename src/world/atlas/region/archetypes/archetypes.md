@@ -17,7 +17,10 @@
   - terrain-form family
   - regional identity summary
   - ecology / seasonal planning notes
-  - current meso allowance stub
+  - launch-primary meso direction
+  - later-allowed meso pool, if any
+  - material / seasonal policy hook once locked
+- archetypes whose base landform is their primary identity may intentionally keep launch meso empty until prototype solving becomes authoritative
 
 ## Current Candidate Pool
 
