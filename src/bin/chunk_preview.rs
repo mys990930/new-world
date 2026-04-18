@@ -4,6 +4,8 @@ use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use new_world::ecs::{
     QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye,
 };
@@ -14,7 +16,7 @@ use new_world::renderer::{
 };
 use new_world::world::{
     BlockFace, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
-    TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
+    PrototypeColumn, TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
     build_chunk_base_heightfield_prototype, build_chunk_mesh, build_chunk_v2_scaffold,
     generate_chunk, sample_chunk_surface_lod,
 };
@@ -374,15 +376,32 @@ fn load_created_world_preview_chunks(
     let load_max_y = max_y_chunk.min(max_chunk.1);
     let load_min_z = (center_z - generation_radius).max(min_chunk.2);
     let load_max_z = (center_z + generation_radius).min(max_chunk.2);
+    let loaded_chunks = preview_chunk_coords_for_bounds(
+        load_min_x,
+        load_max_x,
+        load_min_y,
+        load_max_y,
+        load_min_z,
+        load_max_z,
+    )
+    .into_par_iter()
+    .map(|coord| {
+        load_chunk_from_dump(world_dir, coord)
+            .map(|chunk| (coord, chunk))
+            .map_err(|error| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "failed to load preview chunk {coord:?} from {}: {error}",
+                        world_dir.display()
+                    ),
+                )
+            })
+    })
+    .collect::<Result<Vec<_>, _>>()?;
 
-    for chunk_y in load_min_y..=load_max_y {
-        for chunk_z in load_min_z..=load_max_z {
-            for chunk_x in load_min_x..=load_max_x {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let chunk = load_chunk_from_dump(world_dir, coord)?;
-                world.insert_chunk(coord, chunk);
-            }
-        }
+    for (coord, chunk) in loaded_chunks {
+        world.insert_chunk(coord, chunk);
     }
 
     Ok(())
@@ -432,15 +451,66 @@ fn generate_preview_chunks(
     min_y_chunk: i32,
     max_y_chunk: i32,
 ) {
-    for chunk_y in min_y_chunk..=max_y_chunk {
-        for chunk_z in (center_z - generation_radius)..=(center_z + generation_radius) {
-            for chunk_x in (center_x - generation_radius)..=(center_x + generation_radius) {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let chunk = generate_chunk(coord, world.meta(), registry);
-                world.insert_chunk(coord, chunk);
+    let generated_chunks = preview_chunk_coords(
+        center_x,
+        center_z,
+        generation_radius,
+        min_y_chunk,
+        max_y_chunk,
+    )
+    .into_par_iter()
+    .map(|coord| (coord, generate_chunk(coord, world.meta(), registry)))
+    .collect::<Vec<_>>();
+
+    for (coord, chunk) in generated_chunks {
+        world.insert_chunk(coord, chunk);
+    }
+}
+
+fn preview_chunk_xz_coords(center_x: i32, center_z: i32, radius: i32) -> Vec<(i32, i32)> {
+    let mut coords = Vec::new();
+    for chunk_z in (center_z - radius)..=(center_z + radius) {
+        for chunk_x in (center_x - radius)..=(center_x + radius) {
+            coords.push((chunk_x, chunk_z));
+        }
+    }
+    coords
+}
+
+fn preview_chunk_coords(
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Vec<ChunkCoord> {
+    preview_chunk_coords_for_bounds(
+        center_x - radius,
+        center_x + radius,
+        min_y_chunk,
+        max_y_chunk,
+        center_z - radius,
+        center_z + radius,
+    )
+}
+
+fn preview_chunk_coords_for_bounds(
+    min_chunk_x: i32,
+    max_chunk_x: i32,
+    min_chunk_y: i32,
+    max_chunk_y: i32,
+    min_chunk_z: i32,
+    max_chunk_z: i32,
+) -> Vec<ChunkCoord> {
+    let mut coords = Vec::new();
+    for chunk_y in min_chunk_y..=max_chunk_y {
+        for chunk_z in min_chunk_z..=max_chunk_z {
+            for chunk_x in min_chunk_x..=max_chunk_x {
+                coords.push(ChunkCoord(chunk_x, chunk_y, chunk_z));
             }
         }
     }
+    coords
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -488,6 +558,12 @@ impl PrototypePreviewGrid {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PrototypePreviewChunk {
+    coord: ChunkCoord,
+    columns: Vec<PrototypeColumn>,
+}
+
 fn collect_prototype_render_meshes(
     meta: &WorldMeta,
     registry: &BlockRegistry,
@@ -497,19 +573,13 @@ fn collect_prototype_render_meshes(
     generation_radius: i32,
 ) -> Result<Vec<RenderCpuMesh>, Box<dyn Error>> {
     let grid = build_prototype_preview_grid(meta, center_x, center_z, generation_radius)?;
-    let mut render_meshes = Vec::new();
-
-    for chunk_z in (center_z - radius)..=(center_z + radius) {
-        for chunk_x in (center_x - radius)..=(center_x + radius) {
+    Ok(preview_chunk_xz_coords(center_x, center_z, radius)
+        .into_par_iter()
+        .filter_map(|(chunk_x, chunk_z)| {
             let mesh = build_prototype_heightfield_mesh(&grid, chunk_x, chunk_z, registry);
-            if mesh.vertices.is_empty() || mesh.indices.is_empty() {
-                continue;
-            }
-            render_meshes.push(mesh);
-        }
-    }
-
-    Ok(render_meshes)
+            (!mesh.vertices.is_empty() && !mesh.indices.is_empty()).then_some(mesh)
+        })
+        .collect())
 }
 
 fn build_prototype_preview_grid(
@@ -541,43 +611,52 @@ fn build_prototype_preview_grid(
         width * depth
     ];
     let mut base_y = i32::MAX;
-
-    for chunk_z in min_chunk_z..=max_chunk_z {
-        let chunk_row = usize::try_from(chunk_z - min_chunk_z)
-            .map_err(|_| cli_error("invalid prototype preview chunk row"))?;
-        for chunk_x in min_chunk_x..=max_chunk_x {
-            let scaffold = build_chunk_v2_scaffold(ChunkCoord(chunk_x, 0, chunk_z), meta);
+    let prototypes = preview_chunk_xz_coords(center_x, center_z, generation_radius)
+        .into_par_iter()
+        .map(|(chunk_x, chunk_z)| {
+            let chunk = ChunkCoord(chunk_x, 0, chunk_z);
+            let scaffold = build_chunk_v2_scaffold(chunk, meta);
             let prototype = build_chunk_base_heightfield_prototype(
                 scaffold.chunk,
                 &scaffold.inputs,
                 &scaffold.corridor_window,
             );
-            let chunk_col = usize::try_from(chunk_x - min_chunk_x)
-                .map_err(|_| cli_error("invalid prototype preview chunk column"))?;
-            let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
-            let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
 
-            for local_z in 0..CHUNK_EDGE_I32 {
-                let global_z = chunk_row * CHUNK_EDGE + usize::try_from(local_z)
-                    .map_err(|_| cli_error("invalid prototype preview local z"))?;
-                let row_offset = global_z * width;
-                for local_x in 0..CHUNK_EDGE_I32 {
-                    let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
-                        .map_err(|_| cli_error("invalid prototype preview column index"))?;
-                    let column = prototype.columns[column_index];
-                    let global_x = chunk_col * CHUNK_EDGE + usize::try_from(local_x)
-                        .map_err(|_| cli_error("invalid prototype preview local x"))?;
-                    let index = row_offset + global_x;
-                    let top_y = column.base_height.ceil() as i32;
-                    base_y = base_y.min(top_y);
-                    cells[index] = PrototypePreviewCell {
-                        min_x: chunk_origin_x + local_x,
-                        min_z: chunk_origin_z + local_z,
-                        top_y,
-                        base_height: column.base_height,
-                        relief_budget: column.relief_budget,
-                    };
-                }
+            PrototypePreviewChunk {
+                coord: chunk,
+                columns: prototype.columns,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for preview_chunk in prototypes {
+        let chunk_row = usize::try_from(preview_chunk.coord.2 - min_chunk_z)
+            .map_err(|_| cli_error("invalid prototype preview chunk row"))?;
+        let chunk_col = usize::try_from(preview_chunk.coord.0 - min_chunk_x)
+            .map_err(|_| cli_error("invalid prototype preview chunk column"))?;
+        let chunk_origin_x = preview_chunk.coord.0 * CHUNK_EDGE_I32;
+        let chunk_origin_z = preview_chunk.coord.2 * CHUNK_EDGE_I32;
+
+        for local_z in 0..CHUNK_EDGE_I32 {
+            let global_z = chunk_row * CHUNK_EDGE
+                + usize::try_from(local_z).map_err(|_| cli_error("invalid prototype preview local z"))?;
+            let row_offset = global_z * width;
+            for local_x in 0..CHUNK_EDGE_I32 {
+                let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
+                    .map_err(|_| cli_error("invalid prototype preview column index"))?;
+                let column = preview_chunk.columns[column_index];
+                let global_x = chunk_col * CHUNK_EDGE
+                    + usize::try_from(local_x).map_err(|_| cli_error("invalid prototype preview local x"))?;
+                let index = row_offset + global_x;
+                let top_y = column.base_height.ceil() as i32;
+                base_y = base_y.min(top_y);
+                cells[index] = PrototypePreviewCell {
+                    min_x: chunk_origin_x + local_x,
+                    min_z: chunk_origin_z + local_z,
+                    top_y,
+                    base_height: column.base_height,
+                    relief_budget: column.relief_budget,
+                };
             }
         }
     }
@@ -737,25 +816,14 @@ fn collect_render_meshes(
     min_y_chunk: i32,
     max_y_chunk: i32,
 ) -> Vec<RenderCpuMesh> {
-    let mut render_meshes = Vec::new();
-
-    for chunk_y in min_y_chunk..=max_y_chunk {
-        for chunk_z in (center_z - radius)..=(center_z + radius) {
-            for chunk_x in (center_x - radius)..=(center_x + radius) {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let Some(snapshot) = world.snapshot_chunk(coord) else {
-                    continue;
-                };
-                let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), registry);
-                if mesh.vertices.is_empty() || mesh.indices.is_empty() {
-                    continue;
-                }
-                render_meshes.push(world_mesh_to_render(mesh));
-            }
-        }
-    }
-
-    render_meshes
+    preview_chunk_coords(center_x, center_z, radius, min_y_chunk, max_y_chunk)
+        .into_par_iter()
+        .filter_map(|coord| {
+            let snapshot = world.snapshot_chunk(coord)?;
+            let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), registry);
+            (!mesh.vertices.is_empty() && !mesh.indices.is_empty()).then(|| world_mesh_to_render(mesh))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -783,25 +851,23 @@ fn collect_lod_render_meshes(
     let grid_depth = grid_width;
     let base_y = (min_y_chunk * CHUNK_EDGE_I32).max(WORLD_FLOOR_Y);
     let mut cells = Vec::with_capacity(grid_width * grid_depth);
+    let row_grids = preview_chunk_xz_coords(center_x, center_z, radius)
+        .into_par_iter()
+        .map(|(chunk_x, chunk_z)| sample_chunk_surface_lod(ChunkCoord(chunk_x, 0, chunk_z), lod_blocks, meta))
+        .collect::<Vec<_>>();
 
-    for chunk_z in (center_z - radius)..=(center_z + radius) {
-        let row_grids = ((center_x - radius)..=(center_x + radius))
-            .map(|chunk_x| sample_chunk_surface_lod(ChunkCoord(chunk_x, 0, chunk_z), lod_blocks, meta))
-            .collect::<Vec<_>>();
+    for sample_z in 0..samples_per_chunk {
+        for grid in &row_grids {
+            let row_start = sample_z * usize::from(grid.samples_per_axis);
+            let row_end = row_start + usize::from(grid.samples_per_axis);
 
-        for sample_z in 0..samples_per_chunk {
-            for grid in &row_grids {
-                let row_start = sample_z * usize::from(grid.samples_per_axis);
-                let row_end = row_start + usize::from(grid.samples_per_axis);
-
-                for sample in &grid.samples[row_start..row_end] {
-                    cells.push(LodSurfaceCell {
-                        min_x: sample.world_min_x,
-                        min_z: sample.world_min_z,
-                        top_y: sample.surface_y + 1,
-                        profile: sample.profile,
-                    });
-                }
+            for sample in &grid.samples[row_start..row_end] {
+                cells.push(LodSurfaceCell {
+                    min_x: sample.world_min_x,
+                    min_z: sample.world_min_z,
+                    top_y: sample.surface_y + 1,
+                    profile: sample.profile,
+                });
             }
         }
     }

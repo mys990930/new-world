@@ -27,6 +27,8 @@
 4. Render them with a fixed quarter-view camera and a relief-friendly preview lighting setup.
 5. Save the PNG to disk.
 
+- chunk loading / generation and preview mesh preparation may fan out across multiple CPU cores, but the output image remains deterministic for the same inputs.
+
 ## Prototype Stage
 
 - `--stage prototype` is seed-only and renders the base-heightfield solve instead of realized chunk meshes.
