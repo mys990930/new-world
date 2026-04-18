@@ -1,0 +1,9 @@
+id = 16
+key = "leaf_litter"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "leaf_litter"
+bottom = "leaf_litter"
+side = "leaf_litter"

@@ -1,0 +1,9 @@
+id = 10
+key = "coarse_dirt"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "coarse_dirt"
+bottom = "coarse_dirt"
+side = "coarse_dirt"

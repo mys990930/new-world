@@ -1,0 +1,9 @@
+id = 24
+key = "exposed_rock"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "exposed_rock"
+bottom = "exposed_rock"
+side = "exposed_rock"

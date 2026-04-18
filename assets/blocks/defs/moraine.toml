@@ -1,0 +1,9 @@
+id = 29
+key = "moraine"
+solid = true
+opaque = true
+render = "cube"
+material = "stone"
+top = "moraine"
+bottom = "moraine"
+side = "moraine"

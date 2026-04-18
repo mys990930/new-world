@@ -1,0 +1,9 @@
+id = 28
+key = "alpine_soil"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "alpine_soil"
+bottom = "alpine_soil"
+side = "alpine_soil"

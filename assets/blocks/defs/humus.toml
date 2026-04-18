@@ -1,0 +1,9 @@
+id = 15
+key = "humus"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "humus"
+bottom = "humus"
+side = "humus"

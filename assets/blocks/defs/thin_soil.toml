@@ -1,0 +1,9 @@
+id = 19
+key = "thin_soil"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "thin_soil"
+bottom = "thin_soil"
+side = "thin_soil"

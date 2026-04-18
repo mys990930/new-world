@@ -1,0 +1,9 @@
+id = 21
+key = "dry_grass"
+solid = true
+opaque = true
+render = "cube"
+material = "grass"
+top = "dry_grass"
+bottom = "dry_grass"
+side = "dry_grass"

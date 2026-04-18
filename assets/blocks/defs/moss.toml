@@ -1,0 +1,9 @@
+id = 17
+key = "moss"
+solid = true
+opaque = true
+render = "cube"
+material = "grass"
+top = "moss"
+bottom = "moss"
+side = "moss"

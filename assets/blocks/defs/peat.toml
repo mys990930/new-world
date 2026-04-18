@@ -1,0 +1,9 @@
+id = 13
+key = "peat"
+solid = true
+opaque = true
+render = "cube"
+material = "soil"
+top = "peat"
+bottom = "peat"
+side = "peat"

@@ -1,0 +1,9 @@
+id = 20
+key = "red_sand"
+solid = true
+opaque = true
+render = "cube"
+material = "sand"
+top = "red_sand"
+bottom = "red_sand"
+side = "red_sand"
