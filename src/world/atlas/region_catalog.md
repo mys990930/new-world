@@ -394,6 +394,7 @@ Wave 1 Extension stays documented, but each feature must still be explicitly pro
 - every scaffolded archetype now carries an initial meso allowance stub inside its per-type module and markdown file
 - those stub allowances are intentionally provisional until the per-archetype matrix is published
 - launch-now default expectation remains the Wave 1 Core subset unless an archetype document explicitly promotes a later feature
+- the current V2 meso implementation now uses those same `allowed_meso_keys` stubs as a temporary runtime gate for the Wave 1 Core subset until the authoritative matrix is locked
 - `glaciated_alpine` and `desert_dune_field` intentionally keep launch meso empty or nearly empty because prototype solving must own their primary landform identity first
 - the next planning pass should lock:
   - which meso features remain legal per archetype
@@ -435,4 +436,4 @@ With the launch archetype set now locked, the next planning step is:
 2. lock the first seasonal biome-state model for launch archetypes
 3. lock the first material/block policy per launch archetype
 4. document launch fallback behavior for extended and deferred archetypes
-5. only after that, start V2 implementation against those locked policies
+5. tighten the temporary runtime `allowed_meso_keys` gate into that published matrix and retune the launched Wave 1 meso operators against it

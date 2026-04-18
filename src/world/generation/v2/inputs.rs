@@ -1,12 +1,14 @@
 use crate::world::atlas::{
-    AtlasFieldMap, AtlasStructureMap, RegionClassMap, RegionClassSample, sample_region_classes,
+    AtlasFieldMap, AtlasStructureMap, MesoGuideMap, RegionClassMap, RegionClassSample,
+    sample_region_classes,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use crate::world::meta::WorldMeta;
 
 use super::corridors::{ChunkCorridorWindow, build_chunk_corridor_window};
 use super::super::sampler::{
-    generate_chunk_atlas_fields, generate_chunk_atlas_structure, generate_chunk_region_classes,
+    generate_chunk_atlas_fields, generate_chunk_atlas_structure, generate_chunk_meso_guides,
+    generate_chunk_region_classes,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,21 +26,21 @@ pub enum V2ScaffoldStage {
 
 #[derive(Debug, Clone)]
 pub struct ChunkGenerationV2Inputs {
-    pub meta: WorldMeta,
     pub chunk: ChunkCoord,
     pub atlas_fields: AtlasFieldMap,
     pub atlas_structure: AtlasStructureMap,
     pub region_classes: RegionClassMap,
+    pub meso_guides: MesoGuideMap,
 }
 
 impl PartialEq for ChunkGenerationV2Inputs {
     fn eq(&self, other: &Self) -> bool {
-        self.meta == other.meta
-            && self.chunk == other.chunk
+        self.chunk == other.chunk
             && self.atlas_fields.area() == other.atlas_fields.area()
             && self.atlas_fields.cells().values() == other.atlas_fields.cells().values()
             && self.atlas_structure == other.atlas_structure
             && self.region_classes == other.region_classes
+            && self.meso_guides == other.meso_guides
     }
 }
 
@@ -65,13 +67,14 @@ pub fn prepare_chunk_v2_inputs(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGene
     let atlas_fields = generate_chunk_atlas_fields(coord, meta);
     let atlas_structure = generate_chunk_atlas_structure(coord, meta);
     let region_classes = generate_chunk_region_classes(coord, meta, &atlas_fields, &atlas_structure);
+    let meso_guides = generate_chunk_meso_guides(coord, meta, &atlas_fields, &atlas_structure);
 
     ChunkGenerationV2Inputs {
-        meta: *meta,
         chunk: coord,
         atlas_fields,
         atlas_structure,
         region_classes,
+        meso_guides,
     }
 }
 

@@ -31,10 +31,6 @@ The old V1 realization stack has been removed instead of kept alive in parallel.
   - material, cover, and seasonal surface policy scaffolds
 - `src/world/generation/v2/*`
   - V2 stage scaffolds for inputs, corridors, prototype, meso apply, smoothing, hydrology, and voxelization
-- `src/world/generation/v2/continuity.md`
-  - authoritative design contract for global canonical fields, shared solve tiles, and border anchors
-- `src/world/generation/v2/continuity.rs`
-  - current prototype-side continuity helpers for shared tile bounds and border-anchor sampling
 - `src/world/generation/sampler.rs`
   - shared helper that gathers the padded atlas / structure / region / meso windows for a target chunk
   - current implementation now snaps neighboring chunks to a shared structure-sized atlas-context tile before padding and assembles raw atlas scalar cells from canonical region-owned field solves so the same `AtlasCoord` stays stable across chunk requests
@@ -106,13 +102,12 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
   - prototype now emits one `PrototypeColumn` per in-chunk column, using region/archetype context plus corridor constraints to produce a deterministic broad landform scaffold
   - current implementation now samples atlas scalars continuously in block/world space, blends neighboring classified region context near atlas boundaries without chunk-wide family snapping, uses canonical atlas field assembly to avoid chunk-request drift, collapses repeated river-branch segment responses so long corridors do not stack into seam walls, and adds deterministic subchunk ripple/terrace variation so low-relief terrain reads more clearly in quarter-view
-  - prototype now also builds from shared `4 x 4` continuity-tile corridor context, reuses cached neighboring chunk state plus cached tile corridor windows, applies tile-border anchors, and adds a narrow chunk-edge continuity blend so chunk-local emission does not reintroduce large walls while later full-tile stages are still missing
-  - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, canonical-region boundary, and the reported wall-strip artifact; the current prototype threshold for that reported strip is `<= 1.35` blocks
+  - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, and canonical-region boundary step artifacts
   - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
 ### 6. Meso Solve
 
-- status: `partially planned, not wired into V2`
+- status: `implemented as initial Wave 1 chunk deformation pass`
 - owner:
   - atlas ownership: `atlas/meso.rs`
   - chunk-side application scaffold: `v2/meso_apply.rs`
@@ -120,24 +115,21 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - guide ownership and a full per-feature scaffolded catalog exist
   - the scaffolded pool now carries `launch / extended / deferred` labels and per-feature planning stubs
   - runtime guide generation still only emits the current Wave 1A subset from `atlas/meso.rs`
-  - the design contract now expects meso application to consume canonical world-space guide fields plus the shared border-anchor contract instead of reopening continuity with chunk-local-only deformation
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
-  - authoritative per-archetype allowance matrix still needs to be locked
-  - no V2 chunk deformation pass is implemented yet
+  - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
+  - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
+  - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
+  - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 
 ### 7. Local Detail / Smoothing
 
 - status: `scaffold only`
 - owner: `v2/smoothing.rs`
-- note:
-  - the documented target is now anchor-constrained smoothing over shared solve tiles rather than independent per-chunk blur or noise cleanup
 
 ### 8. Final Hydrology
 
 - status: `scaffold only`
 - owner: `v2/hydrology.rs`
-- note:
-  - the documented target is now cached canonical drainage-aware hydrology that reuses the same border-anchor continuity contract as prototype and meso
 
 ### 9. Region / Material Policy
 
@@ -167,18 +159,16 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 
 ## What Still Remains Before V2 Can Replace It
 
-1. continue tightening the continuity contract from `v2/continuity.md` from the current prototype slice toward the long-term exposed-surface `<= 1 block` target
-2. replace prototype's current per-request shared-tile sampling with a persisted full-tile surface object before meso and smoothing land
-3. publish the authoritative archetype-to-meso allowance matrix for the locked launch set
-4. lock launch material policy per archetype
-5. lock launch seasonal biome-state policy
-6. document launch fallback behavior for extended and deferred archetypes
-7. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online
-8. implement meso application in `v2/meso_apply.rs` on top of the same continuity contract
-9. implement smoothing/local refinement in `v2/smoothing.rs` as an anchor-constrained solve
-10. implement connected hydrology in `v2/hydrology.rs` on cached canonical drainage ownership
-11. implement final material + block voxelization in `v2/voxelize.rs`
-12. replace the compile-only generation stubs with real V2 behavior
+1. publish the authoritative archetype-to-meso allowance matrix for the locked launch set
+2. lock launch material policy per archetype
+3. lock launch seasonal biome-state policy
+4. document launch fallback behavior for extended and deferred archetypes
+5. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online
+6. tune and tighten the Wave 1 meso operators in `v2/meso_apply.rs` once the authoritative matrix is published
+7. implement smoothing/local refinement in `v2/smoothing.rs`
+8. implement connected hydrology in `v2/hydrology.rs`
+9. implement final material + block voxelization in `v2/voxelize.rs`
+10. replace the compile-only generation stubs with real V2 behavior
 
 ## Short Summary
 
@@ -187,7 +177,6 @@ We now have:
 - atlas climate/geography inputs
 - atlas skeleton
 - region classification scaffolding
-- a documented continuity contract for global canonical fields, shared solve tiles, and border anchors
 - meso catalog scaffolding
 - surface policy scaffolding
 - V2 stage containers

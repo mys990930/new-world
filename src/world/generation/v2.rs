@@ -348,7 +348,10 @@ pub use inputs::{
     ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, V2ScaffoldStage, build_chunk_v2_scaffold,
     prepare_chunk_v2_inputs,
 };
-pub use meso_apply::{MesoAppliedPrototype, empty_meso_applied_prototype};
+pub use meso_apply::{
+    MesoAppliedColumn, MesoAppliedPrototype, build_chunk_meso_applied_prototype,
+    empty_meso_applied_prototype,
+};
 pub use prototype::{
     BaseHeightfieldPrototype, PrototypeColumn, build_chunk_base_heightfield_prototype,
     empty_base_heightfield_prototype,

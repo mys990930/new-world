@@ -100,6 +100,8 @@ fn expand_area(area: AtlasArea, padding_cells: i32) -> AtlasArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::atlas::{MesoGuideSample, sample_meso_guides};
+    use crate::world::coord::CHUNK_EDGE_I32;
 
     fn overlap_area(a: AtlasArea, b: AtlasArea) -> AtlasArea {
         let min_x = a.origin().x.max(b.origin().x);
@@ -148,5 +150,57 @@ mod tests {
                 "region overlap drifted at {coord:?}"
             );
         }
+    }
+
+    #[test]
+    fn meso_sampling_stays_stable_across_context_boundaries() {
+        let meta = WorldMeta::new(42);
+        let left_chunk = ChunkCoord(127, 0, 0);
+        let right_chunk = ChunkCoord(128, 0, 0);
+        let left_fields = generate_chunk_atlas_fields(left_chunk, &meta);
+        let right_fields = generate_chunk_atlas_fields(right_chunk, &meta);
+        let left_structure = generate_chunk_atlas_structure(left_chunk, &meta);
+        let right_structure = generate_chunk_atlas_structure(right_chunk, &meta);
+        let left_guides =
+            generate_chunk_meso_guides(left_chunk, &meta, &left_fields, &left_structure);
+        let right_guides =
+            generate_chunk_meso_guides(right_chunk, &meta, &right_fields, &right_structure);
+        let min_world_x = left_chunk.0 * CHUNK_EDGE_I32 - 16;
+        let max_world_x = right_chunk.0 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 + 15;
+        let min_world_z = -16;
+        let max_world_z = 31;
+
+        for world_z in (min_world_z..=max_world_z).step_by(4) {
+            for world_x in (min_world_x..=max_world_x).step_by(4) {
+                let left = sample_meso_guides(&left_guides, world_x, world_z);
+                let right = sample_meso_guides(&right_guides, world_x, world_z);
+                assert_meso_samples_match(left, right, world_x, world_z);
+            }
+        }
+    }
+
+    fn assert_meso_samples_match(
+        left: MesoGuideSample,
+        right: MesoGuideSample,
+        world_x: i32,
+        world_z: i32,
+    ) {
+        let epsilon = 0.0001_f32;
+        assert!(
+            (left.hilliness - right.hilliness).abs() <= epsilon
+                && (left.hill_height - right.hill_height).abs() <= epsilon
+                && (left.basin_weight - right.basin_weight).abs() <= epsilon
+                && (left.basin_depth - right.basin_depth).abs() <= epsilon
+                && (left.escarpment_weight - right.escarpment_weight).abs() <= epsilon
+                && (left.escarpment_height - right.escarpment_height).abs() <= epsilon
+                && (left.escarpment_signed_distance_cells - right.escarpment_signed_distance_cells).abs()
+                    <= epsilon
+                && (left.terrace_weight - right.terrace_weight).abs() <= epsilon
+                && (left.terrace_step_height - right.terrace_step_height).abs() <= epsilon
+                && (left.terrace_spacing_cells - right.terrace_spacing_cells).abs() <= epsilon
+                && (left.terrace_signed_distance_cells - right.terrace_signed_distance_cells).abs()
+                    <= epsilon,
+            "meso guide sample drifted at world ({world_x}, {world_z})\nleft={left:?}\nright={right:?}"
+        );
     }
 }
