@@ -9,7 +9,13 @@
 ## Responsibilities
 
 - convert `RegionArchetype` and `ChunkCorridorWindow` into a deterministic broad-shape prototype
+- sample atlas scalar inputs continuously in world/block space instead of stepping the whole chunk on atlas-cell boundaries
+- blend local region-family context near atlas boundaries without introducing a chunk-wide family step
 - preserve valley seats, floodplain openings, basin outlets, and coastal exits already established by corridor solve
+- aggregate repeated corridor segment responses per river branch so adjacent segments do not stack into artificial trench walls
+- inject deterministic subchunk relief bands and ripple-sized height changes so low-relief terrain still reads clearly in the quarter-view camera
+- solve broad terrain on a shared continuity tile rather than treating every chunk edge as an independent solve boundary
+- obey the border-anchor contract from `continuity.md` so later stages inherit a stable height boundary
 - allocate a remaining relief budget for later meso, smoothing, and hydrology passes
 - keep the landform identity readable before local accents are added
 
@@ -28,6 +34,7 @@
 - `ChunkCoord`
 - `ChunkGenerationV2Inputs`
 - `ChunkCorridorWindow`
+- later target: shared tile bounds and stage anchor inputs from `continuity.md`
 
 ## Outputs
 
@@ -62,12 +69,24 @@ build_chunk_base_heightfield_prototype(
 - deterministic for the same `(seed, generator_version, coord, inputs, corridor_window)`
 - preserves chunk-edge continuity by treating neighboring atlas context as part of the same solve neighborhood
 
+## Planned Internal Solve Boundary
+
+The current code-facing entrypoint is still chunk-oriented, but the design target is a shared tile solve:
+
+- solve a haloed continuity tile once
+- obey the tile's border-anchor set
+- crop chunk interiors from the shared tile result
+
+`continuity.md` owns the tile and anchor contract. This document owns how prototype uses that contract.
+
 ## Coordinate Space
 
 - columns are chunk-relative and aligned to the chunk's block-grid footprint
 - `base_height` is expressed in world-space block Y, not in atlas-cell units
 - `relief_budget` is a nonnegative budget in block units describing how much local up/down shape can still be introduced later without erasing the broad form
-- corridor centers may lie outside the strict chunk bounds, but the influence on prototype columns is still evaluated in chunk-local block space
+- corridor segment endpoints and centers may lie outside the strict chunk bounds, but the influence on prototype columns is still evaluated in chunk-local block space
+- atlas scalar sampling is evaluated from block-center world coordinates through a fractional atlas lookup, while region identity is blended from the neighboring classified atlas cells around the same sample point
+- when prototype moves onto continuity tiles, shared border columns are owned by anchor samples expressed in the same world/block coordinate system
 
 ## Prototype Semantics
 
@@ -168,18 +187,21 @@ build_chunk_base_heightfield_prototype(
 
 ## Solve Pipeline
 
-1. read the chunk-local `RegionClassMap` and locate the center-sample archetype and surrounding family context
-2. read the corridor window and classify each corridor constraint as a valley-seat, floodplain, basin-outlet, coastal-exit, or ridge-pressure influence
-3. select the prototype policy family for the chunk from archetype plus terrain-form family
-4. establish a broad target frame for the family, such as shelf, plain, lowland, hill country, plateau, arid floor, dune body, or alpine upland
-5. solve the column heights with deterministic falloff from corridor constraints and neighborhood continuity
-6. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
-7. emit one `PrototypeColumn` per chunk column and return the completed `BaseHeightfieldPrototype`
+1. sample each column's atlas scalar inputs continuously in world/block space and gather the neighboring classified region cells around that same sample point
+2. read canonical corridor branch fields and the shared border-anchor set for the surrounding continuity tile
+3. blend nearby region-family context so atlas-cell boundaries transition gradually instead of introducing abrupt base-height steps
+4. classify corridor response as valley-seat, floodplain, basin-outlet, coastal-exit, or ridge-pressure influence
+5. establish a broad target frame for the blended local family context, such as shelf, plain, lowland, hill country, plateau, arid floor, dune body, or alpine upland
+6. collapse repeated river-path segment responses by branch so a long river does not over-carve where adjacent segments overlap the same column
+7. add deterministic subchunk ripple and terrace-like variation that stays continuous in world space and does not depend on chunk order
+8. solve the tile's column heights with deterministic falloff from corridor constraints, then force or strongly blend the border band toward the shared anchor samples
+9. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
+10. emit the completed tile result and crop one `PrototypeColumn` per chunk column for the requested chunk
 
 ## Corridor Influence Rules
 
 - valley seats
-  - lower the broad target height along the corridor axis
+  - lower the broad target height along the carried corridor segment
   - widen the floor so the prototype does not collapse into a pinched trench
 - floodplain openings
   - keep the floor broad and shallow
@@ -199,11 +221,13 @@ build_chunk_base_heightfield_prototype(
 1. deterministic for the same inputs and world seed
 2. seam continuity across chunk boundaries is mandatory
 3. corridor continuity is mandatory
-4. only broad-shape information belongs here
-5. final hydrology is deferred
-6. material and block decisions are deferred
-7. meso accents are deferred
-8. local smoothing detail is deferred
+4. atlas-cell boundaries must not introduce artificial base-height steps just because the chunk crossed into a new input window
+5. shared tile borders must agree with their border-anchor samples
+6. only broad-shape information belongs here
+7. final hydrology is deferred
+8. material and block decisions are deferred
+9. meso accents are deferred
+10. local smoothing detail is deferred, but prototype may still carry deterministic subchunk banding when that is needed to keep terrain legible at gameplay camera scale
 
 ## Deferred
 

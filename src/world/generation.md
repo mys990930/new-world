@@ -12,6 +12,7 @@
 - define the public `generate_chunk(...)` contract for future V2 realization
 - assemble padded atlas field / skeleton / region / meso inputs for a chunk
 - keep the V2 stage split explicit: corridors, prototype, meso apply, smoothing, hydrology, voxelize
+- define the continuity contract that later V2 stages must satisfy through canonical world-space fields, shared tile solves, and border anchors
 - preserve compile-time probe and LOD data shapes while runtime diagnostic behavior is intentionally disabled
 - keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns
 
@@ -103,6 +104,9 @@ generation::sample_chunk_surface_lod(
 - River corridors should be defined before biome-aware base heightfield solving, so heightfield generation treats them as constraints rather than as late carve masks.
 - Meso should become a constrained local-accent layer inside those already-classified regions, not the primary biome owner.
 - In V2, headwaters should naturally emerge near mountain spines, passes, upland divides, and basin outlets rather than appearing as isolated wet pockets.
+- Chunk requests should eventually sample canonical world-space fields and crop from shared solve tiles rather than solving every chunk in total isolation.
+- Shared-edge continuity should be enforced as a design contract, not treated as a best-effort artifact cleanup step after the fact.
+- The long-term continuity target is world-wide shared-edge agreement after final exposed-surface quantization, with no shared chunk edge differing by more than one block in height.
 
 ## Processing Flow
 
@@ -114,11 +118,11 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 2. Generate or read the atlas raw-field window plus mountain/drainage skeleton window.
 3. Resolve or sample the matching region classification window.
 4. Generate or read river corridors, basin outlets, and downstream grade for the same footprint.
-5. Solve a biome-aware base heightfield from region archetype plus water-corridor constraints.
-6. Generate or read the matching meso guide window from region context and aligned meso regions.
-7. Apply meso deformation on top of the base heightfield.
-8. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
-9. Solve final hydrology and connected water surfaces from the pre-defined branch model.
+5. Sample or build the canonical world-space continuity fields for the surrounding solve tile, including branch-aligned corridor fields and border anchors.
+6. Solve a biome-aware base heightfield on that shared tile from region archetype plus water-corridor constraints, then crop the requested chunk.
+7. Generate or read the matching meso guide window from region context and aligned meso regions, then apply meso deformation on the same shared continuity contract.
+8. Smooth that surface with anchor-constrained local refinement so major corridor and ridge intent survive without reopening seams.
+9. Solve final hydrology and connected water surfaces from the pre-defined branch model while honoring the same continuity anchors.
 10. Resolve region/material ownership and topsoil / sediment / cover policy.
 11. Write block ids into `ChunkData`.
 12. Return the finished chunk without mutating any live world state.
@@ -141,6 +145,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 ## Stage Contract Notes
 
 - `v2/corridors.md` defines the river-corridor contract that feeds the base-heightfield solve.
+- `v2/continuity.md` defines the global canonical field, tile solve, and border-anchor contract that later V2 stages must share.
 - `v2/prototype.md` is the authoritative design for the base-heightfield solve stage.
 - later V2 stages should treat prototype output as the broad landform source of truth, not as a late convenience mask.
 
@@ -153,6 +158,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 - `v2.md`: region-first generation scaffold
 - `v2/inputs.md`: atlas, skeleton, and region input assembly scaffold
 - `v2/corridors.md`: river corridor and downstream-grade scaffold
+- `v2/continuity.md`: shared tile solve and border-anchor continuity contract
 - `v2/prototype.md`: biome-aware base heightfield prototype scaffold
 - `v2/meso_apply.md`: meso application scaffold
 - `v2/smoothing.md`: smoothing and local refinement scaffold
