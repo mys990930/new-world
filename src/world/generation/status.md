@@ -33,6 +33,8 @@ The old V1 realization stack has been removed instead of kept alive in parallel.
   - V2 stage scaffolds for inputs, corridors, prototype, meso apply, smoothing, hydrology, and voxelization
 - `src/world/generation/v2/continuity.md`
   - authoritative design contract for global canonical fields, shared solve tiles, and border anchors
+- `src/world/generation/v2/continuity.rs`
+  - current prototype-side continuity helpers for shared tile bounds and border-anchor sampling
 - `src/world/generation/sampler.rs`
   - shared helper that gathers the padded atlas / structure / region / meso windows for a target chunk
   - current implementation now snaps neighboring chunks to a shared structure-sized atlas-context tile before padding and assembles raw atlas scalar cells from canonical region-owned field solves so the same `AtlasCoord` stays stable across chunk requests
@@ -104,8 +106,8 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
   - prototype now emits one `PrototypeColumn` per in-chunk column, using region/archetype context plus corridor constraints to produce a deterministic broad landform scaffold
   - current implementation now samples atlas scalars continuously in block/world space, blends neighboring classified region context near atlas boundaries without chunk-wide family snapping, uses canonical atlas field assembly to avoid chunk-request drift, collapses repeated river-branch segment responses so long corridors do not stack into seam walls, and adds deterministic subchunk ripple/terrace variation so low-relief terrain reads more clearly in quarter-view
-  - the documented target continuity architecture now expects prototype to move onto shared solve tiles with border anchors so later stages can inherit a world-wide seam contract instead of relying on chunk-local best effort
-  - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, and canonical-region boundary step artifacts
+  - prototype now also builds from shared `4 x 4` continuity-tile corridor context, reuses cached neighboring chunk state plus cached tile corridor windows, applies tile-border anchors, and adds a narrow chunk-edge continuity blend so chunk-local emission does not reintroduce large walls while later full-tile stages are still missing
+  - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, canonical-region boundary, and the reported wall-strip artifact; the current prototype threshold for that reported strip is `<= 1.35` blocks
   - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
 ### 6. Meso Solve
@@ -165,8 +167,8 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 
 ## What Still Remains Before V2 Can Replace It
 
-1. implement the shared continuity contract from `v2/continuity.md`, starting with canonical branch-aligned fields and tile/border-anchor ownership
-2. move prototype from chunk-local best effort toward shared tile solve plus border anchors
+1. continue tightening the continuity contract from `v2/continuity.md` from the current prototype slice toward the long-term exposed-surface `<= 1 block` target
+2. replace prototype's current per-request shared-tile sampling with a persisted full-tile surface object before meso and smoothing land
 3. publish the authoritative archetype-to-meso allowance matrix for the locked launch set
 4. lock launch material policy per archetype
 5. lock launch seasonal biome-state policy

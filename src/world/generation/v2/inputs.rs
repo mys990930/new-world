@@ -24,6 +24,7 @@ pub enum V2ScaffoldStage {
 
 #[derive(Debug, Clone)]
 pub struct ChunkGenerationV2Inputs {
+    pub meta: WorldMeta,
     pub chunk: ChunkCoord,
     pub atlas_fields: AtlasFieldMap,
     pub atlas_structure: AtlasStructureMap,
@@ -32,7 +33,8 @@ pub struct ChunkGenerationV2Inputs {
 
 impl PartialEq for ChunkGenerationV2Inputs {
     fn eq(&self, other: &Self) -> bool {
-        self.chunk == other.chunk
+        self.meta == other.meta
+            && self.chunk == other.chunk
             && self.atlas_fields.area() == other.atlas_fields.area()
             && self.atlas_fields.cells().values() == other.atlas_fields.cells().values()
             && self.atlas_structure == other.atlas_structure
@@ -65,6 +67,7 @@ pub fn prepare_chunk_v2_inputs(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGene
     let region_classes = generate_chunk_region_classes(coord, meta, &atlas_fields, &atlas_structure);
 
     ChunkGenerationV2Inputs {
+        meta: *meta,
         chunk: coord,
         atlas_fields,
         atlas_structure,

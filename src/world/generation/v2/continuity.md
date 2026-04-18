@@ -59,6 +59,11 @@ The exact launch constants may still change, but the contract should remain:
 - requested chunks crop their interior from the shared core
 - chunk seams inside the same core are therefore interior samples of one solve, not joins between two separately solved chunks
 
+Current prototype implementation note:
+
+- the current code uses a smaller `4 x 4` continuity tile with no extra halo yet
+- prototype still returns one chunk at a time, but it now samples a shared tile corridor context, reuses cached tile/chunk continuity state, and treats tile-border anchors as canonical edge truth
+
 ### 3. Border Anchors
 
 Shared tile borders should not depend on whichever neighboring tile solved first.
@@ -99,6 +104,13 @@ The residual term must either:
 
 These names are design placeholders, not yet locked implementation types.
 
+Current prototype code now has the first concrete subset of these ideas:
+
+- `GenerationTileCoord`
+- `GenerationTileBounds`
+- `BorderAnchorPoint`
+- per-run and shared caches for prototype chunk state and tile corridor context
+
 ## Stage Expectations
 
 ### Prototype
@@ -106,6 +118,7 @@ These names are design placeholders, not yet locked implementation types.
 - solve broad terrain on the shared tile footprint
 - derive its primary frame from canonical world-space fields plus corridor branch fields
 - obey border anchors exactly on the tile edge and blend the first few interior columns back toward the interior solve
+- current code also applies a narrow chunk-edge continuity blend inside the tile while prototype is still analytically sampled per requested chunk instead of materializing one persistent tile grid
 
 ### Meso Apply
 

@@ -16,6 +16,7 @@
 - inject deterministic subchunk relief bands and ripple-sized height changes so low-relief terrain still reads clearly in the quarter-view camera
 - solve broad terrain on a shared continuity tile rather than treating every chunk edge as an independent solve boundary
 - obey the border-anchor contract from `continuity.md` so later stages inherit a stable height boundary
+- reuse cached neighboring chunk state and shared tile corridor context so continuity work does not require recomputing the same tile inputs for every requested chunk
 - allocate a remaining relief budget for later meso, smoothing, and hydrology passes
 - keep the landform identity readable before local accents are added
 
@@ -76,6 +77,12 @@ The current code-facing entrypoint is still chunk-oriented, but the design targe
 - solve a haloed continuity tile once
 - obey the tile's border-anchor set
 - crop chunk interiors from the shared tile result
+
+Current implementation note:
+
+- prototype now samples a shared `4 x 4` continuity tile context per request
+- tile corridor state and neighboring chunk inputs are cached so repeated chunk requests in the same area reuse the same continuity context
+- because prototype is still emitted per chunk instead of persisting a full tile surface object, the current code also applies a narrow chunk-edge continuity blend inside the tile before tile-border anchors are applied
 
 `continuity.md` owns the tile and anchor contract. This document owns how prototype uses that contract.
 
@@ -194,9 +201,11 @@ The current code-facing entrypoint is still chunk-oriented, but the design targe
 5. establish a broad target frame for the blended local family context, such as shelf, plain, lowland, hill country, plateau, arid floor, dune body, or alpine upland
 6. collapse repeated river-path segment responses by branch so a long river does not over-carve where adjacent segments overlap the same column
 7. add deterministic subchunk ripple and terrace-like variation that stays continuous in world space and does not depend on chunk order
-8. solve the tile's column heights with deterministic falloff from corridor constraints, then force or strongly blend the border band toward the shared anchor samples
-9. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
-10. emit the completed tile result and crop one `PrototypeColumn` per chunk column for the requested chunk
+8. solve the tile's column heights with deterministic falloff from corridor constraints
+9. apply a narrow chunk-edge continuity blend inside the tile so per-chunk prototype emission does not reopen visible walls before later full-tile stages exist
+10. force or strongly blend tile-border bands toward the shared anchor samples
+11. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
+12. emit the completed tile result and crop one `PrototypeColumn` per chunk column for the requested chunk
 
 ## Corridor Influence Rules
 
@@ -223,11 +232,12 @@ The current code-facing entrypoint is still chunk-oriented, but the design targe
 3. corridor continuity is mandatory
 4. atlas-cell boundaries must not introduce artificial base-height steps just because the chunk crossed into a new input window
 5. shared tile borders must agree with their border-anchor samples
-6. only broad-shape information belongs here
-7. final hydrology is deferred
-8. material and block decisions are deferred
-9. meso accents are deferred
-10. local smoothing detail is deferred, but prototype may still carry deterministic subchunk banding when that is needed to keep terrain legible at gameplay camera scale
+6. prototype should keep reported seam strips below the current regression threshold rather than allowing multi-block wall artifacts to return
+7. only broad-shape information belongs here
+8. final hydrology is deferred
+9. material and block decisions are deferred
+10. meso accents are deferred
+11. local smoothing detail is deferred, but prototype may still carry deterministic subchunk banding when that is needed to keep terrain legible at gameplay camera scale
 
 ## Deferred
 

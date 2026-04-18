@@ -1,18 +1,24 @@
 use crate::world::atlas::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, AtlasFieldMap, CoastalContext,
-    ElevationBand, HydrologyContext, RegionArchetype, RegionClassCell, RegionClassMap,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, CoastalContext,
+    ElevationBand, HydrologyContext, RegionClassCell, RegionClassMap,
     RiverPathKind, RiverPathSegment, ReliefClass, TerrainFormFamily,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
 use super::inputs::ChunkGenerationV2Inputs;
+use super::sample_atlas_fields_fractional;
 
-const ATLAS_CELL_BLOCK_SPAN: i32 = ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32;
-const CHUNK_HALF_EDGE_F32: f32 = CHUNK_EDGE_I32 as f32 * 0.5;
-const MAX_CORRIDORS_PER_CHUNK: usize = 8;
+const ATLAS_CELL_BLOCK_SPAN: f32 = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32) as f32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RiverCorridorConstraint {
+    pub river_id: u32,
+    pub kind: RiverPathKind,
+    pub order: u8,
+    pub start_x: f32,
+    pub start_z: f32,
+    pub end_x: f32,
+    pub end_z: f32,
     pub center_x: f32,
     pub center_z: f32,
     pub half_width_blocks: f32,
@@ -38,97 +44,52 @@ pub fn build_chunk_corridor_window(
 ) -> ChunkCorridorWindow {
     let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
-    let chunk_center = (
-        chunk_origin_x as f32 + CHUNK_HALF_EDGE_F32,
-        chunk_origin_z as f32 + CHUNK_HALF_EDGE_F32,
-    );
-    let selection_area = chunk_atlas_selection_area(chunk);
-    let mut candidates = Vec::new();
+    let chunk_rect = ChunkBlockRect::for_chunk(chunk);
+    let mut corridors = Vec::new();
 
     for segment in inputs.atlas_structure.drainage().segments() {
         let segment_world = segment_world_segment(*segment);
-        let projection = project_point_onto_segment(chunk_center, segment_world.start, segment_world.end);
         let selection_radius = corridor_selection_radius(*segment);
-        let touches_chunk_window = segment.touches_area(selection_area);
 
-        if !touches_chunk_window && projection.distance_cells > selection_radius {
+        if !expanded_segment_bounds_overlap_chunk_rect(segment_world, selection_radius, chunk_rect) {
             continue;
         }
 
-        let sample_coord = atlas_coord_for_world_point(projection.point.0, projection.point.1);
-        let sampled_field = sample_atlas_field(&inputs.atlas_fields, sample_coord);
-        let sampled_region = sample_region_cell(&inputs.region_classes, sample_coord);
-        let start_field = sample_atlas_field(&inputs.atlas_fields, segment.start);
-        let end_field = sample_atlas_field(&inputs.atlas_fields, segment.end);
-        let corridor = build_corridor_constraint(
+        let midpoint = midpoint(segment_world.start, segment_world.end);
+        let sampled_field = sample_atlas_fields_fractional(&inputs.atlas_fields, midpoint.0, midpoint.1);
+        let sampled_region = sample_region_cell(
+            &inputs.region_classes,
+            atlas_coord_for_world_point(midpoint.0, midpoint.1),
+        );
+        let start_field =
+            sample_atlas_fields_fractional(&inputs.atlas_fields, segment_world.start.0, segment_world.start.1);
+        let end_field =
+            sample_atlas_fields_fractional(&inputs.atlas_fields, segment_world.end.0, segment_world.end.1);
+
+        corridors.push(build_corridor_constraint(
             *segment,
             chunk_origin_x,
             chunk_origin_z,
-            projection,
+            segment_world,
             sampled_field,
             sampled_region,
             start_field,
             end_field,
-        );
-        let score = corridor_priority_score(
-            *segment,
-            projection.distance_cells,
-            selection_radius,
-            touches_chunk_window,
-            sampled_field,
-            sampled_region,
-        );
-
-        candidates.push(ScoredCorridor {
-            score,
-            river_id: segment.river_id.0,
-            kind_rank: kind_rank(segment.kind),
-            order: segment.order,
-            start_x: segment.start.x,
-            start_z: segment.start.z,
-            end_x: segment.end.x,
-            end_z: segment.end.z,
-            corridor,
-        });
+        ));
     }
 
-    candidates.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.river_id.cmp(&right.river_id))
-            .then_with(|| left.kind_rank.cmp(&right.kind_rank))
+    corridors.sort_by(|left, right| {
+        left.river_id
+            .cmp(&right.river_id)
             .then_with(|| left.order.cmp(&right.order))
-            .then_with(|| left.start_x.cmp(&right.start_x))
-            .then_with(|| left.start_z.cmp(&right.start_z))
-            .then_with(|| left.end_x.cmp(&right.end_x))
-            .then_with(|| left.end_z.cmp(&right.end_z))
+            .then_with(|| kind_rank(left.kind).cmp(&kind_rank(right.kind)))
+            .then_with(|| left.start_x.total_cmp(&right.start_x))
+            .then_with(|| left.start_z.total_cmp(&right.start_z))
+            .then_with(|| left.end_x.total_cmp(&right.end_x))
+            .then_with(|| left.end_z.total_cmp(&right.end_z))
     });
-    candidates.truncate(MAX_CORRIDORS_PER_CHUNK);
 
-    ChunkCorridorWindow {
-        chunk,
-        corridors: candidates.into_iter().map(|candidate| candidate.corridor).collect(),
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ScoredCorridor {
-    score: f32,
-    river_id: u32,
-    kind_rank: u8,
-    order: u8,
-    start_x: i32,
-    start_z: i32,
-    end_x: i32,
-    end_z: i32,
-    corridor: RiverCorridorConstraint,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ProjectedPoint {
-    point: (f32, f32),
-    distance_cells: f32,
+    ChunkCorridorWindow { chunk, corridors }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,64 +98,64 @@ struct SegmentWorldLine {
     end: (f32, f32),
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ChunkBlockRect {
+    min_x: f32,
+    max_x: f32,
+    min_z: f32,
+    max_z: f32,
+}
+
+impl ChunkBlockRect {
+    fn for_chunk(chunk: ChunkCoord) -> Self {
+        let min_x = (chunk.0 * CHUNK_EDGE_I32) as f32;
+        let min_z = (chunk.2 * CHUNK_EDGE_I32) as f32;
+        Self {
+            min_x,
+            max_x: min_x + CHUNK_EDGE_I32 as f32,
+            min_z,
+            max_z: min_z + CHUNK_EDGE_I32 as f32,
+        }
+    }
+}
+
 fn build_corridor_constraint(
     segment: RiverPathSegment,
     chunk_origin_x: i32,
     chunk_origin_z: i32,
-    projection: ProjectedPoint,
+    segment_world: SegmentWorldLine,
     sampled_field: AtlasCell,
     sampled_region: RegionClassCell,
     start_field: AtlasCell,
     end_field: AtlasCell,
 ) -> RiverCorridorConstraint {
+    let midpoint = midpoint(segment_world.start, segment_world.end);
     let half_width_blocks = corridor_half_width_blocks(segment, sampled_field, sampled_region);
-    let downstream_grade_per_block =
-        corridor_downstream_grade_per_block(
-            segment,
-            sampled_field,
-            sampled_region,
-            start_field,
-            end_field,
-            projection.distance_cells,
-        );
+    let downstream_grade_per_block = corridor_downstream_grade_per_block(
+        segment,
+        sampled_field,
+        sampled_region,
+        start_field,
+        end_field,
+    );
 
     RiverCorridorConstraint {
-        center_x: projection.point.0 - chunk_origin_x as f32,
-        center_z: projection.point.1 - chunk_origin_z as f32,
+        river_id: segment.river_id.0,
+        kind: segment.kind,
+        order: segment.order,
+        start_x: segment_world.start.0 - chunk_origin_x as f32,
+        start_z: segment_world.start.1 - chunk_origin_z as f32,
+        end_x: segment_world.end.0 - chunk_origin_x as f32,
+        end_z: segment_world.end.1 - chunk_origin_z as f32,
+        center_x: midpoint.0 - chunk_origin_x as f32,
+        center_z: midpoint.1 - chunk_origin_z as f32,
         half_width_blocks,
         downstream_grade_per_block,
     }
 }
 
-fn corridor_priority_score(
-    segment: RiverPathSegment,
-    distance_cells: f32,
-    selection_radius_cells: f32,
-    touches_chunk_window: bool,
-    sampled_field: AtlasCell,
-    sampled_region: RegionClassCell,
-) -> f32 {
-    let proximity_score = if selection_radius_cells <= f32::EPSILON {
-        0.0
-    } else {
-        (1.0 - distance_cells / selection_radius_cells).clamp(0.0, 1.0)
-    };
-    let role_score = match segment.kind {
-        RiverPathKind::Trunk => 0.55,
-        RiverPathKind::Tributary => 0.34,
-    } + segment.order as f32 * 0.06;
-    let context_score = region_corridor_priority(sampled_field, sampled_region);
-    let continuity_score = (1.0 - downstream_progress(segment) * 0.24).max(0.72);
-
-    (if touches_chunk_window { 1.9 } else { 0.0 })
-        + proximity_score * 1.6
-        + role_score
-        + context_score
-        + continuity_score * 0.25
-}
-
 fn corridor_selection_radius(segment: RiverPathSegment) -> f32 {
-    let base = segment.bankfull_width_cells.max(0.35) * ATLAS_CELL_BLOCK_SPAN as f32 * 0.28;
+    let base = segment.bankfull_width_cells.max(0.35) * ATLAS_CELL_BLOCK_SPAN * 0.28;
     base + CHUNK_EDGE_I32 as f32 * 4.0 + 32.0
 }
 
@@ -215,11 +176,11 @@ fn corridor_half_width_blocks(
         - sampled_field.aridity * 0.10;
 
     (segment.bankfull_width_cells.max(0.35)
-        * ATLAS_CELL_BLOCK_SPAN as f32
+        * ATLAS_CELL_BLOCK_SPAN
         * width_scale
         * region_scale
         * field_scale)
-        .clamp(16.0, ATLAS_CELL_BLOCK_SPAN as f32 * 2.5)
+        .clamp(16.0, ATLAS_CELL_BLOCK_SPAN * 2.5)
 }
 
 fn corridor_downstream_grade_per_block(
@@ -228,9 +189,9 @@ fn corridor_downstream_grade_per_block(
     sampled_region: RegionClassCell,
     start_field: AtlasCell,
     end_field: AtlasCell,
-    distance_cells: f32,
 ) -> f32 {
-    let segment_length_blocks = (distance_cells.max(0.5) * ATLAS_CELL_BLOCK_SPAN as f32).max(1.0);
+    let segment_length_cells = (segment.downstream_cells_end - segment.downstream_cells_start).max(0.5);
+    let segment_length_blocks = (segment_length_cells * ATLAS_CELL_BLOCK_SPAN).max(1.0);
     let height_drop = (start_field.macro_elevation - end_field.macro_elevation).max(0.0);
     let flow_signal = (start_field.river_flow_potential + end_field.river_flow_potential) * 0.5;
     let slope_signal = (start_field.slope + end_field.slope) * 0.5;
@@ -251,68 +212,6 @@ fn corridor_downstream_grade_per_block(
     grade *= region_scale * progress_scale;
 
     grade.clamp(0.00020, 0.0120)
-}
-
-fn region_corridor_priority(field: AtlasCell, region: RegionClassCell) -> f32 {
-    let mut score = field.river_flow_potential * 0.35
-        + field.riverine_factor * 0.30
-        + field.wetness * 0.18
-        - field.aridity * 0.10;
-
-    score += match region.hydrology_context {
-        HydrologyContext::RiverCorridor => 0.55,
-        HydrologyContext::WetLowland => 0.50,
-        HydrologyContext::LakeBasin => 0.40,
-        HydrologyContext::WellDrained => 0.12,
-        HydrologyContext::Dryland => -0.08,
-    };
-    score += match region.coastal_context {
-        CoastalContext::Marine => 0.32,
-        CoastalContext::Coastal => 0.20,
-        CoastalContext::NearCoast => 0.08,
-        CoastalContext::Inland => 0.0,
-    };
-    score += match region.elevation_band {
-        ElevationBand::Alpine => 0.20,
-        ElevationBand::Highland => 0.12,
-        ElevationBand::Upland => 0.05,
-        ElevationBand::Low => 0.0,
-    };
-    score += match region.relief_class {
-        ReliefClass::Mountain => 0.15,
-        ReliefClass::Hill => 0.08,
-        ReliefClass::Rolling => 0.03,
-        ReliefClass::Plain => 0.0,
-    };
-    score += match region.terrain_form_family {
-        TerrainFormFamily::Delta
-        | TerrainFormFamily::Floodplain
-        | TerrainFormFamily::WetLowland
-        | TerrainFormFamily::AlluvialLowland => 0.22,
-        TerrainFormFamily::BroadValley | TerrainFormFamily::NarrowValley => 0.12,
-        TerrainFormFamily::Basin => 0.10,
-        TerrainFormFamily::Canyon | TerrainFormFamily::RavineCountry => 0.08,
-        TerrainFormFamily::MarineShelf | TerrainFormFamily::BeachPlain => 0.06,
-        TerrainFormFamily::RidgeCountry => 0.04,
-        _ => 0.0,
-    };
-    score += match region.archetype {
-        RegionArchetype::CoastalDelta
-        | RegionArchetype::EstuaryLowland
-        | RegionArchetype::MarshFloodplain
-        | RegionArchetype::SwampLowland
-        | RegionArchetype::FloodedForestFloodplain
-        | RegionArchetype::FloodedForestAlluvialLowland => 0.20,
-        RegionArchetype::GlaciatedAlpine
-        | RegionArchetype::AlpineRavineCountry
-        | RegionArchetype::BorealRidgeCountry => 0.08,
-        RegionArchetype::DesertDuneField
-        | RegionArchetype::DesertMesaCountry
-        | RegionArchetype::SemiDesertPediment => -0.03,
-        _ => 0.0,
-    };
-
-    score
 }
 
 fn region_width_scale(field: AtlasCell, region: RegionClassCell) -> f32 {
@@ -356,10 +255,7 @@ fn region_width_scale(field: AtlasCell, region: RegionClassCell) -> f32 {
         TerrainFormFamily::MesaCountry | TerrainFormFamily::Badlands => 0.88,
         _ => 1.0,
     };
-    scale *= 1.0
-        + field.riverine_factor * 0.12
-        + field.wetness * 0.08
-        - field.aridity * 0.08;
+    scale *= 1.0 + field.riverine_factor * 0.12 + field.wetness * 0.08 - field.aridity * 0.08;
 
     scale.clamp(0.72, 1.45)
 }
@@ -405,10 +301,7 @@ fn region_grade_scale(field: AtlasCell, region: RegionClassCell) -> f32 {
         TerrainFormFamily::MarineShelf | TerrainFormFamily::BeachPlain => 0.88,
         _ => 1.0,
     };
-    scale *= 1.0
-        + field.slope * 0.14
-        + field.river_flow_potential * 0.08
-        - field.wetness * 0.06;
+    scale *= 1.0 + field.slope * 0.14 + field.river_flow_potential * 0.08 - field.wetness * 0.06;
 
     scale.clamp(0.45, 1.40)
 }
@@ -433,17 +326,20 @@ fn segment_world_segment(segment: RiverPathSegment) -> SegmentWorldLine {
 }
 
 fn atlas_coord_to_world_center(coord: AtlasCoord) -> (f32, f32) {
-    let span = ATLAS_CELL_BLOCK_SPAN as f32;
     (
-        coord.x as f32 * span + span * 0.5,
-        coord.z as f32 * span + span * 0.5,
+        coord.x as f32 * ATLAS_CELL_BLOCK_SPAN + ATLAS_CELL_BLOCK_SPAN * 0.5,
+        coord.z as f32 * ATLAS_CELL_BLOCK_SPAN + ATLAS_CELL_BLOCK_SPAN * 0.5,
     )
+}
+
+fn midpoint(start: (f32, f32), end: (f32, f32)) -> (f32, f32) {
+    ((start.0 + end.0) * 0.5, (start.1 + end.1) * 0.5)
 }
 
 fn atlas_coord_for_world_point(world_x: f32, world_z: f32) -> AtlasCoord {
     AtlasCoord::new(
-        (world_x.floor() as i32).div_euclid(ATLAS_CELL_BLOCK_SPAN),
-        (world_z.floor() as i32).div_euclid(ATLAS_CELL_BLOCK_SPAN),
+        (world_x.floor() as i32).div_euclid(ATLAS_CELL_BLOCK_SPAN as i32),
+        (world_z.floor() as i32).div_euclid(ATLAS_CELL_BLOCK_SPAN as i32),
     )
 }
 
@@ -454,14 +350,6 @@ fn clamp_atlas_coord_to_area(coord: AtlasCoord, area: AtlasArea) -> AtlasCoord {
     AtlasCoord::new(coord.x.clamp(origin.x, max_x), coord.z.clamp(origin.z, max_z))
 }
 
-fn sample_atlas_field(fields: &AtlasFieldMap, coord: AtlasCoord) -> AtlasCell {
-    let area = fields.area();
-    let clamped = clamp_atlas_coord_to_area(coord, area);
-    *fields
-        .get(clamped)
-        .expect("sampled atlas field must exist within the input area")
-}
-
 fn sample_region_cell(regions: &RegionClassMap, coord: AtlasCoord) -> RegionClassCell {
     let area = regions.area();
     let clamped = clamp_atlas_coord_to_area(coord, area);
@@ -470,48 +358,17 @@ fn sample_region_cell(regions: &RegionClassMap, coord: AtlasCoord) -> RegionClas
         .expect("sampled region classification must exist within the input area")
 }
 
-fn chunk_atlas_selection_area(chunk: ChunkCoord) -> AtlasArea {
-    let chunk_atlas_coord = AtlasCoord::new(
-        chunk.0.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
-        chunk.2.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
-    );
-    AtlasArea::new(
-        AtlasCoord::new(chunk_atlas_coord.x - 1, chunk_atlas_coord.z - 1),
-        3,
-        3,
-    )
-    .expect("chunk atlas selection area must be valid")
-}
+fn expanded_segment_bounds_overlap_chunk_rect(
+    segment: SegmentWorldLine,
+    padding_blocks: f32,
+    rect: ChunkBlockRect,
+) -> bool {
+    let min_x = segment.start.0.min(segment.end.0) - padding_blocks;
+    let max_x = segment.start.0.max(segment.end.0) + padding_blocks;
+    let min_z = segment.start.1.min(segment.end.1) - padding_blocks;
+    let max_z = segment.start.1.max(segment.end.1) + padding_blocks;
 
-fn project_point_onto_segment(
-    point: (f32, f32),
-    start: (f32, f32),
-    end: (f32, f32),
-) -> ProjectedPoint {
-    let seg_x = end.0 - start.0;
-    let seg_z = end.1 - start.1;
-    let length_sq = seg_x * seg_x + seg_z * seg_z;
-
-    if length_sq <= f32::EPSILON {
-        return ProjectedPoint {
-            point: start,
-            distance_cells: distance_between_points(point, start),
-        };
-    }
-
-    let t = (((point.0 - start.0) * seg_x + (point.1 - start.1) * seg_z) / length_sq).clamp(0.0, 1.0);
-    let projected = (start.0 + seg_x * t, start.1 + seg_z * t);
-
-    ProjectedPoint {
-        point: projected,
-        distance_cells: distance_between_points(point, projected),
-    }
-}
-
-fn distance_between_points(a: (f32, f32), b: (f32, f32)) -> f32 {
-    let dx = a.0 - b.0;
-    let dz = a.1 - b.1;
-    (dx * dx + dz * dz).sqrt()
+    max_x >= rect.min_x && min_x <= rect.max_x && max_z >= rect.min_z && min_z <= rect.max_z
 }
 
 #[cfg(test)]
@@ -589,5 +446,61 @@ mod tests {
         }
 
         panic!("expected at least one corridor center to allow outside-edge influence");
+    }
+
+    #[test]
+    fn matching_corridors_keep_intrinsic_width_and_grade_across_neighboring_chunks() {
+        let meta = WorldMeta::new(42);
+        let chunk_pairs = [
+            (ChunkCoord(15, 0, 15), ChunkCoord(16, 0, 15)),
+            (ChunkCoord(15, 0, 16), ChunkCoord(16, 0, 16)),
+            (ChunkCoord(0, 0, 0), ChunkCoord(1, 0, 0)),
+            (ChunkCoord(-1, 0, -1), ChunkCoord(0, 0, -1)),
+            (ChunkCoord(31, 0, -20), ChunkCoord(32, 0, -20)),
+            (ChunkCoord(127, 0, 0), ChunkCoord(128, 0, 0)),
+        ];
+
+        for (left_chunk, right_chunk) in chunk_pairs {
+            let left_inputs = prepare_chunk_v2_inputs(left_chunk, &meta);
+            let right_inputs = prepare_chunk_v2_inputs(right_chunk, &meta);
+            let left_window = build_chunk_corridor_window(left_chunk, &left_inputs);
+            let right_window = build_chunk_corridor_window(right_chunk, &right_inputs);
+
+            for left in &left_window.corridors {
+                if let Some(right) = right_window.corridors.iter().find(|candidate| {
+                    candidate.river_id == left.river_id
+                        && candidate.kind == left.kind
+                        && candidate.order == left.order
+                        && same_absolute_segment(left_chunk, left, right_chunk, candidate)
+                }) {
+                    assert!((left.half_width_blocks - right.half_width_blocks).abs() <= f32::EPSILON);
+                    assert!(
+                        (left.downstream_grade_per_block - right.downstream_grade_per_block).abs()
+                            <= f32::EPSILON
+                    );
+                    return;
+                }
+            }
+        }
+
+        panic!("expected neighboring chunk windows to share at least one corridor");
+    }
+
+    fn same_absolute_segment(
+        left_chunk: ChunkCoord,
+        left: &RiverCorridorConstraint,
+        right_chunk: ChunkCoord,
+        right: &RiverCorridorConstraint,
+    ) -> bool {
+        let left_origin_x = left_chunk.0 as f32 * CHUNK_EDGE_I32 as f32;
+        let left_origin_z = left_chunk.2 as f32 * CHUNK_EDGE_I32 as f32;
+        let right_origin_x = right_chunk.0 as f32 * CHUNK_EDGE_I32 as f32;
+        let right_origin_z = right_chunk.2 as f32 * CHUNK_EDGE_I32 as f32;
+
+        (left.start_x + left_origin_x - (right.start_x + right_origin_x)).abs() <= f32::EPSILON
+            && (left.start_z + left_origin_z - (right.start_z + right_origin_z)).abs()
+                <= f32::EPSILON
+            && (left.end_x + left_origin_x - (right.end_x + right_origin_x)).abs() <= f32::EPSILON
+            && (left.end_z + left_origin_z - (right.end_z + right_origin_z)).abs() <= f32::EPSILON
     }
 }

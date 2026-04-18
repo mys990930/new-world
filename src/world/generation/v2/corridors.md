@@ -59,9 +59,14 @@ The initial implementation now exists in code and keeps this stage boundary:
 
 ### `RiverCorridorConstraint`
 
+- `river_id`, `kind`, `order`
+  - stable branch identity carried forward for deterministic matching and debugging
+- `start_x`, `start_z`, `end_x`, `end_z`
+  - chunk-relative block-space endpoints for the broad corridor segment influence
+  - values may sit outside the strict `0..CHUNK_EDGE` footprint so neighboring branches can still shape edge columns
 - `center_x`, `center_z`
-  - chunk-relative block-space center for the corridor influence sample
-  - values may sit outside the strict `0..CHUNK_EDGE` footprint so neighboring branches can influence edge columns without seam artifacts
+  - chunk-relative midpoint of the carried segment
+  - kept as a compact summary and debug-friendly focus point
 - `half_width_blocks`
   - broad prototype-scale corridor half-width, not final carved voxel-bank width
   - intended to bias valley seat, floodplain seat, and lowland opening before smoothing
@@ -105,9 +110,10 @@ The initial implementation now exists in code and keeps this stage boundary:
 1. gather the padded structure and region windows already assembled for the target chunk
 2. select the drainage branches whose corridor influence overlaps the target chunk or its prototype margin
 3. classify each relevant reach as headwater, tributary, trunk, basin outlet, inland floodplain reach, or coastal outlet reach
-4. derive a broad corridor centerline and longitudinal downstream grade from the selected path segments
-5. derive corridor half-width from branch role, downstream progress, and bounded region context
-6. emit `RiverCorridorConstraint` samples that prototype can consume without re-reading atlas structure directly
+4. carry each selected reach forward as a broad block-space segment, not as a single point sample
+5. derive longitudinal downstream grade from the segment's own downstream span and intrinsic midpoint context instead of from a chunk-local projection distance
+6. derive corridor half-width from branch role, downstream progress, and bounded region context
+7. emit `RiverCorridorConstraint` samples that prototype can consume without re-reading atlas structure directly
 
 ## Region Interaction Contract
 
@@ -137,5 +143,8 @@ The initial implementation now exists in code and keeps this stage boundary:
 ## Notes
 
 - an initial deterministic solve now projects nearby drainage segments into a bounded per-chunk corridor set
-- the current solver ranks nearby reaches, keeps the highest-priority chunk influencers, and allows centers outside the strict chunk footprint when wide corridors still matter
+- the current solver keeps every segment whose expanded world-space bounds overlap the chunk prototype margin instead of truncating to a tiny top-N subset
+- corridor scalar support now rides on canonical atlas field assembly from `sampler`, so the same branch no longer widens or steepens just because a neighboring chunk requested a different temporary raw-field window
+- corridor width and downstream-grade signals are now intrinsic to the carried segment, so neighboring chunks that see the same branch keep the same broad water-envelope interpretation
+- prototype now consumes corridor geometry as segment endpoints with circular endcaps rather than treating every corridor as a single radial point influence
 - prototype consumption is still not wired, so corridor solve currently exists as a standalone V2 builder rather than an end-to-end realization step
