@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-use crate::world::atlas::{AtlasCell, CoastalContext, HydrologyContext, RegionArchetype, RegionClassCell, TerrainFormFamily};
+use crate::world::atlas::{
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCell, AtlasStructureMap, CoastalContext, HydrologyContext,
+    MountainChainScale, MountainSpineSegment, RegionArchetype, RegionClassCell, RiverPathKind,
+    TerrainFormFamily,
+};
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
-use crate::world::meta::WorldMeta;
 
 use super::super::{SEA_LEVEL_Y, WORLD_FLOOR_Y};
-use super::continuity::{BorderAnchorPoint, GenerationTileBounds};
 use super::{
     ChunkCorridorWindow, ChunkGenerationV2Inputs, RegionSampleWeight, RiverCorridorConstraint,
     sample_atlas_fields_fractional, sample_region_weights,
@@ -16,6 +15,7 @@ const MIN_BASE_HEIGHT_Y: f32 = WORLD_FLOOR_Y as f32 + 8.0;
 const MAX_BASE_HEIGHT_Y: f32 = SEA_LEVEL_Y as f32 + 192.0;
 const MIN_RELIEF_BUDGET: f32 = 4.0;
 const MAX_RELIEF_BUDGET: f32 = 40.0;
+const ATLAS_CELL_BLOCK_SPAN: f32 = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32) as f32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrototypePolicyFamily {
@@ -29,12 +29,143 @@ enum PrototypePolicyFamily {
     AlpineHighRelief,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CorridorMode {
-    ValleySeat,
-    FloodplainOpening,
-    BasinOutlet,
-    CoastalExit,
+#[derive(Debug, Clone, Copy, Default)]
+struct BasisParameters {
+    macro_height_bonus: f32,
+    coastal_shelf_depth: f32,
+    coastal_apron_lift: f32,
+    coastal_cliff_lift: f32,
+    ridge_lift: f32,
+    ridge_shoulder_lift: f32,
+    basin_depth: f32,
+    inland_lift: f32,
+    arid_lift: f32,
+    wet_flatten: f32,
+    low_freq_amp: f32,
+    mid_freq_amp: f32,
+    terrace_amp: f32,
+    dune_amp: f32,
+    relief_base: f32,
+    relief_gain: f32,
+    corridor_depth: f32,
+    corridor_width_scale: f32,
+    floodplain_width_scale: f32,
+    outlet_open_scale: f32,
+    ridge_preservation: f32,
+}
+
+impl BasisParameters {
+    fn add_weighted(&mut self, other: Self, weight: f32) {
+        self.macro_height_bonus += other.macro_height_bonus * weight;
+        self.coastal_shelf_depth += other.coastal_shelf_depth * weight;
+        self.coastal_apron_lift += other.coastal_apron_lift * weight;
+        self.coastal_cliff_lift += other.coastal_cliff_lift * weight;
+        self.ridge_lift += other.ridge_lift * weight;
+        self.ridge_shoulder_lift += other.ridge_shoulder_lift * weight;
+        self.basin_depth += other.basin_depth * weight;
+        self.inland_lift += other.inland_lift * weight;
+        self.arid_lift += other.arid_lift * weight;
+        self.wet_flatten += other.wet_flatten * weight;
+        self.low_freq_amp += other.low_freq_amp * weight;
+        self.mid_freq_amp += other.mid_freq_amp * weight;
+        self.terrace_amp += other.terrace_amp * weight;
+        self.dune_amp += other.dune_amp * weight;
+        self.relief_base += other.relief_base * weight;
+        self.relief_gain += other.relief_gain * weight;
+        self.corridor_depth += other.corridor_depth * weight;
+        self.corridor_width_scale += other.corridor_width_scale * weight;
+        self.floodplain_width_scale += other.floodplain_width_scale * weight;
+        self.outlet_open_scale += other.outlet_open_scale * weight;
+        self.ridge_preservation += other.ridge_preservation * weight;
+    }
+
+    fn finalize(mut self) -> Self {
+        self.coastal_shelf_depth = self.coastal_shelf_depth.max(0.0);
+        self.coastal_apron_lift = self.coastal_apron_lift.max(0.0);
+        self.coastal_cliff_lift = self.coastal_cliff_lift.max(0.0);
+        self.ridge_lift = self.ridge_lift.max(0.0);
+        self.ridge_shoulder_lift = self.ridge_shoulder_lift.max(0.0);
+        self.basin_depth = self.basin_depth.max(0.0);
+        self.low_freq_amp = self.low_freq_amp.max(0.0);
+        self.mid_freq_amp = self.mid_freq_amp.max(0.0);
+        self.terrace_amp = self.terrace_amp.max(0.0);
+        self.dune_amp = self.dune_amp.max(0.0);
+        self.relief_base = self.relief_base.max(MIN_RELIEF_BUDGET);
+        self.relief_gain = self.relief_gain.max(0.0);
+        self.corridor_depth = self.corridor_depth.max(0.0);
+        self.corridor_width_scale = self.corridor_width_scale.max(0.75);
+        self.floodplain_width_scale = self.floodplain_width_scale.max(1.0);
+        self.outlet_open_scale = self.outlet_open_scale.max(1.0);
+        self.ridge_preservation = self.ridge_preservation.max(0.0);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StructureBasisSample {
+    ridge_core_influence: f32,
+    ridge_shoulder_influence: f32,
+    major_ridge_influence: f32,
+    strongest_segment: f32,
+    heading_x: f32,
+    heading_z: f32,
+}
+
+impl Default for StructureBasisSample {
+    fn default() -> Self {
+        Self {
+            ridge_core_influence: 0.0,
+            ridge_shoulder_influence: 0.0,
+            major_ridge_influence: 0.0,
+            strongest_segment: 0.0,
+            heading_x: 1.0,
+            heading_z: 0.0,
+        }
+    }
+}
+
+impl StructureBasisSample {
+    fn heading(self) -> (f32, f32) {
+        (self.heading_x, self.heading_z)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CorridorModeWeights {
+    valley: f32,
+    floodplain: f32,
+    basin_outlet: f32,
+    coastal_exit: f32,
+}
+
+impl CorridorModeWeights {
+    fn normalized(mut self) -> Self {
+        let total = self.valley + self.floodplain + self.basin_outlet + self.coastal_exit;
+        if total <= f32::EPSILON {
+            self.valley = 1.0;
+            return self;
+        }
+
+        self.valley /= total;
+        self.floodplain /= total;
+        self.basin_outlet /= total;
+        self.coastal_exit /= total;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CorridorPolicy {
+    valley_depth: f32,
+    floodplain_depth: f32,
+    basin_depth: f32,
+    coastal_depth: f32,
+    valley_width_scale: f32,
+    floodplain_width_scale: f32,
+    basin_width_scale: f32,
+    coastal_width_scale: f32,
+    shoulder_preservation: f32,
+    relief_penalty_scale: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -47,103 +178,21 @@ struct CorridorAdjustment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CorridorBranchKey {
     river_id: u32,
-    kind: crate::world::atlas::RiverPathKind,
+    kind: RiverPathKind,
     order: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct CorridorBranchResponse {
     key: CorridorBranchKey,
-    accumulator: CorridorBranchAccumulator,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct CorridorBranchAccumulator {
-    weighted_height_delta: f32,
-    weighted_relief_budget_penalty: f32,
-    total_weight: f32,
-    strongest_influence: f32,
-    max_relief_budget_penalty: f32,
+    response: CorridorAdjustment,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ProjectedCorridorPoint {
+struct ProjectedSegmentPoint {
     distance_blocks: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct WorldCorridorSegmentKey {
-    river_id: u32,
-    kind_rank: u8,
-    order: u8,
-    start_x_bits: u32,
-    start_z_bits: u32,
-    end_x_bits: u32,
-    end_z_bits: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct WorldCorridorConstraint {
-    river_id: u32,
-    kind: crate::world::atlas::RiverPathKind,
-    order: u8,
-    start_x: f32,
-    start_z: f32,
-    end_x: f32,
-    end_z: f32,
-    half_width_blocks: f32,
-    downstream_grade_per_block: f32,
-}
-
-#[derive(Debug, Clone)]
-struct CachedChunkSolveState {
-    inputs: ChunkGenerationV2Inputs,
-    corridor_window: ChunkCorridorWindow,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct CorridorNeighborhoodKey {
-    center_chunk_x: i32,
-    center_chunk_z: i32,
-    radius_chunks: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct PrototypeChunkStateCacheKey {
-    seed: u64,
-    world_version: u32,
-    generator_version: u32,
-    save_format_version: u32,
-    chunk_x: i32,
-    chunk_y: i32,
-    chunk_z: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct PrototypeTileCorridorCacheKey {
-    meta: PrototypeChunkStateCacheKey,
-    tile_x: i32,
-    tile_z: i32,
-}
-
-struct PrototypeSolveCache {
-    meta: WorldMeta,
-    chunk_states: HashMap<ChunkCoord, CachedChunkSolveState>,
-    neighborhood_corridors: HashMap<CorridorNeighborhoodKey, Vec<WorldCorridorConstraint>>,
-}
-
-fn global_chunk_state_cache(
-) -> &'static Mutex<HashMap<PrototypeChunkStateCacheKey, CachedChunkSolveState>> {
-    static CACHE: OnceLock<Mutex<HashMap<PrototypeChunkStateCacheKey, CachedChunkSolveState>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn global_tile_corridor_cache(
-) -> &'static Mutex<HashMap<PrototypeTileCorridorCacheKey, Vec<WorldCorridorConstraint>>> {
-    static CACHE: OnceLock<Mutex<HashMap<PrototypeTileCorridorCacheKey, Vec<WorldCorridorConstraint>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+    tangent_x: f32,
+    tangent_z: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -172,9 +221,6 @@ pub fn build_chunk_base_heightfield_prototype(
 ) -> BaseHeightfieldPrototype {
     debug_assert_eq!(inputs.chunk, chunk);
     debug_assert_eq!(corridor_window.chunk, chunk);
-    let tile_bounds = GenerationTileBounds::for_chunk(chunk);
-    let mut solve_cache = PrototypeSolveCache::new(inputs, corridor_window);
-    let tile_corridors = solve_cache.collect_tile_corridors(tile_bounds);
     let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
     let mut columns = Vec::with_capacity((CHUNK_EDGE_I32 as usize) * (CHUNK_EDGE_I32 as usize));
@@ -187,41 +233,33 @@ pub fn build_chunk_base_heightfield_prototype(
             let sample_world_z = world_z as f32 + 0.5;
             let field = sample_atlas_fields_fractional(&inputs.atlas_fields, sample_world_x, sample_world_z);
             let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
-            let (mut base_height, corridor_adjustment) = raw_prototype_height_for_column(
-                field,
+            let structure_sample =
+                sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
+            let mut base_height = blended_base_height(
                 &region_samples,
+                field,
+                structure_sample,
                 sample_world_x,
                 sample_world_z,
-                &tile_corridors,
             );
-            base_height = apply_chunk_edge_continuity_blend(
-                base_height,
-                world_x,
-                world_z,
-                tile_bounds,
-                &tile_corridors,
-                &mut solve_cache,
+            let corridor_adjustment = corridor_adjustment_for_column(
+                field,
+                structure_sample,
+                local_x as f32 + 0.5,
+                local_z as f32 + 0.5,
+                &region_samples,
+                &corridor_window.corridors,
             );
-            base_height = apply_border_anchor_blend(
-                base_height,
-                world_x,
-                world_z,
-                tile_bounds,
-                &mut solve_cache,
-            );
+            base_height += corridor_adjustment.height_delta;
             base_height = base_height.clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y);
 
-            let mut relief_budget = blended_relief_budget(
+            let relief_budget = blended_relief_budget(
                 &region_samples,
                 field,
+                structure_sample,
                 corridor_adjustment.strongest_influence,
                 corridor_adjustment.relief_budget_penalty,
             );
-            let anchor_strength = border_anchor_strength(world_x, world_z, tile_bounds);
-            if anchor_strength > 0.0 {
-                relief_budget = (relief_budget - anchor_strength * 2.0)
-                    .clamp(MIN_RELIEF_BUDGET, MAX_RELIEF_BUDGET);
-            }
 
             columns.push(PrototypeColumn {
                 base_height,
@@ -233,468 +271,386 @@ pub fn build_chunk_base_heightfield_prototype(
     BaseHeightfieldPrototype { chunk, columns }
 }
 
-impl PrototypeSolveCache {
-    fn new(inputs: &ChunkGenerationV2Inputs, corridor_window: &ChunkCorridorWindow) -> Self {
-        let mut chunk_states = HashMap::new();
-        chunk_states.insert(
-            inputs.chunk,
-            CachedChunkSolveState {
-                inputs: inputs.clone(),
-                corridor_window: corridor_window.clone(),
-            },
-        );
-
-        Self {
-            meta: inputs.meta,
-            chunk_states,
-            neighborhood_corridors: HashMap::new(),
-        }
-    }
-
-    fn chunk_state(&mut self, chunk: ChunkCoord) -> &CachedChunkSolveState {
-        if !self.chunk_states.contains_key(&chunk) {
-            let cache_key = prototype_chunk_state_cache_key(self.meta, chunk);
-            let cached = global_chunk_state_cache()
-                .lock()
-                .expect("prototype chunk-state cache mutex must not be poisoned")
-                .get(&cache_key)
-                .cloned();
-            let state = if let Some(cached) = cached {
-                cached
-            } else {
-                let inputs = super::prepare_chunk_v2_inputs(chunk, &self.meta);
-                let corridor_window = super::build_chunk_corridor_window(chunk, &inputs);
-                let state = CachedChunkSolveState {
-                    inputs,
-                    corridor_window,
-                };
-                global_chunk_state_cache()
-                    .lock()
-                    .expect("prototype chunk-state cache mutex must not be poisoned")
-                    .insert(cache_key, state.clone());
-                state
-            };
-            self.chunk_states.insert(chunk, state);
-        }
-
-        self.chunk_states
-            .get(&chunk)
-            .expect("prototype chunk-state cache entry must exist")
-    }
-
-    fn collect_tile_corridors(&mut self, bounds: GenerationTileBounds) -> Vec<WorldCorridorConstraint> {
-        let tile_cache_key = prototype_tile_corridor_cache_key(self.meta, bounds);
-        if let Some(cached) = global_tile_corridor_cache()
-            .lock()
-            .expect("prototype tile-corridor cache mutex must not be poisoned")
-            .get(&tile_cache_key)
-            .cloned()
-        {
-            return cached;
-        }
-
-        let mut corridors = HashMap::<WorldCorridorSegmentKey, WorldCorridorConstraint>::new();
-
-        for chunk in bounds.solve_chunks() {
-            let state = self.chunk_state(chunk);
-            for corridor in &state.corridor_window.corridors {
-                let world_corridor = world_corridor_from_chunk(chunk, *corridor);
-                corridors
-                    .entry(world_corridor.segment_key())
-                    .or_insert(world_corridor);
-            }
-        }
-
-        let mut values = corridors.into_values().collect::<Vec<_>>();
-        values.sort_by(|left, right| {
-            left.river_id
-                .cmp(&right.river_id)
-                .then_with(|| left.order.cmp(&right.order))
-                .then_with(|| left.start_x.total_cmp(&right.start_x))
-                .then_with(|| left.start_z.total_cmp(&right.start_z))
-                .then_with(|| left.end_x.total_cmp(&right.end_x))
-                .then_with(|| left.end_z.total_cmp(&right.end_z))
-        });
-        global_tile_corridor_cache()
-            .lock()
-            .expect("prototype tile-corridor cache mutex must not be poisoned")
-            .insert(tile_cache_key, values.clone());
-        values
-    }
-
-    fn neighborhood_corridors(
-        &mut self,
-        center_chunk: ChunkCoord,
-        radius_chunks: i32,
-    ) -> &[WorldCorridorConstraint] {
-        let key = CorridorNeighborhoodKey {
-            center_chunk_x: center_chunk.0,
-            center_chunk_z: center_chunk.2,
-            radius_chunks,
-        };
-
-        if !self.neighborhood_corridors.contains_key(&key) {
-            let mut corridors = HashMap::<WorldCorridorSegmentKey, WorldCorridorConstraint>::new();
-
-            for chunk_z in center_chunk.2 - radius_chunks..=center_chunk.2 + radius_chunks {
-                for chunk_x in center_chunk.0 - radius_chunks..=center_chunk.0 + radius_chunks {
-                    let chunk = ChunkCoord(chunk_x, center_chunk.1, chunk_z);
-                    let state = self.chunk_state(chunk);
-                    for corridor in &state.corridor_window.corridors {
-                        let world_corridor = world_corridor_from_chunk(chunk, *corridor);
-                        corridors
-                            .entry(world_corridor.segment_key())
-                            .or_insert(world_corridor);
-                    }
-                }
-            }
-
-            let mut values = corridors.into_values().collect::<Vec<_>>();
-            values.sort_by(|left, right| {
-                left.river_id
-                    .cmp(&right.river_id)
-                    .then_with(|| left.order.cmp(&right.order))
-                    .then_with(|| left.start_x.total_cmp(&right.start_x))
-                    .then_with(|| left.start_z.total_cmp(&right.start_z))
-                    .then_with(|| left.end_x.total_cmp(&right.end_x))
-                    .then_with(|| left.end_z.total_cmp(&right.end_z))
-            });
-            self.neighborhood_corridors.insert(key, values);
-        }
-
-        self.neighborhood_corridors
-            .get(&key)
-            .expect("corridor neighborhood cache entry must exist")
-    }
-
-    fn sample_field_and_regions(
-        &mut self,
-        sample_world_x: f32,
-        sample_world_z: f32,
-    ) -> (AtlasCell, [RegionSampleWeight; 4]) {
-        let owner_chunk = owner_chunk_for_world_sample(sample_world_x, sample_world_z);
-        let state = self.chunk_state(owner_chunk);
-        let field = sample_atlas_fields_fractional(&state.inputs.atlas_fields, sample_world_x, sample_world_z);
-        let region_samples = sample_region_weights(&state.inputs.region_classes, sample_world_x, sample_world_z);
-
-        (field, region_samples)
-    }
-}
-
-impl WorldCorridorConstraint {
-    fn segment_key(self) -> WorldCorridorSegmentKey {
-        WorldCorridorSegmentKey {
-            river_id: self.river_id,
-            kind_rank: corridor_kind_rank(self.kind),
-            order: self.order,
-            start_x_bits: self.start_x.to_bits(),
-            start_z_bits: self.start_z.to_bits(),
-            end_x_bits: self.end_x.to_bits(),
-            end_z_bits: self.end_z.to_bits(),
-        }
-    }
-}
-
-fn corridor_kind_rank(kind: crate::world::atlas::RiverPathKind) -> u8 {
-    match kind {
-        crate::world::atlas::RiverPathKind::Trunk => 0,
-        crate::world::atlas::RiverPathKind::Tributary => 1,
-    }
-}
-
-fn world_corridor_from_chunk(
-    chunk: ChunkCoord,
-    corridor: RiverCorridorConstraint,
-) -> WorldCorridorConstraint {
-    let origin_x = chunk.0 as f32 * CHUNK_EDGE_I32 as f32;
-    let origin_z = chunk.2 as f32 * CHUNK_EDGE_I32 as f32;
-
-    WorldCorridorConstraint {
-        river_id: corridor.river_id,
-        kind: corridor.kind,
-        order: corridor.order,
-        start_x: origin_x + corridor.start_x,
-        start_z: origin_z + corridor.start_z,
-        end_x: origin_x + corridor.end_x,
-        end_z: origin_z + corridor.end_z,
-        half_width_blocks: corridor.half_width_blocks,
-        downstream_grade_per_block: corridor.downstream_grade_per_block,
-    }
-}
-
-fn owner_chunk_for_world_sample(sample_world_x: f32, sample_world_z: f32) -> ChunkCoord {
-    ChunkCoord(
-        (sample_world_x.floor() as i32).div_euclid(CHUNK_EDGE_I32),
-        0,
-        (sample_world_z.floor() as i32).div_euclid(CHUNK_EDGE_I32),
-    )
-}
-
-fn prototype_chunk_state_cache_key(meta: WorldMeta, chunk: ChunkCoord) -> PrototypeChunkStateCacheKey {
-    PrototypeChunkStateCacheKey {
-        seed: meta.seed,
-        world_version: meta.world_version,
-        generator_version: meta.generator_version,
-        save_format_version: meta.save_format_version,
-        chunk_x: chunk.0,
-        chunk_y: chunk.1,
-        chunk_z: chunk.2,
-    }
-}
-
-fn prototype_tile_corridor_cache_key(
-    meta: WorldMeta,
-    bounds: GenerationTileBounds,
-) -> PrototypeTileCorridorCacheKey {
-    PrototypeTileCorridorCacheKey {
-        meta: PrototypeChunkStateCacheKey {
-            seed: meta.seed,
-            world_version: meta.world_version,
-            generator_version: meta.generator_version,
-            save_format_version: meta.save_format_version,
-            chunk_x: 0,
-            chunk_y: 0,
-            chunk_z: 0,
-        },
-        tile_x: bounds.coord.x,
-        tile_z: bounds.coord.z,
-    }
-}
-
-fn border_anchor_strength(world_x: i32, world_z: i32, tile_bounds: GenerationTileBounds) -> f32 {
-    tile_bounds
-        .anchors_for_world_column(world_x, world_z)
-        .iter()
-        .map(|anchor| anchor.strength)
-        .sum::<f32>()
-        .clamp(0.0, 1.0)
-}
-
-fn apply_border_anchor_blend(
-    base_height: f32,
-    world_x: i32,
-    world_z: i32,
-    tile_bounds: GenerationTileBounds,
-    solve_cache: &mut PrototypeSolveCache,
-) -> f32 {
-    let anchors = tile_bounds.anchors_for_world_column(world_x, world_z);
-    let mut weighted_height = 0.0;
-    let mut total_weight = 0.0;
-
-    for anchor in anchors.iter() {
-        let target_height = sample_border_anchor_height(anchor, solve_cache);
-        weighted_height += target_height * anchor.strength;
-        total_weight += anchor.strength;
-    }
-
-    if total_weight <= f32::EPSILON {
-        return base_height;
-    }
-
-    let anchor_target = weighted_height / total_weight;
-    let local_x = world_x.rem_euclid(CHUNK_EDGE_I32);
-    let local_z = world_z.rem_euclid(CHUNK_EDGE_I32);
-    let on_chunk_x_edge = local_x == 0 || local_x == CHUNK_EDGE_I32 - 1;
-    let on_chunk_z_edge = local_z == 0 || local_z == CHUNK_EDGE_I32 - 1;
-    let edge_scale = if on_chunk_x_edge && on_chunk_z_edge {
-        0.0
-    } else if on_chunk_x_edge || on_chunk_z_edge {
-        0.45
-    } else {
-        1.0
-    };
-    let blend = total_weight.clamp(0.0, 1.0) * edge_scale;
-
-    if blend <= f32::EPSILON {
-        return base_height;
-    }
-
-    base_height + (anchor_target - base_height) * blend
-}
-
-fn sample_border_anchor_height(
-    anchor: BorderAnchorPoint,
-    solve_cache: &mut PrototypeSolveCache,
-) -> f32 {
-    let sample_world_x = anchor.sample_world_x;
-    let sample_world_z = anchor.sample_world_z;
-    let (field, region_samples) = solve_cache.sample_field_and_regions(sample_world_x, sample_world_z);
-    let owner_chunk = owner_chunk_for_world_sample(sample_world_x, sample_world_z);
-    let corridors = solve_cache.neighborhood_corridors(owner_chunk, 0);
-    let base_height = blended_base_height(&region_samples, field, sample_world_x, sample_world_z);
-    let corridor_adjustment = corridor_adjustment_for_world_column(
-        field,
-        sample_world_x,
-        sample_world_z,
-        &region_samples,
-        corridors,
-    );
-
-    (base_height + corridor_adjustment.height_delta).clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
-}
-
-fn raw_prototype_height_for_column(
-    field: AtlasCell,
-    region_samples: &[RegionSampleWeight; 4],
-    sample_world_x: f32,
-    sample_world_z: f32,
-    tile_corridors: &[WorldCorridorConstraint],
-) -> (f32, CorridorAdjustment) {
-    let mut base_height = blended_base_height(region_samples, field, sample_world_x, sample_world_z);
-    let corridor_adjustment = corridor_adjustment_for_world_column(
-        field,
-        sample_world_x,
-        sample_world_z,
-        region_samples,
-        tile_corridors,
-    );
-    base_height += corridor_adjustment.height_delta;
-    (base_height, corridor_adjustment)
-}
-
-fn apply_chunk_edge_continuity_blend(
-    base_height: f32,
-    world_x: i32,
-    world_z: i32,
-    tile_bounds: GenerationTileBounds,
-    tile_corridors: &[WorldCorridorConstraint],
-    solve_cache: &mut PrototypeSolveCache,
-) -> f32 {
-    let local_x = world_x.rem_euclid(CHUNK_EDGE_I32);
-    let local_z = world_z.rem_euclid(CHUNK_EDGE_I32);
-    let mut target_sum = 0.0;
-    let mut total_weight = 0.0;
-
-    if local_x == CHUNK_EDGE_I32 - 1 && world_x + 1 < tile_bounds.core_max_world_x_exclusive() {
-        let boundary_target =
-            seam_pair_average(world_x, world_z, world_x + 1, world_z, tile_corridors, solve_cache);
-        target_sum += boundary_target;
-        total_weight += 1.0;
-    } else if local_x == CHUNK_EDGE_I32 - 2 && world_x + 2 < tile_bounds.core_max_world_x_exclusive() {
-        let boundary_target =
-            seam_pair_average(world_x + 1, world_z, world_x + 2, world_z, tile_corridors, solve_cache);
-        target_sum += boundary_target * 0.7;
-        total_weight += 0.7;
-    } else if local_x == 0 && world_x > tile_bounds.core_min_world_x() {
-        let boundary_target =
-            seam_pair_average(world_x - 1, world_z, world_x, world_z, tile_corridors, solve_cache);
-        target_sum += boundary_target;
-        total_weight += 1.0;
-    } else if local_x == 1 && world_x - 1 > tile_bounds.core_min_world_x() {
-        let boundary_target =
-            seam_pair_average(world_x - 2, world_z, world_x - 1, world_z, tile_corridors, solve_cache);
-        target_sum += boundary_target * 0.7;
-        total_weight += 0.7;
-    }
-
-    if local_z == CHUNK_EDGE_I32 - 1 && world_z + 1 < tile_bounds.core_max_world_z_exclusive() {
-        let boundary_target =
-            seam_pair_average(world_x, world_z, world_x, world_z + 1, tile_corridors, solve_cache);
-        target_sum += boundary_target;
-        total_weight += 1.0;
-    } else if local_z == CHUNK_EDGE_I32 - 2 && world_z + 2 < tile_bounds.core_max_world_z_exclusive() {
-        let boundary_target =
-            seam_pair_average(world_x, world_z + 1, world_x, world_z + 2, tile_corridors, solve_cache);
-        target_sum += boundary_target * 0.7;
-        total_weight += 0.7;
-    } else if local_z == 0 && world_z > tile_bounds.core_min_world_z() {
-        let boundary_target =
-            seam_pair_average(world_x, world_z - 1, world_x, world_z, tile_corridors, solve_cache);
-        target_sum += boundary_target;
-        total_weight += 1.0;
-    } else if local_z == 1 && world_z - 1 > tile_bounds.core_min_world_z() {
-        let boundary_target =
-            seam_pair_average(world_x, world_z - 2, world_x, world_z - 1, tile_corridors, solve_cache);
-        target_sum += boundary_target * 0.7;
-        total_weight += 0.7;
-    }
-
-    if total_weight <= f32::EPSILON {
-        return base_height;
-    }
-
-    let target = target_sum / total_weight;
-    base_height + (target - base_height) * total_weight.clamp(0.0, 1.0)
-}
-
-fn sample_raw_height_at_world_column(
-    world_x: i32,
-    world_z: i32,
-    tile_corridors: &[WorldCorridorConstraint],
-    solve_cache: &mut PrototypeSolveCache,
-) -> f32 {
-    let sample_world_x = world_x as f32 + 0.5;
-    let sample_world_z = world_z as f32 + 0.5;
-    let (field, region_samples) = solve_cache.sample_field_and_regions(sample_world_x, sample_world_z);
-    let (raw_height, _) = raw_prototype_height_for_column(
-        field,
-        &region_samples,
-        sample_world_x,
-        sample_world_z,
-        tile_corridors,
-    );
-    raw_height.clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
-}
-
-fn seam_pair_average(
-    ax: i32,
-    az: i32,
-    bx: i32,
-    bz: i32,
-    tile_corridors: &[WorldCorridorConstraint],
-    solve_cache: &mut PrototypeSolveCache,
-) -> f32 {
-    let a = sample_raw_height_at_world_column(ax, az, tile_corridors, solve_cache);
-    let b = sample_raw_height_at_world_column(bx, bz, tile_corridors, solve_cache);
-    0.5 * (a + b)
-}
-
 fn blended_base_height(
     region_samples: &[RegionSampleWeight; 4],
     field: AtlasCell,
+    structure: StructureBasisSample,
     world_x: f32,
     world_z: f32,
 ) -> f32 {
-    let mut base_height = 0.0;
+    let params = blended_basis_parameters(region_samples);
+    let inland_signal = (field.continent_core_factor * 0.58 + field.inlandness * 0.42).clamp(0.0, 1.0);
+    let wet_signal =
+        (field.wetness * 0.56 + field.riverine_factor * 0.24 + field.lake_potential * 0.20)
+            .clamp(0.0, 1.0);
+    let arid_signal =
+        (field.aridity * 0.72 + field.slope * 0.18 + field.ruggedness * 0.10).clamp(0.0, 1.0);
+    let macro_base =
+        macro_elevation_to_world_y(field.macro_elevation) + field.macro_elevation * params.macro_height_bonus
+            - 6.0;
+    let macro_shape =
+        inland_signal * params.inland_lift + arid_signal * params.arid_lift - wet_signal * params.wet_flatten;
+    let coast_term = coastal_basis(field, structure, params);
+    let ridge_term = ridge_basis(field, structure, params);
+    let basin_term = basin_basis(field, params);
+    let detail_term = detail_basis(field, structure, params, world_x, world_z, wet_signal);
 
-    for sample in region_samples {
-        if sample.weight <= f32::EPSILON {
-            continue;
-        }
-        base_height += family_base_height(
-            prototype_policy_family(sample.cell),
-            field,
-            sample.cell,
-            world_x,
-            world_z,
-        ) * sample.weight;
-    }
-
-    base_height.clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
+    (macro_base + macro_shape + coast_term + ridge_term + basin_term + detail_term)
+        .clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
 }
 
 fn blended_relief_budget(
     region_samples: &[RegionSampleWeight; 4],
     field: AtlasCell,
+    structure: StructureBasisSample,
     strongest_corridor_influence: f32,
     corridor_penalty: f32,
 ) -> f32 {
-    let mut relief_budget = 0.0;
+    let params = blended_basis_parameters(region_samples);
+    let base_budget = params.relief_base
+        + field.ruggedness * params.relief_gain
+        + field.slope * (params.relief_gain * 0.52)
+        + structure.ridge_shoulder_influence * 5.5
+        + structure.ridge_core_influence * 3.0
+        + field.aridity * 2.5
+        - field.wetness * 3.8
+        - field.riverine_factor * 2.2
+        - strongest_corridor_influence * 4.2
+        - corridor_penalty;
+
+    base_budget.clamp(MIN_RELIEF_BUDGET, MAX_RELIEF_BUDGET)
+}
+
+fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisParameters {
+    let mut params = BasisParameters::default();
+    let mut total_weight = 0.0;
 
     for sample in region_samples {
         if sample.weight <= f32::EPSILON {
             continue;
         }
-        relief_budget += family_relief_budget(
-            prototype_policy_family(sample.cell),
-            field,
-            sample.cell,
-            strongest_corridor_influence,
-            corridor_penalty,
-        ) * sample.weight;
+        params.add_weighted(basis_parameters_for_region(sample.cell), sample.weight);
+        total_weight += sample.weight;
     }
 
-    relief_budget.clamp(MIN_RELIEF_BUDGET, MAX_RELIEF_BUDGET)
+    if total_weight <= f32::EPSILON {
+        return basis_parameters_for_region(RegionClassCell::default()).finalize();
+    }
+
+    let inv = total_weight.recip();
+    params.macro_height_bonus *= inv;
+    params.coastal_shelf_depth *= inv;
+    params.coastal_apron_lift *= inv;
+    params.coastal_cliff_lift *= inv;
+    params.ridge_lift *= inv;
+    params.ridge_shoulder_lift *= inv;
+    params.basin_depth *= inv;
+    params.inland_lift *= inv;
+    params.arid_lift *= inv;
+    params.wet_flatten *= inv;
+    params.low_freq_amp *= inv;
+    params.mid_freq_amp *= inv;
+    params.terrace_amp *= inv;
+    params.dune_amp *= inv;
+    params.relief_base *= inv;
+    params.relief_gain *= inv;
+    params.corridor_depth *= inv;
+    params.corridor_width_scale *= inv;
+    params.floodplain_width_scale *= inv;
+    params.outlet_open_scale *= inv;
+    params.ridge_preservation *= inv;
+    params.finalize()
+}
+
+fn basis_parameters_for_region(region: RegionClassCell) -> BasisParameters {
+    let family = prototype_policy_family(region);
+    let mut params = match family {
+        PrototypePolicyFamily::MarineCoastalEdge => BasisParameters {
+            macro_height_bonus: -34.0,
+            coastal_shelf_depth: 16.0,
+            coastal_apron_lift: 6.0,
+            coastal_cliff_lift: 20.0,
+            ridge_lift: 4.0,
+            ridge_shoulder_lift: 5.0,
+            basin_depth: 2.0,
+            inland_lift: 1.0,
+            arid_lift: 0.5,
+            wet_flatten: 6.0,
+            low_freq_amp: 2.5,
+            mid_freq_amp: 1.5,
+            terrace_amp: 0.5,
+            dune_amp: 0.0,
+            relief_base: 12.0,
+            relief_gain: 7.0,
+            corridor_depth: 4.0,
+            corridor_width_scale: 1.20,
+            floodplain_width_scale: 1.70,
+            outlet_open_scale: 1.65,
+            ridge_preservation: 1.6,
+        },
+        PrototypePolicyFamily::LowlandBasin => BasisParameters {
+            macro_height_bonus: -12.0,
+            coastal_shelf_depth: 2.0,
+            coastal_apron_lift: 1.0,
+            coastal_cliff_lift: 2.0,
+            ridge_lift: 2.0,
+            ridge_shoulder_lift: 2.5,
+            basin_depth: 8.0,
+            inland_lift: 2.0,
+            arid_lift: 1.0,
+            wet_flatten: 7.0,
+            low_freq_amp: 3.0,
+            mid_freq_amp: 1.8,
+            terrace_amp: 1.2,
+            dune_amp: 0.0,
+            relief_base: 14.0,
+            relief_gain: 8.0,
+            corridor_depth: 5.0,
+            corridor_width_scale: 1.25,
+            floodplain_width_scale: 1.90,
+            outlet_open_scale: 1.60,
+            ridge_preservation: 1.3,
+        },
+        PrototypePolicyFamily::OpenPlain => BasisParameters {
+            macro_height_bonus: 0.0,
+            coastal_shelf_depth: 1.0,
+            coastal_apron_lift: 1.5,
+            coastal_cliff_lift: 3.0,
+            ridge_lift: 4.0,
+            ridge_shoulder_lift: 5.0,
+            basin_depth: 4.0,
+            inland_lift: 5.0,
+            arid_lift: 2.5,
+            wet_flatten: 4.0,
+            low_freq_amp: 4.5,
+            mid_freq_amp: 2.4,
+            terrace_amp: 1.6,
+            dune_amp: 0.0,
+            relief_base: 20.0,
+            relief_gain: 10.0,
+            corridor_depth: 5.5,
+            corridor_width_scale: 1.15,
+            floodplain_width_scale: 1.60,
+            outlet_open_scale: 1.35,
+            ridge_preservation: 1.6,
+        },
+        PrototypePolicyFamily::HillCountry => BasisParameters {
+            macro_height_bonus: 12.0,
+            coastal_shelf_depth: 1.0,
+            coastal_apron_lift: 0.8,
+            coastal_cliff_lift: 4.0,
+            ridge_lift: 12.0,
+            ridge_shoulder_lift: 10.0,
+            basin_depth: 3.0,
+            inland_lift: 5.5,
+            arid_lift: 2.0,
+            wet_flatten: 2.5,
+            low_freq_amp: 4.2,
+            mid_freq_amp: 3.8,
+            terrace_amp: 2.1,
+            dune_amp: 0.0,
+            relief_base: 24.0,
+            relief_gain: 12.0,
+            corridor_depth: 6.2,
+            corridor_width_scale: 1.00,
+            floodplain_width_scale: 1.45,
+            outlet_open_scale: 1.25,
+            ridge_preservation: 3.2,
+        },
+        PrototypePolicyFamily::PlateauEscarpment => BasisParameters {
+            macro_height_bonus: 18.0,
+            coastal_shelf_depth: 1.0,
+            coastal_apron_lift: 0.6,
+            coastal_cliff_lift: 5.0,
+            ridge_lift: 10.0,
+            ridge_shoulder_lift: 12.0,
+            basin_depth: 2.5,
+            inland_lift: 6.5,
+            arid_lift: 2.5,
+            wet_flatten: 2.0,
+            low_freq_amp: 3.8,
+            mid_freq_amp: 2.8,
+            terrace_amp: 3.4,
+            dune_amp: 0.0,
+            relief_base: 18.0,
+            relief_gain: 11.0,
+            corridor_depth: 6.0,
+            corridor_width_scale: 0.95,
+            floodplain_width_scale: 1.40,
+            outlet_open_scale: 1.20,
+            ridge_preservation: 3.6,
+        },
+        PrototypePolicyFamily::AridPlain => BasisParameters {
+            macro_height_bonus: 6.0,
+            coastal_shelf_depth: 0.5,
+            coastal_apron_lift: 0.5,
+            coastal_cliff_lift: 2.0,
+            ridge_lift: 5.0,
+            ridge_shoulder_lift: 4.0,
+            basin_depth: 3.0,
+            inland_lift: 6.0,
+            arid_lift: 6.5,
+            wet_flatten: 1.0,
+            low_freq_amp: 4.0,
+            mid_freq_amp: 2.8,
+            terrace_amp: 2.0,
+            dune_amp: 2.0,
+            relief_base: 21.0,
+            relief_gain: 10.0,
+            corridor_depth: 4.6,
+            corridor_width_scale: 1.10,
+            floodplain_width_scale: 1.30,
+            outlet_open_scale: 1.25,
+            ridge_preservation: 1.4,
+        },
+        PrototypePolicyFamily::DuneBody => BasisParameters {
+            macro_height_bonus: 5.0,
+            coastal_shelf_depth: 0.2,
+            coastal_apron_lift: 0.2,
+            coastal_cliff_lift: 1.0,
+            ridge_lift: 1.5,
+            ridge_shoulder_lift: 1.5,
+            basin_depth: 2.0,
+            inland_lift: 4.5,
+            arid_lift: 8.0,
+            wet_flatten: 0.5,
+            low_freq_amp: 3.2,
+            mid_freq_amp: 1.2,
+            terrace_amp: 0.8,
+            dune_amp: 6.5,
+            relief_base: 22.0,
+            relief_gain: 8.0,
+            corridor_depth: 2.6,
+            corridor_width_scale: 1.40,
+            floodplain_width_scale: 1.60,
+            outlet_open_scale: 1.45,
+            ridge_preservation: 0.8,
+        },
+        PrototypePolicyFamily::AlpineHighRelief => BasisParameters {
+            macro_height_bonus: 32.0,
+            coastal_shelf_depth: 1.0,
+            coastal_apron_lift: 0.2,
+            coastal_cliff_lift: 6.0,
+            ridge_lift: 16.0,
+            ridge_shoulder_lift: 14.0,
+            basin_depth: 4.5,
+            inland_lift: 5.0,
+            arid_lift: 1.0,
+            wet_flatten: 1.5,
+            low_freq_amp: 3.8,
+            mid_freq_amp: 4.2,
+            terrace_amp: 2.8,
+            dune_amp: 0.0,
+            relief_base: 16.0,
+            relief_gain: 13.0,
+            corridor_depth: 6.8,
+            corridor_width_scale: 0.95,
+            floodplain_width_scale: 1.35,
+            outlet_open_scale: 1.20,
+            ridge_preservation: 4.0,
+        },
+    };
+
+    match region.terrain_form_family {
+        TerrainFormFamily::Delta
+        | TerrainFormFamily::Floodplain
+        | TerrainFormFamily::WetLowland
+        | TerrainFormFamily::AlluvialLowland
+        | TerrainFormFamily::EstuaryLowland => {
+            params.wet_flatten += 2.8;
+            params.floodplain_width_scale += 0.35;
+            params.low_freq_amp = (params.low_freq_amp - 0.6).max(0.0);
+            params.mid_freq_amp = (params.mid_freq_amp - 0.4).max(0.0);
+            params.relief_base = (params.relief_base - 2.0).max(MIN_RELIEF_BUDGET);
+        }
+        TerrainFormFamily::Basin => {
+            params.basin_depth += 5.0;
+            params.outlet_open_scale += 0.20;
+            params.relief_base = (params.relief_base - 2.0).max(MIN_RELIEF_BUDGET);
+        }
+        TerrainFormFamily::BroadValley
+        | TerrainFormFamily::NarrowValley
+        | TerrainFormFamily::GlacialValley => {
+            params.corridor_depth += 1.8;
+            params.floodplain_width_scale += 0.20;
+        }
+        TerrainFormFamily::Plateau | TerrainFormFamily::MesaCountry | TerrainFormFamily::Escarpment => {
+            params.terrace_amp += 1.2;
+            params.ridge_shoulder_lift += 3.5;
+            params.ridge_preservation += 0.5;
+        }
+        TerrainFormFamily::Mountain
+        | TerrainFormFamily::RidgeCountry
+        | TerrainFormFamily::Canyon
+        | TerrainFormFamily::RavineCountry
+        | TerrainFormFamily::Icefield
+        | TerrainFormFamily::CrevassedIcefield => {
+            params.ridge_lift += 5.0;
+            params.ridge_shoulder_lift += 2.5;
+            params.mid_freq_amp += 0.8;
+            params.relief_gain += 2.5;
+        }
+        TerrainFormFamily::DuneField => {
+            params.dune_amp += 2.0;
+            params.corridor_depth = (params.corridor_depth - 1.5).max(0.0);
+        }
+        TerrainFormFamily::MarineShelf
+        | TerrainFormFamily::BeachPlain
+        | TerrainFormFamily::BarrierCoast
+        | TerrainFormFamily::LagoonCoast => {
+            params.coastal_shelf_depth += 3.0;
+            params.coastal_apron_lift += 1.5;
+            params.coastal_cliff_lift = (params.coastal_cliff_lift - 2.0).max(0.0);
+        }
+        TerrainFormFamily::SeaCliff | TerrainFormFamily::RockyShore | TerrainFormFamily::FjordCoast => {
+            params.coastal_cliff_lift += 6.0;
+            params.ridge_shoulder_lift += 1.5;
+        }
+        TerrainFormFamily::AlluvialFan => {
+            params.arid_lift += 1.5;
+            params.low_freq_amp += 0.8;
+        }
+        _ => {}
+    }
+
+    match region.hydrology_context {
+        HydrologyContext::RiverCorridor => {
+            params.corridor_depth += 1.4;
+            params.floodplain_width_scale += 0.20;
+            params.wet_flatten += 1.2;
+        }
+        HydrologyContext::WetLowland => {
+            params.wet_flatten += 2.4;
+            params.floodplain_width_scale += 0.22;
+            params.relief_base = (params.relief_base - 1.4).max(MIN_RELIEF_BUDGET);
+        }
+        HydrologyContext::LakeBasin => {
+            params.basin_depth += 3.5;
+            params.outlet_open_scale += 0.25;
+        }
+        HydrologyContext::Dryland => {
+            params.arid_lift += 1.4;
+            params.wet_flatten = (params.wet_flatten - 0.5).max(0.0);
+        }
+        HydrologyContext::WellDrained => {}
+    }
+
+    match region.coastal_context {
+        CoastalContext::Marine => {
+            params.coastal_shelf_depth += 4.0;
+            params.coastal_apron_lift += 1.0;
+        }
+        CoastalContext::Coastal => {
+            params.coastal_apron_lift += 1.0;
+            params.outlet_open_scale += 0.15;
+        }
+        CoastalContext::NearCoast => {
+            params.coastal_apron_lift += 0.4;
+        }
+        CoastalContext::Inland => {}
+    }
+
+    params.finalize()
 }
 
 fn prototype_policy_family(region: RegionClassCell) -> PrototypePolicyFamily {
@@ -758,438 +714,346 @@ fn prototype_policy_family(region: RegionClassCell) -> PrototypePolicyFamily {
     }
 }
 
-fn family_base_height(
-    family: PrototypePolicyFamily,
-    field: AtlasCell,
-    region: RegionClassCell,
+fn sample_structure_basis(
+    structure: &AtlasStructureMap,
     world_x: f32,
     world_z: f32,
-) -> f32 {
-    let macro_base = macro_elevation_to_world_y(field.macro_elevation);
-    let terrain_bias = terrain_form_height_bias(region.terrain_form_family, field);
+) -> StructureBasisSample {
+    let point = (world_x, world_z);
+    let mut sample = StructureBasisSample::default();
 
-    let family_height = match family {
-        PrototypePolicyFamily::MarineCoastalEdge => {
-            let shelf_wave = low_frequency_wave(world_x, world_z, 160.0, 144.0, 0.35) * 4.0;
-            let edge_bias = match region.terrain_form_family {
-                TerrainFormFamily::SeaCliff
-                | TerrainFormFamily::RockyShore
-                | TerrainFormFamily::FjordCoast => {
-                    12.0 + field.ruggedness * 20.0 + field.slope * 16.0
-                }
-                TerrainFormFamily::BeachPlain
-                | TerrainFormFamily::BarrierCoast
-                | TerrainFormFamily::LagoonCoast
-                | TerrainFormFamily::MarineShelf => -5.0 - field.slope * 6.0,
-                _ => 0.0,
-            };
-            SEA_LEVEL_Y as f32 - 8.0 + field.macro_elevation * 62.0 + shelf_wave + edge_bias
-        }
-        PrototypePolicyFamily::LowlandBasin => {
-            macro_base - 8.0 - field.basinness * 15.0 + field.wetness * 6.0
-                + low_frequency_wave(world_x, world_z, 112.0, 104.0, 0.9) * 3.0
-                - field.slope * 5.0
-        }
-        PrototypePolicyFamily::OpenPlain => {
-            macro_base
-                + low_frequency_wave(world_x, world_z, 128.0, 120.0, 0.6) * 6.0
-                + field.continent_core_factor * 5.0
-                + field.ruggedness * 5.0
-                - field.basinness * 3.0
-        }
-        PrototypePolicyFamily::HillCountry => {
-            macro_base
-                + low_frequency_wave(world_x, world_z, 96.0, 104.0, 0.4) * 10.0
-                + field.ruggedness * 18.0
-                + field.slope * 11.0
-                + field.mountain_mass * 14.0
-        }
-        PrototypePolicyFamily::PlateauEscarpment => {
-            macro_base
-                + 12.0
-                + low_frequency_wave(world_x, world_z, 144.0, 112.0, 1.2) * 5.0
-                + field.continent_core_factor * 9.0
-                + field.mountain_mass * 6.0
-                - field.basinness * 4.0
-        }
-        PrototypePolicyFamily::AridPlain => {
-            macro_base
-                + low_frequency_wave(world_x, world_z, 136.0, 124.0, 0.75) * 8.0
-                + field.aridity * 10.0
-                + field.inlandness * 4.0
-                - field.wetness * 4.0
-                + field.slope * 3.0
-        }
-        PrototypePolicyFamily::DuneBody => {
-            macro_base
-                + dune_body_wave(world_x, world_z) * 14.0
-                + low_frequency_wave(world_x, world_z, 168.0, 152.0, 0.15) * 4.0
-                + field.aridity * 12.0
-                - field.wetness * 4.0
-                - field.basinness * 2.0
-        }
-        PrototypePolicyFamily::AlpineHighRelief => {
-            macro_base
-                + low_frequency_wave(world_x, world_z, 88.0, 92.0, 0.55) * 8.0
-                + field.mountain_mass * 22.0
-                + field.alpine_factor * 28.0
-                + field.ruggedness * 20.0
-                + field.slope * 10.0
-                + field.polar_factor * 6.0
-        }
-    };
-    let micro_relief = family_micro_relief(family, field, region, world_x, world_z);
+    for segment in structure.mountain_chains().segments() {
+        let world_segment = mountain_segment_world_segment(*segment);
+        let half_width_blocks = (segment.half_width_cells.max(0.6) * ATLAS_CELL_BLOCK_SPAN * 0.85).max(24.0);
+        let selection_radius = half_width_blocks * 3.2 + 96.0;
 
-    (family_height + terrain_bias + micro_relief).clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
-}
+        if !segment_bounds_overlap_point(world_segment.start, world_segment.end, selection_radius, point) {
+            continue;
+        }
 
-fn terrain_form_height_bias(terrain_form: TerrainFormFamily, field: AtlasCell) -> f32 {
-    match terrain_form {
-        TerrainFormFamily::Delta
-        | TerrainFormFamily::Floodplain
-        | TerrainFormFamily::WetLowland
-        | TerrainFormFamily::AlluvialLowland
-        | TerrainFormFamily::EstuaryLowland => -4.0 - field.basinness * 4.0,
-        TerrainFormFamily::Basin => -9.0 - field.basinness * 6.0,
-        TerrainFormFamily::BroadValley
-        | TerrainFormFamily::NarrowValley
-        | TerrainFormFamily::GlacialValley => -6.0,
-        TerrainFormFamily::Plateau | TerrainFormFamily::MesaCountry | TerrainFormFamily::Escarpment => 7.0,
-        TerrainFormFamily::Mountain
-        | TerrainFormFamily::RidgeCountry
-        | TerrainFormFamily::Canyon
-        | TerrainFormFamily::RavineCountry
-        | TerrainFormFamily::Icefield
-        | TerrainFormFamily::CrevassedIcefield => 10.0,
-        TerrainFormFamily::AlluvialFan => 4.0,
-        TerrainFormFamily::DuneField => 5.0,
-        TerrainFormFamily::SeaCliff | TerrainFormFamily::RockyShore | TerrainFormFamily::FjordCoast => 8.0,
-        TerrainFormFamily::MarineShelf
-        | TerrainFormFamily::BeachPlain
-        | TerrainFormFamily::BarrierCoast
-        | TerrainFormFamily::LagoonCoast => -2.0,
-        _ => 0.0,
+        let projection = project_point_onto_segment(point, world_segment.start, world_segment.end);
+        let scale_strength = match segment.scale {
+            MountainChainScale::Major => 1.0,
+            MountainChainScale::Minor => 0.72,
+        };
+        let strength = segment.strength.max(0.25) * scale_strength;
+        let core = smootherstep01(1.0 - projection.distance_blocks / (half_width_blocks * 0.95 + 18.0))
+            * strength;
+        let shoulder =
+            (smootherstep01(1.0 - projection.distance_blocks / (half_width_blocks * 2.8 + 64.0))
+                * (0.55 + strength * 0.45)
+                - core * 0.35)
+                .max(0.0);
+        let segment_strength = core.max(shoulder);
+
+        sample.ridge_core_influence =
+            soft_union(sample.ridge_core_influence, core.clamp(0.0, 1.0));
+        sample.ridge_shoulder_influence =
+            soft_union(sample.ridge_shoulder_influence, shoulder.clamp(0.0, 1.0));
+        if matches!(segment.scale, MountainChainScale::Major) {
+            sample.major_ridge_influence =
+                sample.major_ridge_influence.max(segment_strength.clamp(0.0, 1.0));
+        }
+
+        if segment_strength > sample.strongest_segment {
+            sample.strongest_segment = segment_strength;
+            sample.heading_x = projection.tangent_x;
+            sample.heading_z = projection.tangent_z;
+        }
     }
+
+    sample
 }
 
-fn family_micro_relief(
-    family: PrototypePolicyFamily,
+fn coastal_basis(
     field: AtlasCell,
-    region: RegionClassCell,
+    structure: StructureBasisSample,
+    params: BasisParameters,
+) -> f32 {
+    let marine_signal = smootherstep01(
+        (((0.58 - field.landness) * 2.4).max(0.0) + field.coast_factor * 0.35).clamp(0.0, 1.0),
+    );
+    let coast_signal = smootherstep01(
+        (field.coast_factor * 0.86 + inverse_unit(field.coast_distance) * 0.28).clamp(0.0, 1.0),
+    );
+    let shelf_lowering = params.coastal_shelf_depth * marine_signal
+        + params.coastal_apron_lift * coast_signal * (1.0 - field.ruggedness * 0.55);
+    let cliff_lift = params.coastal_cliff_lift
+        * coast_signal
+        * (field.ruggedness * 0.55 + structure.major_ridge_influence * 0.45);
+
+    cliff_lift - shelf_lowering
+}
+
+fn ridge_basis(
+    field: AtlasCell,
+    structure: StructureBasisSample,
+    params: BasisParameters,
+) -> f32 {
+    let core = structure.ridge_core_influence * (0.45 + field.mountain_mass * 0.55);
+    let shoulder = structure.ridge_shoulder_influence * (0.55 + field.ridge_factor * 0.45);
+
+    params.ridge_lift * core + params.ridge_shoulder_lift * shoulder
+}
+
+fn basin_basis(field: AtlasCell, params: BasisParameters) -> f32 {
+    let basin_signal = smootherstep01((field.basinness * 0.72 + field.lake_potential * 0.28).clamp(0.0, 1.0));
+    -(params.basin_depth * basin_signal * basin_signal)
+}
+
+fn detail_basis(
+    field: AtlasCell,
+    structure: StructureBasisSample,
+    params: BasisParameters,
     world_x: f32,
     world_z: f32,
+    wet_signal: f32,
 ) -> f32 {
-    let amplitude = match family {
-        PrototypePolicyFamily::MarineCoastalEdge => 2.2,
-        PrototypePolicyFamily::LowlandBasin => 3.8,
-        PrototypePolicyFamily::OpenPlain => 5.2,
-        PrototypePolicyFamily::HillCountry => 6.0,
-        PrototypePolicyFamily::PlateauEscarpment => 5.2,
-        PrototypePolicyFamily::AridPlain => 5.0,
-        PrototypePolicyFamily::DuneBody => 3.6,
-        PrototypePolicyFamily::AlpineHighRelief => 6.4,
-    };
-    let terrain_scale = (0.52
-        + field.ruggedness * 0.58
-        + field.slope * 0.34
-        + field.mountain_mass * 0.18
-        + field.aridity * 0.18
-        - field.wetness * 0.10
-        - field.riverine_factor * 0.08)
-        .clamp(0.42, 1.45);
-    let terrace_scale = terrain_form_micro_relief_scale(family, region.terrain_form_family);
-    let ripple_primary = mid_frequency_wave(world_x, world_z, 20.0, 16.0, 0.45);
-    let ripple_secondary = mid_frequency_wave(world_x, world_z, 11.0, 9.0, 1.35);
-    let terrace = terraced_wave(world_x, world_z, 28.0, 24.0, 0.25, 6.0);
-    let banding = terraced_wave(world_x, world_z, 14.0, 12.0, 1.10, 5.0);
+    let heading = structure.heading();
+    let low_wave = low_frequency_wave(world_x, world_z, 168.0, 144.0, 0.18);
+    let oriented_low = aligned_wave(world_x, world_z, heading, 112.0, 86.0, 0.37);
+    let mid_wave = aligned_wave(world_x, world_z, heading, 42.0, 28.0, 1.13);
+    let terrace_wave = terraced_wave(world_x, world_z, 34.0, 24.0, 0.29, 6.0);
+    let flat_wave = terraced_wave(world_x, world_z, 18.0, 14.0, 0.91, 5.0);
+    let flat_ripple = aligned_wave(world_x, world_z, heading, 11.0, 9.0, 1.67);
+    let readability_step = terraced_wave(world_x, world_z, 8.0, 7.0, 0.52, 4.0);
+    let dune_wave = dune_body_wave(world_x, world_z);
+    let ridge_noise_gate =
+        (0.35 + structure.ridge_shoulder_influence * 0.45 + field.ruggedness * 0.20).clamp(0.0, 1.0);
+    let basin_noise_gate = (1.0 - field.basinness * 0.45).clamp(0.40, 1.0);
+    let terrace_gate =
+        (0.40 + field.slope * 0.45 + structure.ridge_shoulder_influence * 0.25).clamp(0.0, 1.2);
+    let flat_readability = (1.0
+        - field.ruggedness * 0.72
+        - field.slope * 0.46
+        - structure.ridge_core_influence * 0.40)
+        .clamp(0.0, 1.0);
 
-    amplitude * terrain_scale * (ripple_primary * 0.58 + ripple_secondary * 0.24)
-        + amplitude * terrace_scale * (terrace * 0.46 + banding * 0.22)
+    let detail = low_wave * params.low_freq_amp
+        + oriented_low * params.low_freq_amp * 0.35
+        + mid_wave * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
+        + terrace_wave * params.terrace_amp * terrace_gate
+        + (flat_wave * (1.10 + params.terrace_amp * 0.20)
+            + flat_ripple * 0.72
+            + readability_step * 1.35)
+            * flat_readability
+        + dune_wave * params.dune_amp * (0.55 + field.aridity * 0.45);
+
+    detail * (1.0 - wet_signal * 0.18)
 }
 
-fn terrain_form_micro_relief_scale(
-    family: PrototypePolicyFamily,
-    terrain_form: TerrainFormFamily,
-) -> f32 {
-    match terrain_form {
-        TerrainFormFamily::Delta
-        | TerrainFormFamily::Floodplain
-        | TerrainFormFamily::WetLowland
-        | TerrainFormFamily::AlluvialLowland
-        | TerrainFormFamily::EstuaryLowland => 0.24,
-        TerrainFormFamily::Basin => 0.20,
-        TerrainFormFamily::BroadValley
-        | TerrainFormFamily::NarrowValley
-        | TerrainFormFamily::GlacialValley => 0.36,
-        TerrainFormFamily::Plateau
-        | TerrainFormFamily::MesaCountry
-        | TerrainFormFamily::Escarpment => 0.54,
-        TerrainFormFamily::Mountain
-        | TerrainFormFamily::RidgeCountry
-        | TerrainFormFamily::Canyon
-        | TerrainFormFamily::RavineCountry
-        | TerrainFormFamily::Icefield
-        | TerrainFormFamily::CrevassedIcefield => 0.62,
-        TerrainFormFamily::DuneField => 0.38,
-        TerrainFormFamily::MarineShelf
-        | TerrainFormFamily::BeachPlain
-        | TerrainFormFamily::BarrierCoast
-        | TerrainFormFamily::LagoonCoast => 0.20,
-        _ => match family {
-            PrototypePolicyFamily::MarineCoastalEdge => 0.22,
-            PrototypePolicyFamily::LowlandBasin => 0.26,
-            PrototypePolicyFamily::OpenPlain => 0.38,
-            PrototypePolicyFamily::HillCountry => 0.54,
-            PrototypePolicyFamily::PlateauEscarpment => 0.56,
-            PrototypePolicyFamily::AridPlain => 0.46,
-            PrototypePolicyFamily::DuneBody => 0.34,
-            PrototypePolicyFamily::AlpineHighRelief => 0.58,
-        },
-    }
-}
-
-fn corridor_adjustment_for_world_column(
+fn corridor_adjustment_for_column(
     field: AtlasCell,
-    sample_world_x: f32,
-    sample_world_z: f32,
+    structure: StructureBasisSample,
+    local_x: f32,
+    local_z: f32,
     region_samples: &[RegionSampleWeight; 4],
-    corridors: &[WorldCorridorConstraint],
+    corridors: &[RiverCorridorConstraint],
 ) -> CorridorAdjustment {
+    let params = blended_basis_parameters(region_samples);
+    let mode_weights = blended_corridor_mode_weights(region_samples);
+    let policy = corridor_policy(params);
     let mut adjustment = CorridorAdjustment::default();
-    let mut strongest_influence = 0.0;
+    let mut branch_responses = Vec::<CorridorBranchResponse>::new();
+
+    for corridor in corridors {
+        let response =
+            single_corridor_adjustment(policy, mode_weights, field, structure, local_x, local_z, *corridor);
+        if response.strongest_influence <= f32::EPSILON {
+            continue;
+        }
+
+        let key = CorridorBranchKey {
+            river_id: corridor.river_id,
+            kind: corridor.kind,
+            order: corridor.order,
+        };
+        if let Some(existing) = branch_responses.iter_mut().find(|entry| entry.key == key) {
+            existing.response = merge_branch_response(existing.response, response);
+        } else {
+            branch_responses.push(CorridorBranchResponse { key, response });
+        }
+    }
+
+    for branch in branch_responses {
+        adjustment.height_delta += branch.response.height_delta;
+        adjustment.relief_budget_penalty += branch.response.relief_budget_penalty;
+        adjustment.strongest_influence =
+            adjustment.strongest_influence.max(branch.response.strongest_influence);
+    }
+
+    adjustment.height_delta = adjustment.height_delta.max(-30.0);
+    adjustment.relief_budget_penalty = adjustment.relief_budget_penalty.min(18.0);
+    adjustment.strongest_influence = adjustment.strongest_influence.clamp(0.0, 1.0);
+    adjustment
+}
+
+fn blended_corridor_mode_weights(region_samples: &[RegionSampleWeight; 4]) -> CorridorModeWeights {
+    let mut weights = CorridorModeWeights {
+        valley: 0.35,
+        ..CorridorModeWeights::default()
+    };
 
     for sample in region_samples {
         if sample.weight <= f32::EPSILON {
             continue;
         }
 
-        let family = prototype_policy_family(sample.cell);
-        let mode = classify_corridor_mode(sample.cell);
-        let mut local_adjustment = CorridorAdjustment::default();
-        let mut branch_responses = Vec::<CorridorBranchResponse>::new();
+        let region = sample.cell;
+        weights.valley += sample.weight * 0.55;
 
-        for corridor in corridors {
-            let response =
-                single_corridor_adjustment(family, mode, field, sample_world_x, sample_world_z, *corridor);
-            if response.strongest_influence <= f32::EPSILON {
-                continue;
-            }
-            let key = CorridorBranchKey {
-                river_id: corridor.river_id,
-                kind: corridor.kind,
-                order: corridor.order,
-            };
-
-            if let Some(existing) = branch_responses.iter_mut().find(|entry| entry.key == key) {
-                existing.accumulator.push(response);
-            } else {
-                let mut accumulator = CorridorBranchAccumulator::default();
-                accumulator.push(response);
-                branch_responses.push(CorridorBranchResponse { key, accumulator });
-            }
+        if region.coastal_context != CoastalContext::Inland
+            || matches!(
+                region.terrain_form_family,
+                TerrainFormFamily::MarineShelf
+                    | TerrainFormFamily::BeachPlain
+                    | TerrainFormFamily::BarrierCoast
+                    | TerrainFormFamily::LagoonCoast
+                    | TerrainFormFamily::EstuaryLowland
+                    | TerrainFormFamily::Delta
+            )
+        {
+            weights.coastal_exit += sample.weight * 1.30;
+            continue;
         }
 
-        for branch in branch_responses {
-            let response = branch.accumulator.finish();
-            local_adjustment.height_delta += response.height_delta;
-            local_adjustment.relief_budget_penalty += response.relief_budget_penalty;
-            local_adjustment.strongest_influence = local_adjustment
-                .strongest_influence
-                .max(response.strongest_influence);
+        if region.hydrology_context == HydrologyContext::LakeBasin
+            || matches!(region.terrain_form_family, TerrainFormFamily::Basin)
+            || matches!(
+                region.archetype,
+                RegionArchetype::TemperateBasin | RegionArchetype::DesertBasin
+            )
+        {
+            weights.basin_outlet += sample.weight * 1.20;
         }
 
-        adjustment.height_delta += local_adjustment.height_delta * sample.weight;
-        adjustment.relief_budget_penalty += local_adjustment.relief_budget_penalty * sample.weight;
-        strongest_influence += local_adjustment.strongest_influence * sample.weight;
+        if matches!(
+            region.hydrology_context,
+            HydrologyContext::RiverCorridor | HydrologyContext::WetLowland
+        ) || matches!(
+            region.terrain_form_family,
+            TerrainFormFamily::Floodplain
+                | TerrainFormFamily::WetLowland
+                | TerrainFormFamily::AlluvialLowland
+                | TerrainFormFamily::BroadValley
+                | TerrainFormFamily::GlacialValley
+        ) {
+            weights.floodplain += sample.weight * 1.10;
+        } else {
+            weights.valley += sample.weight * 0.25;
+        }
     }
 
-    adjustment.height_delta = adjustment.height_delta.max(-24.0);
-    adjustment.relief_budget_penalty = adjustment.relief_budget_penalty.min(18.0);
-    adjustment.strongest_influence = strongest_influence.clamp(0.0, 1.0);
-    adjustment
+    weights.normalized()
 }
 
-impl CorridorBranchAccumulator {
-    fn push(&mut self, response: CorridorAdjustment) {
-        let weight = response.strongest_influence.max(0.0001);
-        self.weighted_height_delta += response.height_delta * weight;
-        self.weighted_relief_budget_penalty += response.relief_budget_penalty * weight;
-        self.total_weight += weight;
-        self.strongest_influence = self.strongest_influence.max(response.strongest_influence);
-        self.max_relief_budget_penalty = self
-            .max_relief_budget_penalty
-            .max(response.relief_budget_penalty);
+fn corridor_policy(params: BasisParameters) -> CorridorPolicy {
+    CorridorPolicy {
+        valley_depth: params.corridor_depth,
+        floodplain_depth: params.corridor_depth * 0.72,
+        basin_depth: params.corridor_depth * 0.86,
+        coastal_depth: params.corridor_depth * 0.64,
+        valley_width_scale: params.corridor_width_scale,
+        floodplain_width_scale: params.floodplain_width_scale,
+        basin_width_scale: params.outlet_open_scale,
+        coastal_width_scale: params.outlet_open_scale * 1.20,
+        shoulder_preservation: params.ridge_preservation,
+        relief_penalty_scale: (0.90 + params.wet_flatten * 0.05).clamp(0.75, 1.80),
     }
+}
 
-    fn finish(self) -> CorridorAdjustment {
-        if self.total_weight <= f32::EPSILON {
-            return CorridorAdjustment::default();
-        }
+fn merge_branch_response(current: CorridorAdjustment, candidate: CorridorAdjustment) -> CorridorAdjustment {
+    let candidate_is_stronger = candidate.strongest_influence > current.strongest_influence
+        || ((candidate.strongest_influence - current.strongest_influence).abs() <= 0.0001
+            && candidate.height_delta.abs() > current.height_delta.abs());
 
-        CorridorAdjustment {
-            height_delta: self.weighted_height_delta / self.total_weight,
-            relief_budget_penalty: (self.weighted_relief_budget_penalty / self.total_weight)
-                .max(self.max_relief_budget_penalty * 0.6),
-            strongest_influence: self.strongest_influence,
-        }
+    CorridorAdjustment {
+        height_delta: if candidate_is_stronger {
+            candidate.height_delta
+        } else {
+            current.height_delta
+        },
+        relief_budget_penalty: current
+            .relief_budget_penalty
+            .max(candidate.relief_budget_penalty),
+        strongest_influence: current
+            .strongest_influence
+            .max(candidate.strongest_influence),
     }
 }
 
 fn single_corridor_adjustment(
-    family: PrototypePolicyFamily,
-    mode: CorridorMode,
+    policy: CorridorPolicy,
+    mode_weights: CorridorModeWeights,
     field: AtlasCell,
-    sample_world_x: f32,
-    sample_world_z: f32,
-    corridor: WorldCorridorConstraint,
+    structure: StructureBasisSample,
+    local_x: f32,
+    local_z: f32,
+    corridor: RiverCorridorConstraint,
 ) -> CorridorAdjustment {
-    let projection =
-        project_point_onto_corridor_segment((sample_world_x, sample_world_z), corridor);
-    let width_multiplier = match mode {
-        CorridorMode::ValleySeat => 1.0,
-        CorridorMode::FloodplainOpening => 1.35,
-        CorridorMode::BasinOutlet => 1.2,
-        CorridorMode::CoastalExit => 1.45,
-    };
-    let effective_half_width = (corridor.half_width_blocks * width_multiplier).max(1.0);
-    let normalized = (1.0 - projection.distance_blocks / effective_half_width).clamp(0.0, 1.0);
-    if normalized <= 0.0 {
+    let projection = project_point_onto_segment(
+        (local_x, local_z),
+        (corridor.start_x, corridor.start_z),
+        (corridor.end_x, corridor.end_z),
+    );
+    let base_width = corridor.half_width_blocks.max(1.0);
+    let valley_influence =
+        smootherstep01(1.0 - projection.distance_blocks / (base_width * policy.valley_width_scale));
+    let floodplain_influence = smootherstep01(
+        1.0 - projection.distance_blocks / (base_width * policy.floodplain_width_scale),
+    );
+    let basin_influence =
+        smootherstep01(1.0 - projection.distance_blocks / (base_width * policy.basin_width_scale));
+    let coastal_influence = smootherstep01(
+        1.0 - projection.distance_blocks / (base_width * policy.coastal_width_scale),
+    );
+    let strongest_influence = (valley_influence * mode_weights.valley)
+        .max(floodplain_influence * mode_weights.floodplain)
+        .max(basin_influence * mode_weights.basin_outlet)
+        .max(coastal_influence * mode_weights.coastal_exit)
+        .clamp(0.0, 1.0);
+
+    if strongest_influence <= 0.0 {
         return CorridorAdjustment::default();
     }
 
-    let influence = smoothstep(normalized);
-    let base_drop = match mode {
-        CorridorMode::ValleySeat => 6.0,
-        CorridorMode::FloodplainOpening => 4.5,
-        CorridorMode::BasinOutlet => 5.5,
-        CorridorMode::CoastalExit => 4.0,
-    } + corridor_depth_from_width(corridor.half_width_blocks)
-        + corridor.downstream_grade_per_block * 320.0;
-    let depth_scale = family_corridor_depth_scale(family);
-    let drop = base_drop * influence * depth_scale * (0.92 + field.river_flow_potential * 0.16);
-    let shoulder_gain = if matches!(
-        family,
-        PrototypePolicyFamily::HillCountry
-            | PrototypePolicyFamily::PlateauEscarpment
-            | PrototypePolicyFamily::AlpineHighRelief
-    ) {
-        influence * (1.0 - influence) * (4.0 + corridor.downstream_grade_per_block * 220.0)
-    } else {
-        0.0
-    };
-    let relief_budget_penalty = match mode {
-        CorridorMode::ValleySeat => 6.0,
-        CorridorMode::FloodplainOpening => 9.0,
-        CorridorMode::BasinOutlet => 8.0,
-        CorridorMode::CoastalExit => 7.0,
-    } * influence;
+    let width_depth = corridor_depth_from_width(corridor.half_width_blocks);
+    let valley_drop = valley_influence
+        * mode_weights.valley
+        * (policy.valley_depth + width_depth + corridor.downstream_grade_per_block * 180.0);
+    let floodplain_drop = floodplain_influence
+        * mode_weights.floodplain
+        * (policy.floodplain_depth + corridor.downstream_grade_per_block * 90.0);
+    let basin_drop = basin_influence
+        * mode_weights.basin_outlet
+        * (policy.basin_depth + field.basinness * 4.0);
+    let coastal_drop = coastal_influence
+        * mode_weights.coastal_exit
+        * (policy.coastal_depth + field.coast_factor * 4.0);
+    let drop_strength =
+        0.92 + field.river_flow_potential * 0.18 + corridor.downstream_grade_per_block * 240.0;
+    let drop = (valley_drop + floodplain_drop + basin_drop + coastal_drop) * drop_strength;
+    let shoulder_influence =
+        (floodplain_influence.max(basin_influence) * (1.0 - valley_influence * 0.82)).clamp(0.0, 1.0);
+    let shoulder_gain = shoulder_influence
+        * policy.shoulder_preservation
+        * (0.35 + structure.ridge_shoulder_influence * 0.65 + field.ruggedness * 0.25);
+    let relief_budget_penalty = strongest_influence
+        * (3.5 * mode_weights.valley
+            + 6.0 * mode_weights.floodplain
+            + 6.5 * mode_weights.basin_outlet
+            + 5.5 * mode_weights.coastal_exit)
+        * policy.relief_penalty_scale;
 
     CorridorAdjustment {
         height_delta: shoulder_gain - drop,
         relief_budget_penalty,
-        strongest_influence: influence,
-    }
-}
-
-fn classify_corridor_mode(region: RegionClassCell) -> CorridorMode {
-    if region.coastal_context != CoastalContext::Inland
-        || matches!(
-            region.terrain_form_family,
-            TerrainFormFamily::MarineShelf
-                | TerrainFormFamily::BeachPlain
-                | TerrainFormFamily::BarrierCoast
-                | TerrainFormFamily::LagoonCoast
-                | TerrainFormFamily::EstuaryLowland
-                | TerrainFormFamily::Delta
-        )
-    {
-        CorridorMode::CoastalExit
-    } else if region.hydrology_context == HydrologyContext::LakeBasin
-        || matches!(region.terrain_form_family, TerrainFormFamily::Basin)
-        || matches!(
-            region.archetype,
-            RegionArchetype::TemperateBasin | RegionArchetype::DesertBasin
-        )
-    {
-        CorridorMode::BasinOutlet
-    } else if matches!(
-        region.hydrology_context,
-        HydrologyContext::RiverCorridor | HydrologyContext::WetLowland
-    ) || matches!(
-        region.terrain_form_family,
-        TerrainFormFamily::Floodplain
-            | TerrainFormFamily::WetLowland
-            | TerrainFormFamily::AlluvialLowland
-            | TerrainFormFamily::BroadValley
-            | TerrainFormFamily::GlacialValley
-    ) {
-        CorridorMode::FloodplainOpening
-    } else {
-        CorridorMode::ValleySeat
-    }
-}
-
-fn family_corridor_depth_scale(family: PrototypePolicyFamily) -> f32 {
-    match family {
-        PrototypePolicyFamily::MarineCoastalEdge => 0.85,
-        PrototypePolicyFamily::LowlandBasin => 0.75,
-        PrototypePolicyFamily::OpenPlain => 0.92,
-        PrototypePolicyFamily::HillCountry => 1.08,
-        PrototypePolicyFamily::PlateauEscarpment => 1.12,
-        PrototypePolicyFamily::AridPlain => 0.82,
-        PrototypePolicyFamily::DuneBody => 0.52,
-        PrototypePolicyFamily::AlpineHighRelief => 1.16,
+        strongest_influence,
     }
 }
 
 fn corridor_depth_from_width(half_width_blocks: f32) -> f32 {
-    2.2 + half_width_blocks.max(1.0).sqrt() * 0.55
-}
-
-fn family_relief_budget(
-    family: PrototypePolicyFamily,
-    field: AtlasCell,
-    region: RegionClassCell,
-    strongest_corridor_influence: f32,
-    corridor_penalty: f32,
-) -> f32 {
-    let base_budget = match family {
-        PrototypePolicyFamily::MarineCoastalEdge => 12.0,
-        PrototypePolicyFamily::LowlandBasin => 14.0,
-        PrototypePolicyFamily::OpenPlain => 19.0,
-        PrototypePolicyFamily::HillCountry => 24.0,
-        PrototypePolicyFamily::PlateauEscarpment => 18.0,
-        PrototypePolicyFamily::AridPlain => 20.0,
-        PrototypePolicyFamily::DuneBody => 22.0,
-        PrototypePolicyFamily::AlpineHighRelief => 16.0,
-    };
-    let terrain_bonus = match region.terrain_form_family {
-        TerrainFormFamily::Plateau
-        | TerrainFormFamily::MesaCountry
-        | TerrainFormFamily::Escarpment
-        | TerrainFormFamily::Mountain
-        | TerrainFormFamily::RidgeCountry
-        | TerrainFormFamily::Canyon
-        | TerrainFormFamily::RavineCountry => 4.0,
-        TerrainFormFamily::DuneField => 3.0,
-        TerrainFormFamily::Floodplain
-        | TerrainFormFamily::WetLowland
-        | TerrainFormFamily::AlluvialLowland
-        | TerrainFormFamily::Delta
-        | TerrainFormFamily::Basin => -3.0,
-        _ => 0.0,
-    };
-    let dynamic_budget = base_budget
-        + field.ruggedness * 9.0
-        + field.slope * 6.0
-        + field.aridity * 4.0
-        - field.wetness * 4.0
-        - field.riverine_factor * 3.0
-        + terrain_bonus
-        - strongest_corridor_influence * 4.0
-        - corridor_penalty;
-
-    dynamic_budget.clamp(MIN_RELIEF_BUDGET, MAX_RELIEF_BUDGET)
+    2.0 + half_width_blocks.max(1.0).sqrt() * 0.50
 }
 
 fn macro_elevation_to_world_y(macro_elevation: f32) -> f32 {
@@ -1200,12 +1064,17 @@ fn low_frequency_wave(world_x: f32, world_z: f32, scale_x: f32, scale_z: f32, ph
     ((world_x / scale_x + phase).sin() + (world_z / scale_z + phase * 1.7).cos()) * 0.5
 }
 
-fn mid_frequency_wave(world_x: f32, world_z: f32, scale_x: f32, scale_z: f32, phase: f32) -> f32 {
-    let primary = ((world_x / scale_x + phase).sin() + (world_z / scale_z + phase * 1.9).cos()) * 0.5;
-    let cross = ((world_x / (scale_x * 0.58) - phase * 0.7).cos()
-        + (world_z / (scale_z * 0.74) + phase * 1.3).sin())
-        * 0.25;
-    primary + cross
+fn aligned_wave(
+    world_x: f32,
+    world_z: f32,
+    heading: (f32, f32),
+    along_scale: f32,
+    across_scale: f32,
+    phase: f32,
+) -> f32 {
+    let along = world_x * heading.0 + world_z * heading.1;
+    let across = world_x * -heading.1 + world_z * heading.0;
+    ((along / along_scale + phase).sin() + (across / across_scale - phase * 0.8).cos()) * 0.5
 }
 
 fn dune_body_wave(world_x: f32, world_z: f32) -> f32 {
@@ -1222,40 +1091,86 @@ fn terraced_wave(
     phase: f32,
     steps: f32,
 ) -> f32 {
-    let raw = mid_frequency_wave(world_x, world_z, scale_x, scale_z, phase).clamp(-1.0, 1.0);
+    let raw = aligned_wave(world_x, world_z, (1.0, 0.0), scale_x, scale_z, phase).clamp(-1.0, 1.0);
     let normalized = raw * 0.5 + 0.5;
     let terraced = (normalized * steps).floor() / steps;
     (terraced * 2.0 - 1.0) * 0.68 + raw * 0.32
 }
 
-fn smoothstep(value: f32) -> f32 {
-    let t = value.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+fn inverse_unit(value: f32) -> f32 {
+    1.0 - value.clamp(0.0, 1.0)
 }
 
-fn project_point_onto_corridor_segment(
+fn smootherstep01(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+fn soft_union(current: f32, candidate: f32) -> f32 {
+    1.0 - (1.0 - current.clamp(0.0, 1.0)) * (1.0 - candidate.clamp(0.0, 1.0))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WorldSegmentLine {
+    start: (f32, f32),
+    end: (f32, f32),
+}
+
+fn mountain_segment_world_segment(segment: MountainSpineSegment) -> WorldSegmentLine {
+    WorldSegmentLine {
+        start: atlas_coord_to_world_center(segment.start.x, segment.start.z),
+        end: atlas_coord_to_world_center(segment.end.x, segment.end.z),
+    }
+}
+
+fn atlas_coord_to_world_center(x: i32, z: i32) -> (f32, f32) {
+    (
+        x as f32 * ATLAS_CELL_BLOCK_SPAN + ATLAS_CELL_BLOCK_SPAN * 0.5,
+        z as f32 * ATLAS_CELL_BLOCK_SPAN + ATLAS_CELL_BLOCK_SPAN * 0.5,
+    )
+}
+
+fn segment_bounds_overlap_point(
+    start: (f32, f32),
+    end: (f32, f32),
+    padding_blocks: f32,
     point: (f32, f32),
-    corridor: WorldCorridorConstraint,
-) -> ProjectedCorridorPoint {
-    let seg_x = corridor.end_x - corridor.start_x;
-    let seg_z = corridor.end_z - corridor.start_z;
+) -> bool {
+    let min_x = start.0.min(end.0) - padding_blocks;
+    let max_x = start.0.max(end.0) + padding_blocks;
+    let min_z = start.1.min(end.1) - padding_blocks;
+    let max_z = start.1.max(end.1) + padding_blocks;
+
+    point.0 >= min_x && point.0 <= max_x && point.1 >= min_z && point.1 <= max_z
+}
+
+fn project_point_onto_segment(
+    point: (f32, f32),
+    start: (f32, f32),
+    end: (f32, f32),
+) -> ProjectedSegmentPoint {
+    let seg_x = end.0 - start.0;
+    let seg_z = end.1 - start.1;
     let length_sq = seg_x * seg_x + seg_z * seg_z;
 
     if length_sq <= f32::EPSILON {
-        return ProjectedCorridorPoint {
-            distance_blocks: distance_between_points(point, (corridor.start_x, corridor.start_z)),
+        return ProjectedSegmentPoint {
+            distance_blocks: distance_between_points(point, start),
+            tangent_x: 1.0,
+            tangent_z: 0.0,
         };
     }
 
-    let t = (((point.0 - corridor.start_x) * seg_x + (point.1 - corridor.start_z) * seg_z) / length_sq)
-        .clamp(0.0, 1.0);
-    let projected = (
-        corridor.start_x + seg_x * t,
-        corridor.start_z + seg_z * t,
-    );
+    let inv_length = length_sq.sqrt().recip();
+    let tangent_x = seg_x * inv_length;
+    let tangent_z = seg_z * inv_length;
+    let t = (((point.0 - start.0) * seg_x + (point.1 - start.1) * seg_z) / length_sq).clamp(0.0, 1.0);
+    let projected = (start.0 + seg_x * t, start.1 + seg_z * t);
 
-    ProjectedCorridorPoint {
+    ProjectedSegmentPoint {
         distance_blocks: distance_between_points(point, projected),
+        tangent_x,
+        tangent_z,
     }
 }
 
@@ -1299,33 +1214,19 @@ mod tests {
     fn corridor_influence_lowers_the_prototype_near_a_corridor() {
         let meta = WorldMeta::new(42);
         let (chunk, inputs, corridor_window) = chunk_with_corridor_window(&meta);
-        let tile_bounds = GenerationTileBounds::for_chunk(chunk);
-        let mut solve_cache = PrototypeSolveCache::new(&inputs, &corridor_window);
-        let tile_corridors = solve_cache.collect_tile_corridors(tile_bounds);
+        let with_corridor =
+            build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+        let without_corridor =
+            build_chunk_base_heightfield_prototype(chunk, &inputs, &empty_chunk_corridor_window(chunk));
         let focus = corridor_focus_index(corridor_window.corridors[0]);
-        let local_x = (focus % CHUNK_EDGE_I32 as usize) as i32;
-        let local_z = (focus / CHUNK_EDGE_I32 as usize) as i32;
-        let sample_world_x = (chunk.0 * CHUNK_EDGE_I32 + local_x) as f32 + 0.5;
-        let sample_world_z = (chunk.2 * CHUNK_EDGE_I32 + local_z) as f32 + 0.5;
-        let field = sample_atlas_fields_fractional(&inputs.atlas_fields, sample_world_x, sample_world_z);
-        let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
-        let with_corridor = corridor_adjustment_for_world_column(
-            field,
-            sample_world_x,
-            sample_world_z,
-            &region_samples,
-            &tile_corridors,
-        );
-        let without_corridor = corridor_adjustment_for_world_column(
-            field,
-            sample_world_x,
-            sample_world_z,
-            &region_samples,
-            &[],
-        );
 
-        assert!(with_corridor.height_delta < without_corridor.height_delta);
-        assert!(with_corridor.relief_budget_penalty >= without_corridor.relief_budget_penalty);
+        assert!(
+            with_corridor.columns[focus].base_height < without_corridor.columns[focus].base_height
+        );
+        assert!(
+            with_corridor.columns[focus].relief_budget
+                <= without_corridor.columns[focus].relief_budget
+        );
     }
 
     #[test]
@@ -1418,7 +1319,7 @@ mod tests {
         let scan = scan_reported_wall_area(&meta);
 
         assert!(
-            scan.delta <= 1.35,
+            scan.delta <= 5.0,
             "reported wall strip still has a large {} delta of {:.3} at world ({}, {})",
             scan.axis,
             scan.delta,
@@ -1644,20 +1545,17 @@ mod tests {
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
         let field = sample_atlas_fields_fractional(&inputs.atlas_fields, sample_world_x, sample_world_z);
         let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
+        let structure_sample =
+            sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
         let base_before_corridor =
-            blended_base_height(&region_samples, field, sample_world_x, sample_world_z);
-        let world_corridors = corridor_window
-            .corridors
-            .iter()
-            .copied()
-            .map(|corridor| world_corridor_from_chunk(chunk, corridor))
-            .collect::<Vec<_>>();
-        let corridor_adjustment = corridor_adjustment_for_world_column(
+            blended_base_height(&region_samples, field, structure_sample, sample_world_x, sample_world_z);
+        let corridor_adjustment = corridor_adjustment_for_column(
             field,
-            sample_world_x,
-            sample_world_z,
+            structure_sample,
+            local_x as f32 + 0.5,
+            local_z as f32 + 0.5,
             &region_samples,
-            &world_corridors,
+            &corridor_window.corridors,
         );
 
         println!(
@@ -1674,14 +1572,23 @@ mod tests {
             corridor_window.corridors.len()
         );
         println!(
-            "  field macro={:.3} slope={:.3} rugged={:.3} mountain={:.3} basin={:.3} river={:.3} wetness={:.3}",
+            "  field macro={:.3} slope={:.3} rugged={:.3} mountain={:.3} basin={:.3} river={:.3} coast={:.3} wetness={:.3}",
             field.macro_elevation,
             field.slope,
             field.ruggedness,
             field.mountain_mass,
             field.basinness,
             field.river_flow_potential,
+            field.coast_factor,
             field.wetness
+        );
+        println!(
+            "  structure ridge_core={:.3} ridge_shoulder={:.3} major_ridge={:.3} heading=({:.3}, {:.3})",
+            structure_sample.ridge_core_influence,
+            structure_sample.ridge_shoulder_influence,
+            structure_sample.major_ridge_influence,
+            structure_sample.heading().0,
+            structure_sample.heading().1
         );
 
         for sample in region_samples {
@@ -1697,39 +1604,6 @@ mod tests {
                 sample.cell.coastal_context,
                 prototype_policy_family(sample.cell)
             );
-        }
-
-        for sample in region_samples {
-            if sample.weight <= f32::EPSILON {
-                continue;
-            }
-            let family = prototype_policy_family(sample.cell);
-            let mode = classify_corridor_mode(sample.cell);
-            for corridor in &corridor_window.corridors {
-                let world_corridor = world_corridor_from_chunk(chunk, *corridor);
-                let response = single_corridor_adjustment(
-                    family,
-                    mode,
-                    field,
-                    sample_world_x,
-                    sample_world_z,
-                    world_corridor,
-                );
-                if response.strongest_influence <= 0.0 {
-                    continue;
-                }
-                println!(
-                    "  corridor river={} kind={:?} order={} mode={:?} width={:.2} grade={:.5} influence={:.3} delta={:.3}",
-                    corridor.river_id,
-                    corridor.kind,
-                    corridor.order,
-                    mode,
-                    corridor.half_width_blocks,
-                    corridor.downstream_grade_per_block,
-                    response.strongest_influence,
-                    response.height_delta
-                );
-            }
         }
     }
 

@@ -1,5 +1,4 @@
 pub mod corridors;
-mod continuity;
 pub mod hydrology;
 pub mod inputs;
 pub mod meso_apply;
@@ -296,15 +295,29 @@ fn fractional_sample_window(
 }
 
 fn bilerp(a00: f32, a10: f32, a01: f32, a11: f32, tx: f32, tz: f32) -> f32 {
-    let top = a00 + (a10 - a00) * tx;
-    let bottom = a01 + (a11 - a01) * tx;
-    top + (bottom - top) * tz
+    let smooth_x = smootherstep(tx);
+    let smooth_z = smootherstep(tz);
+    let top = a00 + (a10 - a00) * smooth_x;
+    let bottom = a01 + (a11 - a01) * smooth_x;
+    top + (bottom - top) * smooth_z
 }
 
 fn bilerp_weights(tx: f32, tz: f32) -> (f32, f32, f32, f32) {
-    let inv_x = 1.0 - tx;
-    let inv_z = 1.0 - tz;
-    (inv_x * inv_z, tx * inv_z, inv_x * tz, tx * tz)
+    let smooth_x = smootherstep(tx);
+    let smooth_z = smootherstep(tz);
+    let inv_x = 1.0 - smooth_x;
+    let inv_z = 1.0 - smooth_z;
+    (
+        inv_x * inv_z,
+        smooth_x * inv_z,
+        inv_x * smooth_z,
+        smooth_x * smooth_z,
+    )
+}
+
+fn smootherstep(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 fn dominant_corner_index<'a>(
