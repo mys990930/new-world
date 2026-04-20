@@ -30,6 +30,7 @@ const MAX_APPLY_SOURCES: usize = 25;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HillClusterApplySample {
     pub coverage: f32,
+    pub shoulder_coverage: f32,
     pub lobe_height_blocks: f32,
 }
 
@@ -201,6 +202,7 @@ pub(crate) fn sample_apply_signal(
     let mut second = 0.0_f32;
     let mut third = 0.0_f32;
     let mut coverage = 0.0_f32;
+    let mut shoulder_coverage = 0.0_f32;
 
     for cell_z in (base_cell_z - 2)..=(base_cell_z + 2) {
         for cell_x in (base_cell_x - 2)..=(base_cell_x + 2) {
@@ -266,7 +268,9 @@ pub(crate) fn sample_apply_signal(
             base_major + chain_span * 0.68,
             base_minor * 1.55 + 5.0,
         );
-        coverage = coverage.max((shoulder * (0.18 + source.cell.hilliness * 0.28)).clamp(0.0, 0.72));
+        shoulder_coverage = shoulder_coverage.max(
+            (shoulder * (0.22 + source.cell.hilliness * 0.34)).clamp(0.0, 0.88),
+        );
 
         for lobe_index in 0..lobe_count {
             let progress = if lobe_count <= 1 {
@@ -305,9 +309,11 @@ pub(crate) fn sample_apply_signal(
 
             let contribution = lobe.height_blocks * footprint;
             insert_top3(contribution, &mut strongest, &mut second, &mut third);
-            let mask = (footprint * (0.46 + source.cell.hilliness * 0.54) + shoulder * 0.08)
+            let core_mask = (footprint * (0.38 + source.cell.hilliness * 0.46)).clamp(0.0, 1.0);
+            let shoulder_mask = (footprint * 0.20 + shoulder * (0.14 + source.cell.hilliness * 0.10))
                 .clamp(0.0, 1.0);
-            coverage = coverage.max(mask);
+            coverage = coverage.max(core_mask);
+            shoulder_coverage = shoulder_coverage.max(shoulder_mask);
         }
     }
 
@@ -317,7 +323,8 @@ pub(crate) fn sample_apply_signal(
 
     HillClusterApplySample {
         coverage: coverage.clamp(0.0, 1.0),
-        lobe_height_blocks: strongest + second * 0.74 + third * 0.42,
+        shoulder_coverage: shoulder_coverage.max(coverage).clamp(0.0, 1.0),
+        lobe_height_blocks: strongest + second * 0.66 + third * 0.30,
     }
 }
 
@@ -860,6 +867,34 @@ mod tests {
         assert!(
             local_peak_count >= 3,
             "expected neighboring guide cells to resolve as multiple macro lobes, found {local_peak_count}"
+        );
+    }
+
+    #[test]
+    fn apply_signal_keeps_a_broader_shoulder_than_core() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        *cells.get_mut(AtlasCoord::new(1, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.91,
+            hill_height: 9.8,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.87,
+            hill_height: 8.9,
+            ..MesoGuideCell::default()
+        };
+        let guides = MesoGuideMap { area, cells };
+        let sample = sample_apply_signal(
+            &guides,
+            CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32 + 20,
+            CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32 + 34,
+        );
+
+        assert!(sample.lobe_height_blocks > 0.0);
+        assert!(
+            sample.shoulder_coverage >= sample.coverage,
+            "expected hill clusters to keep a broader shoulder than core, got {sample:?}"
         );
     }
 }

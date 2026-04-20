@@ -73,6 +73,7 @@ pub fn build_chunk_meso_applied_prototype(
                 &meso,
                 hill_cluster_apply,
                 allowed_feature_weight(&region_samples, "hill_cluster"),
+                base.relief_budget,
                 column_relief_scale,
                 corridor_avoidance,
             );
@@ -163,20 +164,27 @@ fn hill_cluster_delta(
     meso: &crate::world::atlas::MesoGuideSample,
     hill_cluster_apply: HillClusterApplySample,
     allowed_weight: f32,
+    relief_budget: f32,
     relief_scale: f32,
     corridor_avoidance: f32,
 ) -> f32 {
     let coverage = hill_cluster_apply.coverage.clamp(0.0, 1.0);
-    let footprint_bias = (0.08 + meso.hilliness * 0.18 + coverage * 0.76).clamp(0.0, 1.0);
+    let shoulder = hill_cluster_apply.shoulder_coverage.max(coverage).clamp(0.0, 1.0);
+    let footprint_bias = smoothstep01((0.10 + meso.hilliness * 0.12 + shoulder * 0.78).clamp(0.0, 1.0));
     let weight = footprint_bias * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    let broad_raise = meso.hill_height * (0.10 + meso.hilliness * 0.10);
-    let lobe_raise = hill_cluster_apply.lobe_height_blocks * (0.96 + coverage * 0.34);
+    let shoulder_raise =
+        meso.hill_height * shoulder * (0.24 + shoulder * 0.28 + meso.hilliness * 0.18);
+    let core_raise = hill_cluster_apply.lobe_height_blocks
+        * smoothstep_range(0.12, 0.86, coverage)
+        * (0.44 + shoulder * 0.14 + coverage * 0.16);
+    let raw_raise = (shoulder_raise + core_raise) * weight * relief_scale * 0.96;
+    let hill_cap = (relief_budget * 0.82).max(0.60);
 
-    (broad_raise + lobe_raise) * weight * relief_scale * 1.08
+    soft_cap_positive(raw_raise, hill_cap)
 }
 
 fn shallow_basin_delta(
@@ -307,6 +315,15 @@ fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
 
     let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn soft_cap_positive(value: f32, cap: f32) -> f32 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+
+    let safe_cap = cap.max(f32::EPSILON);
+    safe_cap * (1.0 - (-value / safe_cap).exp())
 }
 
 #[cfg(test)]
@@ -440,10 +457,11 @@ mod tests {
         };
         let hill_cluster_apply = HillClusterApplySample {
             coverage: 0.82,
+            shoulder_coverage: 0.93,
             lobe_height_blocks: 6.2,
         };
 
-        assert!(hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0) > 0.0);
+        assert!(hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 12.0, 1.0, 1.0) > 0.0);
         assert!(shallow_basin_delta(&meso, 1.0, 1.0, 1.0) < 0.0);
         assert!(escarpment_band_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
         assert!(upland_terrace_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
@@ -458,13 +476,38 @@ mod tests {
         };
         let hill_cluster_apply = HillClusterApplySample {
             coverage: 0.68,
+            shoulder_coverage: 0.86,
             lobe_height_blocks: 7.0,
         };
 
-        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0);
+        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 12.0, 1.0, 1.0);
         assert!(
-            delta >= 6.8,
+            delta >= 4.6,
             "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"
+        );
+    }
+
+    #[test]
+    fn hill_cluster_delta_soft_caps_against_low_plain_budget() {
+        let meso = MesoGuideSample {
+            hilliness: 0.64,
+            hill_height: 8.0,
+            ..MesoGuideSample::default()
+        };
+        let hill_cluster_apply = HillClusterApplySample {
+            coverage: 0.92,
+            shoulder_coverage: 0.98,
+            lobe_height_blocks: 15.0,
+        };
+
+        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 3.0, 1.0, 1.0);
+        assert!(
+            delta < 2.46,
+            "expected low-budget hill clusters to ease into plains instead of clipping to a hard wall, got {delta}"
+        );
+        assert!(
+            delta > 1.2,
+            "expected low-budget hill clusters to still produce some rise in plains, got {delta}"
         );
     }
 }

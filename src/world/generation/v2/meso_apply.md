@@ -35,4 +35,5 @@ build_chunk_meso_applied_prototype(
   - sampled guide fields still provide the broad cluster envelope and macro hill-strength context
   - the feature-owned `hill_cluster` runtime helper now resolves neighboring strong guide cells into coherent asymmetric macro-lobe chains during meso apply
 - the launch tuning intentionally leans on feature-owned lobe resolution more than the broad guide field so `hill_cluster` reads as several nearby hills with higher local relief instead of as round guide blobs
+- hill-cluster application now also distinguishes a broader shoulder envelope from the inner hill cores and uses a soft positive cap against low plain relief budgets so hills blend into surrounding terrain instead of clipping at a hard limit
 - the apply operator keeps generic gating, relief-budget spend, and corridor attenuation in `meso_apply.rs`, while feature-specific hill-cluster lobe layout stays in `hill_cluster/mod.rs`
