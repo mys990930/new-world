@@ -154,7 +154,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
 - current `hill_cluster` runtime emission now has two layers:
   - atlas meso guide generation rasterizes a shared clustered hill envelope with several strong guide cells across a few chunks
-  - feature-owned chunk-side macro-lobe resolution turns those strong neighboring guide cells into several broad nearby hills during meso apply
+  - feature-owned chunk-side macro-lobe-chain resolution turns those strong neighboring guide cells into several nearby asymmetric hills with visible saddles during meso apply
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`

@@ -10,16 +10,22 @@ use super::super::{
 };
 
 const STRENGTH_MIN_BLOCKS: f32 = 6.4;
-const STRENGTH_MAX_BLOCKS: f32 = 14.8;
+const STRENGTH_MAX_BLOCKS: f32 = 17.6;
 const LOBE_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
 const LOBE_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const LOBE_HASH_K3: u64 = 0x1656_67B1_9E37_79F9;
-const LOBE_ANGLE_SALT: u64 = 0xD811_B6D2_2200_0001;
-const LOBE_JITTER_X_SALT: u64 = 0xD811_B6D2_2200_0002;
-const LOBE_JITTER_Z_SALT: u64 = 0xD811_B6D2_2200_0003;
-const LOBE_RADIUS_X_SALT: u64 = 0xD811_B6D2_2200_0004;
-const LOBE_RADIUS_Z_SALT: u64 = 0xD811_B6D2_2200_0005;
-const LOBE_HEIGHT_SALT: u64 = 0xD811_B6D2_2200_0006;
+const APPLY_AXIS_FALLBACK_SALT: u64 = 0xD811_B6D2_2200_0001;
+const SOURCE_CENTER_X_SALT: u64 = 0xD811_B6D2_2200_0002;
+const SOURCE_CENTER_Z_SALT: u64 = 0xD811_B6D2_2200_0003;
+const SOURCE_AXIS_JITTER_SALT: u64 = 0xD811_B6D2_2200_0004;
+const SOURCE_CHAIN_SPACING_SALT: u64 = 0xD811_B6D2_2200_0005;
+const SOURCE_MAJOR_RADIUS_SALT: u64 = 0xD811_B6D2_2200_0006;
+const SOURCE_MINOR_RADIUS_SALT: u64 = 0xD811_B6D2_2200_0007;
+const SOURCE_HEIGHT_SALT: u64 = 0xD811_B6D2_2200_0008;
+const SOURCE_ALONG_JITTER_SALT: u64 = 0xD811_B6D2_2200_0009;
+const SOURCE_SIDE_JITTER_SALT: u64 = 0xD811_B6D2_2200_000A;
+const SOURCE_COUNT_SALT: u64 = 0xD811_B6D2_2200_000B;
+const MAX_APPLY_SOURCES: usize = 25;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HillClusterApplySample {
@@ -36,6 +42,27 @@ struct MacroLobeDescriptor {
     radius_x_blocks: f32,
     radius_z_blocks: f32,
     height_blocks: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GuideSource {
+    coord: AtlasCoord,
+    cell: MesoGuideCell,
+    center_x: f32,
+    center_z: f32,
+    weight: f32,
+}
+
+impl Default for GuideSource {
+    fn default() -> Self {
+        Self {
+            coord: AtlasCoord::new(0, 0),
+            cell: MesoGuideCell::default(),
+            center_x: 0.0,
+            center_z: 0.0,
+            weight: 0.0,
+        }
+    }
 }
 
 pub const DEF: MesoFeatureDef = MesoFeatureDef {
@@ -65,7 +92,7 @@ pub(in crate::world::atlas::meso) fn build_instance(
     let center_x = sample_point.0 * crate::world::MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0;
     let center_z = sample_point.1 * crate::world::MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.1;
     let strength_scale =
-        (0.84 + sample.macro_elevation * 0.24 + sample.ruggedness * 0.12).clamp(0.84, 1.22);
+        (0.92 + sample.macro_elevation * 0.30 + sample.ruggedness * 0.18).clamp(0.92, 1.34);
 
     FeatureInstance {
         kind: MesoFeatureKind::HillCluster,
@@ -74,8 +101,8 @@ pub(in crate::world::atlas::meso) fn build_instance(
         heading_x: heading.0,
         heading_z: heading.1,
         radius_x_cells: lerp_f32(
-            1.3,
-            2.3,
+            1.4,
+            2.4,
             hash01(
                 seed,
                 cell_coord.x as i64,
@@ -84,8 +111,8 @@ pub(in crate::world::atlas::meso) fn build_instance(
             ),
         ),
         radius_z_cells: lerp_f32(
-            1.1,
-            1.8,
+            0.95,
+            1.55,
             hash01(
                 seed,
                 cell_coord.x as i64,
@@ -168,8 +195,11 @@ pub(crate) fn sample_apply_signal(
     let base_cell_z = world_z.div_euclid(meso_span_blocks);
     let sample_x = world_x as f32 + 0.5;
     let sample_z = world_z as f32 + 0.5;
+    let mut sources = [GuideSource::default(); MAX_APPLY_SOURCES];
+    let mut source_count = 0_usize;
     let mut strongest = 0.0_f32;
     let mut second = 0.0_f32;
+    let mut third = 0.0_f32;
     let mut coverage = 0.0_f32;
 
     for cell_z in (base_cell_z - 2)..=(base_cell_z + 2) {
@@ -178,13 +208,91 @@ pub(crate) fn sample_apply_signal(
             let Some(cell) = guides.cells().get(coord).copied() else {
                 continue;
             };
-            let Some(lobe) = macro_lobe_descriptor(coord, cell, meso_span_blocks as f32) else {
+            let Some(source) = guide_source(coord, cell, meso_span_blocks as f32) else {
                 continue;
             };
-            let delta_x = sample_x - lobe.center_x;
-            let delta_z = sample_z - lobe.center_z;
-            let along = delta_x * lobe.heading_x + delta_z * lobe.heading_z;
-            let across = delta_x * -lobe.heading_z + delta_z * lobe.heading_x;
+            sources[source_count] = source;
+            source_count += 1;
+        }
+    }
+
+    if source_count == 0 {
+        return HillClusterApplySample::default();
+    }
+
+    let cluster_heading = dominant_apply_axis(&sources, source_count, base_cell_x, base_cell_z);
+
+    for source in sources.iter().take(source_count) {
+        let (heading_x, heading_z) = source_chain_heading(*source, cluster_heading);
+        let normal_x = -heading_z;
+        let normal_z = heading_x;
+        let major_scale =
+            (0.88 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 18.0).clamp(0.0, 0.28))
+                .clamp(0.88, 1.34);
+        let minor_scale =
+            (0.78 + source.cell.hilliness * 0.16 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16))
+                .clamp(0.78, 1.12);
+        let base_major = lerp_f32(
+            24.0,
+            38.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
+        ) * major_scale;
+        let base_minor = lerp_f32(
+            8.5,
+            15.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
+        ) * minor_scale;
+        let chain_spacing = lerp_f32(
+            15.0,
+            24.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT),
+        ) * (0.92 + source.cell.hilliness * 0.24);
+        let lobe_count = if lobe_hash01(source.coord, source.cell, SOURCE_COUNT_SALT) >= 0.64
+            || source.cell.hilliness >= 0.80
+            || source.cell.hill_height >= 11.5
+        {
+            4
+        } else {
+            3
+        };
+        let chain_span = chain_spacing * (lobe_count - 1) as f32;
+        let delta_x = sample_x - source.center_x;
+        let delta_z = sample_z - source.center_z;
+        let source_along = delta_x * heading_x + delta_z * heading_z;
+        let source_across = delta_x * normal_x + delta_z * normal_z;
+        let shoulder = ellipse_footprint(
+            source_along,
+            source_across,
+            base_major + chain_span * 0.68,
+            base_minor * 1.55 + 5.0,
+        );
+        coverage = coverage.max((shoulder * (0.18 + source.cell.hilliness * 0.28)).clamp(0.0, 0.72));
+
+        for lobe_index in 0..lobe_count {
+            let progress = if lobe_count <= 1 {
+                0.5
+            } else {
+                lobe_index as f32 / (lobe_count - 1) as f32
+            };
+            let center_bias = 1.0 - (progress * 2.0 - 1.0).abs();
+            let lobe = macro_lobe_descriptor(
+                *source,
+                heading_x,
+                heading_z,
+                normal_x,
+                normal_z,
+                base_major,
+                base_minor,
+                chain_span,
+                chain_spacing,
+                lobe_index,
+                progress,
+                center_bias,
+            );
+            let lobe_delta_x = sample_x - lobe.center_x;
+            let lobe_delta_z = sample_z - lobe.center_z;
+            let along = lobe_delta_x * lobe.heading_x + lobe_delta_z * lobe.heading_z;
+            let across = lobe_delta_x * -lobe.heading_z + lobe_delta_z * lobe.heading_x;
             let footprint = ellipse_footprint(
                 along,
                 across,
@@ -196,14 +304,9 @@ pub(crate) fn sample_apply_signal(
             }
 
             let contribution = lobe.height_blocks * footprint;
-            if contribution > strongest {
-                second = strongest;
-                strongest = contribution;
-            } else if contribution > second {
-                second = contribution;
-            }
-
-            let mask = (footprint * (0.30 + cell.hilliness * 0.70)).clamp(0.0, 1.0);
+            insert_top3(contribution, &mut strongest, &mut second, &mut third);
+            let mask = (footprint * (0.46 + source.cell.hilliness * 0.54) + shoulder * 0.08)
+                .clamp(0.0, 1.0);
             coverage = coverage.max(mask);
         }
     }
@@ -213,8 +316,8 @@ pub(crate) fn sample_apply_signal(
     }
 
     HillClusterApplySample {
-        coverage,
-        lobe_height_blocks: strongest + second * 0.52,
+        coverage: coverage.clamp(0.0, 1.0),
+        lobe_height_blocks: strongest + second * 0.74 + third * 0.42,
     }
 }
 
@@ -253,39 +356,259 @@ fn cluster_mass_footprints(instance: FeatureInstance, along: f32, across: f32) -
     ]
 }
 
-fn macro_lobe_descriptor(
-    coord: AtlasCoord,
-    cell: MesoGuideCell,
-    meso_span_blocks: f32,
-) -> Option<MacroLobeDescriptor> {
+fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -> Option<GuideSource> {
     if cell.hilliness < 0.18 || cell.hill_height < 2.2 {
         return None;
     }
 
-    let angle = lobe_hash01(coord, cell, LOBE_ANGLE_SALT) * TAU;
-    let heading_x = angle.cos();
-    let heading_z = angle.sin();
     let center_x = coord.x as f32 * meso_span_blocks
         + meso_span_blocks * 0.5
-        + lerp_f32(-meso_span_blocks * 0.16, meso_span_blocks * 0.16, lobe_hash01(coord, cell, LOBE_JITTER_X_SALT));
+        + lerp_f32(
+            -meso_span_blocks * 0.16,
+            meso_span_blocks * 0.16,
+            lobe_hash01(coord, cell, SOURCE_CENTER_X_SALT),
+        );
     let center_z = coord.z as f32 * meso_span_blocks
         + meso_span_blocks * 0.5
-        + lerp_f32(-meso_span_blocks * 0.16, meso_span_blocks * 0.16, lobe_hash01(coord, cell, LOBE_JITTER_Z_SALT));
-    let radius_scale =
-        (0.76 + cell.hilliness * 0.24 + (cell.hill_height / 14.0).clamp(0.0, 0.28)).clamp(0.76, 1.28);
-    let height_scale = (0.74 + cell.hilliness * 0.26).clamp(0.74, 1.10);
+        + lerp_f32(
+            -meso_span_blocks * 0.16,
+            meso_span_blocks * 0.16,
+            lobe_hash01(coord, cell, SOURCE_CENTER_Z_SALT),
+        );
+    let weight = (0.24 + cell.hilliness * 0.56 + (cell.hill_height / 16.0).clamp(0.0, 0.44))
+        .clamp(0.24, 1.32);
 
-    Some(MacroLobeDescriptor {
+    Some(GuideSource {
+        coord,
+        cell,
         center_x,
         center_z,
+        weight,
+    })
+}
+
+fn dominant_apply_axis(
+    sources: &[GuideSource; MAX_APPLY_SOURCES],
+    source_count: usize,
+    base_cell_x: i32,
+    base_cell_z: i32,
+) -> (f32, f32) {
+    let mut total_weight = 0.0_f32;
+    let mut mean_x = 0.0_f32;
+    let mut mean_z = 0.0_f32;
+
+    for source in sources.iter().take(source_count) {
+        total_weight += source.weight;
+        mean_x += source.center_x * source.weight;
+        mean_z += source.center_z * source.weight;
+    }
+
+    if total_weight <= f32::EPSILON {
+        return fallback_axis(base_cell_x, base_cell_z);
+    }
+
+    mean_x /= total_weight;
+    mean_z /= total_weight;
+
+    let mut xx = 0.0_f32;
+    let mut zz = 0.0_f32;
+    let mut xz = 0.0_f32;
+
+    for source in sources.iter().take(source_count) {
+        let delta_x = source.center_x - mean_x;
+        let delta_z = source.center_z - mean_z;
+        xx += source.weight * delta_x * delta_x;
+        zz += source.weight * delta_z * delta_z;
+        xz += source.weight * delta_x * delta_z;
+    }
+
+    if (xx + zz) <= 24.0 {
+        return fallback_axis(base_cell_x, base_cell_z);
+    }
+
+    let angle = 0.5 * (2.0 * xz).atan2(xx - zz);
+    let heading_x = angle.cos();
+    let heading_z = angle.sin();
+    if !heading_x.is_finite() || !heading_z.is_finite() {
+        return fallback_axis(base_cell_x, base_cell_z);
+    }
+
+    (heading_x, heading_z)
+}
+
+fn fallback_axis(base_cell_x: i32, base_cell_z: i32) -> (f32, f32) {
+    let bits = splitmix64(
+        APPLY_AXIS_FALLBACK_SALT
+            ^ (base_cell_x as i64 as u64).wrapping_mul(LOBE_HASH_K1)
+            ^ (base_cell_z as i64 as u64).wrapping_mul(LOBE_HASH_K2)
+            ^ LOBE_HASH_K3,
+    ) >> 11;
+    let max = ((1_u64 << 53) - 1) as f64;
+    let angle = (bits as f64 / max) as f32 * TAU;
+    (angle.cos(), angle.sin())
+}
+
+fn source_chain_heading(source: GuideSource, cluster_heading: (f32, f32)) -> (f32, f32) {
+    let jitter_angle = lerp_f32(
+        -0.28,
+        0.28,
+        lobe_hash01(source.coord, source.cell, SOURCE_AXIS_JITTER_SALT),
+    ) * (0.50 + source.cell.hilliness * 0.14);
+    rotate_vector(cluster_heading, jitter_angle)
+}
+
+fn rotate_vector(vector: (f32, f32), angle: f32) -> (f32, f32) {
+    let sin = angle.sin();
+    let cos = angle.cos();
+    (
+        vector.0 * cos - vector.1 * sin,
+        vector.0 * sin + vector.1 * cos,
+    )
+}
+
+fn macro_lobe_descriptor(
+    source: GuideSource,
+    heading_x: f32,
+    heading_z: f32,
+    normal_x: f32,
+    normal_z: f32,
+    base_major: f32,
+    base_minor: f32,
+    chain_span: f32,
+    chain_spacing: f32,
+    lobe_index: usize,
+    progress: f32,
+    center_bias: f32,
+) -> MacroLobeDescriptor {
+    let along_jitter = lerp_f32(
+        -chain_spacing * 0.20,
+        chain_spacing * 0.20,
+        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_ALONG_JITTER_SALT),
+    );
+    let patterned_side = match lobe_index {
+        0 => -0.34,
+        1 => 0.10,
+        2 => 0.28,
+        _ => -0.18,
+    };
+    let side_jitter = lerp_f32(
+        -base_minor * 0.42,
+        base_minor * 0.42,
+        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SIDE_JITTER_SALT),
+    );
+    let offset_along = (progress - 0.5) * chain_span + along_jitter;
+    let offset_across = base_minor * patterned_side + side_jitter;
+    let radius_x = base_major
+        * (0.84 + center_bias * 0.22 + source.cell.hilliness * 0.08)
+        * lerp_f32(
+            0.94,
+            1.08,
+            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MAJOR_RADIUS_SALT),
+        );
+    let radius_z = base_minor
+        * (0.76 + center_bias * 0.12 + source.cell.hilliness * 0.06)
+        * lerp_f32(
+            0.90,
+            1.10,
+            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MINOR_RADIUS_SALT),
+        );
+    let height_blocks = source.cell.hill_height
+        * (1.04 + source.cell.hilliness * 0.30 + center_bias * 0.16)
+        * lerp_f32(
+            1.02,
+            1.40,
+            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_HEIGHT_SALT),
+        );
+
+    MacroLobeDescriptor {
+        center_x: source.center_x + heading_x * offset_along + normal_x * offset_across,
+        center_z: source.center_z + heading_z * offset_along + normal_z * offset_across,
         heading_x,
         heading_z,
-        radius_x_blocks: lerp_f32(20.0, 38.0, lobe_hash01(coord, cell, LOBE_RADIUS_X_SALT)) * radius_scale,
-        radius_z_blocks: lerp_f32(16.0, 30.0, lobe_hash01(coord, cell, LOBE_RADIUS_Z_SALT)) * radius_scale,
-        height_blocks: cell.hill_height
-            * lerp_f32(0.82, 1.12, lobe_hash01(coord, cell, LOBE_HEIGHT_SALT))
-            * height_scale,
-    })
+        radius_x_blocks: radius_x,
+        radius_z_blocks: radius_z,
+        height_blocks,
+    }
+}
+
+fn insert_top3(value: f32, strongest: &mut f32, second: &mut f32, third: &mut f32) {
+    if value > *strongest {
+        *third = *second;
+        *second = *strongest;
+        *strongest = value;
+    } else if value > *second {
+        *third = *second;
+        *second = value;
+    } else if value > *third {
+        *third = value;
+    }
+}
+
+fn indexed_lobe_hash01(coord: AtlasCoord, cell: MesoGuideCell, lobe_index: usize, salt: u64) -> f32 {
+    let hill_bits = ((cell.hilliness.to_bits() as u64) << 32) ^ cell.hill_height.to_bits() as u64;
+    let bits = splitmix64(
+        salt
+            ^ hill_bits
+            ^ (coord.x as i64 as u64).wrapping_mul(LOBE_HASH_K1)
+            ^ (coord.z as i64 as u64).wrapping_mul(LOBE_HASH_K2)
+            ^ (lobe_index as u64).wrapping_mul(LOBE_HASH_K3)
+            ^ LOBE_HASH_K3,
+    ) >> 11;
+    let max = ((1_u64 << 53) - 1) as f64;
+    (bits as f64 / max) as f32
+}
+
+#[cfg(test)]
+fn source_weight_sum(sources: &[GuideSource; MAX_APPLY_SOURCES], source_count: usize) -> f32 {
+    sources
+        .iter()
+        .take(source_count)
+        .map(|source| source.weight)
+        .sum::<f32>()
+}
+
+#[cfg(test)]
+fn anisotropy_ratio(sources: &[GuideSource; MAX_APPLY_SOURCES], source_count: usize) -> f32 {
+    let total_weight = source_weight_sum(sources, source_count);
+    if total_weight <= f32::EPSILON {
+        return 1.0;
+    }
+
+    let mean_x = sources
+        .iter()
+        .take(source_count)
+        .map(|source| source.center_x * source.weight)
+        .sum::<f32>()
+        / total_weight;
+    let mean_z = sources
+        .iter()
+        .take(source_count)
+        .map(|source| source.center_z * source.weight)
+        .sum::<f32>()
+        / total_weight;
+    let mut xx = 0.0_f32;
+    let mut zz = 0.0_f32;
+
+    for source in sources.iter().take(source_count) {
+        let delta_x = source.center_x - mean_x;
+        let delta_z = source.center_z - mean_z;
+        xx += source.weight * delta_x * delta_x;
+        zz += source.weight * delta_z * delta_z;
+    }
+
+    let major = xx.max(zz).sqrt();
+    let minor = xx.min(zz).sqrt().max(1.0);
+    major / minor
+}
+
+#[cfg(test)]
+fn horizontal_alignment_ratio(heading: (f32, f32)) -> f32 {
+    heading.0.abs() / heading.1.abs().max(0.001)
+}
+
+#[cfg(test)]
+fn vertical_alignment_ratio(heading: (f32, f32)) -> f32 {
+    heading.1.abs() / heading.0.abs().max(0.001)
 }
 
 fn lobe_hash01(coord: AtlasCoord, cell: MesoGuideCell, salt: u64) -> f32 {
@@ -409,6 +732,94 @@ mod tests {
     }
 
     #[test]
+    fn dominant_apply_axis_prefers_neighbor_alignment() {
+        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+        let mut sources = [GuideSource::default(); MAX_APPLY_SOURCES];
+        sources[0] = guide_source(
+            AtlasCoord::new(1, 1),
+            MesoGuideCell {
+                hilliness: 0.90,
+                hill_height: 10.0,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+        sources[1] = guide_source(
+            AtlasCoord::new(2, 1),
+            MesoGuideCell {
+                hilliness: 0.84,
+                hill_height: 8.9,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+        sources[2] = guide_source(
+            AtlasCoord::new(3, 1),
+            MesoGuideCell {
+                hilliness: 0.78,
+                hill_height: 8.0,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+
+        let heading = dominant_apply_axis(&sources, 3, 2, 1);
+        assert!(
+            horizontal_alignment_ratio(heading) >= 1.8,
+            "expected horizontally aligned sources to prefer a horizontal cluster axis, got {heading:?}"
+        );
+        assert!(
+            anisotropy_ratio(&sources, 3) >= 1.6,
+            "expected the synthetic source layout to stay anisotropic"
+        );
+    }
+
+    #[test]
+    fn dominant_apply_axis_handles_vertical_neighbor_alignment() {
+        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+        let mut sources = [GuideSource::default(); MAX_APPLY_SOURCES];
+        sources[0] = guide_source(
+            AtlasCoord::new(2, 1),
+            MesoGuideCell {
+                hilliness: 0.88,
+                hill_height: 9.2,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+        sources[1] = guide_source(
+            AtlasCoord::new(2, 2),
+            MesoGuideCell {
+                hilliness: 0.86,
+                hill_height: 8.8,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+        sources[2] = guide_source(
+            AtlasCoord::new(2, 3),
+            MesoGuideCell {
+                hilliness: 0.82,
+                hill_height: 8.1,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .unwrap();
+
+        let heading = dominant_apply_axis(&sources, 3, 2, 2);
+        assert!(
+            vertical_alignment_ratio(heading) >= 1.8,
+            "expected vertically aligned sources to prefer a vertical cluster axis, got {heading:?}"
+        );
+    }
+
+    #[test]
     fn apply_signal_resolves_multiple_macro_lobes_from_neighboring_cells() {
         let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
         let mut cells = crate::world::AtlasGrid::defaulted(area);
@@ -447,7 +858,7 @@ mod tests {
         }
 
         assert!(
-            local_peak_count >= 2,
+            local_peak_count >= 3,
             "expected neighboring guide cells to resolve as multiple macro lobes, found {local_peak_count}"
         );
     }

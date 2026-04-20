@@ -17,8 +17,8 @@
 
 - Biases inland terrain prototypes without taking over the owning region identity.
 - Atlas-owned guide emission should describe one shared inland cluster envelope with several strong guide cells across a few chunks rather than a point-like object list.
-- Chunk-side realization should resolve that guide into several broad macro lobes so the player reads a hill country cluster, not tiny local hilllets and not one smeared swell.
-- At the current `0.5m` block scale, launch tuning should be strong enough that the resulting prototype deformation reads as actual hill country rather than sub-meter noise.
+- Chunk-side realization should resolve that guide into coherent asymmetric macro-lobe chains with visible saddles between nearby hills, so the player reads hill country rather than circles, tiny local hilllets, or one smeared swell.
+- At the current `0.5m` block scale, launch tuning should produce several-meter prototype relief so the feature reads as real hill country rather than sub-meter noise.
 - Should avoid displacing major river corridors and instead sit beside or above them.
 
 ## Ecology Notes

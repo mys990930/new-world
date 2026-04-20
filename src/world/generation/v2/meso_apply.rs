@@ -167,17 +167,16 @@ fn hill_cluster_delta(
     corridor_avoidance: f32,
 ) -> f32 {
     let coverage = hill_cluster_apply.coverage.clamp(0.0, 1.0);
-    let footprint_bias = (0.16 + meso.hilliness * 0.34 + coverage * 0.50).clamp(0.0, 1.0);
+    let footprint_bias = (0.08 + meso.hilliness * 0.18 + coverage * 0.76).clamp(0.0, 1.0);
     let weight = footprint_bias * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    let broad_raise = meso.hill_height * (0.18 + meso.hilliness * 0.18);
-    let lobe_raise =
-        hill_cluster_apply.lobe_height_blocks * (0.68 + coverage * 0.24);
+    let broad_raise = meso.hill_height * (0.10 + meso.hilliness * 0.10);
+    let lobe_raise = hill_cluster_apply.lobe_height_blocks * (0.96 + coverage * 0.34);
 
-    (broad_raise + lobe_raise) * weight * relief_scale * 0.90
+    (broad_raise + lobe_raise) * weight * relief_scale * 1.08
 }
 
 fn shallow_basin_delta(
@@ -464,7 +463,7 @@ mod tests {
 
         let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0);
         assert!(
-            delta >= 4.4,
+            delta >= 6.8,
             "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"
         );
     }
