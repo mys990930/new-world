@@ -9,7 +9,7 @@ use super::super::{SEA_LEVEL_Y, WORLD_FLOOR_Y};
 use super::{
     ChunkCorridorWindow, ChunkGenerationV2Inputs, ChunkRealizationFieldPatch, RealizationSample,
     RegionSampleWeight, RiverCorridorConstraint, sample_atlas_fields_fractional,
-    sample_chunk_realization_field, sample_region_weights,
+    sample_chunk_realization_field,
 };
 
 const MIN_BASE_HEIGHT_Y: f32 = WORLD_FLOOR_Y as f32 + 8.0;
@@ -254,7 +254,6 @@ pub fn build_chunk_base_heightfield_prototype(
                 sample_world_z,
             );
             let params = basis_parameters_from_realization(realization);
-            let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
             let structure_sample =
                 sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
             let mut base_height = blended_base_height(
@@ -270,7 +269,6 @@ pub fn build_chunk_base_heightfield_prototype(
                 structure_sample,
                 local_x as f32 + 0.5,
                 local_z as f32 + 0.5,
-                &region_samples,
                 &corridor_window.corridors,
             );
             base_height += corridor_adjustment.height_delta;
@@ -1014,10 +1012,9 @@ fn corridor_adjustment_for_column(
     structure: StructureBasisSample,
     local_x: f32,
     local_z: f32,
-    region_samples: &[RegionSampleWeight; 4],
     corridors: &[RiverCorridorConstraint],
 ) -> CorridorAdjustment {
-    let mode_weights = blended_corridor_mode_weights(region_samples);
+    let mode_weights = blended_corridor_mode_weights(params, field, structure);
     let policy = corridor_policy(params);
     let mut adjustment = CorridorAdjustment::default();
     let mut branch_responses = Vec::<CorridorBranchResponse>::new();
@@ -1054,61 +1051,59 @@ fn corridor_adjustment_for_column(
     adjustment
 }
 
-fn blended_corridor_mode_weights(region_samples: &[RegionSampleWeight; 4]) -> CorridorModeWeights {
-    let mut weights = CorridorModeWeights {
-        valley: 0.35,
-        ..CorridorModeWeights::default()
+fn blended_corridor_mode_weights(
+    params: BasisParameters,
+    field: AtlasCell,
+    structure: StructureBasisSample,
+) -> CorridorModeWeights {
+    let corridor_depth_signal = smootherstep01((params.corridor_depth / 8.0).clamp(0.0, 1.0));
+    let floodplain_scale_signal =
+        smootherstep01(((params.floodplain_width_scale - 1.0) / 0.9).clamp(0.0, 1.0));
+    let outlet_open_signal =
+        smootherstep01(((params.outlet_open_scale - 1.0) / 0.9).clamp(0.0, 1.0));
+    let wet_flatten_signal = smootherstep01((params.wet_flatten / 8.0).clamp(0.0, 1.0));
+    let basin_depth_signal = smootherstep01((params.basin_depth / 12.0).clamp(0.0, 1.0));
+    let coastal_signal = smootherstep01(
+        (field.coast_factor * 0.78
+            + inverse_unit(field.coast_distance) * 0.30
+            + inverse_unit(field.landness) * 0.18)
+            .clamp(0.0, 1.0),
+    );
+    let basin_signal = smootherstep01(
+        (field.basinness * 0.64
+            + field.lake_potential * 0.26
+            + basin_depth_signal * 0.18
+            + outlet_open_signal * 0.12
+            - field.riverine_factor * 0.08)
+            .clamp(0.0, 1.0),
+    );
+    let floodplain_signal = smootherstep01(
+        (field.wetness * 0.30
+            + field.riverine_factor * 0.28
+            + field.river_flow_potential * 0.18
+            + field.lake_potential * 0.10
+            + wet_flatten_signal * 0.16
+            + floodplain_scale_signal * 0.12
+            - field.aridity * 0.12
+            - structure.major_ridge_influence * 0.10)
+            .clamp(0.0, 1.0),
+    );
+    let valley_signal = smootherstep01(
+        (0.28
+            + corridor_depth_signal * 0.26
+            + field.slope * 0.18
+            + field.ruggedness * 0.12
+            + structure.ridge_shoulder_influence * 0.14
+            - floodplain_signal * 0.10)
+            .clamp(0.0, 1.0),
+    );
+
+    let weights = CorridorModeWeights {
+        valley: 0.35 + valley_signal * 0.85 + (1.0 - floodplain_signal) * 0.08,
+        floodplain: floodplain_signal * (0.75 + floodplain_scale_signal * 0.45),
+        basin_outlet: basin_signal * (0.68 + outlet_open_signal * 0.42),
+        coastal_exit: coastal_signal * (0.72 + outlet_open_signal * 0.40),
     };
-
-    for sample in region_samples {
-        if sample.weight <= f32::EPSILON {
-            continue;
-        }
-
-        let region = sample.cell;
-        weights.valley += sample.weight * 0.55;
-
-        if region.coastal_context != CoastalContext::Inland
-            || matches!(
-                region.terrain_form_family,
-                TerrainFormFamily::MarineShelf
-                    | TerrainFormFamily::BeachPlain
-                    | TerrainFormFamily::BarrierCoast
-                    | TerrainFormFamily::LagoonCoast
-                    | TerrainFormFamily::EstuaryLowland
-                    | TerrainFormFamily::Delta
-            )
-        {
-            weights.coastal_exit += sample.weight * 1.30;
-            continue;
-        }
-
-        if region.hydrology_context == HydrologyContext::LakeBasin
-            || matches!(region.terrain_form_family, TerrainFormFamily::Basin)
-            || matches!(
-                region.archetype,
-                RegionArchetype::TemperateBasin | RegionArchetype::DesertBasin
-            )
-        {
-            weights.basin_outlet += sample.weight * 1.20;
-        }
-
-        if matches!(
-            region.hydrology_context,
-            HydrologyContext::RiverCorridor | HydrologyContext::WetLowland
-        ) || matches!(
-            region.terrain_form_family,
-            TerrainFormFamily::Floodplain
-                | TerrainFormFamily::WetLowland
-                | TerrainFormFamily::AlluvialLowland
-                | TerrainFormFamily::BroadValley
-                | TerrainFormFamily::GlacialValley
-        ) {
-            weights.floodplain += sample.weight * 1.10;
-        } else {
-            weights.valley += sample.weight * 0.25;
-        }
-    }
 
     weights.normalized()
 }
@@ -1968,7 +1963,6 @@ mod tests {
         let realization =
             sample_chunk_realization_field(&realization_field, sample_world_x, sample_world_z);
         let params = basis_parameters_from_realization(realization);
-        let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
         let structure_sample =
             sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
         let base_before_corridor =
@@ -1979,7 +1973,6 @@ mod tests {
             structure_sample,
             local_x as f32 + 0.5,
             local_z as f32 + 0.5,
-            &region_samples,
             &corridor_window.corridors,
         );
 
@@ -2015,21 +2008,14 @@ mod tests {
             structure_sample.heading().0,
             structure_sample.heading().1
         );
-
-        for sample in region_samples {
-            if sample.weight <= f32::EPSILON {
-                continue;
-            }
-            println!(
-                "  region weight={:.3} archetype={:?} terrain={:?} hydro={:?} coastal={:?} family={:?}",
-                sample.weight,
-                sample.cell.archetype,
-                sample.cell.terrain_form_family,
-                sample.cell.hydrology_context,
-                sample.cell.coastal_context,
-                prototype_policy_family(sample.cell)
-            );
-        }
+        let mode_weights = blended_corridor_mode_weights(params, field, structure_sample);
+        println!(
+            "  corridor_mode valley={:.3} floodplain={:.3} basin={:.3} coastal={:.3}",
+            mode_weights.valley,
+            mode_weights.floodplain,
+            mode_weights.basin_outlet,
+            mode_weights.coastal_exit
+        );
     }
 
     #[derive(Debug, Clone, Copy)]

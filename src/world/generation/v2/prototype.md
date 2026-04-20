@@ -107,7 +107,7 @@ build_chunk_base_heightfield_prototype(
 - this keeps boundaries readable while avoiding abrupt "switch formula" behavior at atlas-cell or classified-region edges
 - current implementation note:
   - runtime prototype now samples `ChunkRealizationFieldPatch` per column and converts the resulting `RealizationSample` back into the shared basis parameter bundle before evaluating height and relief
-  - neighboring region-cell weights are still sampled, but only to derive corridor-mode policy weights rather than to provide the primary broad-shape parameter lattice
+  - corridor-mode policy weights are now also derived from atlas scalars plus realization/structure signals, so the prototype no longer re-samples neighboring classified region cells during its per-column broad-shape solve
 
 ## Launch Policy Families
 

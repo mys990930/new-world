@@ -112,7 +112,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
   - prototype now emits one `PrototypeColumn` per in-chunk column, using realization-field control samples plus corridor constraints to produce a deterministic broad landform scaffold
   - current implementation now samples atlas scalars continuously in block/world space, blends neighboring classified region context near atlas boundaries without chunk-wide family snapping, uses canonical atlas field assembly to avoid chunk-request drift, collapses repeated river-branch segment responses so long corridors do not stack into seam walls, and adds deterministic subchunk ripple/terrace variation so low-relief terrain reads more clearly in quarter-view
-  - direct classified-cell blending is no longer the primary control path; region samples remain only as corridor-mode policy hints while broad-shape parameters now come from the realization field
+  - direct classified-cell blending is no longer the primary control path; broad-shape parameters and corridor-mode policy weights now both come from realization-era continuous signals plus atlas/structure context
   - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, and canonical-region boundary step artifacts
   - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
