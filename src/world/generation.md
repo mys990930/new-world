@@ -11,7 +11,7 @@
 
 - define the public `generate_chunk(...)` contract for future V2 realization
 - assemble padded atlas field / skeleton / region / meso inputs for a chunk
-- keep the V2 stage split explicit: corridors, prototype, meso apply, smoothing, hydrology, voxelize
+- keep the V2 stage split explicit: realization field, corridors, prototype, meso apply, smoothing, hydrology, voxelize
 - preserve compile-time probe and LOD data shapes while runtime diagnostic behavior is intentionally disabled
 - keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns
 
@@ -23,6 +23,8 @@
   - mountain-range direction, ridge skeleton, drainage direction, river topology
 - `atlas region classification`
   - biome family, terrain-form family, hydrology context, region archetype
+- `generation realization field`
+  - continuous prototype-control parameters derived from classified region semantics plus nearby atlas context
 - `atlas meso guides`
   - several-chunk terrain accents such as local hill groups, escarpment bands, basins, terraces, or coastal breakup
 - `generation profile families`
@@ -106,6 +108,7 @@ generation::sample_chunk_surface_lod(
 - Atlas remains the owner of macro terrain direction, but V2 also requires explicit region classification before meso and before base heightfield solving.
 - Region classification should resolve stable biome and terrain-form archetypes from raw continuous fields plus skeleton context, instead of asking meso or material thresholds to decide primary local identity.
 - Climate regime should be treated as a derived long-pattern class, while seasonal biome state should stay a later runtime layer that changes cover/material expression without constantly reclassifying the region archetype.
+- Region classification should no longer feed prototype as a direct per-cell parameter switch. Generation should first derive a continuous realization field that carries flatness, relief, ridge, terrace, and wetness biases across atlas-cell boundaries.
 - River corridors should be defined before biome-aware base heightfield solving, so heightfield generation treats them as constraints rather than as late carve masks.
 - Meso should become a constrained local-accent layer inside those already-classified regions, not the primary biome owner.
 - In V2, headwaters should naturally emerge near mountain spines, passes, upland divides, and basin outlets rather than appearing as isolated wet pockets.
@@ -119,15 +122,16 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 1. Map the target chunk to the atlas neighborhood needed for raw fields, skeleton, and region classification.
 2. Generate or read the atlas raw-field window plus mountain/drainage skeleton window.
 3. Resolve or sample the matching region classification window.
-4. Generate or read river corridors, basin outlets, and downstream grade for the same footprint.
-5. Solve a biome-aware base heightfield from region archetype plus water-corridor constraints.
-6. Generate or read the matching meso guide window from region context and aligned meso regions.
-7. Apply meso deformation on top of the base heightfield.
-8. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
-9. Solve final hydrology and connected water surfaces from the pre-defined branch model.
-10. Resolve region/material ownership and topsoil / sediment / cover policy.
-11. Write block ids into `ChunkData`.
-12. Return the finished chunk without mutating any live world state.
+4. Build a continuous realization field over the same neighborhood so prototype does not sample raw atlas-cell archetype labels directly.
+5. Generate or read river corridors, basin outlets, and downstream grade for the same footprint.
+6. Solve a biome-aware base heightfield from realization-field control samples plus water-corridor constraints.
+7. Generate or read the matching meso guide window from region context and aligned meso regions.
+8. Apply meso deformation on top of the base heightfield.
+9. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
+10. Solve final hydrology and connected water surfaces from the pre-defined branch model.
+11. Resolve region/material ownership and topsoil / sediment / cover policy.
+12. Write block ids into `ChunkData`.
+13. Return the finished chunk without mutating any live world state.
 
 ## Probe Scope Notes
 
@@ -158,6 +162,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 - `status.md`: current V2 progress, retained modules, and removed legacy summary
 - `v2.md`: region-first generation scaffold
 - `v2/inputs.md`: atlas, skeleton, and region input assembly scaffold
+- `v2/realization_field.md`: continuous prototype-control field derived from semantic region classes
 - `v2/corridors.md`: river corridor and downstream-grade scaffold
 - `v2/prototype.md`: biome-aware base heightfield prototype scaffold
 - `v2/meso_apply.md`: meso application scaffold

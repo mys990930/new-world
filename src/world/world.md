@@ -240,4 +240,4 @@ NOT:
 - the old legacy V1 chunk generator has now been removed instead of being kept beside V2
 - the current top-level `world::generate_chunk(...)` path is an explicit TODO stub until V2 realization lands
 - the current `probe_chunk(...)`, `probe_column(...)`, and `sample_chunk_surface_lod(...)` surfaces are also compile-only TODO stubs
-- the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`
+- the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> realization field solve -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`

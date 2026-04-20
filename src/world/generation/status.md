@@ -30,7 +30,7 @@ The old V1 realization stack has been removed instead of kept alive in parallel.
 - `src/world/surface/*`
   - material, cover, and seasonal surface policy scaffolds
 - `src/world/generation/v2/*`
-  - V2 stage scaffolds for inputs, corridors, prototype, meso apply, smoothing, hydrology, and voxelization
+  - V2 stage scaffolds for inputs, realization field, corridors, prototype, meso apply, smoothing, hydrology, and voxelization
 - `src/world/generation/sampler.rs`
   - shared helper that gathers the padded atlas / structure / region / meso windows for a target chunk
   - current implementation now snaps neighboring chunks to a shared structure-sized atlas-context tile before padding and assembles raw atlas scalar cells from canonical region-owned field solves so the same `AtlasCoord` stays stable across chunk requests
@@ -83,7 +83,17 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - launch policy now allows strong hydrology context to override otherwise generic inland archetype resolution
   - archetype-to-meso, seasonal, and material policy still need locking
 
-### 4. River Corridor Solve
+### 4. Realization Field
+
+- status: `planned, not yet implemented`
+- owner: `v2/realization_field.md` now, planned `v2/realization_field.rs`
+- note:
+  - this stage will sit between discrete region classification and prototype height solving
+  - its job is to convert atlas-cell semantic classes plus nearby atlas context into a continuous prototype-control field, so the world no longer advertises atlas rectangles through piecewise-bilinear parameter blending
+  - the current prototype still samples neighboring classified region cells directly and blends their parameter bundles at runtime; that direct cell-to-heightfield coupling is now treated as the main known source of large-scale atlas-grid imprint
+  - the realization-field stage should therefore own sub-atlas control-lattice sampling, permeability/continuity rules, and world-space control-field sampling before prototype begins its broad-shape solve
+
+### 5. River Corridor Solve
 
 - status: `implemented as initial standalone solve`
 - owner: `v2/corridors.rs`
@@ -94,7 +104,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - the stage contract remains the same: corridor solve consumes structure + region context and emits prototype-facing branch constraints before base heightfield solving
   - scaffold assembly now carries corridor output forward, and the prototype boundary accepts it explicitly
 
-### 5. Biome-Aware Base Heightfield
+### 6. Biome-Aware Base Heightfield
 
 - status: `implemented as initial broad-shape solve`
 - owner: `v2/prototype.rs`
@@ -102,10 +112,11 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
   - prototype now emits one `PrototypeColumn` per in-chunk column, using region/archetype context plus corridor constraints to produce a deterministic broad landform scaffold
   - current implementation now samples atlas scalars continuously in block/world space, blends neighboring classified region context near atlas boundaries without chunk-wide family snapping, uses canonical atlas field assembly to avoid chunk-request drift, collapses repeated river-branch segment responses so long corridors do not stack into seam walls, and adds deterministic subchunk ripple/terrace variation so low-relief terrain reads more clearly in quarter-view
+  - this direct classified-cell blending is now explicitly temporary: once the realization-field stage lands, prototype should consume continuous realization samples instead of using atlas-cell region labels as its first control surface
   - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, and canonical-region boundary step artifacts
   - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
-### 6. Meso Solve
+### 7. Meso Solve
 
 - status: `implemented as initial Wave 1 chunk deformation pass`
 - owner:
@@ -123,27 +134,27 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 
-### 7. Local Detail / Smoothing
+### 8. Local Detail / Smoothing
 
 - status: `scaffold only`
 - owner: `v2/smoothing.rs`
 
-### 8. Final Hydrology
+### 9. Final Hydrology
 
 - status: `scaffold only`
 - owner: `v2/hydrology.rs`
 
-### 9. Region / Material Policy
+### 10. Region / Material Policy
 
 - status: `definitions exist, not wired into generation`
 - owner: `src/world/surface/material.rs`, `src/world/surface/cover.rs`
 
-### 10. Seasonal Biome State
+### 11. Seasonal Biome State
 
 - status: `definitions exist, not wired into generation`
 - owner: `src/world/surface/seasonal.rs`
 
-### 11. Voxelization
+### 12. Voxelization
 
 - status: `scaffold only`
 - owner: `v2/voxelize.rs`
@@ -165,12 +176,13 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 2. lock launch material policy per archetype
 3. lock launch seasonal biome-state policy
 4. document launch fallback behavior for extended and deferred archetypes
-5. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online
-6. tune and tighten the Wave 1 meso operators in `v2/meso_apply.rs` once the authoritative matrix is published
-7. implement smoothing/local refinement in `v2/smoothing.rs`
-8. implement connected hydrology in `v2/hydrology.rs`
-9. implement final material + block voxelization in `v2/voxelize.rs`
-10. replace the compile-only generation stubs with real V2 behavior
+5. implement the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles
+6. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online, then retarget prototype to the realization field instead of direct region-cell blending
+7. tune and tighten the Wave 1 meso operators in `v2/meso_apply.rs` once the authoritative matrix is published
+8. implement smoothing/local refinement in `v2/smoothing.rs`
+9. implement connected hydrology in `v2/hydrology.rs`
+10. implement final material + block voxelization in `v2/voxelize.rs`
+11. replace the compile-only generation stubs with real V2 behavior
 
 ## Short Summary
 

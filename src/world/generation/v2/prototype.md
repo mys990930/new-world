@@ -3,14 +3,14 @@
 ## Role
 
 - own the biome-aware base heightfield solve before meso deformation
-- turn region archetype plus corridor constraints into the broad landform that later stages refine
+- turn realization-field control samples plus corridor constraints into the broad landform that later stages refine
 - remain the authoritative design contract for the base-heightfield solve stage
 
 ## Responsibilities
 
-- convert `RegionArchetype`, atlas scalar fields, nearby mountain structure, and `ChunkCorridorWindow` into a deterministic broad-shape prototype
+- convert realization-field control samples, atlas scalar fields, nearby mountain structure, and `ChunkCorridorWindow` into a deterministic broad-shape prototype
 - sample atlas scalar inputs continuously in world/block space with smoothed fractional interpolation instead of stepping the whole chunk on atlas-cell boundaries
-- blend local region-family context near atlas boundaries by first blending shared basis parameters rather than directly averaging unrelated per-family outputs
+- consume a continuous realization field that already carries cross-cell parameter continuity, instead of treating atlas-cell semantic labels as the first prototype control surface
 - derive ridge, coast, basin, and corridor influence as continuous world-space basis terms that can cross chunk borders naturally
 - preserve valley seats, floodplain openings, basin outlets, and coastal exits already established by corridor solve
 - soft-blend repeated corridor segment responses per river branch so adjacent segments do not stack into artificial trench walls or hand off with sharp seams
@@ -32,6 +32,7 @@
 
 - `ChunkCoord`
 - `ChunkGenerationV2Inputs`
+- `ChunkRealizationFieldPatch` (planned)
 - `ChunkCorridorWindow`
 
 ## Outputs
@@ -73,7 +74,7 @@ build_chunk_base_heightfield_prototype(
 - `base_height` is expressed as an integer-valued world-space block Y surface, not in atlas-cell units
 - `relief_budget` is a nonnegative budget in block units describing how much local up/down shape can still be introduced later without erasing the broad form
 - corridor segment endpoints and centers may lie outside the strict chunk bounds, but the influence on prototype columns is still evaluated in chunk-local block space
-- atlas scalar sampling is evaluated from block-center world coordinates through a smoothed fractional atlas lookup, while region identity is blended from the neighboring classified atlas cells around the same sample point
+- atlas scalar sampling is evaluated from block-center world coordinates through a smoothed fractional atlas lookup, while prototype-control parameters should come from a generation-side realization field sampled in world space rather than directly from neighboring classified atlas cells
 - nearby mountain-chain segments are sampled into chunk-local ridge basis signals from world-space distance and shoulder falloff rather than by hard atlas-cell ownership
 
 ## Prototype Semantics
@@ -91,7 +92,7 @@ build_chunk_base_heightfield_prototype(
 ## Solve Model
 
 - the prototype now treats height as a shared continuous basis solve, not as a per-family standalone formula
-- each sampled region family contributes a weighted parameter set describing:
+- the realization field should provide a continuous parameter vector per sample describing:
   - macro uplift bias
   - coastal shelf / apron / cliff response
   - ridge crest / shoulder lift
@@ -99,11 +100,12 @@ build_chunk_base_heightfield_prototype(
   - inland / aridity / wetness bias
   - low-frequency, structure-aligned, terrace, and dune amplitudes
   - corridor depth / width / outlet-open behavior
-- the prototype first blends those parameters from neighboring region samples around the current world-space point
-- concrete archetype modules may further nudge those family defaults through optional archetype-owned prototype hints exported from `atlas/region/archetypes/*`
+- archetype modules may still contribute source hints through optional archetype-owned prototype hints exported from `atlas/region/archetypes/*`, but those hints should first be diffused into the realization field instead of being applied as direct atlas-cell parameter switches at prototype sample time
 - the final broad height is then evaluated once from common basis terms such as macro elevation, coastal response, ridge structure response, basin response, seed-independent deterministic detail, and corridor response
-- deterministic detail carriers should stay stable across world seeds, while region, atlas, and corridor context only modulate where and how strongly those carriers are expressed
+- deterministic detail carriers should stay stable across world seeds, while realization, atlas, and corridor context only modulate where and how strongly those carriers are expressed
 - this keeps boundaries readable while avoiding abrupt "switch formula" behavior at atlas-cell or classified-region edges
+- current implementation note:
+  - until `v2/realization_field.rs` exists, runtime prototype still directly blends neighboring classified region cells as a temporary approximation
 
 ## Launch Policy Families
 
@@ -193,11 +195,11 @@ build_chunk_base_heightfield_prototype(
 
 ## Solve Pipeline
 
-1. sample each column's atlas scalar inputs continuously in world/block space and gather the neighboring classified region cells around that same sample point
-2. blend nearby region-family context into a shared parameter set so atlas-cell boundaries transition gradually instead of introducing abrupt base-height steps
+1. sample each column's atlas scalar inputs continuously in world/block space
+2. sample the realization field in world space to obtain a continuous prototype-control vector that can cross atlas-cell boundaries naturally
 3. sample nearby mountain-chain structure into continuous ridge-core and ridge-shoulder basis signals in world space
 4. read the corridor window and convert each branch into continuous valley, floodplain, and outlet-openness signals with chunk-external support
-5. evaluate the shared basis solve once from macro elevation, coast, ridge, basin, and deterministic detail terms
+5. evaluate the shared basis solve once from macro elevation, realization-field control values, coast, ridge, basin, and deterministic detail terms
 6. softly blend repeated river-path segment responses by branch so a long river does not over-carve or abruptly hand off where adjacent segments overlap the same column
 7. apply corridor response as a pre-meso constraint on top of the shared basis solve while preserving ridge shoulders where appropriate
 8. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
@@ -223,7 +225,7 @@ build_chunk_base_heightfield_prototype(
 
 ## Boundary And Continuity Rules
 
-- region boundaries should blend shared solver parameters, not switch to a different closed-form height equation
+- region boundaries should not act as the direct prototype control lattice; continuity should come from the upstream realization field, not only from local 2x2 region-cell blending at the point of prototype evaluation
 - ridge and corridor influence should be evaluated in world space from nearby segment geometry, even when the segment midpoint lies outside the strict chunk footprint
 - atlas scalar interpolation should use smoothed fractions so the same cell neighborhood does not create a visible terrace merely because the sample crossed an atlas-cell line
 - any deterministic micro-relief kept in prototype should remain subordinate to the broad basis terms, should never depend on chunk generation order, and should keep its carrier pattern stable across world seeds

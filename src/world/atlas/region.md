@@ -19,6 +19,7 @@
 
 - final river-channel carve or water voxel fill
 - final chunk-local heightfield solve
+- generation-side realization-field diffusion or relaxation
 - meso feature generation
 - final block placement
 - preview-only debug biome palettes
@@ -170,6 +171,7 @@ region_archetype_prototype_hint(
 - the next planning step is to lock archetype-to-meso allowance and surface policy from that candidate pool
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
 - future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion
+- the next generation-side step after classification is now a separate realization-field stage that turns those discrete semantic classes into continuous prototype-control parameters without exposing atlas-cell rectangles directly in the final terrain
 
 ## Submodules
 

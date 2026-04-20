@@ -8,12 +8,14 @@
 - The meso layer is derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
 - Before meso chooses local accents, atlas should also own a deterministic region-classification layer that resolves biome and terrain-form archetypes from raw fields plus skeleton context.
 - Atlas therefore targets a four-part guide stack: raw scalar fields, directional skeleton, region classification, and meso terrain guides.
+- The generation side should then derive a separate continuous realization field from region classification plus nearby atlas context before prototype height solving, rather than treating atlas-cell archetype labels as direct chunk-heightfield parameters.
 
 ## Architecture Direction
 
 - atlas raw fields stay continuous and deterministic
 - skeleton owns mountain, divide, drainage, and river-corridor direction
 - region classification resolves stable biome and terrain-form archetypes before chunk-local heightfield solving
+- generation should derive a continuous realization field from those resolved region semantics plus nearby atlas context before prototype samples turn them into block-space height
 - meso is constrained by that classified region and only adds several-chunk local accents afterward
 
 ## 역할
