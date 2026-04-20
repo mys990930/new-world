@@ -517,7 +517,7 @@ fn preview_chunk_coords_for_bounds(
 struct PrototypePreviewCell {
     min_x: i32,
     min_z: i32,
-    top_y: i32,
+    top_y: f32,
     base_height: f32,
     relief_budget: f32,
 }
@@ -551,10 +551,10 @@ impl PrototypePreviewGrid {
         self.index_of(world_x, world_z).map(|index| self.cells[index])
     }
 
-    fn top_y_or_base(&self, world_x: i32, world_z: i32) -> i32 {
+    fn top_y_or_base(&self, world_x: i32, world_z: i32) -> f32 {
         self.cell(world_x, world_z)
-            .map(|cell| cell.top_y.max(self.base_y + 1))
-            .unwrap_or(self.base_y)
+            .map(|cell| cell.top_y.max(self.base_y as f32 + 0.01))
+            .unwrap_or(self.base_y as f32)
     }
 }
 
@@ -604,7 +604,7 @@ fn build_prototype_preview_grid(
         PrototypePreviewCell {
             min_x: origin_x,
             min_z: origin_z,
-            top_y: WORLD_FLOOR_Y,
+            top_y: WORLD_FLOOR_Y as f32,
             base_height: WORLD_FLOOR_Y as f32,
             relief_budget: 0.0,
         };
@@ -648,8 +648,8 @@ fn build_prototype_preview_grid(
                 let global_x = chunk_col * CHUNK_EDGE
                     + usize::try_from(local_x).map_err(|_| cli_error("invalid prototype preview local x"))?;
                 let index = row_offset + global_x;
-                let top_y = column.base_height.ceil() as i32;
-                base_y = base_y.min(top_y);
+                let top_y = column.base_height;
+                base_y = base_y.min(top_y.floor() as i32);
                 cells[index] = PrototypePreviewCell {
                     min_x: chunk_origin_x + local_x,
                     min_z: chunk_origin_z + local_z,
@@ -694,16 +694,16 @@ fn build_prototype_heightfield_mesh(
             let Some(cell) = grid.cell(world_x, world_z) else {
                 continue;
             };
-            let top_y = cell.top_y.max(grid.base_y + 1);
-            if top_y <= grid.base_y {
+            let top_y = cell.top_y.max(grid.base_y as f32 + 0.01);
+            if top_y <= grid.base_y as f32 {
                 continue;
             }
 
             let color = prototype_column_color(block_def.tint_as_linear_rgba(), cell, grid.base_y);
-            append_box_face(
+            append_box_face_f32(
                 &mut mesh,
                 cell.min_x,
-                grid.base_y,
+                grid.base_y as f32,
                 cell.min_z,
                 cell.min_x + 1,
                 top_y,
@@ -717,8 +717,8 @@ fn build_prototype_heightfield_mesh(
             );
 
             let left_top = grid.top_y_or_base(world_x - 1, world_z);
-            if top_y > left_top {
-                append_box_face(
+            if top_y > left_top + 0.001 {
+                append_box_face_f32(
                     &mut mesh,
                     cell.min_x,
                     left_top,
@@ -736,8 +736,8 @@ fn build_prototype_heightfield_mesh(
             }
 
             let right_top = grid.top_y_or_base(world_x + 1, world_z);
-            if top_y > right_top {
-                append_box_face(
+            if top_y > right_top + 0.001 {
+                append_box_face_f32(
                     &mut mesh,
                     cell.min_x,
                     right_top,
@@ -755,8 +755,8 @@ fn build_prototype_heightfield_mesh(
             }
 
             let back_top = grid.top_y_or_base(world_x, world_z - 1);
-            if top_y > back_top {
-                append_box_face(
+            if top_y > back_top + 0.001 {
+                append_box_face_f32(
                     &mut mesh,
                     cell.min_x,
                     back_top,
@@ -774,8 +774,8 @@ fn build_prototype_heightfield_mesh(
             }
 
             let front_top = grid.top_y_or_base(world_x, world_z + 1);
-            if top_y > front_top {
-                append_box_face(
+            if top_y > front_top + 0.001 {
+                append_box_face_f32(
                     &mut mesh,
                     cell.min_x,
                     front_top,
@@ -1101,6 +1101,55 @@ fn append_box_face(
     ]);
 }
 
+fn append_box_face_f32(
+    mesh: &mut RenderCpuMesh,
+    min_x: i32,
+    min_y: f32,
+    min_z: i32,
+    max_x: i32,
+    max_y: f32,
+    max_z: i32,
+    face: BlockFace,
+    color: [f32; 4],
+    texture_layer: u32,
+    material_kind: u32,
+    y_origin: i32,
+    y_scale: f32,
+) {
+    if min_y >= max_y || min_x >= max_x || min_z >= max_z {
+        return;
+    }
+
+    let positions = scaled_face_positions_f32(
+        min_x, min_y, min_z, max_x, max_y, max_z, face, y_origin, y_scale,
+    );
+    let base_index = mesh.vertices.len() as u32;
+    let normal = face_normal(face);
+    let uv = face_uvs();
+    extend_render_bounds(&mut mesh.bounds, &positions);
+
+    for (position, uv) in positions.into_iter().zip(uv) {
+        mesh.vertices.push(new_world::renderer::MeshVertex {
+            position,
+            color,
+            normal,
+            uv,
+            texture_layer,
+            material_kind,
+            contour_edges: 0,
+        });
+    }
+
+    mesh.indices.extend_from_slice(&[
+        base_index,
+        base_index + 1,
+        base_index + 2,
+        base_index,
+        base_index + 2,
+        base_index + 3,
+    ]);
+}
+
 fn face_uvs() -> [[f32; 2]; 4] {
     [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
 }
@@ -1117,6 +1166,61 @@ fn scaled_face_positions(
     y_scale: f32,
 ) -> [[f32; 3]; 4] {
     let transform_y = |y: i32| y_origin as f32 + (y - y_origin) as f32 * y_scale;
+    let min = [min_x as f32, transform_y(min_y), min_z as f32];
+    let max = [max_x as f32, transform_y(max_y), max_z as f32];
+
+    match face {
+        BlockFace::NegX => [
+            [min[0], min[1], min[2]],
+            [min[0], min[1], max[2]],
+            [min[0], max[1], max[2]],
+            [min[0], max[1], min[2]],
+        ],
+        BlockFace::PosX => [
+            [max[0], min[1], max[2]],
+            [max[0], min[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], max[1], max[2]],
+        ],
+        BlockFace::NegY => [
+            [min[0], min[1], max[2]],
+            [max[0], min[1], max[2]],
+            [max[0], min[1], min[2]],
+            [min[0], min[1], min[2]],
+        ],
+        BlockFace::PosY => [
+            [min[0], max[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], max[1], max[2]],
+            [min[0], max[1], max[2]],
+        ],
+        BlockFace::NegZ => [
+            [max[0], min[1], min[2]],
+            [min[0], min[1], min[2]],
+            [min[0], max[1], min[2]],
+            [max[0], max[1], min[2]],
+        ],
+        BlockFace::PosZ => [
+            [min[0], min[1], max[2]],
+            [max[0], min[1], max[2]],
+            [max[0], max[1], max[2]],
+            [min[0], max[1], max[2]],
+        ],
+    }
+}
+
+fn scaled_face_positions_f32(
+    min_x: i32,
+    min_y: f32,
+    min_z: i32,
+    max_x: i32,
+    max_y: f32,
+    max_z: i32,
+    face: BlockFace,
+    y_origin: i32,
+    y_scale: f32,
+) -> [[f32; 3]; 4] {
+    let transform_y = |y: f32| y_origin as f32 + (y - y_origin as f32) * y_scale;
     let min = [min_x as f32, transform_y(min_y), min_z as f32];
     let max = [max_x as f32, transform_y(max_y), max_z as f32];
 

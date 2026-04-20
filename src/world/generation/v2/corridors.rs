@@ -9,6 +9,7 @@ use super::inputs::ChunkGenerationV2Inputs;
 use super::sample_atlas_fields_fractional;
 
 const ATLAS_CELL_BLOCK_SPAN: f32 = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32) as f32;
+const MAX_PROTOTYPE_CORRIDOR_WIDTH_SCALE: f32 = 2.6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RiverCorridorConstraint {
@@ -49,12 +50,6 @@ pub fn build_chunk_corridor_window(
 
     for segment in inputs.atlas_structure.drainage().segments() {
         let segment_world = segment_world_segment(*segment);
-        let selection_radius = corridor_selection_radius(*segment);
-
-        if !expanded_segment_bounds_overlap_chunk_rect(segment_world, selection_radius, chunk_rect) {
-            continue;
-        }
-
         let midpoint = midpoint(segment_world.start, segment_world.end);
         let sampled_field = sample_atlas_fields_fractional(&inputs.atlas_fields, midpoint.0, midpoint.1);
         let sampled_region = sample_region_cell(
@@ -65,16 +60,28 @@ pub fn build_chunk_corridor_window(
             sample_atlas_fields_fractional(&inputs.atlas_fields, segment_world.start.0, segment_world.start.1);
         let end_field =
             sample_atlas_fields_fractional(&inputs.atlas_fields, segment_world.end.0, segment_world.end.1);
+        let half_width_blocks = corridor_half_width_blocks(*segment, sampled_field, sampled_region);
+        let selection_radius = corridor_selection_radius(half_width_blocks);
+
+        if !expanded_segment_bounds_overlap_chunk_rect(segment_world, selection_radius, chunk_rect) {
+            continue;
+        }
+
+        let downstream_grade_per_block = corridor_downstream_grade_per_block(
+            *segment,
+            sampled_field,
+            sampled_region,
+            start_field,
+            end_field,
+        );
 
         corridors.push(build_corridor_constraint(
             *segment,
             chunk_origin_x,
             chunk_origin_z,
             segment_world,
-            sampled_field,
-            sampled_region,
-            start_field,
-            end_field,
+            half_width_blocks,
+            downstream_grade_per_block,
         ));
     }
 
@@ -124,20 +131,10 @@ fn build_corridor_constraint(
     chunk_origin_x: i32,
     chunk_origin_z: i32,
     segment_world: SegmentWorldLine,
-    sampled_field: AtlasCell,
-    sampled_region: RegionClassCell,
-    start_field: AtlasCell,
-    end_field: AtlasCell,
+    half_width_blocks: f32,
+    downstream_grade_per_block: f32,
 ) -> RiverCorridorConstraint {
     let midpoint = midpoint(segment_world.start, segment_world.end);
-    let half_width_blocks = corridor_half_width_blocks(segment, sampled_field, sampled_region);
-    let downstream_grade_per_block = corridor_downstream_grade_per_block(
-        segment,
-        sampled_field,
-        sampled_region,
-        start_field,
-        end_field,
-    );
 
     RiverCorridorConstraint {
         river_id: segment.river_id.0,
@@ -154,9 +151,10 @@ fn build_corridor_constraint(
     }
 }
 
-fn corridor_selection_radius(segment: RiverPathSegment) -> f32 {
-    let base = segment.bankfull_width_cells.max(0.35) * ATLAS_CELL_BLOCK_SPAN * 0.28;
-    base + CHUNK_EDGE_I32 as f32 * 4.0 + 32.0
+fn corridor_selection_radius(half_width_blocks: f32) -> f32 {
+    half_width_blocks.max(16.0) * MAX_PROTOTYPE_CORRIDOR_WIDTH_SCALE
+        + CHUNK_EDGE_I32 as f32 * 4.0
+        + 32.0
 }
 
 fn corridor_half_width_blocks(

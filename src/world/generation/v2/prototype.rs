@@ -734,6 +734,8 @@ fn sample_structure_basis(
 ) -> StructureBasisSample {
     let point = (world_x, world_z);
     let mut sample = StructureBasisSample::default();
+    let mut heading_accum_x = 0.0_f32;
+    let mut heading_accum_z = 0.0_f32;
 
     for segment in structure.mountain_chains().segments() {
         let world_segment = mountain_segment_world_segment(*segment);
@@ -770,9 +772,29 @@ fn sample_structure_basis(
 
         if segment_strength > sample.strongest_segment {
             sample.strongest_segment = segment_strength;
-            sample.heading_x = projection.tangent_x;
-            sample.heading_z = projection.tangent_z;
         }
+
+        if segment_strength > f32::EPSILON {
+            let mut tangent_x = projection.tangent_x;
+            let mut tangent_z = projection.tangent_z;
+            let accum_len_sq = heading_accum_x * heading_accum_x + heading_accum_z * heading_accum_z;
+            if accum_len_sq > f32::EPSILON {
+                let dot = tangent_x * heading_accum_x + tangent_z * heading_accum_z;
+                if dot < 0.0 {
+                    tangent_x = -tangent_x;
+                    tangent_z = -tangent_z;
+                }
+            }
+            heading_accum_x += tangent_x * segment_strength;
+            heading_accum_z += tangent_z * segment_strength;
+        }
+    }
+
+    let heading_len_sq = heading_accum_x * heading_accum_x + heading_accum_z * heading_accum_z;
+    if heading_len_sq > f32::EPSILON {
+        let inv_heading_len = heading_len_sq.sqrt().recip();
+        sample.heading_x = heading_accum_x * inv_heading_len;
+        sample.heading_z = heading_accum_z * inv_heading_len;
     }
 
     sample
@@ -882,8 +904,8 @@ fn detail_basis(
         + mid_noise * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
         + terrace_wave * params.terrace_amp * terrace_gate
         + (flat_wave * (1.10 + params.terrace_amp * 0.20)
-            + flat_ripple * 0.72
-            + readability_step * 1.35)
+            + flat_ripple * 0.84
+            + readability_step * 1.46)
             * flat_readability
         + dune_wave * params.dune_amp * (0.55 + field.aridity * 0.45);
 
@@ -1515,6 +1537,43 @@ mod tests {
         assert!(a >= -1.0 && a <= 1.0);
         assert!(terraced >= -1.0 && terraced <= 1.0);
         assert_ne!(a.to_bits(), c.to_bits());
+    }
+
+    #[test]
+    fn horizontal_boundary_band_near_neg56_pos93_stays_below_large_step_threshold() {
+        let meta = WorldMeta::new(42);
+        let min_chunk_x = -66;
+        let max_chunk_x = -46;
+        let min_boundary_chunk_z = 84;
+        let max_boundary_chunk_z = 103;
+        let min_world_x = min_chunk_x * CHUNK_EDGE_I32;
+        let max_world_x = (max_chunk_x + 1) * CHUNK_EDGE_I32 - 1;
+        let mut cache = std::collections::HashMap::new();
+        let mut strongest_delta = 0.0_f32;
+        let mut strongest_world_x = min_world_x;
+        let mut strongest_world_z = min_boundary_chunk_z * CHUNK_EDGE_I32;
+
+        for boundary_chunk_z in min_boundary_chunk_z..=max_boundary_chunk_z {
+            let world_z = boundary_chunk_z * CHUNK_EDGE_I32;
+            for world_x in min_world_x..=max_world_x {
+                let back = sampled_world_height(world_x, world_z - 1, &meta, &mut cache);
+                let front = sampled_world_height(world_x, world_z, &meta, &mut cache);
+                let delta = (front - back).abs();
+                if delta > strongest_delta {
+                    strongest_delta = delta;
+                    strongest_world_x = world_x;
+                    strongest_world_z = world_z;
+                }
+            }
+        }
+
+        assert!(
+            strongest_delta <= 1.0,
+            "horizontal boundary band near cx=-56 cz=93 still has a large step of {:.3} at world ({}, {})",
+            strongest_delta,
+            strongest_world_x,
+            strongest_world_z
+        );
     }
 
     #[test]

@@ -144,7 +144,8 @@ The initial implementation now exists in code and keeps this stage boundary:
 
 - an initial deterministic solve now projects nearby drainage segments into a bounded per-chunk corridor set
 - the current solver keeps every segment whose expanded world-space bounds overlap the chunk prototype margin instead of truncating to a tiny top-N subset
+- segment selection now uses a conservative prototype-support radius derived from the carried corridor half-width, so neighboring chunks keep the same branch available while the broad corridor envelope can still influence edge columns
 - corridor scalar support now rides on canonical atlas field assembly from `sampler`, so the same branch no longer widens or steepens just because a neighboring chunk requested a different temporary raw-field window
 - corridor width and downstream-grade signals are now intrinsic to the carried segment, so neighboring chunks that see the same branch keep the same broad water-envelope interpretation
 - prototype now consumes corridor geometry as segment endpoints with circular endcaps rather than treating every corridor as a single radial point influence
-- prototype consumption is still not wired, so corridor solve currently exists as a standalone V2 builder rather than an end-to-end realization step
+- prototype consumption is now wired through the base-heightfield solve, so corridor continuity issues should be debugged at the shared branch/window boundary rather than at a missing integration seam
