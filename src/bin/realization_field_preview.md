@@ -13,7 +13,7 @@
 - `--chunk-x` / `--chunk-z` aliases for direct chunk targeting
 - horizontal chunk `--radius`
 - `--blocks-per-pixel <u32>` sample scale
-- `--mode <name>`
+- `--mode <composite|biome|archetype|flatness|relief|uplift|wetness|ridge|terrace|corridor>`
 - output PNG path
 
 ## Outputs
@@ -39,6 +39,10 @@
 
 - `composite`
   - default broad-shape visualization combining uplift, flatness, wetness, ridge, terrace, and corridor influence
+- `biome`
+  - renders the dominant `PreviewSample.region` with the same biome-first semantic palette used by `region_topdown_preview`, including coastal / hydrology / terrain / relief-elevation shading
+- `archetype`
+  - starts from the same dominant-region semantic palette and adds archetype-family accents so realization windows can be compared against launch-region identity without a separate atlas pass
 - `flatness`
 - `relief`
 - `uplift`
@@ -60,6 +64,7 @@
 
 - the current binary now uses the public realization-field API exposed from `world::generation`
 - sampled biome / archetype / terrain-form counts still come from region classification on purpose, because realization field diffuses parameters rather than semantic ids
+- `biome` / `archetype` also intentionally read the already-sampled dominant `PreviewSample.region` rather than re-running a separate region preview pipeline
 - channel views are proxies over the current `RealizationSample` fields:
   - `wetness` visualizes `wet_flatten`
   - `corridor` visualizes corridor susceptibility / policy channels, not final corridor geometry or hydrology carve

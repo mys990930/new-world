@@ -11,11 +11,11 @@ use image::{Rgb, RgbImage};
 
 use new_world::world::atlas::region_archetype_prototype_hint;
 use new_world::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, CHUNK_EDGE_I32, ChunkCoord,
-    ChunkGenerationV2Scaffold, CoastalContext, ElevationBand, HydrologyContext, RegionClassCell,
-    RegionClassMap, RegionClassSample, RealizationSample, ReliefClass, RiverPathKind,
-    TerrainFormFamily, WorldMeta, build_chunk_v2_scaffold, sample_chunk_realization_field,
-    sample_region_classes,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, BiomeFamily, CHUNK_EDGE_I32, ChunkCoord,
+    ChunkGenerationV2Scaffold, CoastalContext, ElevationBand, HydrologyContext, RegionArchetype,
+    RegionClassCell, RegionClassMap, RegionClassSample, RealizationSample, ReliefClass,
+    RiverPathKind, TerrainFormFamily, WorldMeta, build_chunk_v2_scaffold,
+    sample_chunk_realization_field, sample_region_classes,
 };
 
 const DEFAULT_CENTER_X: i32 = 0;
@@ -143,6 +143,8 @@ impl PreviewWindow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreviewMode {
     Composite,
+    Biome,
+    Archetype,
     Flatness,
     Relief,
     Uplift,
@@ -156,6 +158,8 @@ impl PreviewMode {
     fn parse(value: &str) -> Option<Self> {
         match canonical_key(value).as_str() {
             "composite" => Some(Self::Composite),
+            "biome" => Some(Self::Biome),
+            "archetype" => Some(Self::Archetype),
             "flatness" => Some(Self::Flatness),
             "relief" => Some(Self::Relief),
             "uplift" => Some(Self::Uplift),
@@ -170,6 +174,8 @@ impl PreviewMode {
     fn as_str(self) -> &'static str {
         match self {
             Self::Composite => "composite",
+            Self::Biome => "biome",
+            Self::Archetype => "archetype",
             Self::Flatness => "flatness",
             Self::Relief => "relief",
             Self::Uplift => "uplift",
@@ -366,7 +372,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let value = parse_required::<String>(&mut args, "mode")?;
                 mode = PreviewMode::parse(&value).ok_or_else(|| {
                     cli_error(format!(
-                        "invalid mode: {value} (expected one of: composite, flatness, relief, uplift, wetness, ridge, terrace, corridor)"
+                        "invalid mode: {value} (expected one of: composite, biome, archetype, flatness, relief, uplift, wetness, ridge, terrace, corridor)"
                     ))
                 })?;
             }
@@ -692,6 +698,8 @@ where
 fn color_for_sample(sample: PreviewSample, mode: PreviewMode) -> [u8; 3] {
     match mode {
         PreviewMode::Composite => composite_color(sample),
+        PreviewMode::Biome => biome_semantic_color(sample.region),
+        PreviewMode::Archetype => archetype_semantic_color(sample.region),
         PreviewMode::Flatness => ramp_color(
             sample.flatness,
             [70, 74, 86],
@@ -766,6 +774,225 @@ fn ramp_color(value: f32, low: [u8; 3], mid: [u8; 3], high: [u8; 3]) -> [u8; 3] 
         blend(low, mid, value * 2.0)
     } else {
         blend(mid, high, (value - 0.5) * 2.0)
+    }
+}
+
+fn biome_semantic_color(region: RegionClassSample) -> [u8; 3] {
+    let mut color = biome_base_color(region.biome_family);
+    color = blend(
+        color,
+        coastal_tint(region.coastal_context),
+        coastal_tint_strength(region.coastal_context),
+    );
+    color = blend(
+        color,
+        hydrology_tint(region.hydrology_context),
+        hydrology_tint_strength(region.hydrology_context),
+    );
+
+    if let Some((accent, strength)) = terrain_accent(region.terrain_form_family) {
+        color = blend(color, accent, strength);
+    }
+
+    let relief_factor = relief_brightness(region.relief_class);
+    let elevation_factor = elevation_brightness(region.elevation_band);
+    scale(color, relief_factor * elevation_factor)
+}
+
+fn archetype_semantic_color(region: RegionClassSample) -> [u8; 3] {
+    let base = biome_semantic_color(region);
+    let (accent, strength) = archetype_tint(region.archetype);
+    blend(base, accent, strength)
+}
+
+fn biome_base_color(biome: BiomeFamily) -> [u8; 3] {
+    match biome {
+        BiomeFamily::Oceanic => [44, 92, 160],
+        BiomeFamily::RockyCoast => [98, 110, 126],
+        BiomeFamily::SandyCoast => [216, 196, 132],
+        BiomeFamily::EstuarineCoast => [112, 152, 140],
+        BiomeFamily::LagoonCoast => [116, 182, 170],
+        BiomeFamily::Mangrove => [62, 116, 86],
+        BiomeFamily::Marsh => [124, 136, 72],
+        BiomeFamily::Swamp => [76, 102, 70],
+        BiomeFamily::FloodedForest => [60, 112, 96],
+        BiomeFamily::Desert => [216, 176, 104],
+        BiomeFamily::SemiDesert => [194, 160, 104],
+        BiomeFamily::Steppe => [172, 154, 94],
+        BiomeFamily::DryShrubland => [140, 136, 92],
+        BiomeFamily::MediterraneanShrubland => [124, 146, 82],
+        BiomeFamily::TemperateBroadleafForest => [88, 148, 82],
+        BiomeFamily::TemperateMixedForest => [78, 132, 86],
+        BiomeFamily::TemperateRainforest => [72, 132, 94],
+        BiomeFamily::BorealForest => [70, 116, 98],
+        BiomeFamily::Savanna => [166, 172, 82],
+        BiomeFamily::TropicalDryForest => [120, 126, 74],
+        BiomeFamily::TropicalRainforest => [58, 150, 82],
+        BiomeFamily::MonsoonForest => [58, 140, 92],
+        BiomeFamily::SubalpineWoodland => [84, 120, 98],
+        BiomeFamily::AlpineMeadow => [114, 156, 112],
+        BiomeFamily::Tundra => [148, 152, 118],
+        BiomeFamily::PolarBarrens => [168, 170, 176],
+        BiomeFamily::PolarIce => [232, 240, 246],
+        BiomeFamily::TemperateGrassland => [120, 170, 92],
+    }
+}
+
+fn coastal_tint(context: CoastalContext) -> [u8; 3] {
+    match context {
+        CoastalContext::Marine => [90, 146, 200],
+        CoastalContext::Coastal => [138, 182, 196],
+        CoastalContext::NearCoast => [152, 180, 170],
+        CoastalContext::Inland => [255, 255, 255],
+    }
+}
+
+fn coastal_tint_strength(context: CoastalContext) -> f32 {
+    match context {
+        CoastalContext::Marine => 0.32,
+        CoastalContext::Coastal => 0.14,
+        CoastalContext::NearCoast => 0.07,
+        CoastalContext::Inland => 0.0,
+    }
+}
+
+fn hydrology_tint(context: HydrologyContext) -> [u8; 3] {
+    match context {
+        HydrologyContext::Dryland => [255, 255, 255],
+        HydrologyContext::WellDrained => [238, 236, 220],
+        HydrologyContext::RiverCorridor => [92, 134, 196],
+        HydrologyContext::LakeBasin => [102, 138, 178],
+        HydrologyContext::WetLowland => [104, 142, 122],
+    }
+}
+
+fn hydrology_tint_strength(context: HydrologyContext) -> f32 {
+    match context {
+        HydrologyContext::Dryland => 0.0,
+        HydrologyContext::WellDrained => 0.04,
+        HydrologyContext::RiverCorridor => 0.18,
+        HydrologyContext::LakeBasin => 0.22,
+        HydrologyContext::WetLowland => 0.15,
+    }
+}
+
+fn terrain_accent(form: TerrainFormFamily) -> Option<([u8; 3], f32)> {
+    match form {
+        TerrainFormFamily::MarineShelf
+        | TerrainFormFamily::LagoonCoast
+        | TerrainFormFamily::BarrierCoast
+        | TerrainFormFamily::EstuaryLowland
+        | TerrainFormFamily::Delta => Some(([124, 176, 188], 0.12)),
+        TerrainFormFamily::BeachPlain
+        | TerrainFormFamily::AlluvialFan
+        | TerrainFormFamily::DuneField
+        | TerrainFormFamily::MesaCountry
+        | TerrainFormFamily::Badlands
+        | TerrainFormFamily::Pediment
+        | TerrainFormFamily::Canyon => Some(([194, 136, 88], 0.14)),
+        TerrainFormFamily::Floodplain
+        | TerrainFormFamily::WetLowland
+        | TerrainFormFamily::AlluvialLowland
+        | TerrainFormFamily::Basin
+        | TerrainFormFamily::BroadValley
+        | TerrainFormFamily::NarrowValley => Some(([106, 136, 106], 0.10)),
+        TerrainFormFamily::SeaCliff
+        | TerrainFormFamily::FjordCoast
+        | TerrainFormFamily::MountainFront
+        | TerrainFormFamily::Escarpment
+        | TerrainFormFamily::Mountain
+        | TerrainFormFamily::RidgeCountry
+        | TerrainFormFamily::GlacialValley
+        | TerrainFormFamily::RavineCountry => Some(([164, 172, 184], 0.12)),
+        TerrainFormFamily::Icefield | TerrainFormFamily::CrevassedIcefield => {
+            Some(([226, 236, 244], 0.18))
+        }
+        TerrainFormFamily::Karst => Some(([168, 180, 166], 0.08)),
+        TerrainFormFamily::RockyShore
+        | TerrainFormFamily::Plain
+        | TerrainFormFamily::RollingPlain
+        | TerrainFormFamily::HillCountry
+        | TerrainFormFamily::HillCluster
+        | TerrainFormFamily::Plateau => None,
+    }
+}
+
+fn relief_brightness(relief: ReliefClass) -> f32 {
+    match relief {
+        ReliefClass::Plain => 1.06,
+        ReliefClass::Rolling => 1.0,
+        ReliefClass::Hill => 0.94,
+        ReliefClass::Mountain => 0.86,
+    }
+}
+
+fn elevation_brightness(elevation: ElevationBand) -> f32 {
+    match elevation {
+        ElevationBand::Low => 1.03,
+        ElevationBand::Upland => 0.99,
+        ElevationBand::Highland => 0.94,
+        ElevationBand::Alpine => 0.89,
+    }
+}
+
+fn archetype_tint(archetype: RegionArchetype) -> ([u8; 3], f32) {
+    match archetype {
+        RegionArchetype::OceanicShelf
+        | RegionArchetype::SandyBeachPlain
+        | RegionArchetype::CoastalCliffland
+        | RegionArchetype::RockyShoreCoast
+        | RegionArchetype::BarrierCoast
+        | RegionArchetype::LagoonCoast
+        | RegionArchetype::EstuaryLowland
+        | RegionArchetype::CoastalDelta
+        | RegionArchetype::MangroveLagoon
+        | RegionArchetype::MangroveDelta
+        | RegionArchetype::MonsoonDelta
+        | RegionArchetype::FjordCoast => ([128, 190, 204], 0.18),
+        RegionArchetype::ColdWetLowland
+        | RegionArchetype::TundraPlain
+        | RegionArchetype::TropicalRainforestLowland
+        | RegionArchetype::MarshFloodplain
+        | RegionArchetype::SwampLowland
+        | RegionArchetype::FloodedForestAlluvialLowland
+        | RegionArchetype::FloodedForestFloodplain
+        | RegionArchetype::TemperateBasin
+        | RegionArchetype::TemperateBroadValley
+        | RegionArchetype::BorealWetLowland
+        | RegionArchetype::DesertBasin
+        | RegionArchetype::MonsoonFloodplain
+        | RegionArchetype::GlacialValley => ([112, 154, 126], 0.18),
+        RegionArchetype::TemperatePlain
+        | RegionArchetype::SavannaPlain
+        | RegionArchetype::TemperateRollingPlain
+        | RegionArchetype::TemperateBroadleafPlain
+        | RegionArchetype::BorealPlain
+        | RegionArchetype::PolarBarrensPlain => ([186, 188, 122], 0.12),
+        RegionArchetype::TemperateHills
+        | RegionArchetype::TropicalRainforestHills
+        | RegionArchetype::SteppeHills
+        | RegionArchetype::TemperateMixedHills
+        | RegionArchetype::BorealHills
+        | RegionArchetype::MediterraneanShrublandHills
+        | RegionArchetype::SavannaHills
+        | RegionArchetype::TropicalDryForestHills
+        | RegionArchetype::SubalpineWoodedFront
+        | RegionArchetype::DesertAlluvialFan
+        | RegionArchetype::BorealRidgeCountry
+        | RegionArchetype::AlpineRavineCountry => ([154, 126, 94], 0.18),
+        RegionArchetype::TemperatePlateau
+        | RegionArchetype::TemperateEscarpmentUpland
+        | RegionArchetype::MonsoonPlateau
+        | RegionArchetype::DesertMesaCountry => ([198, 132, 92], 0.20),
+        RegionArchetype::SteppePlain
+        | RegionArchetype::DesertPlain
+        | RegionArchetype::SemiDesertPediment
+        | RegionArchetype::DryShrublandBadlands
+        | RegionArchetype::DryShrublandKarst => ([212, 168, 104], 0.16),
+        RegionArchetype::DesertDuneField => ([236, 204, 124], 0.28),
+        RegionArchetype::GlaciatedAlpine
+        | RegionArchetype::AlpineMeadowMountain
+        | RegionArchetype::CrevassedIcefield => ([222, 230, 240], 0.22),
     }
 }
 
@@ -1586,7 +1813,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin realization_field_preview -- <seed> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--mode <composite|flatness|relief|uplift|wetness|ridge|terrace|corridor>] [--output <path>]"
+    "usage: cargo run --bin realization_field_preview -- <seed> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--mode <composite|biome|archetype|flatness|relief|uplift|wetness|ridge|terrace|corridor>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1596,6 +1823,19 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_with_region(region: RegionClassCell) -> PreviewSample {
+        PreviewSample {
+            region,
+            uplift: 0.5,
+            flatness: 0.5,
+            relief: 0.5,
+            wetness: 0.5,
+            ridge: 0.5,
+            terrace: 0.5,
+            corridor: 0.5,
+        }
+    }
 
     fn sample_with_channels(uplift: f32, flatness: f32, wetness: f32) -> PreviewSample {
         PreviewSample {
@@ -1624,6 +1864,8 @@ mod tests {
 
     #[test]
     fn mode_parser_accepts_named_channels() {
+        assert_eq!(PreviewMode::parse("biome"), Some(PreviewMode::Biome));
+        assert_eq!(PreviewMode::parse("archetype"), Some(PreviewMode::Archetype));
         assert_eq!(PreviewMode::parse("flatness"), Some(PreviewMode::Flatness));
         assert_eq!(PreviewMode::parse("wetness"), Some(PreviewMode::Wetness));
         assert_eq!(PreviewMode::parse("ridge"), Some(PreviewMode::Ridge));
@@ -1637,5 +1879,43 @@ mod tests {
 
         assert!(wet[2] > dry[2]);
         assert!(dry[0] > wet[0]);
+    }
+
+    #[test]
+    fn biome_palette_keeps_polar_ice_lighter_than_temperate_grassland() {
+        let polar = color_for_sample(
+            sample_with_region(RegionClassCell {
+                biome_family: BiomeFamily::PolarIce,
+                ..RegionClassCell::default()
+            }),
+            PreviewMode::Biome,
+        );
+        let grass = color_for_sample(
+            sample_with_region(RegionClassCell {
+                biome_family: BiomeFamily::TemperateGrassland,
+                ..RegionClassCell::default()
+            }),
+            PreviewMode::Biome,
+        );
+
+        assert!(polar[0] > grass[0]);
+        assert!(polar[1] > grass[1]);
+        assert!(polar[2] > grass[2]);
+    }
+
+    #[test]
+    fn archetype_mode_adds_family_accent_over_biome_mode() {
+        let region = RegionClassCell {
+            biome_family: BiomeFamily::Desert,
+            archetype: RegionArchetype::DesertDuneField,
+            terrain_form_family: TerrainFormFamily::DuneField,
+            ..RegionClassCell::default()
+        };
+
+        let biome = color_for_sample(sample_with_region(region), PreviewMode::Biome);
+        let archetype = color_for_sample(sample_with_region(region), PreviewMode::Archetype);
+
+        assert_ne!(biome, archetype);
+        assert!(archetype[1] > biome[1]);
     }
 }
