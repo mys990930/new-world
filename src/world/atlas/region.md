@@ -12,6 +12,7 @@
 - resolve continuous atlas inputs into stable class bands rather than overlapping fuzzy weight bundles
 - define biome-family, terrain-form-family, and combined region-archetype contracts
 - expose sampleable region classification for generation, meso selection, and material policy
+- expose archetype-owned runtime hint data when later generation stages need concrete per-archetype tuning without giving up shared solver ownership
 - keep classification deterministic, generation-order-independent, and on-demand
 
 ## Non-Responsibilities
@@ -53,6 +54,9 @@ sample_region_classes(
     world_x: i32,
     world_z: i32,
 ) -> RegionClassSample
+region_archetype_prototype_hint(
+    id: RegionArchetype,
+) -> Option<&'static PrototypeArchetypeHint>
 ```
 
 ## Input Model
@@ -161,6 +165,7 @@ sample_region_classes(
 - the biome-family and terrain-form-family candidate taxonomies are now locked at the planning level
 - the launch candidate pool in `region_catalog.md` is now the authoritative planning contract for classifier-facing regional identity
 - a full `RegionArchetype` candidate pool with `launch`, `extended`, and `deferred` labels is now scaffolded as per-type modules and docs
+- archetype modules may now also attach optional generation-facing prototype hints so concrete launch archetypes can diverge inside the shared prototype solver without forking the whole algorithm
 - launch policy now treats strong hydrology context as eligible to override generic inland archetype selection
 - the next planning step is to lock archetype-to-meso allowance and surface policy from that candidate pool
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet

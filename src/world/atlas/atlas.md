@@ -71,6 +71,7 @@ sample_region_classes(
     world_x: i32,
     world_z: i32,
 ) -> RegionClassSample
+region_archetype_prototype_hint(id: RegionArchetype) -> Option<&'static PrototypeArchetypeHint>
 
 generate_meso_guides(
     meta: &WorldMeta,

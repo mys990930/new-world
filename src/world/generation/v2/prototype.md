@@ -100,6 +100,7 @@ build_chunk_base_heightfield_prototype(
   - low-frequency, structure-aligned, terrace, and dune amplitudes
   - corridor depth / width / outlet-open behavior
 - the prototype first blends those parameters from neighboring region samples around the current world-space point
+- concrete archetype modules may further nudge those family defaults through optional archetype-owned prototype hints exported from `atlas/region/archetypes/*`
 - the final broad height is then evaluated once from common basis terms such as macro elevation, coastal response, ridge structure response, basin response, seed-independent deterministic detail, and corridor response
 - deterministic detail carriers should stay stable across world seeds, while region, atlas, and corridor context only modulate where and how strongly those carriers are expressed
 - this keeps boundaries readable while avoiding abrupt "switch formula" behavior at atlas-cell or classified-region edges

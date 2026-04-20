@@ -17,6 +17,7 @@
 
 - detailed terrain-shape solve is still a planning stub
 - drainage, seasonality, and material policies should be locked in later dedicated passes
+- runtime prototype hint now biases this archetype toward higher broad uplift, stronger ridge emphasis, and more retained relief than the generic alpine family baseline
 
 ## Ecology Notes
 

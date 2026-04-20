@@ -1,7 +1,7 @@
 use crate::world::atlas::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCell, AtlasStructureMap, CoastalContext, HydrologyContext,
-    MountainChainScale, MountainSpineSegment, RegionArchetype, RegionClassCell, RiverPathKind,
-    TerrainFormFamily,
+    MountainChainScale, MountainSpineSegment, PrototypeArchetypeHint, RegionArchetype,
+    RegionClassCell, RiverPathKind, TerrainFormFamily, region_archetype_prototype_hint,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
@@ -380,9 +380,8 @@ fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisPa
     params.finalize()
 }
 
-fn basis_parameters_for_region(region: RegionClassCell) -> BasisParameters {
-    let family = prototype_policy_family(region);
-    let mut params = match family {
+fn basis_parameters_for_family(family: PrototypePolicyFamily) -> BasisParameters {
+    match family {
         PrototypePolicyFamily::MarineCoastalEdge => BasisParameters {
             macro_height_bonus: -34.0,
             coastal_shelf_depth: 16.0,
@@ -567,7 +566,12 @@ fn basis_parameters_for_region(region: RegionClassCell) -> BasisParameters {
             outlet_open_scale: 1.20,
             ridge_preservation: 4.0,
         },
-    };
+    }
+}
+
+fn basis_parameters_for_region(region: RegionClassCell) -> BasisParameters {
+    let family = prototype_policy_family(region);
+    let mut params = basis_parameters_for_family(family);
 
     match region.terrain_form_family {
         TerrainFormFamily::Delta
@@ -668,7 +672,30 @@ fn basis_parameters_for_region(region: RegionClassCell) -> BasisParameters {
         CoastalContext::Inland => {}
     }
 
+    if let Some(hint) = region_archetype_prototype_hint(region.archetype) {
+        params = apply_archetype_prototype_hint(params, *hint);
+    }
+
     params.finalize()
+}
+
+fn apply_archetype_prototype_hint(
+    mut params: BasisParameters,
+    hint: PrototypeArchetypeHint,
+) -> BasisParameters {
+    params.macro_height_bonus += hint.macro_height_bonus_delta;
+    params.wet_flatten = (params.wet_flatten + hint.wet_flatten_delta).max(0.0);
+    params.low_freq_amp *= hint.low_freq_amp_scale.max(0.0);
+    params.mid_freq_amp *= hint.mid_freq_amp_scale.max(0.0);
+    params.terrace_amp *= hint.terrace_amp_scale.max(0.0);
+    params.relief_base *= hint.relief_base_scale.max(0.0);
+    params.relief_gain *= hint.relief_gain_scale.max(0.0);
+    params.corridor_depth *= hint.corridor_depth_scale.max(0.0);
+    params.floodplain_width_scale *= hint.floodplain_width_scale.max(0.0);
+    params.ridge_lift *= hint.ridge_lift_scale.max(0.0);
+    params.ridge_shoulder_lift *= hint.ridge_shoulder_lift_scale.max(0.0);
+    params.ridge_preservation *= hint.ridge_preservation_scale.max(0.0);
+    params
 }
 
 fn prototype_policy_family(region: RegionClassCell) -> PrototypePolicyFamily {
@@ -1391,6 +1418,44 @@ mod tests {
             with_corridor.columns[focus].relief_budget
                 <= without_corridor.columns[focus].relief_budget
         );
+    }
+
+    #[test]
+    fn temperate_plain_archetype_hint_flattens_plain_family_defaults() {
+        let mut hinted_region = RegionClassCell::default();
+        hinted_region.archetype = RegionArchetype::TemperatePlain;
+        hinted_region.terrain_form_family = TerrainFormFamily::Plain;
+        hinted_region.hydrology_context = HydrologyContext::WellDrained;
+
+        let mut neutral_region = hinted_region;
+        neutral_region.archetype = RegionArchetype::SavannaPlain;
+
+        let neutral = basis_parameters_for_region(neutral_region);
+        let hinted = basis_parameters_for_region(hinted_region);
+
+        assert!(hinted.wet_flatten > neutral.wet_flatten);
+        assert!(hinted.low_freq_amp < neutral.low_freq_amp);
+        assert!(hinted.mid_freq_amp < neutral.mid_freq_amp);
+        assert!(hinted.relief_base < neutral.relief_base);
+    }
+
+    #[test]
+    fn glaciated_alpine_archetype_hint_emphasizes_mountain_family_defaults() {
+        let mut hinted_region = RegionClassCell::default();
+        hinted_region.archetype = RegionArchetype::GlaciatedAlpine;
+        hinted_region.terrain_form_family = TerrainFormFamily::Icefield;
+        hinted_region.hydrology_context = HydrologyContext::WellDrained;
+
+        let mut neutral_region = hinted_region;
+        neutral_region.archetype = RegionArchetype::AlpineMeadowMountain;
+
+        let neutral = basis_parameters_for_region(neutral_region);
+        let hinted = basis_parameters_for_region(hinted_region);
+
+        assert!(hinted.macro_height_bonus > neutral.macro_height_bonus);
+        assert!(hinted.ridge_lift > neutral.ridge_lift);
+        assert!(hinted.mid_freq_amp > neutral.mid_freq_amp);
+        assert!(hinted.relief_gain > neutral.relief_gain);
     }
 
     #[test]

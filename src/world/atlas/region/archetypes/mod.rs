@@ -86,6 +86,22 @@ pub enum SeasonalSurfaceProfile {
     CoastalTemperate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrototypeArchetypeHint {
+    pub macro_height_bonus_delta: f32,
+    pub wet_flatten_delta: f32,
+    pub low_freq_amp_scale: f32,
+    pub mid_freq_amp_scale: f32,
+    pub terrace_amp_scale: f32,
+    pub relief_base_scale: f32,
+    pub relief_gain_scale: f32,
+    pub corridor_depth_scale: f32,
+    pub floodplain_width_scale: f32,
+    pub ridge_lift_scale: f32,
+    pub ridge_shoulder_lift_scale: f32,
+    pub ridge_preservation_scale: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegionArchetypeDef {
     pub id: RegionArchetype,
@@ -165,4 +181,14 @@ pub fn region_archetype_defs() -> &'static [RegionArchetypeDef] {
 
 pub fn region_archetype_def(id: RegionArchetype) -> Option<&'static RegionArchetypeDef> {
     REGION_ARCHETYPE_DEFS.iter().find(|def| def.id == id)
+}
+
+pub fn region_archetype_prototype_hint(
+    id: RegionArchetype,
+) -> Option<&'static PrototypeArchetypeHint> {
+    match id {
+        RegionArchetype::TemperatePlain => Some(&temperate_plain::PROTOTYPE_HINT),
+        RegionArchetype::GlaciatedAlpine => Some(&glaciated_alpine::PROTOTYPE_HINT),
+        _ => None,
+    }
 }

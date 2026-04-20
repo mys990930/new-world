@@ -2,7 +2,10 @@ pub mod archetypes;
 pub mod axes;
 pub mod catalog;
 
-pub use archetypes::{RegionArchetypeDef, region_archetype_def, region_archetype_defs};
+pub use archetypes::{
+    PrototypeArchetypeHint, RegionArchetypeDef, region_archetype_def,
+    region_archetype_defs, region_archetype_prototype_hint,
+};
 pub use axes::{
     RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS,
     RawClassificationDimension,

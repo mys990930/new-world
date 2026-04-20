@@ -11,6 +11,7 @@
   - `mod.rs`
   - `<type>.md`
 - the Rust module exposes a lightweight `RegionArchetypeDef`
+- archetypes that need chunk-generation nuance may also expose optional runtime hints such as `PrototypeArchetypeHint` without moving the shared prototype solve into atlas
 - the markdown file holds planning content:
   - stage label
   - biome family

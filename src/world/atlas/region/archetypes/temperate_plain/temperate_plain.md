@@ -17,6 +17,7 @@
 
 - detailed terrain-shape solve is still a planning stub
 - drainage, seasonality, and material policies should be locked in later dedicated passes
+- runtime prototype hint now biases this archetype toward flatter broad surfaces, lower relief noise, and slightly wider floodplain openings than the generic plain family baseline
 
 ## Ecology Notes
 
