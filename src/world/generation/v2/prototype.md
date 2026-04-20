@@ -200,6 +200,8 @@ build_chunk_base_heightfield_prototype(
 1. sample each column's atlas scalar inputs continuously in world/block space
 2. sample the realization field in world space to obtain a continuous prototype-control vector that can cross atlas-cell boundaries naturally
 3. sample nearby mountain-chain structure into continuous ridge-core and ridge-shoulder basis signals in world space
+   structure-aligned detail heading should come from a sign-independent ridge-axis average, not from raw per-segment tangent direction, so neighboring columns do not flip the carrier frame
+   structure-aligned detail coordinates should be expressed relative to a stable local ridge-center anchor, not only from the absolute world origin, so small heading drift does not explode into large carrier phase jumps
 4. read the corridor window and convert each branch into continuous valley, floodplain, and outlet-openness signals with chunk-external support
 5. evaluate the shared basis solve once from macro elevation, realization-field control values, coast, ridge, basin, and deterministic detail terms
 6. softly blend repeated river-path segment responses by branch so a long river does not over-carve or abruptly hand off where adjacent segments overlap the same column

@@ -122,6 +122,8 @@ struct StructureBasisSample {
     strongest_segment: f32,
     heading_x: f32,
     heading_z: f32,
+    heading_center_x: f32,
+    heading_center_z: f32,
 }
 
 impl Default for StructureBasisSample {
@@ -133,6 +135,8 @@ impl Default for StructureBasisSample {
             strongest_segment: 0.0,
             heading_x: 1.0,
             heading_z: 0.0,
+            heading_center_x: 0.0,
+            heading_center_z: 0.0,
         }
     }
 }
@@ -828,8 +832,11 @@ fn sample_structure_basis(
 ) -> StructureBasisSample {
     let point = (world_x, world_z);
     let mut sample = StructureBasisSample::default();
-    let mut heading_accum_x = 0.0_f32;
-    let mut heading_accum_z = 0.0_f32;
+    let mut heading_axis_accum_x = 0.0_f32;
+    let mut heading_axis_accum_z = 0.0_f32;
+    let mut heading_center_accum_x = 0.0_f32;
+    let mut heading_center_accum_z = 0.0_f32;
+    let mut heading_center_weight = 0.0_f32;
 
     for segment in structure.mountain_chains().segments() {
         let world_segment = mountain_segment_world_segment(*segment);
@@ -869,26 +876,31 @@ fn sample_structure_basis(
         }
 
         if segment_strength > f32::EPSILON {
-            let mut tangent_x = projection.tangent_x;
-            let mut tangent_z = projection.tangent_z;
-            let accum_len_sq = heading_accum_x * heading_accum_x + heading_accum_z * heading_accum_z;
-            if accum_len_sq > f32::EPSILON {
-                let dot = tangent_x * heading_accum_x + tangent_z * heading_accum_z;
-                if dot < 0.0 {
-                    tangent_x = -tangent_x;
-                    tangent_z = -tangent_z;
-                }
-            }
-            heading_accum_x += tangent_x * segment_strength;
-            heading_accum_z += tangent_z * segment_strength;
+            // Treat mountain tangents as an undirected axis so nearby samples do not
+            // flip carrier orientation just because contributing segment order or sign differs.
+            let tangent_x = projection.tangent_x;
+            let tangent_z = projection.tangent_z;
+            heading_axis_accum_x += (tangent_x * tangent_x - tangent_z * tangent_z) * segment_strength;
+            heading_axis_accum_z += (2.0 * tangent_x * tangent_z) * segment_strength;
+            let center_x = (world_segment.start.0 + world_segment.end.0) * 0.5;
+            let center_z = (world_segment.start.1 + world_segment.end.1) * 0.5;
+            heading_center_accum_x += center_x * segment_strength;
+            heading_center_accum_z += center_z * segment_strength;
+            heading_center_weight += segment_strength;
         }
     }
 
-    let heading_len_sq = heading_accum_x * heading_accum_x + heading_accum_z * heading_accum_z;
-    if heading_len_sq > f32::EPSILON {
-        let inv_heading_len = heading_len_sq.sqrt().recip();
-        sample.heading_x = heading_accum_x * inv_heading_len;
-        sample.heading_z = heading_accum_z * inv_heading_len;
+    let heading_axis_len_sq =
+        heading_axis_accum_x * heading_axis_accum_x + heading_axis_accum_z * heading_axis_accum_z;
+    if heading_axis_len_sq > f32::EPSILON {
+        let heading_angle = 0.5 * heading_axis_accum_z.atan2(heading_axis_accum_x);
+        sample.heading_x = heading_angle.cos();
+        sample.heading_z = heading_angle.sin();
+    }
+    if heading_center_weight > f32::EPSILON {
+        let inv_heading_center_weight = heading_center_weight.recip();
+        sample.heading_center_x = heading_center_accum_x * inv_heading_center_weight;
+        sample.heading_center_z = heading_center_accum_z * inv_heading_center_weight;
     }
 
     sample
@@ -939,8 +951,20 @@ fn detail_basis(
     wet_signal: f32,
 ) -> f32 {
     let heading = structure.heading();
-    let along = world_x * heading.0 + world_z * heading.1;
-    let across = world_x * -heading.1 + world_z * heading.0;
+    let heading_origin_x = if structure.strongest_segment > f32::EPSILON {
+        structure.heading_center_x
+    } else {
+        world_x
+    };
+    let heading_origin_z = if structure.strongest_segment > f32::EPSILON {
+        structure.heading_center_z
+    } else {
+        world_z
+    };
+    let relative_world_x = world_x - heading_origin_x;
+    let relative_world_z = world_z - heading_origin_z;
+    let along = relative_world_x * heading.0 + relative_world_z * heading.1;
+    let across = relative_world_x * -heading.1 + relative_world_z * heading.0;
     let (warped_world_x, warped_world_z) =
         seedless_domain_warp(world_x, world_z, 184.0, 14.0, DETAIL_SALT_WARP_X, DETAIL_SALT_WARP_Z);
     let (warped_along, warped_across) = seedless_domain_warp(
@@ -1733,6 +1757,29 @@ mod tests {
             strongest_delta,
             strongest_world_x,
             strongest_world_z
+        );
+    }
+
+    #[test]
+    fn detail_band_near_neg6_neg510_stays_below_local_step_threshold() {
+        let meta = WorldMeta::new(42);
+        let mut cache = std::collections::HashMap::new();
+        let samples = [
+            sampled_world_height(121, -16387, &meta, &mut cache),
+            sampled_world_height(122, -16387, &meta, &mut cache),
+            sampled_world_height(122, -16386, &meta, &mut cache),
+            sampled_world_height(122, -16385, &meta, &mut cache),
+        ];
+
+        let mut strongest_delta = 0.0_f32;
+        for window in samples.windows(2) {
+            strongest_delta = strongest_delta.max((window[1] - window[0]).abs());
+        }
+
+        assert!(
+            strongest_delta <= 3.0,
+            "detail band near cx=-6 cz=-510 still shows a strong local step of {:.3}",
+            strongest_delta
         );
     }
 
