@@ -120,6 +120,7 @@ struct StructureBasisSample {
     ridge_shoulder_influence: f32,
     major_ridge_influence: f32,
     strongest_segment: f32,
+    detail_frame_stability: f32,
     heading_x: f32,
     heading_z: f32,
     heading_center_x: f32,
@@ -133,6 +134,7 @@ impl Default for StructureBasisSample {
             ridge_shoulder_influence: 0.0,
             major_ridge_influence: 0.0,
             strongest_segment: 0.0,
+            detail_frame_stability: 0.0,
             heading_x: 1.0,
             heading_z: 0.0,
             heading_center_x: 0.0,
@@ -836,6 +838,8 @@ fn sample_structure_basis(
     let mut heading_axis_accum_z = 0.0_f32;
     let mut heading_center_accum_x = 0.0_f32;
     let mut heading_center_accum_z = 0.0_f32;
+    let mut heading_center_accum_x2 = 0.0_f32;
+    let mut heading_center_accum_z2 = 0.0_f32;
     let mut heading_center_weight = 0.0_f32;
 
     for segment in structure.mountain_chains().segments() {
@@ -871,6 +875,9 @@ fn sample_structure_basis(
                 sample.major_ridge_influence.max(segment_strength.clamp(0.0, 1.0));
         }
 
+        let center_x = (world_segment.start.0 + world_segment.end.0) * 0.5;
+        let center_z = (world_segment.start.1 + world_segment.end.1) * 0.5;
+
         if segment_strength > sample.strongest_segment {
             sample.strongest_segment = segment_strength;
         }
@@ -882,10 +889,10 @@ fn sample_structure_basis(
             let tangent_z = projection.tangent_z;
             heading_axis_accum_x += (tangent_x * tangent_x - tangent_z * tangent_z) * segment_strength;
             heading_axis_accum_z += (2.0 * tangent_x * tangent_z) * segment_strength;
-            let center_x = (world_segment.start.0 + world_segment.end.0) * 0.5;
-            let center_z = (world_segment.start.1 + world_segment.end.1) * 0.5;
             heading_center_accum_x += center_x * segment_strength;
             heading_center_accum_z += center_z * segment_strength;
+            heading_center_accum_x2 += center_x * center_x * segment_strength;
+            heading_center_accum_z2 += center_z * center_z * segment_strength;
             heading_center_weight += segment_strength;
         }
     }
@@ -901,6 +908,17 @@ fn sample_structure_basis(
         let inv_heading_center_weight = heading_center_weight.recip();
         sample.heading_center_x = heading_center_accum_x * inv_heading_center_weight;
         sample.heading_center_z = heading_center_accum_z * inv_heading_center_weight;
+        let mean_x2 = heading_center_accum_x2 * inv_heading_center_weight;
+        let mean_z2 = heading_center_accum_z2 * inv_heading_center_weight;
+        let variance_x = (mean_x2 - sample.heading_center_x * sample.heading_center_x).max(0.0);
+        let variance_z = (mean_z2 - sample.heading_center_z * sample.heading_center_z).max(0.0);
+        let center_spread = (variance_x + variance_z).sqrt();
+        let spread_ratio = ((center_spread - 96.0) / 320.0).clamp(0.0, 1.0);
+        let spread_stability = 1.0 - smootherstep01(spread_ratio);
+        let axis_coherence = (heading_axis_len_sq.sqrt() * inv_heading_center_weight).clamp(0.0, 1.0);
+        let strength_stability = smootherstep01((sample.strongest_segment / 0.65).clamp(0.0, 1.0));
+        sample.detail_frame_stability =
+            ((axis_coherence * 0.6 + strength_stability * 0.4) * spread_stability).clamp(0.0, 1.0);
     }
 
     sample
@@ -951,6 +969,7 @@ fn detail_basis(
     wet_signal: f32,
 ) -> f32 {
     let heading = structure.heading();
+    let aligned_frame = structure.detail_frame_stability.clamp(0.0, 1.0);
     let heading_origin_x = if structure.strongest_segment > f32::EPSILON {
         structure.heading_center_x
     } else {
@@ -988,9 +1007,21 @@ fn detail_basis(
     );
     let mid_noise =
         seedless_value_fbm(warped_along, warped_across, 46.0, 2, 2.15, 0.56, DETAIL_SALT_MID_FREQ);
+    let world_mid_noise = seedless_value_fbm(
+        warped_world_x,
+        warped_world_z,
+        46.0,
+        2,
+        2.15,
+        0.56,
+        DETAIL_SALT_MID_FREQ.wrapping_add(DETAIL_HASH_K2),
+    );
     let flat_noise =
         seedless_value_fbm(warped_world_x, warped_world_z, 20.0, 2, 2.02, 0.54, DETAIL_SALT_FLAT_FREQ);
-    let terrace_source = (oriented_low * 0.58 + mid_noise * 0.42).clamp(-1.0, 1.0);
+    let blended_mid_noise = world_mid_noise * (1.0 - aligned_frame) + mid_noise * aligned_frame;
+    let terrace_source = ((flat_noise * (1.0 - aligned_frame))
+        + ((oriented_low * 0.58 + blended_mid_noise * 0.42).clamp(-1.0, 1.0) * aligned_frame))
+        .clamp(-1.0, 1.0);
     let flat_source = (flat_noise * 0.72 + mid_noise * 0.28).clamp(-1.0, 1.0);
     let terrace_wave = soft_terrace_noise(terrace_source, 6.0, 0.76);
     let flat_wave = soft_terrace_noise(flat_source, 5.0, 0.82);
@@ -1018,9 +1049,9 @@ fn detail_basis(
         .clamp(0.0, 1.0);
 
     let detail = low_noise * params.low_freq_amp
-        + oriented_low * params.low_freq_amp * 0.35
-        + mid_noise * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
-        + terrace_wave * params.terrace_amp * terrace_gate
+        + oriented_low * params.low_freq_amp * 0.35 * aligned_frame
+        + blended_mid_noise * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
+        + terrace_wave * params.terrace_amp * terrace_gate * (0.38 + aligned_frame * 0.62)
         + (flat_wave * (1.10 + params.terrace_amp * 0.20)
             + flat_ripple * 0.84
             + readability_step * 1.46)
@@ -1764,22 +1795,24 @@ mod tests {
     fn detail_band_near_neg6_neg510_stays_below_local_step_threshold() {
         let meta = WorldMeta::new(42);
         let mut cache = std::collections::HashMap::new();
-        let samples = [
-            sampled_world_height(121, -16387, &meta, &mut cache),
-            sampled_world_height(122, -16387, &meta, &mut cache),
-            sampled_world_height(122, -16386, &meta, &mut cache),
-            sampled_world_height(122, -16385, &meta, &mut cache),
-        ];
-
         let mut strongest_delta = 0.0_f32;
-        for window in samples.windows(2) {
-            strongest_delta = strongest_delta.max((window[1] - window[0]).abs());
+        let mut strongest_world_z = -16576;
+
+        for world_z in -16576..=-16496 {
+            let left = sampled_world_height(-1, world_z, &meta, &mut cache);
+            let right = sampled_world_height(0, world_z, &meta, &mut cache);
+            let delta = (right - left).abs();
+            if delta > strongest_delta {
+                strongest_delta = delta;
+                strongest_world_z = world_z;
+            }
         }
 
         assert!(
-            strongest_delta <= 3.0,
-            "detail band near cx=-6 cz=-510 still shows a strong local step of {:.3}",
-            strongest_delta
+            strongest_delta <= 1.5,
+            "detail band near cx=-6 cz=-510 still shows a strong local step of {:.3} across x=-1/0 at world z {}",
+            strongest_delta,
+            strongest_world_z
         );
     }
 
@@ -2014,6 +2047,21 @@ mod tests {
             sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
         let base_before_corridor =
             blended_base_height(params, field, structure_sample, sample_world_x, sample_world_z);
+        let inland_signal = (field.continent_core_factor * 0.58 + field.inlandness * 0.42).clamp(0.0, 1.0);
+        let wet_signal =
+            (field.wetness * 0.56 + field.riverine_factor * 0.24 + field.lake_potential * 0.20)
+                .clamp(0.0, 1.0);
+        let arid_signal =
+            (field.aridity * 0.72 + field.slope * 0.18 + field.ruggedness * 0.10).clamp(0.0, 1.0);
+        let macro_base =
+            macro_elevation_to_world_y(field.macro_elevation) + field.macro_elevation * params.macro_height_bonus
+                - 6.0;
+        let macro_shape =
+            inland_signal * params.inland_lift + arid_signal * params.arid_lift - wet_signal * params.wet_flatten;
+        let coast_term = coastal_basis(field, structure_sample, params);
+        let ridge_term = ridge_basis(field, structure_sample, params);
+        let basin_term = basin_basis(field, params);
+        let detail_term = detail_basis(field, structure_sample, params, sample_world_x, sample_world_z, wet_signal);
         let corridor_adjustment = corridor_adjustment_for_column(
             params,
             field,
@@ -2048,12 +2096,24 @@ mod tests {
             field.wetness
         );
         println!(
-            "  structure ridge_core={:.3} ridge_shoulder={:.3} major_ridge={:.3} heading=({:.3}, {:.3})",
+            "  structure ridge_core={:.3} ridge_shoulder={:.3} major_ridge={:.3} heading=({:.3}, {:.3}) heading_center=({:.3}, {:.3}) strongest_segment={:.3}",
             structure_sample.ridge_core_influence,
             structure_sample.ridge_shoulder_influence,
             structure_sample.major_ridge_influence,
             structure_sample.heading().0,
-            structure_sample.heading().1
+            structure_sample.heading().1,
+            structure_sample.heading_center_x,
+            structure_sample.heading_center_z,
+            structure_sample.strongest_segment
+        );
+        println!(
+            "  basis macro_base={:.3} macro_shape={:.3} coast={:.3} ridge={:.3} basin={:.3} detail={:.3}",
+            macro_base,
+            macro_shape,
+            coast_term,
+            ridge_term,
+            basin_term,
+            detail_term
         );
         let mode_weights = blended_corridor_mode_weights(params, field, structure_sample);
         println!(

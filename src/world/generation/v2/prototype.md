@@ -202,6 +202,7 @@ build_chunk_base_heightfield_prototype(
 3. sample nearby mountain-chain structure into continuous ridge-core and ridge-shoulder basis signals in world space
    structure-aligned detail heading should come from a sign-independent ridge-axis average, not from raw per-segment tangent direction, so neighboring columns do not flip the carrier frame
    structure-aligned detail coordinates should be expressed relative to a stable local ridge-center anchor, not only from the absolute world origin, so small heading drift does not explode into large carrier phase jumps
+   when nearby ridge support spans several competing segment centers, prototype should reduce the weight of structure-aligned detail carriers and fall back toward world-space carriers instead of letting the aligned frame hand off as a visible wall
 4. read the corridor window and convert each branch into continuous valley, floodplain, and outlet-openness signals with chunk-external support
 5. evaluate the shared basis solve once from macro elevation, realization-field control values, coast, ridge, basin, and deterministic detail terms
 6. softly blend repeated river-path segment responses by branch so a long river does not over-carve or abruptly hand off where adjacent segments overlap the same column
@@ -233,6 +234,7 @@ build_chunk_base_heightfield_prototype(
 - ridge and corridor influence should be evaluated in world space from nearby segment geometry, even when the segment midpoint lies outside the strict chunk footprint
 - atlas scalar interpolation should use smoothed fractions so the same cell neighborhood does not create a visible terrace merely because the sample crossed an atlas-cell line
 - any deterministic micro-relief kept in prototype should remain subordinate to the broad basis terms, should never depend on chunk generation order, and should keep its carrier pattern stable across world seeds
+- structure-aligned micro-relief should only stay dominant when the sampled ridge frame is coherent; ambiguous local support should fade back toward world-space carriers rather than producing long seam-like bands
 
 ## Invariants
 
