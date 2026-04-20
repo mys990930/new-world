@@ -119,7 +119,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
   - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
-  - hill clusters now emit stronger multi-peak guide groups and the chunk-side operator preserves more of that peak signal so the current block scale reads as actual clustered hills
+  - hill clusters now emit stronger multi-peak guide groups and then synthesize deterministic chunk-space hilllets from nearby strong guide cells during meso apply so the current block scale reads as actual clustered hills instead of one broad swell
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 

@@ -11,7 +11,7 @@
   - `mod.rs`
   - `<feature>.md`
 - the Rust module always exposes a `MesoFeatureDef`
-- launch features that are already wired into runtime guide generation may also keep their feature-specific build or rasterize helpers in that same folder instead of centralizing every implementation detail in `atlas/meso.rs`
+- launch features that are already wired into runtime guide generation may also keep their feature-specific build, rasterize, and chunk-apply shaping helpers in that same folder instead of centralizing every implementation detail in `atlas/meso.rs`
 - the markdown file holds planning content:
   - stage label
   - placement family

@@ -1,4 +1,7 @@
-use crate::world::atlas::{RiverPathKind, region_archetype_def, sample_meso_guides};
+use crate::world::atlas::{
+    HillClusterApplySample, RiverPathKind, region_archetype_def,
+    sample_hill_cluster_apply_signal, sample_meso_guides,
+};
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
 use super::{
@@ -55,6 +58,8 @@ pub fn build_chunk_meso_applied_prototype(
             let world_x = chunk_origin_x + local_x;
             let world_z = chunk_origin_z + local_z;
             let meso = sample_meso_guides(&inputs.meso_guides, world_x, world_z);
+            let hill_cluster_apply =
+                sample_hill_cluster_apply_signal(&inputs.meso_guides, world_x, world_z);
             let region_samples =
                 sample_region_weights(&inputs.region_classes, world_x as f32 + 0.5, world_z as f32 + 0.5);
             let corridor_avoidance = corridor_avoidance_factor(
@@ -66,6 +71,7 @@ pub fn build_chunk_meso_applied_prototype(
 
             let hill_cluster = hill_cluster_delta(
                 &meso,
+                hill_cluster_apply,
                 allowed_feature_weight(&region_samples, "hill_cluster"),
                 column_relief_scale,
                 corridor_avoidance,
@@ -155,17 +161,23 @@ fn allowed_feature_weight(region_samples: &[RegionSampleWeight; 4], key: &str) -
 
 fn hill_cluster_delta(
     meso: &crate::world::atlas::MesoGuideSample,
+    hill_cluster_apply: HillClusterApplySample,
     allowed_weight: f32,
     relief_scale: f32,
     corridor_avoidance: f32,
 ) -> f32 {
-    let footprint_bias = 0.42 + meso.hilliness * 0.58;
+    let peak_mask = hill_cluster_apply.peak_mask.clamp(0.0, 1.0);
+    let footprint_bias = (0.20 + meso.hilliness * 0.40 + peak_mask * 0.40).clamp(0.0, 1.0);
     let weight = footprint_bias * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    meso.hill_height * weight * relief_scale * 1.08
+    let broad_raise = meso.hill_height * (0.22 + meso.hilliness * 0.18);
+    let peak_raise =
+        hill_cluster_apply.peak_height_blocks * (0.78 + peak_mask * 0.26);
+
+    (broad_raise + peak_raise) * weight * relief_scale * 0.92
 }
 
 fn shallow_basin_delta(
@@ -427,8 +439,12 @@ mod tests {
             terrace_signed_distance_cells: -0.75,
             ..MesoGuideSample::default()
         };
+        let hill_cluster_apply = HillClusterApplySample {
+            peak_mask: 0.85,
+            peak_height_blocks: 5.6,
+        };
 
-        assert!(hill_cluster_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
+        assert!(hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0) > 0.0);
         assert!(shallow_basin_delta(&meso, 1.0, 1.0, 1.0) < 0.0);
         assert!(escarpment_band_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
         assert!(upland_terrace_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
@@ -441,8 +457,12 @@ mod tests {
             hill_height: 7.5,
             ..MesoGuideSample::default()
         };
+        let hill_cluster_apply = HillClusterApplySample {
+            peak_mask: 0.72,
+            peak_height_blocks: 5.4,
+        };
 
-        let delta = hill_cluster_delta(&meso, 1.0, 1.0, 1.0);
+        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0);
         assert!(
             delta >= 4.8,
             "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"

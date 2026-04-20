@@ -31,4 +31,7 @@ build_chunk_meso_applied_prototype(
 - chunk-side application currently uses `RegionArchetypeDef.allowed_meso_keys` as a temporary runtime gate until the authoritative per-archetype allowance matrix is fully locked
 - avoid-primary-corridor features are attenuated near carried river corridors so meso does not close prototype outlets or overwrite the broad hydrology read
 - the stage spends only part of each column's prototype relief budget and forwards the remaining budget to later smoothing and hydrology work
-- `hill_cluster` now treats sampled `hill_height` as the already-shaped cluster peak signal; the apply operator still uses `hilliness` for edge falloff, but no longer squares the footprint so inland hill groups can read at the current `0.5m` block scale
+- `hill_cluster` now uses two signals together:
+  - the sampled guide fields still provide the broad cluster envelope and overall inland hill strength
+  - the feature-owned `hill_cluster` runtime helper synthesizes deterministic chunk-space hilllets from nearby strong guide cells so the final deformation reads as several local hills
+- the apply operator keeps `hilliness` as an edge falloff and broad weight, but preserves more peak height so inland hill groups can read at the current `0.5m` block scale

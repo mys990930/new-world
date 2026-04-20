@@ -3,6 +3,9 @@ pub mod features;
 
 pub use catalog::{MesoCatalogEntry, MesoCatalogStatus, meso_catalog_entries};
 pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
+pub(crate) use features::hill_cluster::{
+    HillClusterApplySample, sample_apply_signal as sample_hill_cluster_apply_signal,
+};
 
 use std::f32::consts::TAU;
 
