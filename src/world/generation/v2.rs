@@ -3,6 +3,7 @@ pub mod hydrology;
 pub mod inputs;
 pub mod meso_apply;
 pub mod prototype;
+pub mod realization_field;
 pub mod smoothing;
 pub mod voxelize;
 
@@ -355,6 +356,11 @@ pub use meso_apply::{
 pub use prototype::{
     BaseHeightfieldPrototype, PrototypeColumn, build_chunk_base_heightfield_prototype,
     empty_base_heightfield_prototype,
+};
+pub use realization_field::{
+    ChunkRealizationFieldPatch, RealizationFieldNode, RealizationSample,
+    REALIZATION_NODE_BLOCK_SPAN, REALIZATION_NODE_CHUNK_SPAN, build_chunk_realization_field_patch,
+    empty_chunk_realization_field_patch, sample_chunk_realization_field,
 };
 pub use smoothing::{SmoothedPrototype, empty_smoothed_prototype};
 pub use voxelize::{VoxelizationPlan, default_voxelization_plan};

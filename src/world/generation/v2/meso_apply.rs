@@ -331,7 +331,8 @@ mod tests {
     use super::*;
     use crate::world::atlas::{MesoGuideSample, RegionArchetype, RegionClassCell};
     use crate::world::generation::v2::{
-        build_chunk_base_heightfield_prototype, build_chunk_corridor_window, prepare_chunk_v2_inputs,
+        build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
+        build_chunk_realization_field_patch, prepare_chunk_v2_inputs,
     };
     use crate::world::meta::WorldMeta;
 
@@ -340,8 +341,14 @@ mod tests {
         let meta = WorldMeta::new(42);
         let chunk = ChunkCoord(4, 0, -3);
         let inputs = prepare_chunk_v2_inputs(chunk, &meta);
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
-        let prototype = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+        let prototype = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &corridor_window,
+        );
         let a = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
         let b = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
 
@@ -369,8 +376,14 @@ mod tests {
 
         for chunk in candidates {
             let inputs = prepare_chunk_v2_inputs(chunk, &meta);
+            let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
             let corridor_window = build_chunk_corridor_window(chunk, &inputs);
-            let prototype = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+            let prototype = build_chunk_base_heightfield_prototype(
+                chunk,
+                &inputs,
+                &realization_field,
+                &corridor_window,
+            );
             let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
             let has_delta = prototype
                 .columns

@@ -32,7 +32,7 @@
 
 - `ChunkCoord`
 - `ChunkGenerationV2Inputs`
-- `ChunkRealizationFieldPatch` (planned)
+- `ChunkRealizationFieldPatch`
 - `ChunkCorridorWindow`
 
 ## Outputs
@@ -45,6 +45,7 @@
 build_chunk_base_heightfield_prototype(
     chunk: ChunkCoord,
     inputs: &ChunkGenerationV2Inputs,
+    realization_field: &ChunkRealizationFieldPatch,
     corridor_window: &ChunkCorridorWindow,
 ) -> BaseHeightfieldPrototype
 ```
@@ -92,7 +93,7 @@ build_chunk_base_heightfield_prototype(
 ## Solve Model
 
 - the prototype now treats height as a shared continuous basis solve, not as a per-family standalone formula
-- the realization field should provide a continuous parameter vector per sample describing:
+- the realization field now provides a continuous parameter vector per sample describing:
   - macro uplift bias
   - coastal shelf / apron / cliff response
   - ridge crest / shoulder lift
@@ -105,7 +106,8 @@ build_chunk_base_heightfield_prototype(
 - deterministic detail carriers should stay stable across world seeds, while realization, atlas, and corridor context only modulate where and how strongly those carriers are expressed
 - this keeps boundaries readable while avoiding abrupt "switch formula" behavior at atlas-cell or classified-region edges
 - current implementation note:
-  - until `v2/realization_field.rs` exists, runtime prototype still directly blends neighboring classified region cells as a temporary approximation
+  - runtime prototype now samples `ChunkRealizationFieldPatch` per column and converts the resulting `RealizationSample` back into the shared basis parameter bundle before evaluating height and relief
+  - neighboring region-cell weights are still sampled, but only to derive corridor-mode policy weights rather than to provide the primary broad-shape parameter lattice
 
 ## Launch Policy Families
 

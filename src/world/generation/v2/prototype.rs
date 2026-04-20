@@ -7,8 +7,9 @@ use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
 use super::super::{SEA_LEVEL_Y, WORLD_FLOOR_Y};
 use super::{
-    ChunkCorridorWindow, ChunkGenerationV2Inputs, RegionSampleWeight, RiverCorridorConstraint,
-    sample_atlas_fields_fractional, sample_region_weights,
+    ChunkCorridorWindow, ChunkGenerationV2Inputs, ChunkRealizationFieldPatch, RealizationSample,
+    RegionSampleWeight, RiverCorridorConstraint, sample_atlas_fields_fractional,
+    sample_chunk_realization_field, sample_region_weights,
 };
 
 const MIN_BASE_HEIGHT_Y: f32 = WORLD_FLOOR_Y as f32 + 8.0;
@@ -42,7 +43,7 @@ enum PrototypePolicyFamily {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct BasisParameters {
+pub(super) struct BasisParameters {
     macro_height_bonus: f32,
     coastal_shelf_depth: f32,
     coastal_apron_lift: f32,
@@ -230,9 +231,11 @@ pub fn empty_base_heightfield_prototype(chunk: ChunkCoord) -> BaseHeightfieldPro
 pub fn build_chunk_base_heightfield_prototype(
     chunk: ChunkCoord,
     inputs: &ChunkGenerationV2Inputs,
+    realization_field: &ChunkRealizationFieldPatch,
     corridor_window: &ChunkCorridorWindow,
 ) -> BaseHeightfieldPrototype {
     debug_assert_eq!(inputs.chunk, chunk);
+    debug_assert_eq!(realization_field.chunk, chunk);
     debug_assert_eq!(corridor_window.chunk, chunk);
     let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
@@ -245,17 +248,24 @@ pub fn build_chunk_base_heightfield_prototype(
             let sample_world_x = world_x as f32 + 0.5;
             let sample_world_z = world_z as f32 + 0.5;
             let field = sample_atlas_fields_fractional(&inputs.atlas_fields, sample_world_x, sample_world_z);
+            let realization = sample_chunk_realization_field(
+                realization_field,
+                sample_world_x,
+                sample_world_z,
+            );
+            let params = basis_parameters_from_realization(realization);
             let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
             let structure_sample =
                 sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
             let mut base_height = blended_base_height(
-                &region_samples,
+                params,
                 field,
                 structure_sample,
                 sample_world_x,
                 sample_world_z,
             );
             let corridor_adjustment = corridor_adjustment_for_column(
+                params,
                 field,
                 structure_sample,
                 local_x as f32 + 0.5,
@@ -268,7 +278,7 @@ pub fn build_chunk_base_heightfield_prototype(
             base_height = snap_base_height_to_block_y(base_height);
 
             let relief_budget = blended_relief_budget(
-                &region_samples,
+                params,
                 field,
                 structure_sample,
                 corridor_adjustment.strongest_influence,
@@ -286,13 +296,12 @@ pub fn build_chunk_base_heightfield_prototype(
 }
 
 fn blended_base_height(
-    region_samples: &[RegionSampleWeight; 4],
+    params: BasisParameters,
     field: AtlasCell,
     structure: StructureBasisSample,
     world_x: f32,
     world_z: f32,
 ) -> f32 {
-    let params = blended_basis_parameters(region_samples);
     let inland_signal = (field.continent_core_factor * 0.58 + field.inlandness * 0.42).clamp(0.0, 1.0);
     let wet_signal =
         (field.wetness * 0.56 + field.riverine_factor * 0.24 + field.lake_potential * 0.20)
@@ -314,13 +323,12 @@ fn blended_base_height(
 }
 
 fn blended_relief_budget(
-    region_samples: &[RegionSampleWeight; 4],
+    params: BasisParameters,
     field: AtlasCell,
     structure: StructureBasisSample,
     strongest_corridor_influence: f32,
     corridor_penalty: f32,
 ) -> f32 {
-    let params = blended_basis_parameters(region_samples);
     let base_budget = params.relief_base
         + field.ruggedness * params.relief_gain
         + field.slope * (params.relief_gain * 0.52)
@@ -339,7 +347,7 @@ fn snap_base_height_to_block_y(base_height: f32) -> f32 {
     base_height.round().clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
 }
 
-fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisParameters {
+pub(super) fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisParameters {
     let mut params = BasisParameters::default();
     let mut total_weight = 0.0;
 
@@ -378,6 +386,62 @@ fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisPa
     params.outlet_open_scale *= inv;
     params.ridge_preservation *= inv;
     params.finalize()
+}
+
+pub(super) fn basis_parameters_to_realization_sample(
+    params: BasisParameters,
+) -> RealizationSample {
+    RealizationSample {
+        macro_height_bonus: params.macro_height_bonus,
+        coastal_shelf_depth: params.coastal_shelf_depth,
+        coastal_apron_lift: params.coastal_apron_lift,
+        coastal_cliff_lift: params.coastal_cliff_lift,
+        ridge_lift: params.ridge_lift,
+        ridge_shoulder_lift: params.ridge_shoulder_lift,
+        basin_depth: params.basin_depth,
+        inland_lift: params.inland_lift,
+        arid_lift: params.arid_lift,
+        wet_flatten: params.wet_flatten,
+        low_freq_amp: params.low_freq_amp,
+        mid_freq_amp: params.mid_freq_amp,
+        terrace_amp: params.terrace_amp,
+        dune_amp: params.dune_amp,
+        relief_base: params.relief_base,
+        relief_gain: params.relief_gain,
+        corridor_depth: params.corridor_depth,
+        corridor_width_scale: params.corridor_width_scale,
+        floodplain_width_scale: params.floodplain_width_scale,
+        outlet_open_scale: params.outlet_open_scale,
+        ridge_preservation: params.ridge_preservation,
+        meso_relief_reserve: params.relief_base * 0.65 + params.relief_gain * 0.35,
+    }
+}
+
+fn basis_parameters_from_realization(sample: RealizationSample) -> BasisParameters {
+    BasisParameters {
+        macro_height_bonus: sample.macro_height_bonus,
+        coastal_shelf_depth: sample.coastal_shelf_depth,
+        coastal_apron_lift: sample.coastal_apron_lift,
+        coastal_cliff_lift: sample.coastal_cliff_lift,
+        ridge_lift: sample.ridge_lift,
+        ridge_shoulder_lift: sample.ridge_shoulder_lift,
+        basin_depth: sample.basin_depth,
+        inland_lift: sample.inland_lift,
+        arid_lift: sample.arid_lift,
+        wet_flatten: sample.wet_flatten,
+        low_freq_amp: sample.low_freq_amp,
+        mid_freq_amp: sample.mid_freq_amp,
+        terrace_amp: sample.terrace_amp,
+        dune_amp: sample.dune_amp,
+        relief_base: sample.relief_base,
+        relief_gain: sample.relief_gain,
+        corridor_depth: sample.corridor_depth,
+        corridor_width_scale: sample.corridor_width_scale,
+        floodplain_width_scale: sample.floodplain_width_scale,
+        outlet_open_scale: sample.outlet_open_scale,
+        ridge_preservation: sample.ridge_preservation,
+    }
+    .finalize()
 }
 
 fn basis_parameters_for_family(family: PrototypePolicyFamily) -> BasisParameters {
@@ -945,6 +1009,7 @@ fn detail_basis(
 }
 
 fn corridor_adjustment_for_column(
+    params: BasisParameters,
     field: AtlasCell,
     structure: StructureBasisSample,
     local_x: f32,
@@ -952,7 +1017,6 @@ fn corridor_adjustment_for_column(
     region_samples: &[RegionSampleWeight; 4],
     corridors: &[RiverCorridorConstraint],
 ) -> CorridorAdjustment {
-    let params = blended_basis_parameters(region_samples);
     let mode_weights = blended_corridor_mode_weights(region_samples);
     let policy = corridor_policy(params);
     let mut adjustment = CorridorAdjustment::default();
@@ -1371,7 +1435,8 @@ fn distance_between_points(a: (f32, f32), b: (f32, f32)) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::v2::{
-        build_chunk_corridor_window, empty_chunk_corridor_window, prepare_chunk_v2_inputs,
+        build_chunk_corridor_window, build_chunk_realization_field_patch,
+        empty_chunk_corridor_window, prepare_chunk_v2_inputs,
     };
     use crate::world::meta::WorldMeta;
 
@@ -1380,9 +1445,20 @@ mod tests {
         let meta = WorldMeta::new(42);
         let chunk = ChunkCoord(4, 0, -3);
         let inputs = prepare_chunk_v2_inputs(chunk, &meta);
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
-        let a = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
-        let b = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+        let a = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &corridor_window,
+        );
+        let b = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &corridor_window,
+        );
 
         assert_eq!(a, b);
         assert_eq!(a.chunk, chunk);
@@ -1405,10 +1481,19 @@ mod tests {
     fn corridor_influence_lowers_the_prototype_near_a_corridor() {
         let meta = WorldMeta::new(42);
         let (chunk, inputs, corridor_window) = chunk_with_corridor_window(&meta);
-        let with_corridor =
-            build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
-        let without_corridor =
-            build_chunk_base_heightfield_prototype(chunk, &inputs, &empty_chunk_corridor_window(chunk));
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
+        let with_corridor = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &corridor_window,
+        );
+        let without_corridor = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &empty_chunk_corridor_window(chunk),
+        );
         let focus = corridor_focus_index(corridor_window.corridors[0]);
 
         assert!(
@@ -1463,8 +1548,14 @@ mod tests {
         let meta = WorldMeta::new(42);
         let chunk = ChunkCoord(4, 0, -3);
         let inputs = prepare_chunk_v2_inputs(chunk, &meta);
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
-        let prototype = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+        let prototype = build_chunk_base_heightfield_prototype(
+            chunk,
+            &inputs,
+            &realization_field,
+            &corridor_window,
+        );
         let min_height = prototype
             .columns
             .iter()
@@ -1672,8 +1763,9 @@ mod tests {
 
     fn build_prototype(chunk: ChunkCoord, meta: &WorldMeta) -> BaseHeightfieldPrototype {
         let inputs = prepare_chunk_v2_inputs(chunk, meta);
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
-        build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window)
+        build_chunk_base_heightfield_prototype(chunk, &inputs, &realization_field, &corridor_window)
     }
 
     fn chunk_with_corridor_window(
@@ -1709,8 +1801,14 @@ mod tests {
 
         for chunk in candidates {
             let inputs = prepare_chunk_v2_inputs(chunk, meta);
+            let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
             let corridor_window = empty_chunk_corridor_window(chunk);
-            let prototype = build_chunk_base_heightfield_prototype(chunk, &inputs, &corridor_window);
+            let prototype = build_chunk_base_heightfield_prototype(
+                chunk,
+                &inputs,
+                &realization_field,
+                &corridor_window,
+            );
             let max_adjacent_delta = prototype
                 .columns
                 .chunks(CHUNK_EDGE_I32 as usize)
@@ -1864,14 +1962,19 @@ mod tests {
         let sample_world_x = world_x as f32 + 0.5;
         let sample_world_z = world_z as f32 + 0.5;
         let inputs = prepare_chunk_v2_inputs(chunk, meta);
+        let realization_field = build_chunk_realization_field_patch(chunk, &inputs);
         let corridor_window = build_chunk_corridor_window(chunk, &inputs);
         let field = sample_atlas_fields_fractional(&inputs.atlas_fields, sample_world_x, sample_world_z);
+        let realization =
+            sample_chunk_realization_field(&realization_field, sample_world_x, sample_world_z);
+        let params = basis_parameters_from_realization(realization);
         let region_samples = sample_region_weights(&inputs.region_classes, sample_world_x, sample_world_z);
         let structure_sample =
             sample_structure_basis(&inputs.atlas_structure, sample_world_x, sample_world_z);
         let base_before_corridor =
-            blended_base_height(&region_samples, field, structure_sample, sample_world_x, sample_world_z);
+            blended_base_height(params, field, structure_sample, sample_world_x, sample_world_z);
         let corridor_adjustment = corridor_adjustment_for_column(
+            params,
             field,
             structure_sample,
             local_x as f32 + 0.5,

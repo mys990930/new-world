@@ -629,6 +629,7 @@ fn build_prototype_preview_grid(
             let prototype = build_chunk_base_heightfield_prototype(
                 scaffold.chunk,
                 &scaffold.inputs,
+                &scaffold.realization_field_patch,
                 &scaffold.corridor_window,
             );
             let meso = build_chunk_meso_applied_prototype(
@@ -1486,6 +1487,7 @@ mod tests {
         let prototype = build_chunk_base_heightfield_prototype(
             scaffold.chunk,
             &scaffold.inputs,
+            &scaffold.realization_field_patch,
             &scaffold.corridor_window,
         );
         let meso = build_chunk_meso_applied_prototype(

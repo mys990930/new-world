@@ -4,7 +4,7 @@
 
 - own the continuous prototype-control solve that sits between discrete region classification and the biome-aware base heightfield
 - turn atlas-cell semantic classes into a world-space realization field so terrain no longer exposes atlas rectangles through direct cell-to-heightfield parameter switches
-- provide the authoritative design contract for the upcoming realization-field stage before implementation lands
+- provide the authoritative design contract for the current realization-field stage and its next tuning steps
 
 ## Responsibilities
 
@@ -31,8 +31,9 @@
 ## Outputs
 
 - `ChunkRealizationFieldPatch`
+- `RealizationSample`
 
-## Planned Interface
+## Interface
 
 ```rust
 build_chunk_realization_field_patch(
@@ -53,7 +54,7 @@ sample_chunk_realization_field(
   - the locally anchored semantic intent derived from one classified region cell plus nearby atlas context
 - `RealizationFieldNode`
   - one node on the sub-atlas control lattice
-  - stores the solved continuous parameter vector used by prototype
+  - stores both the locally anchored source sample and the solved continuous parameter vector used by prototype
 - `ChunkRealizationFieldPatch`
   - the chunk-local solved control patch including halo support so neighboring chunks agree along shared boundaries
 - `RealizationSample`
@@ -87,6 +88,9 @@ These are continuous generation controls, not a replacement encoding of `RegionA
   - one realization node per `2 x 2` chunks
   - this yields `8 x 8` realization nodes inside one `16 x 16` chunk atlas cell
 - each chunk solve should include enough halo nodes that neighboring chunks sample the same solved field along shared boundaries
+- current implementation:
+  - `REALIZATION_NODE_CHUNK_SPAN = 2`
+  - `REALIZATION_PATCH_HALO_NODES = 2`
 
 ## Source Construction
 
@@ -126,6 +130,9 @@ Permeability should decrease when the macro context says a boundary should remai
   - stays anchored to its own source hint
   - is pulled toward compatible neighboring node values according to permeability
 - sample the solved node field in world space when prototype requests a control vector
+- current implementation note:
+  - the first solve uses a bounded neighborhood gather with permeability-weighted averaging plus an anchor-strength blend, rather than a multi-iteration global relaxation pass
+  - permeability already considers distance, semantic compatibility, scalar-context similarity, marine/inland transitions, and basin-wall pressure
 
 The solve target is not "blur everything"; it is "carry compatible landform intent across atlas-cell boundaries without losing macro barriers".
 
@@ -153,13 +160,13 @@ The solve target is not "blur everything"; it is "carry compatible landform inte
 
 ## Why This Exists
 
-- the current prototype directly blends neighboring classified atlas cells at sample time
-- that softens hard steps, but it still leaves a piecewise atlas-grid-shaped control field at large scale
-- the realization field exists specifically to remove that remaining atlas-grid imprint and let terrain context continue naturally across classified-cell boundaries
+- the previous prototype directly blended neighboring classified atlas cells at sample time
+- that softened hard steps, but still left a piecewise atlas-grid-shaped control field at large scale
+- the realization field now exists specifically to remove that remaining atlas-grid imprint and let terrain context continue naturally across classified-cell boundaries
 
 ## Deferred
 
 - exact runtime storage layout
-- exact relaxation iteration count
+- stronger multi-step relaxation / solve variants beyond the current bounded diffusion pass
 - any final corridor-aware feedback into the realization solve
 - meso coupling beyond preserving a later `meso_relief_reserve`

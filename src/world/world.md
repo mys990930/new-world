@@ -232,12 +232,12 @@ NOT:
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
-- the next authoritative ownership step is atlas-owned region classification, which should resolve biome and terrain-form archetypes before base heightfield solving
-- an initial code scaffold for atlas-owned region classification now exists, but it is not yet the active gameplay generator path
+- atlas-owned region classification now resolves biome and terrain-form archetypes before base heightfield solving
+- generation-side realization-field sampling now sits after region classification so prototype can read continuous control parameters instead of atlas-cell labels directly
 - the current public `resolve_region_classes(...)` surface remains launch-safe by applying launch fallback at the final step, while the internal raw classifier may still emit broader scaffolded archetypes for testing and future downstream work
 - atlas-owned meso guides should eventually sit after region classification and before generation micro detail as on-demand deterministic terrain accents
 - the full per-feature meso taxonomy is now scaffolded in `atlas/meso/features/*`, but the currently emitted runtime subset is still only the Wave 1A guides: `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - the old legacy V1 chunk generator has now been removed instead of being kept beside V2
-- the current top-level `world::generate_chunk(...)` path is an explicit TODO stub until V2 realization lands
+- the current top-level `world::generate_chunk(...)` path is an explicit TODO stub until end-to-end V2 chunk realization lands
 - the current `probe_chunk(...)`, `probe_column(...)`, and `sample_chunk_surface_lod(...)` surfaces are also compile-only TODO stubs
 - the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> realization field solve -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`

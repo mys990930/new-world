@@ -6,6 +6,7 @@ use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 use crate::world::meta::WorldMeta;
 
 use super::corridors::{ChunkCorridorWindow, build_chunk_corridor_window};
+use super::realization_field::{ChunkRealizationFieldPatch, build_chunk_realization_field_patch};
 use super::super::sampler::{
     generate_chunk_atlas_fields, generate_chunk_atlas_structure, generate_chunk_meso_guides,
     generate_chunk_region_classes,
@@ -15,6 +16,7 @@ use super::super::sampler::{
 pub enum V2ScaffoldStage {
     AtlasInputsReady,
     RegionClassificationReady,
+    RealizationFieldReady,
     CorridorWindowReady,
     PrototypeReady,
     MesoReady,
@@ -50,6 +52,7 @@ pub struct ChunkGenerationV2Scaffold {
     pub stage: V2ScaffoldStage,
     pub inputs: ChunkGenerationV2Inputs,
     pub center_region: RegionClassSample,
+    pub realization_field_patch: ChunkRealizationFieldPatch,
     pub corridor_window: ChunkCorridorWindow,
 }
 
@@ -59,6 +62,7 @@ impl PartialEq for ChunkGenerationV2Scaffold {
             && self.stage == other.stage
             && self.inputs == other.inputs
             && self.center_region == other.center_region
+            && self.realization_field_patch == other.realization_field_patch
             && self.corridor_window == other.corridor_window
     }
 }
@@ -83,6 +87,7 @@ pub fn build_chunk_v2_scaffold(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGene
     let center_world_x = coord.0 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32.div_euclid(2);
     let center_world_z = coord.2 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32.div_euclid(2);
     let center_region = sample_region_classes(&inputs.region_classes, center_world_x, center_world_z);
+    let realization_field_patch = build_chunk_realization_field_patch(coord, &inputs);
     let corridor_window = build_chunk_corridor_window(coord, &inputs);
 
     ChunkGenerationV2Scaffold {
@@ -90,6 +95,7 @@ pub fn build_chunk_v2_scaffold(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGene
         stage: V2ScaffoldStage::CorridorWindowReady,
         inputs,
         center_region,
+        realization_field_patch,
         corridor_window,
     }
 }

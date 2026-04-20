@@ -74,6 +74,16 @@ generation::build_chunk_v2_scaffold(
     coord: ChunkCoord,
     meta: &WorldMeta,
 ) -> ChunkGenerationV2Scaffold
+generation::build_chunk_realization_field_patch(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationV2Inputs,
+) -> ChunkRealizationFieldPatch
+generation::build_chunk_base_heightfield_prototype(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationV2Inputs,
+    realization_field: &ChunkRealizationFieldPatch,
+    corridor_window: &ChunkCorridorWindow,
+) -> BaseHeightfieldPrototype
 generation::build_chunk_meso_applied_prototype(
     chunk: ChunkCoord,
     inputs: &ChunkGenerationV2Inputs,
@@ -162,7 +172,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 - `status.md`: current V2 progress, retained modules, and removed legacy summary
 - `v2.md`: region-first generation scaffold
 - `v2/inputs.md`: atlas, skeleton, and region input assembly scaffold
-- `v2/realization_field.md`: continuous prototype-control field derived from semantic region classes
+- `v2/realization_field.md`: continuous prototype-control field derived from semantic region classes and sampled by prototype before corridor shaping
 - `v2/corridors.md`: river corridor and downstream-grade scaffold
 - `v2/prototype.md`: biome-aware base heightfield prototype scaffold
 - `v2/meso_apply.md`: meso application scaffold

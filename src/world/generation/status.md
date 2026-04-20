@@ -85,13 +85,13 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 4. Realization Field
 
-- status: `planned, not yet implemented`
-- owner: `v2/realization_field.md` now, planned `v2/realization_field.rs`
+- status: `implemented as initial continuous control-field solve`
+- owner: `v2/realization_field.rs`
 - note:
-  - this stage will sit between discrete region classification and prototype height solving
-  - its job is to convert atlas-cell semantic classes plus nearby atlas context into a continuous prototype-control field, so the world no longer advertises atlas rectangles through piecewise-bilinear parameter blending
-  - the current prototype still samples neighboring classified region cells directly and blends their parameter bundles at runtime; that direct cell-to-heightfield coupling is now treated as the main known source of large-scale atlas-grid imprint
-  - the realization-field stage should therefore own sub-atlas control-lattice sampling, permeability/continuity rules, and world-space control-field sampling before prototype begins its broad-shape solve
+  - this stage now sits between discrete region classification and prototype height solving
+  - it converts atlas-cell semantic classes plus nearby atlas context into a continuous prototype-control field, so prototype no longer reads classified atlas cells as its first parameter lattice
+  - the current implementation uses a `2 x 2` chunk realization lattice with halo support, source hints derived from blended region/archetype semantics plus atlas scalars, and a local permeability-weighted diffusion solve before world-space sampling
+  - the stage is intentionally local and chunk-order-independent, but still initial: tuning, channel coverage, and stronger macro-barrier rules remain open work
 
 ### 5. River Corridor Solve
 
@@ -110,9 +110,9 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 - owner: `v2/prototype.rs`
 - note:
   - `src/world/generation/v2/prototype.md` is now the authoritative base-heightfield solve design
-  - prototype now emits one `PrototypeColumn` per in-chunk column, using region/archetype context plus corridor constraints to produce a deterministic broad landform scaffold
+  - prototype now emits one `PrototypeColumn` per in-chunk column, using realization-field control samples plus corridor constraints to produce a deterministic broad landform scaffold
   - current implementation now samples atlas scalars continuously in block/world space, blends neighboring classified region context near atlas boundaries without chunk-wide family snapping, uses canonical atlas field assembly to avoid chunk-request drift, collapses repeated river-branch segment responses so long corridors do not stack into seam walls, and adds deterministic subchunk ripple/terrace variation so low-relief terrain reads more clearly in quarter-view
-  - this direct classified-cell blending is now explicitly temporary: once the realization-field stage lands, prototype should consume continuous realization samples instead of using atlas-cell region labels as its first control surface
+  - direct classified-cell blending is no longer the primary control path; region samples remain only as corridor-mode policy hints while broad-shape parameters now come from the realization field
   - corridor response, valley seats, and relief budgets remain explicit, while shared-edge regression tests now guard against chunk, atlas-boundary, and canonical-region boundary step artifacts
   - later stages still own meso accents, smoothing, final hydrology, and voxel/material realization
 
@@ -176,8 +176,8 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 2. lock launch material policy per archetype
 3. lock launch seasonal biome-state policy
 4. document launch fallback behavior for extended and deferred archetypes
-5. implement the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles
-6. expand and tune archetype coverage in `v2/prototype.rs` as more launch and extended landform cases come online, then retarget prototype to the realization field instead of direct region-cell blending
+5. tune and extend the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles at larger scales too
+6. expand and tune archetype coverage in `v2/prototype.rs` and `v2/realization_field.rs` as more launch and extended landform cases come online
 7. tune and tighten the Wave 1 meso operators in `v2/meso_apply.rs` once the authoritative matrix is published
 8. implement smoothing/local refinement in `v2/smoothing.rs`
 9. implement connected hydrology in `v2/hydrology.rs`

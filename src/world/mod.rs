@@ -66,13 +66,16 @@ pub use edit::{EditError, EditResult, WorldEdit};
 pub use generation::{
     FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, V2_GENERATOR_LABEL, WORLD_FLOOR_Y,
     BaseHeightfieldPrototype, ChunkCorridorWindow, ChunkGenerationV2Inputs,
-    ChunkGenerationV2Scaffold, HydrologySolve, MesoAppliedColumn, MesoAppliedPrototype,
-    PrototypeColumn, RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage,
-    VoxelizationPlan, build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
-    build_chunk_meso_applied_prototype, build_chunk_v2_scaffold, default_voxelization_plan,
-    empty_base_heightfield_prototype, empty_chunk_corridor_window, empty_hydrology_solve,
+    ChunkGenerationV2Scaffold, ChunkRealizationFieldPatch, HydrologySolve, MesoAppliedColumn,
+    MesoAppliedPrototype, PrototypeColumn, REALIZATION_NODE_BLOCK_SPAN,
+    REALIZATION_NODE_CHUNK_SPAN, RealizationFieldNode, RealizationSample,
+    RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage, VoxelizationPlan,
+    build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
+    build_chunk_meso_applied_prototype, build_chunk_realization_field_patch,
+    build_chunk_v2_scaffold, default_voxelization_plan, empty_base_heightfield_prototype,
+    empty_chunk_corridor_window, empty_chunk_realization_field_patch, empty_hydrology_solve,
     empty_meso_applied_prototype, empty_smoothed_prototype, generate_chunk,
-    prepare_chunk_v2_inputs,
+    prepare_chunk_v2_inputs, sample_chunk_realization_field,
 };
 #[allow(unused_imports)]
 pub use generation::{
