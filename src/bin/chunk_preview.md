@@ -23,7 +23,7 @@
 
 1. Resolve the preview source.
 2. Load or generate the requested chunk window plus padding for meshing.
-3. Build either full block meshes through `world::meshing` or a coarse probe-driven heightfield mesh when `--lod-blocks > 1`.
+3. Build either full block meshes through `world::meshing`, a post-prototype meso-applied heightfield mesh for `--stage prototype`, or a coarse probe-driven heightfield mesh when `--lod-blocks > 1`.
 4. Render them with a fixed quarter-view camera and a relief-friendly preview lighting setup.
 5. Save the PNG to disk.
 
@@ -31,10 +31,10 @@
 
 ## Prototype Stage
 
-- `--stage prototype` is seed-only and renders the base-heightfield solve instead of realized chunk meshes.
-- The prototype path builds `ChunkGenerationV2Inputs` for each chunk in the requested window, then calls the V2 scaffold and base-heightfield prototype solve before meshing the result for preview.
+- `--stage prototype` is seed-only and renders the post-prototype meso-applied heightfield instead of realized chunk meshes.
+- The prototype path builds `ChunkGenerationV2Inputs` for each chunk in the requested window, then calls the V2 scaffold, base-heightfield prototype solve, and meso apply stage before meshing the result for preview.
 - Vertical chunk bounds are ignored in prototype mode; the render footprint is controlled by `--center-x`, `--center-z`, and `--radius`.
-- The default output name includes `_prototype` so the image is easy to tell apart from the full chunk preview.
+- The default output name still includes `_prototype` so the image is easy to tell apart from the full chunk preview, even though the rendered surface already includes meso deformation.
 
 Example:
 

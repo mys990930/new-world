@@ -16,9 +16,10 @@ use new_world::renderer::{
 };
 use new_world::world::{
     BlockFace, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
-    PrototypeColumn, TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
-    build_chunk_base_heightfield_prototype, build_chunk_mesh, build_chunk_v2_scaffold,
-    generate_chunk, sample_chunk_surface_lod,
+    TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
+    build_chunk_base_heightfield_prototype, build_chunk_mesh,
+    build_chunk_meso_applied_prototype, build_chunk_v2_scaffold, generate_chunk,
+    sample_chunk_surface_lod,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -266,7 +267,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("center chunk: ({center_x}, {center_z})");
     match stage {
         PreviewStage::Prototype => {
-            println!("render footprint: xz radius={}, prototype stage, y bounds ignored", radius);
+            println!(
+                "render footprint: xz radius={}, prototype+meso stage, y bounds ignored",
+                radius
+            );
         }
         PreviewStage::Full => {
             println!(
@@ -561,7 +565,13 @@ impl PrototypePreviewGrid {
 #[derive(Debug, Clone)]
 struct PrototypePreviewChunk {
     coord: ChunkCoord,
-    columns: Vec<PrototypeColumn>,
+    columns: Vec<PrototypePreviewColumn>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrototypePreviewColumn {
+    height: f32,
+    remaining_relief_budget: f32,
 }
 
 fn collect_prototype_render_meshes(
@@ -621,10 +631,23 @@ fn build_prototype_preview_grid(
                 &scaffold.inputs,
                 &scaffold.corridor_window,
             );
+            let meso = build_chunk_meso_applied_prototype(
+                scaffold.chunk,
+                &scaffold.inputs,
+                &scaffold.corridor_window,
+                &prototype,
+            );
 
             PrototypePreviewChunk {
                 coord: chunk,
-                columns: prototype.columns,
+                columns: meso
+                    .columns
+                    .into_iter()
+                    .map(|column| PrototypePreviewColumn {
+                        height: column.height,
+                        remaining_relief_budget: column.remaining_relief_budget,
+                    })
+                    .collect(),
             }
         })
         .collect::<Vec<_>>();
@@ -648,14 +671,14 @@ fn build_prototype_preview_grid(
                 let global_x = chunk_col * CHUNK_EDGE
                     + usize::try_from(local_x).map_err(|_| cli_error("invalid prototype preview local x"))?;
                 let index = row_offset + global_x;
-                let top_y = column.base_height.round() as i32;
+                let top_y = column.height.round() as i32;
                 base_y = base_y.min(top_y);
                 cells[index] = PrototypePreviewCell {
                     min_x: chunk_origin_x + local_x,
                     min_z: chunk_origin_z + local_z,
                     top_y,
-                    base_height: column.base_height,
-                    relief_budget: column.relief_budget,
+                    base_height: column.height,
+                    relief_budget: column.remaining_relief_budget,
                 };
             }
         }
@@ -1408,7 +1431,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_preview -- <seed> [--stage <full|prototype>] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--stage full] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n\nPrototype stage is seed-only and renders the base heightfield / prototype solve instead of realized chunk meshes."
+    "usage: cargo run --bin chunk_preview -- <seed> [--stage <full|prototype>] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--stage full] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n\nPrototype stage is seed-only and renders the post-prototype meso-applied heightfield instead of realized chunk meshes."
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1451,5 +1474,58 @@ mod tests {
             .iter()
             .any(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty()));
         assert!(meshes.iter().all(|mesh| mesh.bounds.is_some()));
+    }
+
+    #[test]
+    fn prototype_stage_grid_matches_meso_applied_heights() {
+        let meta = WorldMeta::new(42);
+        let chunk = ChunkCoord(3, 0, 24);
+        let grid =
+            build_prototype_preview_grid(&meta, chunk.0, chunk.2, 0).expect("prototype grid should build");
+        let scaffold = build_chunk_v2_scaffold(chunk, &meta);
+        let prototype = build_chunk_base_heightfield_prototype(
+            scaffold.chunk,
+            &scaffold.inputs,
+            &scaffold.corridor_window,
+        );
+        let meso = build_chunk_meso_applied_prototype(
+            scaffold.chunk,
+            &scaffold.inputs,
+            &scaffold.corridor_window,
+            &prototype,
+        );
+        let mut found_meso_delta = false;
+
+        for local_z in 0..CHUNK_EDGE_I32 {
+            for local_x in 0..CHUNK_EDGE_I32 {
+                let index = local_z as usize * CHUNK_EDGE_I32 as usize + local_x as usize;
+                let world_x = chunk.0 * CHUNK_EDGE_I32 + local_x;
+                let world_z = chunk.2 * CHUNK_EDGE_I32 + local_z;
+                let cell = grid
+                    .cell(world_x, world_z)
+                    .expect("prototype grid should cover the sampled chunk");
+                let applied = meso.columns[index];
+                let base = prototype.columns[index];
+
+                assert!(
+                    (cell.base_height - applied.height).abs() <= 0.001,
+                    "prototype preview cell height drifted from meso-applied height at ({world_x}, {world_z})"
+                );
+                assert_eq!(cell.top_y, applied.height.round() as i32);
+                assert!(
+                    (cell.relief_budget - applied.remaining_relief_budget).abs() <= 0.001,
+                    "prototype preview relief budget drifted at ({world_x}, {world_z})"
+                );
+
+                if (applied.height - base.base_height).abs() >= 0.10 {
+                    found_meso_delta = true;
+                }
+            }
+        }
+
+        assert!(
+            found_meso_delta,
+            "expected the sampled prototype preview chunk to include meso deformation"
+        );
     }
 }
