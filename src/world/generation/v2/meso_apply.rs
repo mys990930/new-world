@@ -166,18 +166,18 @@ fn hill_cluster_delta(
     relief_scale: f32,
     corridor_avoidance: f32,
 ) -> f32 {
-    let peak_mask = hill_cluster_apply.peak_mask.clamp(0.0, 1.0);
-    let footprint_bias = (0.20 + meso.hilliness * 0.40 + peak_mask * 0.40).clamp(0.0, 1.0);
+    let coverage = hill_cluster_apply.coverage.clamp(0.0, 1.0);
+    let footprint_bias = (0.16 + meso.hilliness * 0.34 + coverage * 0.50).clamp(0.0, 1.0);
     let weight = footprint_bias * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    let broad_raise = meso.hill_height * (0.22 + meso.hilliness * 0.18);
-    let peak_raise =
-        hill_cluster_apply.peak_height_blocks * (0.78 + peak_mask * 0.26);
+    let broad_raise = meso.hill_height * (0.18 + meso.hilliness * 0.18);
+    let lobe_raise =
+        hill_cluster_apply.lobe_height_blocks * (0.68 + coverage * 0.24);
 
-    (broad_raise + peak_raise) * weight * relief_scale * 0.92
+    (broad_raise + lobe_raise) * weight * relief_scale * 0.90
 }
 
 fn shallow_basin_delta(
@@ -440,8 +440,8 @@ mod tests {
             ..MesoGuideSample::default()
         };
         let hill_cluster_apply = HillClusterApplySample {
-            peak_mask: 0.85,
-            peak_height_blocks: 5.6,
+            coverage: 0.82,
+            lobe_height_blocks: 6.2,
         };
 
         assert!(hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0) > 0.0);
@@ -451,20 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn hill_cluster_delta_keeps_peak_height_material_at_partial_footprint() {
+    fn hill_cluster_delta_keeps_macro_lobe_material_at_partial_footprint() {
         let meso = MesoGuideSample {
             hilliness: 0.55,
             hill_height: 7.5,
             ..MesoGuideSample::default()
         };
         let hill_cluster_apply = HillClusterApplySample {
-            peak_mask: 0.72,
-            peak_height_blocks: 5.4,
+            coverage: 0.68,
+            lobe_height_blocks: 7.0,
         };
 
         let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 1.0, 1.0);
         assert!(
-            delta >= 4.8,
+            delta >= 4.4,
             "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"
         );
     }
