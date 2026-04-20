@@ -13,8 +13,8 @@
 - blend local region-family context near atlas boundaries by first blending shared basis parameters rather than directly averaging unrelated per-family outputs
 - derive ridge, coast, basin, and corridor influence as continuous world-space basis terms that can cross chunk borders naturally
 - preserve valley seats, floodplain openings, basin outlets, and coastal exits already established by corridor solve
-- aggregate repeated corridor segment responses per river branch so adjacent segments do not stack into artificial trench walls
-- inject deterministic subchunk relief bands and ripple-sized height changes so low-relief terrain still reads clearly in the quarter-view camera
+- soft-blend repeated corridor segment responses per river branch so adjacent segments do not stack into artificial trench walls or hand off with sharp seams
+- inject deterministic subchunk relief bands and ripple-sized height changes from seed-independent value-noise carriers so low-relief terrain still reads clearly in the quarter-view camera
 - allocate a remaining relief budget for later meso, smoothing, and hydrology passes
 - keep the landform identity readable before local accents are added
 
@@ -99,7 +99,8 @@ build_chunk_base_heightfield_prototype(
   - low-frequency, structure-aligned, terrace, and dune amplitudes
   - corridor depth / width / outlet-open behavior
 - the prototype first blends those parameters from neighboring region samples around the current world-space point
-- the final broad height is then evaluated once from common basis terms such as macro elevation, coastal response, ridge structure response, basin response, deterministic detail, and corridor response
+- the final broad height is then evaluated once from common basis terms such as macro elevation, coastal response, ridge structure response, basin response, seed-independent deterministic detail, and corridor response
+- deterministic detail carriers should stay stable across world seeds, while region, atlas, and corridor context only modulate where and how strongly those carriers are expressed
 - this keeps boundaries readable while avoiding abrupt "switch formula" behavior at atlas-cell or classified-region edges
 
 ## Launch Policy Families
@@ -195,7 +196,7 @@ build_chunk_base_heightfield_prototype(
 3. sample nearby mountain-chain structure into continuous ridge-core and ridge-shoulder basis signals in world space
 4. read the corridor window and convert each branch into continuous valley, floodplain, and outlet-openness signals with chunk-external support
 5. evaluate the shared basis solve once from macro elevation, coast, ridge, basin, and deterministic detail terms
-6. collapse repeated river-path segment responses by branch so a long river does not over-carve where adjacent segments overlap the same column
+6. softly blend repeated river-path segment responses by branch so a long river does not over-carve or abruptly hand off where adjacent segments overlap the same column
 7. apply corridor response as a pre-meso constraint on top of the shared basis solve while preserving ridge shoulders where appropriate
 8. distribute relief budget to preserve room for later meso and smoothing without changing the broad identity
 9. emit one `PrototypeColumn` per chunk column and return the completed `BaseHeightfieldPrototype`
@@ -223,7 +224,7 @@ build_chunk_base_heightfield_prototype(
 - region boundaries should blend shared solver parameters, not switch to a different closed-form height equation
 - ridge and corridor influence should be evaluated in world space from nearby segment geometry, even when the segment midpoint lies outside the strict chunk footprint
 - atlas scalar interpolation should use smoothed fractions so the same cell neighborhood does not create a visible terrace merely because the sample crossed an atlas-cell line
-- any deterministic micro-relief kept in prototype should remain subordinate to the broad basis terms and should never depend on chunk generation order
+- any deterministic micro-relief kept in prototype should remain subordinate to the broad basis terms, should never depend on chunk generation order, and should keep its carrier pattern stable across world seeds
 
 ## Invariants
 

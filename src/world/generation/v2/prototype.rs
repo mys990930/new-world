@@ -16,6 +16,18 @@ const MAX_BASE_HEIGHT_Y: f32 = SEA_LEVEL_Y as f32 + 192.0;
 const MIN_RELIEF_BUDGET: f32 = 4.0;
 const MAX_RELIEF_BUDGET: f32 = 40.0;
 const ATLAS_CELL_BLOCK_SPAN: f32 = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32) as f32;
+const DETAIL_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
+const DETAIL_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
+const DETAIL_HASH_K3: u64 = 0x1656_67B1_9E37_79F9;
+const DETAIL_SALT_LOW_FREQ: u64 = 0xD311_A501_1000_0001;
+const DETAIL_SALT_ORIENTED_LOW: u64 = 0xD311_A501_1000_0002;
+const DETAIL_SALT_MID_FREQ: u64 = 0xD311_A501_1000_0003;
+const DETAIL_SALT_FLAT_FREQ: u64 = 0xD311_A501_1000_0004;
+const DETAIL_SALT_DUNE_FREQ: u64 = 0xD311_A501_1000_0005;
+const DETAIL_SALT_WARP_X: u64 = 0xD311_A501_2000_0001;
+const DETAIL_SALT_WARP_Z: u64 = 0xD311_A501_2000_0002;
+const DETAIL_SALT_ORIENT_WARP_X: u64 = 0xD311_A501_2000_0003;
+const DETAIL_SALT_ORIENT_WARP_Z: u64 = 0xD311_A501_2000_0004;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PrototypePolicyFamily {
@@ -173,6 +185,7 @@ struct CorridorAdjustment {
     height_delta: f32,
     relief_budget_penalty: f32,
     strongest_influence: f32,
+    blend_weight: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -810,14 +823,49 @@ fn detail_basis(
     wet_signal: f32,
 ) -> f32 {
     let heading = structure.heading();
-    let low_wave = low_frequency_wave(world_x, world_z, 168.0, 144.0, 0.18);
-    let oriented_low = aligned_wave(world_x, world_z, heading, 112.0, 86.0, 0.37);
-    let mid_wave = aligned_wave(world_x, world_z, heading, 42.0, 28.0, 1.13);
-    let terrace_wave = terraced_wave(world_x, world_z, 34.0, 24.0, 0.29, 6.0);
-    let flat_wave = terraced_wave(world_x, world_z, 18.0, 14.0, 0.91, 5.0);
-    let flat_ripple = aligned_wave(world_x, world_z, heading, 11.0, 9.0, 1.67);
-    let readability_step = terraced_wave(world_x, world_z, 8.0, 7.0, 0.52, 4.0);
-    let dune_wave = dune_body_wave(world_x, world_z);
+    let along = world_x * heading.0 + world_z * heading.1;
+    let across = world_x * -heading.1 + world_z * heading.0;
+    let (warped_world_x, warped_world_z) =
+        seedless_domain_warp(world_x, world_z, 184.0, 14.0, DETAIL_SALT_WARP_X, DETAIL_SALT_WARP_Z);
+    let (warped_along, warped_across) = seedless_domain_warp(
+        along,
+        across,
+        132.0,
+        10.0,
+        DETAIL_SALT_ORIENT_WARP_X,
+        DETAIL_SALT_ORIENT_WARP_Z,
+    );
+    let low_noise =
+        seedless_value_fbm(warped_world_x, warped_world_z, 164.0, 3, 2.03, 0.52, DETAIL_SALT_LOW_FREQ);
+    let oriented_low = seedless_value_fbm(
+        warped_along,
+        warped_across,
+        108.0,
+        3,
+        2.08,
+        0.50,
+        DETAIL_SALT_ORIENTED_LOW,
+    );
+    let mid_noise =
+        seedless_value_fbm(warped_along, warped_across, 46.0, 2, 2.15, 0.56, DETAIL_SALT_MID_FREQ);
+    let flat_noise =
+        seedless_value_fbm(warped_world_x, warped_world_z, 20.0, 2, 2.02, 0.54, DETAIL_SALT_FLAT_FREQ);
+    let terrace_source = (oriented_low * 0.58 + mid_noise * 0.42).clamp(-1.0, 1.0);
+    let flat_source = (flat_noise * 0.72 + mid_noise * 0.28).clamp(-1.0, 1.0);
+    let terrace_wave = soft_terrace_noise(terrace_source, 6.0, 0.76);
+    let flat_wave = soft_terrace_noise(flat_source, 5.0, 0.82);
+    let readability_step = soft_terrace_noise(flat_noise, 4.0, 0.90);
+    let flat_ripple = seedless_value_fbm(
+        warped_world_x,
+        warped_world_z,
+        11.5,
+        2,
+        2.00,
+        0.52,
+        DETAIL_SALT_FLAT_FREQ.wrapping_add(DETAIL_HASH_K1),
+    );
+    let dune_wave =
+        seedless_ridged_fbm(warped_along * 0.72, warped_across * 1.18, 68.0, 3, 2.12, 0.55, DETAIL_SALT_DUNE_FREQ);
     let ridge_noise_gate =
         (0.35 + structure.ridge_shoulder_influence * 0.45 + field.ruggedness * 0.20).clamp(0.0, 1.0);
     let basin_noise_gate = (1.0 - field.basinness * 0.45).clamp(0.40, 1.0);
@@ -829,9 +877,9 @@ fn detail_basis(
         - structure.ridge_core_influence * 0.40)
         .clamp(0.0, 1.0);
 
-    let detail = low_wave * params.low_freq_amp
+    let detail = low_noise * params.low_freq_amp
         + oriented_low * params.low_freq_amp * 0.35
-        + mid_wave * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
+        + mid_noise * params.mid_freq_amp * ridge_noise_gate * basin_noise_gate
         + terrace_wave * params.terrace_amp * terrace_gate
         + (flat_wave * (1.10 + params.terrace_amp * 0.20)
             + flat_ripple * 0.72
@@ -963,22 +1011,21 @@ fn corridor_policy(params: BasisParameters) -> CorridorPolicy {
 }
 
 fn merge_branch_response(current: CorridorAdjustment, candidate: CorridorAdjustment) -> CorridorAdjustment {
-    let candidate_is_stronger = candidate.strongest_influence > current.strongest_influence
-        || ((candidate.strongest_influence - current.strongest_influence).abs() <= 0.0001
-            && candidate.height_delta.abs() > current.height_delta.abs());
+    let current_weight = corridor_response_blend_weight(current);
+    let candidate_weight = corridor_response_blend_weight(candidate);
+    let total_weight = current_weight + candidate_weight;
+    if total_weight <= f32::EPSILON {
+        return CorridorAdjustment::default();
+    }
 
     CorridorAdjustment {
-        height_delta: if candidate_is_stronger {
-            candidate.height_delta
-        } else {
-            current.height_delta
-        },
-        relief_budget_penalty: current
-            .relief_budget_penalty
-            .max(candidate.relief_budget_penalty),
-        strongest_influence: current
-            .strongest_influence
-            .max(candidate.strongest_influence),
+        height_delta: (current.height_delta * current_weight + candidate.height_delta * candidate_weight)
+            / total_weight,
+        relief_budget_penalty: (current.relief_budget_penalty * current_weight
+            + candidate.relief_budget_penalty * candidate_weight)
+            / total_weight,
+        strongest_influence: current.strongest_influence.max(candidate.strongest_influence),
+        blend_weight: total_weight,
     }
 }
 
@@ -1049,7 +1096,20 @@ fn single_corridor_adjustment(
         height_delta: shoulder_gain - drop,
         relief_budget_penalty,
         strongest_influence,
+        blend_weight: corridor_segment_blend_weight(strongest_influence),
     }
+}
+
+fn corridor_response_blend_weight(adjustment: CorridorAdjustment) -> f32 {
+    if adjustment.blend_weight > f32::EPSILON {
+        adjustment.blend_weight
+    } else {
+        corridor_segment_blend_weight(adjustment.strongest_influence)
+    }
+}
+
+fn corridor_segment_blend_weight(strongest_influence: f32) -> f32 {
+    smootherstep01(strongest_influence.clamp(0.0, 1.0)).max(0.001)
 }
 
 fn corridor_depth_from_width(half_width_blocks: f32) -> f32 {
@@ -1060,41 +1120,114 @@ fn macro_elevation_to_world_y(macro_elevation: f32) -> f32 {
     (SEA_LEVEL_Y as f32 - 8.0 + macro_elevation * 140.0).clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
 }
 
-fn low_frequency_wave(world_x: f32, world_z: f32, scale_x: f32, scale_z: f32, phase: f32) -> f32 {
-    ((world_x / scale_x + phase).sin() + (world_z / scale_z + phase * 1.7).cos()) * 0.5
+fn seedless_splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(DETAIL_HASH_K1);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
 }
 
-fn aligned_wave(
-    world_x: f32,
-    world_z: f32,
-    heading: (f32, f32),
-    along_scale: f32,
-    across_scale: f32,
-    phase: f32,
+fn seedless_hash01(x: i64, z: i64, salt: u64) -> f32 {
+    let x_bits = (x as u64).wrapping_mul(DETAIL_HASH_K2);
+    let z_bits = (z as u64).wrapping_mul(DETAIL_HASH_K3);
+    let bits = seedless_splitmix64(salt ^ x_bits ^ z_bits) >> 11;
+    let max = ((1_u64 << 53) - 1) as f64;
+    (bits as f64 / max) as f32
+}
+
+fn seedless_value_noise01(x: f32, z: f32, lattice_scale: f32, salt: u64) -> f32 {
+    let sample_x = x / lattice_scale.max(1.0);
+    let sample_z = z / lattice_scale.max(1.0);
+    let x0 = sample_x.floor() as i64;
+    let z0 = sample_z.floor() as i64;
+    let tx = smootherstep01(sample_x - x0 as f32);
+    let tz = smootherstep01(sample_z - z0 as f32);
+    let n00 = seedless_hash01(x0, z0, salt);
+    let n10 = seedless_hash01(x0 + 1, z0, salt);
+    let n01 = seedless_hash01(x0, z0 + 1, salt);
+    let n11 = seedless_hash01(x0 + 1, z0 + 1, salt);
+    let nx0 = n00 + (n10 - n00) * tx;
+    let nx1 = n01 + (n11 - n01) * tx;
+    nx0 + (nx1 - nx0) * tz
+}
+
+fn seedless_value_noise_signed(x: f32, z: f32, lattice_scale: f32, salt: u64) -> f32 {
+    seedless_value_noise01(x, z, lattice_scale, salt) * 2.0 - 1.0
+}
+
+fn seedless_value_fbm(
+    x: f32,
+    z: f32,
+    base_scale: f32,
+    octaves: u32,
+    lacunarity: f32,
+    gain: f32,
+    salt: u64,
 ) -> f32 {
-    let along = world_x * heading.0 + world_z * heading.1;
-    let across = world_x * -heading.1 + world_z * heading.0;
-    ((along / along_scale + phase).sin() + (across / across_scale - phase * 0.8).cos()) * 0.5
+    let mut amplitude = 1.0_f32;
+    let mut scale = base_scale.max(1.0);
+    let mut total = 0.0_f32;
+    let mut amplitude_sum = 0.0_f32;
+
+    for octave in 0..octaves {
+        let octave_salt = salt.wrapping_add((octave as u64).wrapping_mul(DETAIL_HASH_K1));
+        total += seedless_value_noise_signed(x, z, scale, octave_salt) * amplitude;
+        amplitude_sum += amplitude;
+        amplitude *= gain;
+        scale /= lacunarity.max(1.01);
+    }
+
+    if amplitude_sum <= f32::EPSILON {
+        0.0
+    } else {
+        (total / amplitude_sum).clamp(-1.0, 1.0)
+    }
 }
 
-fn dune_body_wave(world_x: f32, world_z: f32) -> f32 {
-    let long_wave = (world_x / 72.0 + world_z / 128.0).sin();
-    let cross_wave = (world_x / 148.0 - world_z / 84.0 + 0.9).cos();
-    long_wave * 0.65 + cross_wave * 0.35
-}
-
-fn terraced_wave(
-    world_x: f32,
-    world_z: f32,
-    scale_x: f32,
-    scale_z: f32,
-    phase: f32,
-    steps: f32,
+fn seedless_ridged_fbm(
+    x: f32,
+    z: f32,
+    base_scale: f32,
+    octaves: u32,
+    lacunarity: f32,
+    gain: f32,
+    salt: u64,
 ) -> f32 {
-    let raw = aligned_wave(world_x, world_z, (1.0, 0.0), scale_x, scale_z, phase).clamp(-1.0, 1.0);
-    let normalized = raw * 0.5 + 0.5;
+    let mut amplitude = 1.0_f32;
+    let mut scale = base_scale.max(1.0);
+    let mut total = 0.0_f32;
+    let mut amplitude_sum = 0.0_f32;
+
+    for octave in 0..octaves {
+        let octave_salt = salt.wrapping_add((octave as u64).wrapping_mul(DETAIL_HASH_K2));
+        let signal = seedless_value_noise_signed(x, z, scale, octave_salt);
+        let ridged = 1.0 - signal.abs();
+        total += (ridged * 2.0 - 1.0) * amplitude;
+        amplitude_sum += amplitude;
+        amplitude *= gain;
+        scale /= lacunarity.max(1.01);
+    }
+
+    if amplitude_sum <= f32::EPSILON {
+        0.0
+    } else {
+        (total / amplitude_sum).clamp(-1.0, 1.0)
+    }
+}
+
+fn seedless_domain_warp(x: f32, z: f32, warp_scale: f32, amplitude: f32, salt_x: u64, salt_z: u64) -> (f32, f32) {
+    let dx = seedless_value_fbm(x, z, warp_scale, 3, 2.0, 0.5, salt_x) * amplitude;
+    let dz = seedless_value_fbm(x, z, warp_scale, 3, 2.0, 0.5, salt_z) * amplitude;
+    (x + dx, z + dz)
+}
+
+fn soft_terrace_noise(signal: f32, steps: f32, sharpness: f32) -> f32 {
+    let normalized = signal.clamp(-1.0, 1.0) * 0.5 + 0.5;
+    let steps = steps.max(1.0);
     let terraced = (normalized * steps).floor() / steps;
-    (terraced * 2.0 - 1.0) * 0.68 + raw * 0.32
+    let blend = sharpness.clamp(0.0, 1.0);
+    let mixed = terraced * blend + normalized * (1.0 - blend);
+    mixed * 2.0 - 1.0
 }
 
 fn inverse_unit(value: f32) -> f32 {
@@ -1313,6 +1446,7 @@ mod tests {
         dump_world_sample_details(scan.world_x, scan.world_z, &meta);
     }
 
+
     #[test]
     fn reported_wall_strip_stays_below_large_vertical_step_threshold() {
         let meta = WorldMeta::new(42);
@@ -1326,6 +1460,61 @@ mod tests {
             scan.world_x,
             scan.world_z
         );
+    }
+
+    #[test]
+    fn merge_branch_response_softly_blends_similar_segment_responses() {
+        let current = CorridorAdjustment {
+            height_delta: -18.0,
+            relief_budget_penalty: 8.5,
+            strongest_influence: 0.95,
+            blend_weight: corridor_segment_blend_weight(0.95),
+        };
+        let candidate = CorridorAdjustment {
+            height_delta: -14.0,
+            relief_budget_penalty: 6.0,
+            strongest_influence: 0.92,
+            blend_weight: corridor_segment_blend_weight(0.92),
+        };
+
+        let merged = merge_branch_response(current, candidate);
+        let reverse_merged = merge_branch_response(candidate, current);
+
+        assert!(
+            merged.height_delta > current.height_delta && merged.height_delta < candidate.height_delta,
+            "expected soft blended height delta between {:.3} and {:.3}, got {:.3}",
+            current.height_delta,
+            candidate.height_delta,
+            merged.height_delta
+        );
+        assert!(
+            merged.relief_budget_penalty < current.relief_budget_penalty
+                && merged.relief_budget_penalty > candidate.relief_budget_penalty,
+            "expected soft blended relief penalty between {:.3} and {:.3}, got {:.3}",
+            candidate.relief_budget_penalty,
+            current.relief_budget_penalty,
+            merged.relief_budget_penalty
+        );
+        assert!(
+            (merged.height_delta - reverse_merged.height_delta).abs() <= 0.0001
+                && (merged.relief_budget_penalty - reverse_merged.relief_budget_penalty).abs()
+                    <= 0.0001,
+            "expected branch-response blend to be order-independent"
+        );
+    }
+
+    #[test]
+    fn seedless_value_noise_helpers_are_deterministic_and_bounded() {
+        let a = seedless_value_fbm(123.5, -88.25, 96.0, 3, 2.0, 0.5, DETAIL_SALT_LOW_FREQ);
+        let b = seedless_value_fbm(123.5, -88.25, 96.0, 3, 2.0, 0.5, DETAIL_SALT_LOW_FREQ);
+        let c = seedless_value_fbm(124.5, -88.25, 96.0, 3, 2.0, 0.5, DETAIL_SALT_LOW_FREQ);
+        let terraced = soft_terrace_noise(a, 5.0, 0.85);
+
+        assert_eq!(a.to_bits(), b.to_bits());
+        assert!(a.is_finite() && c.is_finite() && terraced.is_finite());
+        assert!(a >= -1.0 && a <= 1.0);
+        assert!(terraced >= -1.0 && terraced <= 1.0);
+        assert_ne!(a.to_bits(), c.to_bits());
     }
 
     #[test]
