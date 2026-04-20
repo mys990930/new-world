@@ -70,7 +70,7 @@ build_chunk_base_heightfield_prototype(
 ## Coordinate Space
 
 - columns are chunk-relative and aligned to the chunk's block-grid footprint
-- `base_height` is expressed in world-space block Y, not in atlas-cell units
+- `base_height` is expressed as an integer-valued world-space block Y surface, not in atlas-cell units
 - `relief_budget` is a nonnegative budget in block units describing how much local up/down shape can still be introduced later without erasing the broad form
 - corridor segment endpoints and centers may lie outside the strict chunk bounds, but the influence on prototype columns is still evaluated in chunk-local block space
 - atlas scalar sampling is evaluated from block-center world coordinates through a smoothed fractional atlas lookup, while region identity is blended from the neighboring classified atlas cells around the same sample point
@@ -80,6 +80,7 @@ build_chunk_base_heightfield_prototype(
 
 - `base_height`
   - the provisional solid-surface target for the column before meso and later detail
+  - snapped onto the block grid before the prototype column is emitted so later voxel stages inherit a discrete surface baseline
   - not the final exposed surface after smoothing, hydrology, or voxelization
   - may represent a plateau top, valley floor, shelf break, ridge shoulder, basin bowl, dune crest neighborhood, or coastal rim depending on family
 - `relief_budget`

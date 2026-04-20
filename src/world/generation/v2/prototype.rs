@@ -265,6 +265,7 @@ pub fn build_chunk_base_heightfield_prototype(
             );
             base_height += corridor_adjustment.height_delta;
             base_height = base_height.clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y);
+            base_height = snap_base_height_to_block_y(base_height);
 
             let relief_budget = blended_relief_budget(
                 &region_samples,
@@ -332,6 +333,10 @@ fn blended_relief_budget(
         - corridor_penalty;
 
     base_budget.clamp(MIN_RELIEF_BUDGET, MAX_RELIEF_BUDGET)
+}
+
+fn snap_base_height_to_block_y(base_height: f32) -> f32 {
+    base_height.round().clamp(MIN_BASE_HEIGHT_Y, MAX_BASE_HEIGHT_Y)
 }
 
 fn blended_basis_parameters(region_samples: &[RegionSampleWeight; 4]) -> BasisParameters {
@@ -1359,6 +1364,10 @@ mod tests {
             .columns
             .iter()
             .all(|column| column.base_height.is_finite() && column.relief_budget.is_finite()));
+        assert!(a
+            .columns
+            .iter()
+            .all(|column| (column.base_height - column.base_height.round()).abs() <= 0.0001));
         assert!(a
             .columns
             .iter()
