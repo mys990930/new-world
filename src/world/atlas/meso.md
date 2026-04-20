@@ -151,6 +151,8 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - the full per-feature taxonomy is now scaffolded in `meso/catalog.md` and `meso/features/*` with `launch`, `extended`, and `deferred` labels
 - current generated candidates are still only `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - current implemented selection still follows an atlas/structure-constrained deterministic lottery model
+- runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
+- current `hill_cluster` runtime emission now rasterizes as a stronger multi-peak hill group rather than a single broad swell, so several nearby hilltops can survive into chunk-space sampling at the current `0.5m` block scale
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`

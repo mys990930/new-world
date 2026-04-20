@@ -115,9 +115,11 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - guide ownership and a full per-feature scaffolded catalog exist
   - the scaffolded pool now carries `launch / extended / deferred` labels and per-feature planning stubs
   - runtime guide generation still only emits the current Wave 1A subset from `atlas/meso.rs`
+  - shared meso lottery and dispatch stay in `atlas/meso.rs`, but runtime-wired feature-specific hill-cluster shaping now lives under `atlas/meso/features/hill_cluster/`
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
   - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
+  - hill clusters now emit stronger multi-peak guide groups and the chunk-side operator preserves more of that peak signal so the current block scale reads as actual clustered hills
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 

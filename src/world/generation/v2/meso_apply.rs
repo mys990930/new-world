@@ -159,12 +159,13 @@ fn hill_cluster_delta(
     relief_scale: f32,
     corridor_avoidance: f32,
 ) -> f32 {
-    let weight = meso.hilliness * allowed_weight * corridor_avoidance;
+    let footprint_bias = 0.42 + meso.hilliness * 0.58;
+    let weight = footprint_bias * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    meso.hill_height * weight * relief_scale * 0.82
+    meso.hill_height * weight * relief_scale * 1.08
 }
 
 fn shallow_basin_delta(
@@ -414,7 +415,7 @@ mod tests {
     fn wave_one_feature_operators_emit_expected_directionality() {
         let meso = MesoGuideSample {
             hilliness: 0.8,
-            hill_height: 4.0,
+            hill_height: 7.0,
             basin_weight: 0.7,
             basin_depth: 3.0,
             escarpment_weight: 0.9,
@@ -431,5 +432,20 @@ mod tests {
         assert!(shallow_basin_delta(&meso, 1.0, 1.0, 1.0) < 0.0);
         assert!(escarpment_band_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
         assert!(upland_terrace_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
+    }
+
+    #[test]
+    fn hill_cluster_delta_keeps_peak_height_material_at_partial_footprint() {
+        let meso = MesoGuideSample {
+            hilliness: 0.55,
+            hill_height: 7.5,
+            ..MesoGuideSample::default()
+        };
+
+        let delta = hill_cluster_delta(&meso, 1.0, 1.0, 1.0);
+        assert!(
+            delta >= 4.8,
+            "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"
+        );
     }
 }

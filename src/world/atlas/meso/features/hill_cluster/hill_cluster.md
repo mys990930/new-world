@@ -11,11 +11,13 @@
 
 ## Summary
 
-- Hill Cluster planning stub for a multi-chunk terrain accent.
+- Deterministic multi-peak hill groups for an inland multi-chunk terrain accent.
 
 ## Terrain Traits
 
 - Biases inland terrain prototypes without taking over the owning region identity.
+- Runtime emission should read as several nearby hilltops under one shared cluster envelope instead of one low broad swell.
+- At the current `0.5m` block scale, launch tuning should be strong enough that the resulting prototype deformation reads as actual hill country rather than sub-meter noise.
 - Should avoid displacing major river corridors and instead sit beside or above them.
 
 ## Ecology Notes

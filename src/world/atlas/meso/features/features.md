@@ -10,7 +10,8 @@
 - every concrete feature has:
   - `mod.rs`
   - `<feature>.md`
-- the Rust module exposes a lightweight `MesoFeatureDef`
+- the Rust module always exposes a `MesoFeatureDef`
+- launch features that are already wired into runtime guide generation may also keep their feature-specific build or rasterize helpers in that same folder instead of centralizing every implementation detail in `atlas/meso.rs`
 - the markdown file holds planning content:
   - stage label
   - placement family
@@ -92,4 +93,5 @@
 - `natural_arch`
 
 - the full scaffolded pool is broader than the currently emitted runtime guide subset
-- current guide generation in `atlas/meso.rs` still only emits the Wave 1A subset: `hill_cluster`, `shallow_basin`, `escarpment_band`, and `upland_terrace`
+- current guide generation still only emits the Wave 1A subset: `hill_cluster`, `shallow_basin`, `escarpment_band`, and `upland_terrace`
+- `atlas/meso.rs` should stay focused on shared lottery, sampling, and raster dispatch, while feature-specific realization details for runtime-wired launch features should live under the matching `features/<name>/` folder

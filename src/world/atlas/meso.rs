@@ -565,42 +565,24 @@ fn pick_feature_instance(
         return None;
     }
 
+    let jitter = cell_center_jitter(seed, cell_coord);
     let pick_roll =
         hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_PICK_SALT) * total;
     let kind = weighted_pick(weights, pick_roll)?;
     let heading = feature_heading(seed, cell_coord, kind, structure);
-    let jitter = cell_center_jitter(seed, cell_coord);
-    let center_x = sample_point.0 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0;
-    let center_z = sample_point.1 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.1;
 
     Some(match kind {
-        MesoFeatureKind::HillCluster => FeatureInstance {
-            kind,
-            center_x,
-            center_z,
-            heading_x: heading.0,
-            heading_z: heading.1,
-            radius_x_cells: lerp_f32(
-                1.5,
-                3.1,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_X_SALT),
-            ),
-            radius_z_cells: lerp_f32(
-                1.2,
-                2.4,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_Z_SALT),
-            ),
-            strength_blocks: lerp_f32(
-                1.8,
-                5.4,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_STRENGTH_SALT),
-            ) * (0.75 + sample.macro_elevation * 0.25),
-            spacing_cells: 1.0,
-        },
+        MesoFeatureKind::HillCluster => features::hill_cluster::build_instance(
+            seed,
+            cell_coord,
+            sample_point,
+            sample,
+            heading,
+        ),
         MesoFeatureKind::Basin => FeatureInstance {
             kind,
-            center_x,
-            center_z,
+            center_x: sample_point.0 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0,
+            center_z: sample_point.1 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.1,
             heading_x: heading.0,
             heading_z: heading.1,
             radius_x_cells: lerp_f32(
@@ -622,8 +604,8 @@ fn pick_feature_instance(
         },
         MesoFeatureKind::EscarpmentBand => FeatureInstance {
             kind,
-            center_x,
-            center_z,
+            center_x: sample_point.0 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0,
+            center_z: sample_point.1 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.1,
             heading_x: heading.0,
             heading_z: heading.1,
             radius_x_cells: lerp_f32(
@@ -645,8 +627,8 @@ fn pick_feature_instance(
         },
         MesoFeatureKind::TerraceBand => FeatureInstance {
             kind,
-            center_x,
-            center_z,
+            center_x: sample_point.0 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0,
+            center_z: sample_point.1 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.1,
             heading_x: heading.0,
             heading_z: heading.1,
             radius_x_cells: lerp_f32(
@@ -754,17 +736,7 @@ fn rasterize_feature(instance: FeatureInstance, cells: &mut AtlasGrid<MesoGuideC
 
             match instance.kind {
                 MesoFeatureKind::HillCluster => {
-                    let footprint = ellipse_footprint(
-                        along,
-                        across,
-                        instance.radius_x_cells,
-                        instance.radius_z_cells,
-                    );
-                    if footprint <= 0.0 {
-                        continue;
-                    }
-                    cell.hilliness = (cell.hilliness + footprint).clamp(0.0, 1.0);
-                    cell.hill_height = cell.hill_height.max(instance.strength_blocks * footprint);
+                    features::hill_cluster::rasterize(instance, cell, along, across);
                 }
                 MesoFeatureKind::Basin => {
                     let footprint = ellipse_footprint(
