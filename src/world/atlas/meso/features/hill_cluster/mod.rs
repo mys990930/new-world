@@ -102,8 +102,8 @@ pub(in crate::world::atlas::meso) fn build_instance(
         heading_x: heading.0,
         heading_z: heading.1,
         radius_x_cells: lerp_f32(
-            1.4,
-            2.4,
+            1.48,
+            2.56,
             hash01(
                 seed,
                 cell_coord.x as i64,
@@ -112,8 +112,8 @@ pub(in crate::world::atlas::meso) fn build_instance(
             ),
         ),
         radius_z_cells: lerp_f32(
-            0.95,
-            1.55,
+            1.02,
+            1.64,
             hash01(
                 seed,
                 cell_coord.x as i64,
@@ -235,13 +235,13 @@ pub(crate) fn sample_apply_signal(
             (0.78 + source.cell.hilliness * 0.16 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16))
                 .clamp(0.78, 1.12);
         let base_major = lerp_f32(
-            24.0,
-            38.0,
+            26.0,
+            41.5,
             lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
         ) * major_scale;
         let base_minor = lerp_f32(
-            8.5,
-            15.0,
+            9.5,
+            16.5,
             lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
         ) * minor_scale;
         let chain_spacing = lerp_f32(
@@ -265,8 +265,8 @@ pub(crate) fn sample_apply_signal(
         let shoulder = ellipse_footprint(
             source_along,
             source_across,
-            base_major + chain_span * 0.68,
-            base_minor * 1.55 + 5.0,
+            base_major + chain_span * 0.74,
+            base_minor * 1.68 + 6.0,
         );
         shoulder_coverage = shoulder_coverage.max(
             (shoulder * (0.22 + source.cell.hilliness * 0.34)).clamp(0.0, 0.88),
@@ -506,14 +506,14 @@ fn macro_lobe_descriptor(
     let offset_along = (progress - 0.5) * chain_span + along_jitter;
     let offset_across = base_minor * patterned_side + side_jitter;
     let radius_x = base_major
-        * (0.84 + center_bias * 0.22 + source.cell.hilliness * 0.08)
+        * (0.88 + center_bias * 0.22 + source.cell.hilliness * 0.08)
         * lerp_f32(
             0.94,
             1.08,
             indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MAJOR_RADIUS_SALT),
         );
     let radius_z = base_minor
-        * (0.76 + center_bias * 0.12 + source.cell.hilliness * 0.06)
+        * (0.82 + center_bias * 0.12 + source.cell.hilliness * 0.06)
         * lerp_f32(
             0.90,
             1.10,
