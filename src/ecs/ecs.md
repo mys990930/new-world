@@ -15,6 +15,8 @@
 - moving-entity facing / pose state management
 - camera state management
 - selection state management
+- active simulation region calculation for time/season/weather progression
+- gameplay consumption of world calendar, local weather, and seasonal state
 - chunk meta-state management
 - jobs result interpretation
 - schedule ordering
@@ -42,6 +44,7 @@
 - `ChunkStates`
 - `ChunkLifecyclePlan`
 - `SelectionState`
+- future active-environment region metadata
 
 #### Entities / Components
 
@@ -95,6 +98,11 @@
 - player locomotion
   - horizontal velocity derives from `MoveWorldIntent`
   - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
+- time / season / weather consumption
+  - ECS does not own the authoritative world calendar or season state
+  - ECS fixed-phase logic selects the active simulation region around the player
+  - ECS can request or consume local weather / seasonal state for gameplay, HUD, audio, and renderer bridge output
+  - nearby changes may appear as immediate gameplay/environment feedback, while far-away seasonal changes may remain deferred until their chunks become interesting
 - moving entity render-facing state
   - gameplay-facing movement / yaw may stay continuous in ECS
   - render-facing direction for voxel creatures should quantize to 8 octants only when exporting render DTOs
@@ -164,6 +172,7 @@ EcsRuntime::plan_chunk_lifecycle(
 6. render-facing octant / pose state for moving voxel entities is derived gameplay output, not renderer-authored state
 7. the local player inventory stays player-owned ECS state rather than app-owned HUD state
 8. inventory-open UI blocking affects gameplay interpretation inside ECS rather than changing renderer ownership
+9. ECS may decide which regions need eager environmental simulation, but world remains the source of truth for calendar and seasonal state
 
 ### Submodules
 - mod.rs: public facade, re-export
@@ -187,3 +196,4 @@ EcsRuntime::plan_chunk_lifecycle(
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
+- planned time/season/weather work should keep the source-of-truth calendar and climate state in world, the fixed-tick progression rules in simulation, and the active-region plus gameplay-consumption logic in ECS

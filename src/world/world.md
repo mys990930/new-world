@@ -18,6 +18,9 @@
 - deterministic region-classification ownership between atlas raw fields / skeleton guidance and chunk-local realization
 - deterministic meso terrain-guide ownership after region classification and before final chunk-local realization
 - surface material policy and seasonal biome-state ownership before final voxel fill
+- world calendar, date, and season source-of-truth ownership
+- atlas-cell runtime climate state ownership
+- deferred seasonal/weather/ecology patch ownership for far-away regions
 - snapshot/query surfaces
 - edit result / dirty chunk calculation
 - procedural generation result expression as `ChunkData`
@@ -70,6 +73,10 @@
 - `MaterialPolicyDef`, `MaterialPolicyId`
 - `SeasonalBiomeStateDef`, `SeasonalBiomeStateId`, `SeasonalPhase`
 - `CoverOverrideRule`, `CoverPhase`
+- `WorldCalendar`
+- `AtlasClimateRuntimeState`
+- `LocalWeatherState`
+- `DeferredSeasonPatch`
 - `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
 - `CreateWorldConfig`
 - `WorldCore`
@@ -218,6 +225,7 @@ NOT:
 - `atlas/meso/catalog.md`: scaffolded meso feature catalog index
 - `atlas/meso/features/features.md`: per-feature module/doc structure
 - `surface/surface.md`: material, cover, and seasonal surface policy contract
+- `calendar.md`: world-owned calendar, runtime climate, and deferred seasonal patch contract
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
@@ -230,6 +238,7 @@ NOT:
 - top-down preview sampling now also stays world-owned so app minimaps and debug tools can reuse the same realized block-column interpretation rules
 - the current minimap cache flow uses snapshot-based top-down chunk-column derivation in jobs, while render-time viewport composition stays app-owned
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
+- planned time/season ownership also stays world-owned: calendar, active climate drift state, and deferred far-region seasonal patches should remain world truth even when only a small active region is simulated eagerly
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
 - atlas-owned region classification now resolves biome and terrain-form archetypes before base heightfield solving

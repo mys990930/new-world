@@ -1,71 +1,77 @@
 # fixed
 
-## 역할
+## Role
 
-- fixed tick에서만 실행되는 ECS 측 규칙과 simulation 연계를 담당한다
-- active simulation region 계산과 simulation 요청/결과 흐름을 관리한다
+- own the ECS-side fixed-phase bridge to simulation
+- decide which regions and subsystems should run eagerly on each fixed tick
 
-## 소유 데이터
+## Owned Data
 
 ### SimClock
+
 - logical simulation tick index
-- fixed-step 관련 메타 상태
+- fixed-step metadata needed on the ECS side
 
 ### ActiveSimRegion
-- 현재 tick에서 활성화할 region / subsystem 범위
+
+- the region and subsystem scope that should run this tick
+- typically centered on player-relevant active gameplay space
 
 ### SimulationControlState
-- subsystem enable/disable 상태
-- catch-up 관련 정책 메타
+
+- subsystem enable/disable state
+- catch-up and throttling metadata
 
 ### PendingSimulationResults
-- 아직 world/jobs 후속 단계로 넘기지 않은 simulation 결과
 
-## 입력
+- simulation results that have not yet been forwarded into world/jobs follow-up handling
 
-- app이 결정한 fixed tick 실행 시점
-- player 위치와 관심 영역
-- chunk 메타 상태
-- simulation 결과
+## Inputs
 
-## 출력
+- fixed-tick execution points chosen by app
+- player position and related active-area context
+- chunk meta-state
+- completed simulation results
+- world calendar and environmental context when deciding what nearby regions need eager updates
 
-- simulation request
-- world edit 후보
-- dirty chunk / remesh / save 후속 요청
+## Outputs
 
-## 처리 흐름
+- simulation requests
+- world-edit candidates
+- dirty chunk / remesh / save follow-up requests
+- active region envelopes for time/season/weather progression
 
-1. app이 fixed phase 실행을 요청한다
-2. ECS가 이번 tick의 활성 region / subsystem 대상을 계산한다
-3. simulation 요청 또는 직접 실행 결과를 수집한다
-4. 결과를 world/jobs/renderer 후속 단계에 넘길 intermediate state로 변환한다
+## Process
 
-## 상태 전이 규칙
+1. app requests a fixed-phase step
+2. ECS computes the active region and subsystem scope for this tick
+3. ECS forwards simulation requests or collects direct simulation results
+4. ECS converts those results into intermediate state for world/jobs follow-up handling
 
-- frame update와 fixed update는 섞이지 않는다
-- simulation 대상 계산은 fixed phase에서만 수행한다
-- 같은 tick의 결과 반영 순서는 deterministic해야 한다
+## State Transition Rules
 
-## 불변식
+- frame update and fixed update stay separate
+- time/season/weather progression rules only advance during fixed phase
+- the order in which same-tick results are applied must remain deterministic
+- active-region calculation may limit eager simulation, while far-away regions rely on world-owned deferred state
 
-- fixed timestep accumulator는 app이 소유한다
-- ECS fixed 모듈은 simulation을 오케스트레이션하지만 simulation 알고리즘 자체를 구현하지 않는다
-- world 원본 데이터 수정은 world API를 통해 이어져야 한다
+## Invariants
 
-## 비책임
+- the fixed-timestep accumulator remains app-owned
+- ECS fixed flow orchestrates simulation requests but does not implement the underlying simulation rules itself
+- world mutations must still go through world-owned APIs/results
+- ECS may choose which nearby areas should receive eager environmental updates, but it does not own the authoritative calendar/season state
 
-- accumulator 관리
-- simulation 세부 규칙 계산
-- jobs 실행
+## Non-Responsibilities
+
+- accumulator ownership
+- low-level simulation rule computation
+- jobs execution
 - renderer draw
 
-## 관련 모듈
+## Related Modules
 
-- runtime.rs가 fixed schedule을 실행한다
-- chunk.rs / jobs.rs / world / simulation과 맞닿는다
-- player.rs 상태가 active region 계산의 기준이 될 수 있다
-
-## 메모
-
-- subsystem별 고정 업데이트 주기를 따로 둘지 여부는 나중에 확정 가능하다
+- `runtime.rs` runs the fixed schedule entry points
+- `chunk.rs`, `jobs.rs`, `world`, and `simulation` meet here
+- `player.rs` state is one of the key inputs for active-region selection
+- `../simulation/time.md` defines the time/season/weather rule side that this bridge should call into

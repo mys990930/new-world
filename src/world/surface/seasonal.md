@@ -8,6 +8,7 @@
 
 - describe in-year surface states such as snowy temperate ground or tropical wet season
 - let time-varying appearance change without reclassifying the owning archetype
+- stay as world-owned seasonal-state definitions that simulation can advance and ECS can consume
 
 ## Current Stub States
 
@@ -18,3 +19,9 @@
 - `ColdFrozenWetland`
 - `AlpineSnowpack`
 - `CoastalStormSeason`
+
+## Notes
+
+- this file defines the stable runtime seasonal-state vocabulary, not the fixed-tick progression loop
+- world should own the authoritative seasonal state and any deferred far-region seasonal patches
+- simulation should own how those states advance over time
