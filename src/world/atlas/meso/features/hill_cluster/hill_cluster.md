@@ -28,6 +28,7 @@
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill mass has room to read before the next saddle begins.
 - Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.
 - The resolved shape should keep a broader shoulder envelope than the inner hill cores so plains can ease upward naturally instead of stepping into a hard wall.
+- Corridor-adjacent hill clusters may be damped, but the feature should still keep a materially visible uplift where the resolved hill mass survives beside the corridor.
 - The chunk-side helper must scan a wide enough neighboring guide neighborhood that the same broad hill mass does not disappear or clip when the sample crosses a chunk or meso-cell boundary.
 - When the resolved source layout is too compact to infer a clear shared axis, fallback orientation must stay source-stable across neighboring samples instead of re-rolling per chunk or per meso cell.
 - Should avoid displacing major river corridors and instead sit beside or above them.

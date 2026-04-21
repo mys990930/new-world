@@ -81,12 +81,15 @@ pub fn build_chunk_meso_applied_prototype(
                 hill_cluster_allowed,
                 corridor_avoidance,
             );
+            let basin_hill_conflict = (hill_cluster_surface.core_coverage * 0.82
+                + hill_cluster_surface.shoulder_coverage * 0.46)
+                .clamp(0.0, 0.92);
             let shallow_basin = shallow_basin_delta(
                 &meso,
                 allowed_feature_weight(&region_samples, "shallow_basin"),
                 column_relief_scale,
                 corridor_avoidance,
-            );
+            ) * (1.0 - basin_hill_conflict * 0.84).clamp(0.22, 1.0);
             let escarpment_band = escarpment_band_delta(
                 &meso,
                 allowed_feature_weight(&region_samples, "escarpment_band"),
@@ -172,7 +175,12 @@ fn hill_cluster_surface_delta(
     allowed_weight: f32,
     corridor_avoidance: f32,
 ) -> f32 {
-    let weight = hill_cluster_surface.blend_weight * allowed_weight * corridor_avoidance;
+    let surface_weight = hill_cluster_surface.blend_weight.max(
+        (hill_cluster_surface.shoulder_coverage * 0.86 + hill_cluster_surface.core_coverage * 0.32)
+            .clamp(0.0, 0.94),
+    );
+    let corridor_weight = corridor_avoidance.clamp(0.0, 1.0).powf(0.5);
+    let weight = surface_weight * allowed_weight * corridor_weight;
     if weight <= f32::EPSILON {
         return 0.0;
     }
@@ -568,5 +576,102 @@ mod tests {
                 "shared meso edge delta {seam_delta:.3} should stay close to neighboring local slope {local_delta:.3} at row {row}"
             );
         }
+    }
+
+    #[test]
+    fn hill_cluster_preview_window_keeps_material_uplift_after_compositing() {
+        let meta = WorldMeta::new(42);
+        let center_chunk_x = -67;
+        let center_chunk_z = 93;
+        let radius = 3;
+        let mut max_target_raise = 0.0_f32;
+        let mut max_hill_delta = 0.0_f32;
+        let mut max_net_delta = f32::NEG_INFINITY;
+        let mut hill_columns = 0usize;
+        let mut visible_hill_columns = 0usize;
+
+        for chunk_z in (center_chunk_z - radius)..=(center_chunk_z + radius) {
+            for chunk_x in (center_chunk_x - radius)..=(center_chunk_x + radius) {
+                let chunk = ChunkCoord(chunk_x, 0, chunk_z);
+                let inputs = prepare_chunk_v2_inputs(chunk, &meta);
+                let realization = build_chunk_realization_field_patch(chunk, &inputs);
+                let corridor_window = build_chunk_corridor_window(chunk, &inputs);
+                let prototype = build_chunk_base_heightfield_prototype(
+                    chunk,
+                    &inputs,
+                    &realization,
+                    &corridor_window,
+                );
+                let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
+
+                for local_z in 0..CHUNK_EDGE_I32 {
+                    for local_x in 0..CHUNK_EDGE_I32 {
+                        let index = local_z as usize * CHUNK_EDGE_I32 as usize + local_x as usize;
+                        let base = prototype.columns[index];
+                        let applied = meso.columns[index];
+                        let world_x = chunk.0 * CHUNK_EDGE_I32 + local_x;
+                        let world_z = chunk.2 * CHUNK_EDGE_I32 + local_z;
+                        let region_samples = sample_region_weights(
+                            &inputs.region_classes,
+                            world_x as f32 + 0.5,
+                            world_z as f32 + 0.5,
+                        );
+                        let allowed_weight = allowed_feature_weight(&region_samples, "hill_cluster");
+                        let corridor_avoidance = corridor_avoidance_factor(
+                            local_x as f32 + 0.5,
+                            local_z as f32 + 0.5,
+                            &corridor_window.corridors,
+                        );
+                        let hill_surface = sample_hill_cluster_surface(
+                            &inputs.meso_guides,
+                            world_x,
+                            world_z,
+                            base.base_height,
+                            base.relief_budget,
+                        );
+                        let hill_delta = hill_cluster_surface_delta(
+                            base.base_height,
+                            hill_surface,
+                            allowed_weight,
+                            corridor_avoidance,
+                        );
+                        let net_delta = applied.height - base.base_height;
+                        let target_raise = hill_surface.target_surface_y - base.base_height;
+
+                        if hill_delta >= 1.0 {
+                            hill_columns += 1;
+                        }
+                        if net_delta >= 1.0 {
+                            visible_hill_columns += 1;
+                        }
+
+                        max_target_raise = max_target_raise.max(target_raise);
+                        max_hill_delta = max_hill_delta.max(hill_delta);
+                        max_net_delta = max_net_delta.max(net_delta);
+                    }
+                }
+            }
+        }
+
+        assert!(
+            max_target_raise >= 8.0,
+            "expected hill-cluster surface solve to keep a visibly raised target in the preview window, got max target raise {max_target_raise:.3}"
+        );
+        assert!(
+            max_hill_delta >= 3.0,
+            "expected hill-cluster compositing to keep a material positive delta in the preview window, got max hill delta {max_hill_delta:.3}"
+        );
+        assert!(
+            max_net_delta >= 2.5,
+            "expected hill-cluster uplift to survive downstream compositing in the preview window, got max net delta {max_net_delta:.3}"
+        );
+        assert!(
+            visible_hill_columns >= 96,
+            "expected the preview window to keep a readable count of visibly raised hill columns, got {visible_hill_columns}"
+        );
+        assert!(
+            hill_columns >= visible_hill_columns,
+            "raw hill columns should not be fewer than visible hill columns"
+        );
     }
 }

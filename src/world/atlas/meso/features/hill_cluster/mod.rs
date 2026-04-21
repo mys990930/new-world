@@ -378,19 +378,20 @@ pub(crate) fn sample_surface(
 
     let meso = sample_meso_guides(guides, world_x, world_z);
     let shoulder_raise = meso.hill_height
-        * (0.42 + meso.hilliness * 0.24 + shoulder * 0.26)
-        * smoothstep_range(0.06, 0.98, shoulder);
+        * (1.52 + meso.hilliness * 0.62 + shoulder * 0.72)
+        * smoothstep_range(0.03, 0.98, shoulder);
     let core_raise = apply.lobe_height_blocks
-        * (0.96 + meso.hilliness * 0.18 + coverage * 0.16)
-        * smoothstep_range(0.04, 0.90, coverage);
-    let raw_target_raise = shoulder_raise * (0.76 + shoulder * 0.20) + core_raise;
-    let target_raise = soft_cap_positive(raw_target_raise, (relief_budget * 1.22).max(11.5));
+        * (2.82 + meso.hilliness * 0.56 + coverage * 0.54)
+        * smoothstep_range(0.02, 0.90, coverage);
+    let raw_target_raise =
+        shoulder_raise * (1.18 + shoulder * 0.40) + core_raise * (1.34 + coverage * 0.28);
+    let target_raise = soft_cap_positive(raw_target_raise, (relief_budget * 2.35).max(26.0));
     if target_raise <= f32::EPSILON {
         return HillClusterSurfaceSample::flat(base_surface_y);
     }
 
     let blend_weight = smoothstep01(
-        (shoulder * 0.78 + coverage * 0.26 + meso.hilliness * 0.10).clamp(0.0, 1.0),
+        (shoulder * 0.92 + coverage * 0.44 + meso.hilliness * 0.18).clamp(0.0, 1.0),
     );
 
     HillClusterSurfaceSample {

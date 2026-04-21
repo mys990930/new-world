@@ -52,4 +52,6 @@ build_chunk_meso_applied_prototype(
   - the resolved hill mass should rise from the plain through feature-owned falloff rather than by abruptly stacking a narrow additive delta on top of the base
   - dense neighboring guide cells should be pruned down before surface resolve so one cluster does not explode into many overlapping small hills
   - scan support and fallback orientation must stay stable enough across neighboring chunk / meso-cell contexts that the same broad hill mass does not clip or rotate at shared boundaries
+  - hill-cluster compositing should keep a material visible uplift after corridor gating; avoid-primary-corridor attenuation should damp the feature, not erase it wholesale
+  - cross-feature compositing should not let `shallow_basin` fully flatten an already-resolved hill mass inside the same footprint
 - the other Wave 1 launch features may temporarily remain on legacy delta operators during the transition, but the target architecture is feature-owned surface resolution for every meso landform
