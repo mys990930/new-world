@@ -4,7 +4,8 @@ pub mod features;
 pub use catalog::{MesoCatalogEntry, MesoCatalogStatus, meso_catalog_entries};
 pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
 pub(crate) use features::hill_cluster::{
-    HillClusterSurfaceSample, sample_surface as sample_hill_cluster_surface,
+    HillClusterSurfaceSample, build_window as build_hill_cluster_window,
+    sample_surface_from_window as sample_hill_cluster_surface_from_window,
 };
 
 use std::f32::consts::TAU;

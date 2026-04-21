@@ -1,6 +1,6 @@
 use crate::world::atlas::{
-    HillClusterSurfaceSample, RiverPathKind, region_archetype_def,
-    sample_hill_cluster_surface, sample_meso_guides,
+    HillClusterSurfaceSample, RiverPathKind, build_hill_cluster_window, region_archetype_def,
+    sample_hill_cluster_surface_from_window, sample_meso_guides,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
@@ -50,6 +50,7 @@ pub fn build_chunk_meso_applied_prototype(
     let mut applied_shallow_basin = false;
     let mut applied_escarpment_band = false;
     let mut applied_upland_terrace = false;
+    let hill_cluster_window = build_hill_cluster_window(&inputs.meso_guides, chunk);
 
     for local_z in 0..CHUNK_EDGE_I32 {
         for local_x in 0..CHUNK_EDGE_I32 {
@@ -67,7 +68,8 @@ pub fn build_chunk_meso_applied_prototype(
             );
             let column_relief_scale = relief_budget_scale(base.relief_budget);
             let hill_cluster_allowed = allowed_feature_weight(&region_samples, "hill_cluster");
-            let hill_cluster_surface = sample_hill_cluster_surface(
+            let hill_cluster_surface = sample_hill_cluster_surface_from_window(
+                &hill_cluster_window,
                 &inputs.meso_guides,
                 world_x,
                 world_z,
@@ -89,7 +91,7 @@ pub fn build_chunk_meso_applied_prototype(
                 allowed_feature_weight(&region_samples, "shallow_basin"),
                 column_relief_scale,
                 corridor_avoidance,
-            ) * (1.0 - basin_hill_conflict * 0.84).clamp(0.22, 1.0);
+            ) * (1.0_f32 - basin_hill_conflict * 0.84).clamp(0.22, 1.0);
             let escarpment_band = escarpment_band_delta(
                 &meso,
                 allowed_feature_weight(&region_samples, "escarpment_band"),
@@ -343,6 +345,23 @@ mod tests {
     };
     use crate::world::meta::WorldMeta;
 
+    fn assert_hill_cluster_samples_match(
+        left: HillClusterSurfaceSample,
+        right: HillClusterSurfaceSample,
+        world_x: i32,
+        world_z: i32,
+    ) {
+        let epsilon = 0.0001_f32;
+        assert!(
+            (left.target_surface_y - right.target_surface_y).abs() <= epsilon
+                && (left.blend_weight - right.blend_weight).abs() <= epsilon
+                && (left.relief_spend - right.relief_spend).abs() <= epsilon
+                && (left.core_coverage - right.core_coverage).abs() <= epsilon
+                && (left.shoulder_coverage - right.shoulder_coverage).abs() <= epsilon,
+            "resolved hill-cluster surface drifted at world ({world_x}, {world_z})\nleft={left:?}\nright={right:?}"
+        );
+    }
+
     #[test]
     fn meso_apply_is_deterministic_and_emits_a_full_grid() {
         let meta = WorldMeta::new(42);
@@ -579,6 +598,40 @@ mod tests {
     }
 
     #[test]
+    fn hill_cluster_resolved_windows_match_across_context_boundary() {
+        let meta = WorldMeta::new(42);
+        let left_chunk = ChunkCoord(127, 0, 0);
+        let right_chunk = ChunkCoord(128, 0, 0);
+        let left_inputs = prepare_chunk_v2_inputs(left_chunk, &meta);
+        let right_inputs = prepare_chunk_v2_inputs(right_chunk, &meta);
+        let left_window = build_hill_cluster_window(&left_inputs.meso_guides, left_chunk);
+        let right_window = build_hill_cluster_window(&right_inputs.meso_guides, right_chunk);
+        let boundary_world_x = right_chunk.0 * CHUNK_EDGE_I32;
+
+        for world_z in (0..CHUNK_EDGE_I32).step_by(4) {
+            for world_x in ((boundary_world_x - 16)..=(boundary_world_x + 15)).step_by(4) {
+                let left = sample_hill_cluster_surface_from_window(
+                    &left_window,
+                    &left_inputs.meso_guides,
+                    world_x,
+                    world_z,
+                    100.0,
+                    12.0,
+                );
+                let right = sample_hill_cluster_surface_from_window(
+                    &right_window,
+                    &right_inputs.meso_guides,
+                    world_x,
+                    world_z,
+                    100.0,
+                    12.0,
+                );
+                assert_hill_cluster_samples_match(left, right, world_x, world_z);
+            }
+        }
+    }
+
+    #[test]
     fn hill_cluster_preview_window_keeps_material_uplift_after_compositing() {
         let meta = WorldMeta::new(42);
         let center_chunk_x = -67;
@@ -603,6 +656,7 @@ mod tests {
                     &corridor_window,
                 );
                 let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
+                let hill_cluster_window = build_hill_cluster_window(&inputs.meso_guides, chunk);
 
                 for local_z in 0..CHUNK_EDGE_I32 {
                     for local_x in 0..CHUNK_EDGE_I32 {
@@ -622,7 +676,8 @@ mod tests {
                             local_z as f32 + 0.5,
                             &corridor_window.corridors,
                         );
-                        let hill_surface = sample_hill_cluster_surface(
+                        let hill_surface = sample_hill_cluster_surface_from_window(
+                            &hill_cluster_window,
                             &inputs.meso_guides,
                             world_x,
                             world_z,

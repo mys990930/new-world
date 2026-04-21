@@ -1,14 +1,24 @@
+mod resolved;
+
 use std::f32::consts::TAU;
 
 use crate::world::atlas::{
-    AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap, sample_meso_guides,
+    AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap,
 };
-use crate::world::{CHUNK_EDGE_I32, MESO_GUIDE_CELL_SIZE_IN_CHUNKS};
+#[cfg(test)]
+use crate::world::coord::ChunkCoord;
+#[cfg(test)]
+use crate::world::CHUNK_EDGE_I32;
+#[cfg(test)]
+use crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS;
 
 use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 use super::super::{
     FeatureInstance, MesoFeatureKind, cell_center_jitter, ellipse_footprint, hash01, lerp_f32,
 };
+pub(crate) use resolved::{build_window, sample_surface_from_window};
+#[cfg(test)]
+pub(crate) use resolved::sample_apply_signal_from_window;
 
 const STRENGTH_MIN_BLOCKS: f32 = 6.4;
 const STRENGTH_MAX_BLOCKS: f32 = 17.6;
@@ -35,7 +45,6 @@ const SOURCE_NOTCH_OFFSET_SALT: u64 = 0xD811_B6D2_2200_0011;
 const SOURCE_NOTCH_SIDE_SALT: u64 = 0xD811_B6D2_2200_0012;
 const SOURCE_NOTCH_STRENGTH_SALT: u64 = 0xD811_B6D2_2200_0013;
 const APPLY_SCAN_RADIUS_CELLS: i32 = 5;
-const MAX_APPLY_SOURCES: usize = 121;
 const MAX_RESOLVED_CLUSTER_SOURCES: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -220,148 +229,13 @@ pub(in crate::world::atlas::meso) fn rasterize(
     cell.hill_height = cell.hill_height.max(instance.strength_blocks * height_scale);
 }
 
-pub(crate) fn sample_apply_signal(
-    guides: &MesoGuideMap,
-    world_x: i32,
-    world_z: i32,
-) -> HillClusterApplySample {
-    let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32).max(1);
-    let base_cell_x = world_x.div_euclid(meso_span_blocks);
-    let base_cell_z = world_z.div_euclid(meso_span_blocks);
-    let sample_x = world_x as f32 + 0.5;
-    let sample_z = world_z as f32 + 0.5;
-    let mut candidates = Vec::with_capacity(MAX_APPLY_SOURCES);
-    let mut strongest = 0.0_f32;
-    let mut second = 0.0_f32;
-    let mut third = 0.0_f32;
-    let mut coverage = 0.0_f32;
-    let mut shoulder_coverage = 0.0_f32;
-
-    for cell_z in (base_cell_z - APPLY_SCAN_RADIUS_CELLS)..=(base_cell_z + APPLY_SCAN_RADIUS_CELLS)
-    {
-        for cell_x in (base_cell_x - APPLY_SCAN_RADIUS_CELLS)
-            ..=(base_cell_x + APPLY_SCAN_RADIUS_CELLS)
-        {
-            let coord = AtlasCoord::new(cell_x, cell_z);
-            let Some(cell) = guides.cells().get(coord).copied() else {
-                continue;
-            };
-            if !is_local_source_peak(guides, coord, cell) {
-                continue;
-            }
-            let Some(source) = guide_source(coord, cell, meso_span_blocks as f32) else {
-                continue;
-            };
-            candidates.push(source);
-        }
-    }
-
-    if candidates.is_empty() {
-        return HillClusterApplySample::default();
-    }
-
-    let sources = prune_cluster_sources(candidates);
-    if sources.is_empty() {
-        return HillClusterApplySample::default();
-    }
-
-    let cluster_heading = dominant_apply_axis(&sources);
-
-    for source in &sources {
-        let (heading_x, heading_z) = source_chain_heading(*source, cluster_heading);
-        let normal_x = -heading_z;
-        let normal_z = heading_x;
-        let major_scale =
-            (0.94 + source.cell.hilliness * 0.22 + (source.cell.hill_height / 16.0).clamp(0.0, 0.36))
-                .clamp(0.94, 1.52);
-        let minor_scale =
-            (0.92 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 20.0).clamp(0.0, 0.20))
-                .clamp(0.92, 1.26);
-        let base_major = lerp_f32(
-            52.0,
-            86.0,
-            lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
-        ) * major_scale;
-        let base_minor = lerp_f32(
-            38.0,
-            62.0,
-            lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
-        ) * minor_scale;
-        let chain_spacing = lerp_f32(
-            24.0,
-            38.0,
-            lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT),
-        ) * (1.02 + source.cell.hilliness * 0.18);
-        let lobe_count = if lobe_hash01(source.coord, source.cell, SOURCE_COUNT_SALT) >= 0.70
-            || source.cell.hilliness >= 0.86
-            || source.cell.hill_height >= 12.4
-        {
-            3
-        } else {
-            2
-        };
-        let chain_span = chain_spacing * (lobe_count - 1) as f32;
-        let delta_x = sample_x - source.center_x;
-        let delta_z = sample_z - source.center_z;
-        let source_along = delta_x * heading_x + delta_z * heading_z;
-        let source_across = delta_x * normal_x + delta_z * normal_z;
-        let shoulder = ellipse_footprint(
-            source_along,
-            source_across,
-            base_major + chain_span * 1.16 + 12.0,
-            base_minor * 2.18 + 16.0,
-        );
-        shoulder_coverage = shoulder_coverage.max(
-            (shoulder * (0.20 + source.cell.hilliness * 0.32)).clamp(0.0, 0.90),
-        );
-
-        for lobe_index in 0..lobe_count {
-            let progress = if lobe_count <= 1 {
-                0.5
-            } else {
-                lobe_index as f32 / (lobe_count - 1) as f32
-            };
-            let center_bias = 1.0 - (progress * 2.0 - 1.0).abs();
-            let lobe = macro_lobe_descriptor(
-                *source,
-                heading_x,
-                heading_z,
-                normal_x,
-                normal_z,
-                base_major,
-                base_minor,
-                chain_span,
-                chain_spacing,
-                lobe_index,
-                progress,
-                center_bias,
-            );
-            let footprint = irregular_lobe_footprint(lobe, *source, lobe_index, sample_x, sample_z);
-            if footprint <= 0.0 {
-                continue;
-            }
-
-            let contribution = lobe.height_blocks * footprint;
-            insert_top3(contribution, &mut strongest, &mut second, &mut third);
-            let core_mask = (footprint * (0.38 + source.cell.hilliness * 0.46)).clamp(0.0, 1.0);
-            let shoulder_mask = (footprint * 0.20 + shoulder * (0.14 + source.cell.hilliness * 0.10))
-                .clamp(0.0, 1.0);
-            coverage = coverage.max(core_mask);
-            shoulder_coverage = shoulder_coverage.max(shoulder_mask);
-        }
-    }
-
-    if strongest <= f32::EPSILON {
-        return HillClusterApplySample::default();
-    }
-
-    HillClusterApplySample {
-        coverage: coverage.clamp(0.0, 1.0),
-        shoulder_coverage: shoulder_coverage.max(coverage).clamp(0.0, 1.0),
-        lobe_height_blocks: strongest + second * 0.66 + third * 0.30,
-    }
+#[cfg(test)]
+pub(crate) fn sample_apply_signal(guides: &MesoGuideMap, world_x: i32, world_z: i32) -> HillClusterApplySample {
+    let window = build_window(guides, chunk_coord_for_world_xz(world_x, world_z));
+    sample_apply_signal_from_window(&window, world_x, world_z)
 }
 
+#[cfg(test)]
 pub(crate) fn sample_surface(
     guides: &MesoGuideMap,
     world_x: i32,
@@ -369,38 +243,17 @@ pub(crate) fn sample_surface(
     base_surface_y: f32,
     relief_budget: f32,
 ) -> HillClusterSurfaceSample {
-    let apply = sample_apply_signal(guides, world_x, world_z);
-    let coverage = apply.coverage.clamp(0.0, 1.0);
-    let shoulder = apply.shoulder_coverage.max(coverage).clamp(0.0, 1.0);
-    if shoulder <= f32::EPSILON || apply.lobe_height_blocks <= f32::EPSILON {
-        return HillClusterSurfaceSample::flat(base_surface_y);
-    }
+    let window = build_window(guides, chunk_coord_for_world_xz(world_x, world_z));
+    sample_surface_from_window(&window, guides, world_x, world_z, base_surface_y, relief_budget)
+}
 
-    let meso = sample_meso_guides(guides, world_x, world_z);
-    let shoulder_raise = meso.hill_height
-        * (1.52 + meso.hilliness * 0.62 + shoulder * 0.72)
-        * smoothstep_range(0.03, 0.98, shoulder);
-    let core_raise = apply.lobe_height_blocks
-        * (2.82 + meso.hilliness * 0.56 + coverage * 0.54)
-        * smoothstep_range(0.02, 0.90, coverage);
-    let raw_target_raise =
-        shoulder_raise * (1.18 + shoulder * 0.40) + core_raise * (1.34 + coverage * 0.28);
-    let target_raise = soft_cap_positive(raw_target_raise, (relief_budget * 2.35).max(26.0));
-    if target_raise <= f32::EPSILON {
-        return HillClusterSurfaceSample::flat(base_surface_y);
-    }
-
-    let blend_weight = smoothstep01(
-        (shoulder * 0.92 + coverage * 0.44 + meso.hilliness * 0.18).clamp(0.0, 1.0),
-    );
-
-    HillClusterSurfaceSample {
-        target_surface_y: base_surface_y + target_raise,
-        blend_weight,
-        relief_spend: target_raise * blend_weight,
-        core_coverage: coverage,
-        shoulder_coverage: shoulder,
-    }
+#[cfg(test)]
+fn chunk_coord_for_world_xz(world_x: i32, world_z: i32) -> ChunkCoord {
+    ChunkCoord(
+        world_x.div_euclid(CHUNK_EDGE_I32),
+        0,
+        world_z.div_euclid(CHUNK_EDGE_I32),
+    )
 }
 
 fn cluster_mass_footprints(instance: FeatureInstance, along: f32, across: f32) -> [f32; 5] {

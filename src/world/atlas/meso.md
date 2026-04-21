@@ -12,6 +12,7 @@
 - define how meso guides are derived from atlas region classification plus skeleton context
 - define how meso candidates are selected from atlas/structure-conditioned weights plus deterministic randomness
 - expose per-sample guide weights and directional hints that feature-owned generation resolvers can consume before hydrology and block fill
+- support feature-owned resolved-instance windows so chunk-local sampling can read the same multi-chunk landform objects across neighboring chunk requests
 - stay deterministic and generation-order-independent
 - stay broad enough to be visible across several chunks inside normal play view
 
@@ -31,6 +32,7 @@
 - `MesoGuideMap`
 - `MesoGuideCell`
 - `MesoGuideSample`
+- feature-owned private resolved-instance caches or windows such as multi-chunk hill-cluster objects
 
 ## Public Interface
 
@@ -154,9 +156,10 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
 - current `hill_cluster` runtime emission now has two layers:
   - atlas meso guide generation rasterizes a shared clustered hill envelope with several strong guide cells across a few chunks
-  - feature-owned chunk-side resolution turns those strong neighboring guide cells plus the prototype baseline into several nearby asymmetric hills with visible saddles and a blended target surface during meso apply
+  - feature-owned chunk-side resolution must first resolve shared multi-chunk hill objects from that guide neighborhood, then sample those same resolved objects per column during meso apply
 - the current hill-cluster runtime helper also keeps a broader shoulder envelope than the inner hill cores so plains transition into hill country more naturally at launch scale
 - the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
+- feature-owned chunk-side resolved windows must be deterministic from guide ownership alone; neighboring chunks sampling the same hill mass should not re-roll a different object graph at the seam
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing, but target architecture is feature-owned surface resolution rather than one shared additive deformation formula
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
