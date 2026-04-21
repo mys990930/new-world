@@ -1,6 +1,6 @@
 mod resolved;
 
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 use crate::world::atlas::{
     AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap,
@@ -44,6 +44,15 @@ const SOURCE_SHOULDER_SIDE_SALT: u64 = 0xD811_B6D2_2200_0010;
 const SOURCE_NOTCH_OFFSET_SALT: u64 = 0xD811_B6D2_2200_0011;
 const SOURCE_NOTCH_SIDE_SALT: u64 = 0xD811_B6D2_2200_0012;
 const SOURCE_NOTCH_STRENGTH_SALT: u64 = 0xD811_B6D2_2200_0013;
+const SOURCE_SUMMIT_HEIGHT_SALT: u64 = 0xD811_B6D2_2200_0014;
+const SOURCE_SUMMIT_PROFILE_SALT: u64 = 0xD811_B6D2_2200_0015;
+const SOURCE_OUTLINE_PRIMARY_SALT: u64 = 0xD811_B6D2_2200_0016;
+const SOURCE_OUTLINE_SECONDARY_SALT: u64 = 0xD811_B6D2_2200_0017;
+const SOURCE_OUTLINE_TERTIARY_SALT: u64 = 0xD811_B6D2_2200_0018;
+const SOURCE_ENVELOPE_FILL_SALT: u64 = 0xD811_B6D2_2200_0019;
+const SOURCE_ENVELOPE_RADIUS_SALT: u64 = 0xD811_B6D2_2200_001A;
+const SOURCE_ENVELOPE_SHOULDER_SALT: u64 = 0xD811_B6D2_2200_001B;
+const SOURCE_SUMMIT_CAP_SALT: u64 = 0xD811_B6D2_2200_001C;
 const MAX_RESOLVED_CLUSTER_SOURCES: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -51,6 +60,7 @@ pub struct HillClusterApplySample {
     pub coverage: f32,
     pub shoulder_coverage: f32,
     pub lobe_height_blocks: f32,
+    pub peak_raise_cap_blocks: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -563,11 +573,41 @@ fn irregular_lobe_footprint(
                 0.22,
                 indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ACROSS_SALT),
             );
-    let core = ellipse_footprint(
+    let outline_primary =
+        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_PRIMARY_SALT);
+    let outline_secondary =
+        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_SECONDARY_SALT);
+    let outline_tertiary =
+        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_TERTIARY_SALT);
+    let irregular_radial_footprint =
+        |shape_along: f32, shape_across: f32, radius_x: f32, radius_z: f32, edge_bias: f32| {
+            let normalized_along = shape_along / radius_x.max(f32::EPSILON);
+            let normalized_across = shape_across / radius_z.max(f32::EPSILON);
+            let contour_angle = normalized_across.atan2(normalized_along);
+            let radial_span =
+                (normalized_along * normalized_along + normalized_across * normalized_across).sqrt();
+            let ripple_phase = (normalized_along * 1.22 - normalized_across * 1.46) * PI
+                + outline_secondary * TAU;
+            let contour_scale = 1.0
+                + (contour_angle * 2.0 + outline_primary * TAU + ripple_phase * 0.44).sin()
+                    * lerp_f32(0.16, 0.30, outline_primary)
+                + (contour_angle * 3.0 + outline_secondary * TAU - ripple_phase * 0.32).sin()
+                    * lerp_f32(0.10, 0.20, outline_secondary)
+                + (contour_angle * 5.0 + outline_tertiary * TAU + ripple_phase * 0.58).cos()
+                    * lerp_f32(0.06, 0.14, outline_tertiary);
+            let contour_push =
+                (contour_angle * 4.0 + ripple_phase * 0.86 + outline_primary * TAU).sin() * 0.10
+                    + (contour_angle * 7.0 - ripple_phase * 0.52 + outline_tertiary * TAU).cos()
+                        * 0.06;
+            let radial = (radial_span + contour_push + edge_bias) / contour_scale.max(0.56);
+            smoothstep_range(1.06, 0.0, radial)
+        };
+    let core = irregular_radial_footprint(
         warped_along,
         warped_across,
-        lobe.radius_x_blocks.max(f32::EPSILON),
-        lobe.radius_z_blocks.max(f32::EPSILON),
+        lobe.radius_x_blocks,
+        lobe.radius_z_blocks,
+        0.0,
     );
     let shoulder_offset = lerp_f32(
         -0.18,
@@ -579,17 +619,19 @@ fn irregular_lobe_footprint(
         0.30,
         indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SHOULDER_SIDE_SALT),
     );
-    let shoulder = ellipse_footprint(
+    let shoulder = irregular_radial_footprint(
         warped_along - lobe.radius_x_blocks * shoulder_offset,
         warped_across + lobe.radius_z_blocks * shoulder_side,
-        lobe.radius_x_blocks * 0.82,
-        lobe.radius_z_blocks * 0.94,
+        lobe.radius_x_blocks * 0.86,
+        lobe.radius_z_blocks * 0.98,
+        -0.04,
     );
-    let backfill = ellipse_footprint(
+    let backfill = irregular_radial_footprint(
         warped_along + lobe.radius_x_blocks * 0.14,
         warped_across - lobe.radius_z_blocks * 0.10,
-        lobe.radius_x_blocks * 0.66,
-        lobe.radius_z_blocks * 0.74,
+        lobe.radius_x_blocks * 0.74,
+        lobe.radius_z_blocks * 0.82,
+        -0.02,
     );
     let notch = ellipse_footprint(
         warped_along
@@ -614,7 +656,7 @@ fn irregular_lobe_footprint(
         indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_STRENGTH_SALT),
     );
 
-    (core * 0.72 + shoulder * 0.30 + backfill * 0.20 - notch).clamp(0.0, 1.0)
+    (core * 0.62 + shoulder * 0.28 + backfill * 0.22 - notch).clamp(0.0, 1.0)
 }
 
 fn distance_between_points(a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -1183,6 +1225,138 @@ mod tests {
         assert!(
             (a - b).abs() >= 0.04,
             "expected irregular hill lobes to avoid mirror-symmetric blobs, got a={a:.3}, b={b:.3}"
+        );
+    }
+
+    #[test]
+    fn irregular_lobe_footprint_varies_across_angles_at_equal_radius() {
+        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+        let source = guide_source(
+            AtlasCoord::new(2, 2),
+            MesoGuideCell {
+                hilliness: 0.93,
+                hill_height: 11.1,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .expect("strong source should build");
+        let lobe = macro_lobe_descriptor(
+            source,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            74.0,
+            50.0,
+            28.0,
+            28.0,
+            1,
+            0.5,
+            1.0,
+        );
+        let sample_at_angle = |angle: f32| {
+            irregular_lobe_footprint(
+                lobe,
+                source,
+                1,
+                lobe.center_x + angle.cos() * lobe.radius_x_blocks * 0.78,
+                lobe.center_z + angle.sin() * lobe.radius_z_blocks * 0.78,
+            )
+        };
+        let mut min_sample = f32::INFINITY;
+        let mut max_sample = f32::NEG_INFINITY;
+        for step in 0..8 {
+            let sample = sample_at_angle((step as f32 / 8.0) * TAU);
+            min_sample = min_sample.min(sample);
+            max_sample = max_sample.max(sample);
+        }
+
+        assert!(
+            (max_sample - min_sample) >= 0.06,
+            "expected equal-radius contour samples to vary by angle for irregular hill outlines, got min={min_sample:.3}, max={max_sample:.3}"
+        );
+    }
+
+    #[test]
+    fn neighboring_sources_keep_midfield_support_between_peaks() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 5, 4).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        let source_cell = MesoGuideCell {
+            hilliness: 0.93,
+            hill_height: 11.4,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(1, 1)).unwrap() = source_cell;
+        *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = source_cell;
+        let guides = MesoGuideMap { area, cells };
+        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+        let left_source = guide_source(AtlasCoord::new(1, 1), source_cell, meso_span_blocks).unwrap();
+        let right_source = guide_source(AtlasCoord::new(2, 1), source_cell, meso_span_blocks).unwrap();
+        let left_peak = sample_apply_signal(
+            &guides,
+            left_source.center_x.floor() as i32,
+            left_source.center_z.floor() as i32,
+        );
+        let right_peak = sample_apply_signal(
+            &guides,
+            right_source.center_x.floor() as i32,
+            right_source.center_z.floor() as i32,
+        );
+        let midpoint = sample_apply_signal(
+            &guides,
+            ((left_source.center_x + right_source.center_x) * 0.5).floor() as i32,
+            ((left_source.center_z + right_source.center_z) * 0.5).floor() as i32,
+        );
+
+        assert!(
+            midpoint.shoulder_coverage >= 0.40,
+            "expected neighboring hills to keep meaningful shared support through the midfield, got {midpoint:?}"
+        );
+        assert!(
+            midpoint.lobe_height_blocks
+                >= left_peak.lobe_height_blocks.min(right_peak.lobe_height_blocks) * 0.22,
+            "expected neighboring hills to avoid an unnaturally hollow xz-plan midpoint, left={left_peak:?}, midpoint={midpoint:?}, right={right_peak:?}"
+        );
+    }
+
+    #[test]
+    fn sample_surface_peak_heights_vary_between_hills() {
+        let source_cell = MesoGuideCell {
+            hilliness: 0.94,
+            hill_height: 11.2,
+            ..MesoGuideCell::default()
+        };
+        let strongest_for_coord = |coord: AtlasCoord| {
+            let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 8, 4).unwrap();
+            let mut cells = crate::world::AtlasGrid::defaulted(area);
+            *cells.get_mut(coord).unwrap() = source_cell;
+            let guides = MesoGuideMap { area, cells };
+            let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+            let source = guide_source(coord, source_cell, meso_span_blocks).unwrap();
+            let mut strongest = HillClusterSurfaceSample::flat(100.0);
+            for offset_z in (-32..=32).step_by(4) {
+                for offset_x in (-32..=32).step_by(4) {
+                    let sample = sample_surface(
+                        &guides,
+                        source.center_x.floor() as i32 + offset_x,
+                        source.center_z.floor() as i32 + offset_z,
+                        100.0,
+                        16.0,
+                    );
+                    if sample.target_surface_y > strongest.target_surface_y {
+                        strongest = sample;
+                    }
+                }
+            }
+            strongest
+        };
+        let left = strongest_for_coord(AtlasCoord::new(1, 1));
+        let right = strongest_for_coord(AtlasCoord::new(4, 1));
+
+        assert!(
+            (left.target_surface_y - right.target_surface_y).abs() >= 1.0,
+            "expected different hills to keep visibly different summit heights, left={left:?}, right={right:?}"
         );
     }
 

@@ -51,6 +51,7 @@ build_chunk_meso_applied_prototype(
   - the feature-owned runtime helper should turn those guides plus the base prototype into a smaller set of broader, taller, irregular hill lobes with explicit shoulders and a smoothly blended target surface
   - hill-cluster runtime should first gather the meso-region-owned hill clusters relevant to the chunk window, then sample that same resolved object set per column rather than rebuilding hill guesses column-by-column
   - the resolved hill mass should rise from the plain through feature-owned falloff rather than by abruptly stacking a narrow additive delta on top of the base
+  - hill-cluster shape solve should keep irregular closed contours, a soft shared support envelope between nearby peaks, and per-hill / per-blob summit caps so different hills do not all terminate at the same y
   - dense neighboring guide cells should be pruned down before surface resolve so one cluster does not explode into many overlapping small hills
   - scan support and fallback orientation must stay stable enough across neighboring chunk / meso-cell contexts that the same broad hill mass does not clip or rotate at shared boundaries
   - hill-cluster compositing should keep a material visible uplift after corridor gating; avoid-primary-corridor attenuation should damp the feature, not erase it wholesale
