@@ -20,6 +20,7 @@
 - Chunk-side realization should resolve that guide into coherent asymmetric macro-lobe chains with visible saddles between nearby hills, so the player reads hill country rather than circles, tiny local hilllets, or one smeared swell.
 - At the current `0.5m` block scale, launch tuning should produce several-meter prototype relief so the feature reads as real hill country rather than sub-meter noise.
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill mass has room to read before the next saddle begins.
+- Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.
 - The resolved shape should keep a broader shoulder envelope than the inner hill cores so plains can ease upward naturally instead of stepping into a hard wall.
 - The chunk-side helper must scan a wide enough neighboring guide neighborhood that the same broad hill mass does not disappear or clip when the sample crosses a chunk or meso-cell boundary.
 - Should avoid displacing major river corridors and instead sit beside or above them.

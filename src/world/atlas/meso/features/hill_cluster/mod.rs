@@ -113,8 +113,8 @@ pub(in crate::world::atlas::meso) fn build_instance(
             ),
         ),
         radius_z_cells: lerp_f32(
-            1.53,
-            2.46,
+            2.18,
+            3.58,
             hash01(
                 seed,
                 cell_coord.x as i64,
@@ -244,8 +244,8 @@ pub(crate) fn sample_apply_signal(
             lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
         ) * major_scale;
         let base_minor = lerp_f32(
-            14.0,
-            24.0,
+            28.0,
+            44.0,
             lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
         ) * minor_scale;
         let chain_spacing = lerp_f32(
@@ -517,10 +517,10 @@ fn macro_lobe_descriptor(
             indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MAJOR_RADIUS_SALT),
         );
     let radius_z = base_minor
-        * (0.82 + center_bias * 0.12 + source.cell.hilliness * 0.06)
+        * (1.00 + center_bias * 0.12 + source.cell.hilliness * 0.06)
         * lerp_f32(
-            0.96,
-            1.16,
+            1.00,
+            1.22,
             indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MINOR_RADIUS_SALT),
         );
     let height_blocks = source.cell.hill_height
@@ -900,6 +900,72 @@ mod tests {
             sample.shoulder_coverage >= sample.coverage,
             "expected hill clusters to keep a broader shoulder than core, got {sample:?}"
         );
+    }
+
+    #[test]
+    fn macro_lobe_aspect_ratio_stays_below_extreme_chain_values() {
+        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+        let source = guide_source(
+            AtlasCoord::new(3, 2),
+            MesoGuideCell {
+                hilliness: 0.94,
+                hill_height: 12.8,
+                ..MesoGuideCell::default()
+            },
+            meso_span_blocks,
+        )
+        .expect("strong test source should build");
+        let heading_x = 1.0;
+        let heading_z = 0.0;
+        let normal_x = 0.0;
+        let normal_z = 1.0;
+        let major_scale =
+            (0.88 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 18.0).clamp(0.0, 0.28))
+                .clamp(0.88, 1.34);
+        let minor_scale =
+            (0.78 + source.cell.hilliness * 0.16 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16))
+                .clamp(0.78, 1.12);
+        let base_major = lerp_f32(
+            39.0,
+            62.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
+        ) * major_scale;
+        let base_minor = lerp_f32(
+            28.0,
+            44.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
+        ) * minor_scale;
+        let chain_spacing = lerp_f32(
+            15.0,
+            24.0,
+            lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT),
+        ) * (0.92 + source.cell.hilliness * 0.24);
+        let lobe_count = 4;
+        let chain_span = chain_spacing * (lobe_count - 1) as f32;
+
+        for lobe_index in 0..lobe_count {
+            let progress = lobe_index as f32 / (lobe_count - 1) as f32;
+            let center_bias = 1.0 - (progress * 2.0 - 1.0).abs();
+            let lobe = macro_lobe_descriptor(
+                source,
+                heading_x,
+                heading_z,
+                normal_x,
+                normal_z,
+                base_major,
+                base_minor,
+                chain_span,
+                chain_spacing,
+                lobe_index,
+                progress,
+                center_bias,
+            );
+            let aspect_ratio = lobe.radius_x_blocks / lobe.radius_z_blocks.max(f32::EPSILON);
+            assert!(
+                aspect_ratio <= 2.15,
+                "expected hill lobes to avoid extreme one-axis stretch, got aspect ratio {aspect_ratio:.3} for lobe {lobe_index}"
+            );
+        }
     }
 
 }
