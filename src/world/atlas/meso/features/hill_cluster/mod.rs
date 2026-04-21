@@ -36,7 +36,6 @@ const SOURCE_NOTCH_SIDE_SALT: u64 = 0xD811_B6D2_2200_0012;
 const SOURCE_NOTCH_STRENGTH_SALT: u64 = 0xD811_B6D2_2200_0013;
 const APPLY_SCAN_RADIUS_CELLS: i32 = 5;
 const MAX_APPLY_SOURCES: usize = 121;
-const MAX_RESOLVED_CLUSTER_SOURCES: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HillClusterApplySample {
@@ -231,11 +230,11 @@ pub(crate) fn sample_apply_signal(
     let sample_x = world_x as f32 + 0.5;
     let sample_z = world_z as f32 + 0.5;
     let mut candidates = Vec::with_capacity(MAX_APPLY_SOURCES);
-    let mut strongest = 0.0_f32;
-    let mut second = 0.0_f32;
-    let mut third = 0.0_f32;
-    let mut coverage = 0.0_f32;
-    let mut shoulder_coverage = 0.0_f32;
+    let mut weighted_height_sum = 0.0_f32;
+    let mut footprint_weight_sum = 0.0_f32;
+    let mut smooth_peak_pow4_sum = 0.0_f32;
+    let mut coverage_accum = 0.0_f32;
+    let mut shoulder_coverage_accum = 0.0_f32;
 
     for cell_z in (base_cell_z - APPLY_SCAN_RADIUS_CELLS)..=(base_cell_z + APPLY_SCAN_RADIUS_CELLS)
     {
@@ -260,14 +259,22 @@ pub(crate) fn sample_apply_signal(
         return HillClusterApplySample::default();
     }
 
-    let sources = prune_cluster_sources(candidates, sample_x, sample_z);
+    let sources = candidates;
     if sources.is_empty() {
         return HillClusterApplySample::default();
     }
 
-    let cluster_heading = dominant_apply_axis(&sources, base_cell_x, base_cell_z);
+    let cluster_heading = dominant_apply_axis(&sources, sample_x, sample_z, base_cell_x, base_cell_z);
 
     for source in &sources {
+        let source_distance =
+            distance_between_points((sample_x, sample_z), (source.center_x, source.center_z));
+        let source_support =
+            smoothstep_range(source.keepout_radius_blocks * 4.8, 0.0, source_distance);
+        if source_support <= 0.001 {
+            continue;
+        }
+
         let (heading_x, heading_z) = source_chain_heading(*source, cluster_heading);
         let normal_x = -heading_z;
         let normal_z = heading_x;
@@ -311,9 +318,9 @@ pub(crate) fn sample_apply_signal(
             base_major + chain_span * 1.16 + 12.0,
             base_minor * 2.18 + 16.0,
         );
-        shoulder_coverage = shoulder_coverage.max(
-            (shoulder * (0.20 + source.cell.hilliness * 0.32)).clamp(0.0, 0.90),
-        );
+        shoulder_coverage_accum += shoulder
+            * source_support
+            * (0.20 + source.cell.hilliness * 0.32);
 
         for lobe_index in 0..lobe_count {
             let progress = if lobe_count <= 1 {
@@ -341,24 +348,31 @@ pub(crate) fn sample_apply_signal(
                 continue;
             }
 
-            let contribution = lobe.height_blocks * footprint;
-            insert_top3(contribution, &mut strongest, &mut second, &mut third);
-            let core_mask = (footprint * (0.38 + source.cell.hilliness * 0.46)).clamp(0.0, 1.0);
-            let shoulder_mask = (footprint * 0.20 + shoulder * (0.14 + source.cell.hilliness * 0.10))
+            let supported_footprint = footprint * source_support;
+            let contribution = lobe.height_blocks * supported_footprint;
+            weighted_height_sum += contribution;
+            footprint_weight_sum += supported_footprint;
+            smooth_peak_pow4_sum += contribution.powi(4);
+            coverage_accum += supported_footprint * (0.40 + source.cell.hilliness * 0.44);
+            shoulder_coverage_accum += (supported_footprint * 0.22
+                + shoulder * source_support * (0.13 + source.cell.hilliness * 0.09))
                 .clamp(0.0, 1.0);
-            coverage = coverage.max(core_mask);
-            shoulder_coverage = shoulder_coverage.max(shoulder_mask);
         }
     }
 
-    if strongest <= f32::EPSILON {
+    if footprint_weight_sum <= f32::EPSILON {
         return HillClusterApplySample::default();
     }
 
+    let mean_height = weighted_height_sum / footprint_weight_sum.max(f32::EPSILON);
+    let smooth_peak_height = smooth_peak_pow4_sum.max(0.0).powf(0.25);
+    let coverage = (1.0 - (-coverage_accum * 0.92).exp()).clamp(0.0, 1.0);
+    let shoulder_coverage = (1.0 - (-shoulder_coverage_accum * 0.78).exp()).clamp(0.0, 1.0);
+
     HillClusterApplySample {
-        coverage: coverage.clamp(0.0, 1.0),
-        shoulder_coverage: shoulder_coverage.max(coverage).clamp(0.0, 1.0),
-        lobe_height_blocks: strongest + second * 0.66 + third * 0.30,
+        coverage,
+        shoulder_coverage: shoulder_coverage.max(coverage),
+        lobe_height_blocks: (smooth_peak_height * 0.64 + mean_height * 0.46).max(0.0),
     }
 }
 
@@ -478,6 +492,8 @@ fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -
 
 fn dominant_apply_axis(
     sources: &[GuideSource],
+    sample_x: f32,
+    sample_z: f32,
     base_cell_x: i32,
     base_cell_z: i32,
 ) -> (f32, f32) {
@@ -511,7 +527,15 @@ fn dominant_apply_axis(
     }
 
     if (xx + zz) <= 24.0 {
-        return fallback_axis(base_cell_x, base_cell_z);
+        let toward_mean_x = mean_x - sample_x;
+        let toward_mean_z = mean_z - sample_z;
+        let toward_len_sq = toward_mean_x * toward_mean_x + toward_mean_z * toward_mean_z;
+        if toward_len_sq >= 16.0 {
+            let inv_len = toward_len_sq.sqrt().recip();
+            return (toward_mean_x * inv_len, toward_mean_z * inv_len);
+        }
+
+        return fallback_axis_from_sample(sample_x, sample_z);
     }
 
     let angle = 0.5 * (2.0 * xz).atan2(xx - zz);
@@ -534,6 +558,14 @@ fn fallback_axis(base_cell_x: i32, base_cell_z: i32) -> (f32, f32) {
     let max = ((1_u64 << 53) - 1) as f64;
     let angle = (bits as f64 / max) as f32 * TAU;
     (angle.cos(), angle.sin())
+}
+
+fn fallback_axis_from_sample(sample_x: f32, sample_z: f32) -> (f32, f32) {
+    let smooth_angle = ((sample_x * 0.0107).sin() * 1.14
+        + (sample_z * 0.0089).cos() * 0.92
+        + ((sample_x + sample_z) * 0.0046).sin() * 0.68)
+        * 0.86;
+    (smooth_angle.cos(), smooth_angle.sin())
 }
 
 fn source_chain_heading(source: GuideSource, cluster_heading: (f32, f32)) -> (f32, f32) {
@@ -647,59 +679,6 @@ fn is_local_source_peak(guides: &MesoGuideMap, coord: AtlasCoord, cell: MesoGuid
     true
 }
 
-fn prune_cluster_sources(
-    mut candidates: Vec<GuideSource>,
-    sample_x: f32,
-    sample_z: f32,
-) -> Vec<GuideSource> {
-    candidates.sort_by(|a, b| {
-        let a_score = source_relevance_score(*a, sample_x, sample_z);
-        let b_score = source_relevance_score(*b, sample_x, sample_z);
-        b_score.total_cmp(&a_score)
-    });
-    let mut kept: Vec<GuideSource> = Vec::with_capacity(MAX_RESOLVED_CLUSTER_SOURCES);
-
-    for candidate in candidates {
-        let relevance = source_relevance_score(candidate, sample_x, sample_z);
-        if relevance <= 0.04 {
-            continue;
-        }
-
-        let mut overlaps = false;
-        for existing in &kept {
-            let separation = distance_between_points(
-                (candidate.center_x, candidate.center_z),
-                (existing.center_x, existing.center_z),
-            );
-            let minimum = candidate
-                .keepout_radius_blocks
-                .min(existing.keepout_radius_blocks)
-                * lerp_f32(0.60, 0.92, relevance);
-            if separation < minimum {
-                overlaps = true;
-                break;
-            }
-        }
-
-        if overlaps {
-            continue;
-        }
-
-        kept.push(candidate);
-        if kept.len() >= MAX_RESOLVED_CLUSTER_SOURCES {
-            break;
-        }
-    }
-
-    kept
-}
-
-fn source_relevance_score(source: GuideSource, sample_x: f32, sample_z: f32) -> f32 {
-    let distance = distance_between_points((source.center_x, source.center_z), (sample_x, sample_z));
-    let distance_weight = smoothstep_range(source.keepout_radius_blocks * 4.6, 0.0, distance);
-    source.weight * (0.16 + distance_weight * 0.84)
-}
-
 fn irregular_lobe_footprint(
     lobe: MacroLobeDescriptor,
     source: GuideSource,
@@ -789,19 +768,6 @@ fn distance_between_points(a: (f32, f32), b: (f32, f32)) -> f32 {
     let dx = a.0 - b.0;
     let dz = a.1 - b.1;
     (dx * dx + dz * dz).sqrt()
-}
-
-fn insert_top3(value: f32, strongest: &mut f32, second: &mut f32, third: &mut f32) {
-    if value > *strongest {
-        *third = *second;
-        *second = *strongest;
-        *strongest = value;
-    } else if value > *second {
-        *third = *second;
-        *second = value;
-    } else if value > *third {
-        *third = value;
-    }
 }
 
 fn indexed_lobe_hash01(coord: AtlasCoord, cell: MesoGuideCell, lobe_index: usize, salt: u64) -> f32 {
@@ -1044,7 +1010,7 @@ mod tests {
         .unwrap(),
         ];
 
-        let heading = dominant_apply_axis(&sources, 2, 1);
+        let heading = dominant_apply_axis(&sources, meso_span_blocks * 2.5, meso_span_blocks * 1.5, 2, 1);
         assert!(
             horizontal_alignment_ratio(heading) >= 1.8,
             "expected horizontally aligned sources to prefer a horizontal cluster axis, got {heading:?}"
@@ -1091,7 +1057,7 @@ mod tests {
         .unwrap(),
         ];
 
-        let heading = dominant_apply_axis(&sources, 2, 2);
+        let heading = dominant_apply_axis(&sources, meso_span_blocks * 2.5, meso_span_blocks * 2.5, 2, 2);
         assert!(
             vertical_alignment_ratio(heading) >= 1.8,
             "expected vertically aligned sources to prefer a vertical cluster axis, got {heading:?}"
@@ -1241,46 +1207,33 @@ mod tests {
     }
 
     #[test]
-    fn prune_cluster_sources_reduces_dense_neighbor_overlap() {
-        let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
-        let candidates = vec![
-            guide_source(
-                AtlasCoord::new(1, 1),
-                MesoGuideCell {
-                    hilliness: 0.94,
-                    hill_height: 12.0,
-                    ..MesoGuideCell::default()
-                },
-                meso_span_blocks,
-            )
-            .unwrap(),
-            guide_source(
-                AtlasCoord::new(2, 1),
-                MesoGuideCell {
-                    hilliness: 0.90,
-                    hill_height: 11.2,
-                    ..MesoGuideCell::default()
-                },
-                meso_span_blocks,
-            )
-            .unwrap(),
-            guide_source(
-                AtlasCoord::new(1, 2),
-                MesoGuideCell {
-                    hilliness: 0.88,
-                    hill_height: 10.6,
-                    ..MesoGuideCell::default()
-                },
-                meso_span_blocks,
-            )
-            .unwrap(),
-        ];
+    fn local_peak_filter_drops_weaker_neighbor_sources() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        *cells.get_mut(AtlasCoord::new(1, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.92,
+            hill_height: 11.8,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.90,
+            hill_height: 9.6,
+            ..MesoGuideCell::default()
+        };
+        let guides = MesoGuideMap { area, cells };
 
-        let kept = prune_cluster_sources(candidates, meso_span_blocks * 1.5, meso_span_blocks * 1.5);
+        assert!(is_local_source_peak(
+            &guides,
+            AtlasCoord::new(1, 1),
+            guides.cells().get(AtlasCoord::new(1, 1)).copied().unwrap()
+        ));
         assert!(
-            kept.len() <= 2,
-            "expected dense neighboring hill sources to prune down, kept {} sources",
-            kept.len()
+            !is_local_source_peak(
+                &guides,
+                AtlasCoord::new(2, 1),
+                guides.cells().get(AtlasCoord::new(2, 1)).copied().unwrap()
+            ),
+            "weaker adjacent source should be filtered out to avoid dense overlap"
         );
     }
 
@@ -1307,6 +1260,35 @@ mod tests {
         assert!(
             seam_delta <= 3.6,
             "expected hill-cluster apply support to stay stable across meso-cell boundaries, seam delta={seam_delta:.3}\nleft={left:?}\nright={right:?}"
+        );
+    }
+
+    #[test]
+    fn apply_signal_varies_smoothly_across_neighbor_columns() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 6, 6).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        for coord in area.coords() {
+            if coord.x >= 1 && coord.x <= 4 && coord.z >= 1 && coord.z <= 4 {
+                *cells.get_mut(coord).unwrap() = MesoGuideCell {
+                    hilliness: 0.78 + (coord.x as f32 * 0.02),
+                    hill_height: 8.4 + (coord.z as f32 * 0.5),
+                    ..MesoGuideCell::default()
+                };
+            }
+        }
+        let guides = MesoGuideMap { area, cells };
+        let meso_span = CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32;
+        let world_z = meso_span * 2 + 28;
+        let mut max_delta = 0.0_f32;
+        for world_x in (meso_span..(meso_span * 3)).step_by(2) {
+            let a = sample_apply_signal(&guides, world_x, world_z).lobe_height_blocks;
+            let b = sample_apply_signal(&guides, world_x + 1, world_z).lobe_height_blocks;
+            max_delta = max_delta.max((a - b).abs());
+        }
+
+        assert!(
+            max_delta <= 2.2,
+            "expected neighboring columns to remain smooth under hill support blending, max delta={max_delta:.3}"
         );
     }
 
