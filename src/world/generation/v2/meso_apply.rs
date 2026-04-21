@@ -101,7 +101,9 @@ pub fn build_chunk_meso_applied_prototype(
             );
 
             let unclamped_delta = hill_cluster + shallow_basin + escarpment_band + upland_terrace;
-            let max_raise = base.relief_budget * MAX_FEATURE_SPEND_FRACTION;
+            let max_raise = base.relief_budget
+                * hill_cluster_raise_cap_fraction(hill_cluster_surface)
+                    .max(MAX_FEATURE_SPEND_FRACTION);
             let max_lower = base.relief_budget * MAX_FEATURE_SPEND_FRACTION;
             let applied_delta = unclamped_delta.clamp(-max_lower, max_raise);
             let spent_relief = applied_delta.abs().min(base.relief_budget * 0.86);
@@ -177,6 +179,16 @@ fn hill_cluster_surface_delta(
 
     let blended_surface_y = lerp_f32(base_height, hill_cluster_surface.target_surface_y, weight);
     blended_surface_y - base_height
+}
+
+fn hill_cluster_raise_cap_fraction(hill_cluster_surface: HillClusterSurfaceSample) -> f32 {
+    lerp_f32(
+        MAX_FEATURE_SPEND_FRACTION,
+        0.90,
+        (hill_cluster_surface.core_coverage * 0.78
+            + hill_cluster_surface.shoulder_coverage * 0.22)
+            .clamp(0.0, 1.0),
+    )
 }
 
 fn shallow_basin_delta(

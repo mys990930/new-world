@@ -21,6 +21,9 @@
 - The runtime helper should own the hill surface resolve itself instead of returning only a generic additive `delta_y`.
 - A resolved hill cluster should produce one feature-owned target surface that rises several blocks above the local prototype baseline, with broad shoulders and soft falloff blended back into the surrounding plain.
 - At launch tuning, strong hill-cluster lobes should be able to exceed roughly `+8` blocks relative to the nearby prototype where guide support and archetype allowance justify it.
+- Dense neighboring guide cells should be pruned into a smaller set of dominant hill masses so one cluster does not degenerate into many tiny overlapping bumps.
+- Individual hill lobes should be visibly irregular and asymmetric rather than reading as clean circular blobs.
+- Launch tuning should prefer fewer, broader, taller hills over many small peaks packed into the same area.
 - At the current `0.5m` block scale, launch tuning should produce several-meter prototype relief so the feature reads as real hill country rather than sub-meter noise.
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill mass has room to read before the next saddle begins.
 - Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.

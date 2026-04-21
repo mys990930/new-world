@@ -48,6 +48,7 @@ build_chunk_meso_applied_prototype(
 - the stage spends only part of each column's prototype relief budget and forwards the remaining budget to later smoothing and hydrology work
 - `hill_cluster` is the first feature being moved from `generic delta_y` treatment to `feature-owned target-surface resolve`
   - sampled guide fields still provide broad cluster envelope and macro hill-strength context
-  - the feature-owned runtime helper should turn those guides plus the base prototype into several broad hill lobes with explicit shoulders and a smoothly blended target surface
+  - the feature-owned runtime helper should turn those guides plus the base prototype into a smaller set of broader, taller, irregular hill lobes with explicit shoulders and a smoothly blended target surface
   - the resolved hill mass should rise from the plain through feature-owned falloff rather than by abruptly stacking a narrow additive delta on top of the base
+  - dense neighboring guide cells should be pruned down before surface resolve so one cluster does not explode into many overlapping small hills
 - the other Wave 1 launch features may temporarily remain on legacy delta operators during the transition, but the target architecture is feature-owned surface resolution for every meso landform
