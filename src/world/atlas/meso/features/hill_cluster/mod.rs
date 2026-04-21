@@ -25,7 +25,8 @@ const SOURCE_HEIGHT_SALT: u64 = 0xD811_B6D2_2200_0008;
 const SOURCE_ALONG_JITTER_SALT: u64 = 0xD811_B6D2_2200_0009;
 const SOURCE_SIDE_JITTER_SALT: u64 = 0xD811_B6D2_2200_000A;
 const SOURCE_COUNT_SALT: u64 = 0xD811_B6D2_2200_000B;
-const MAX_APPLY_SOURCES: usize = 25;
+const APPLY_SCAN_RADIUS_CELLS: i32 = 4;
+const MAX_APPLY_SOURCES: usize = 81;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HillClusterApplySample {
@@ -204,8 +205,11 @@ pub(crate) fn sample_apply_signal(
     let mut coverage = 0.0_f32;
     let mut shoulder_coverage = 0.0_f32;
 
-    for cell_z in (base_cell_z - 2)..=(base_cell_z + 2) {
-        for cell_x in (base_cell_x - 2)..=(base_cell_x + 2) {
+    for cell_z in (base_cell_z - APPLY_SCAN_RADIUS_CELLS)..=(base_cell_z + APPLY_SCAN_RADIUS_CELLS)
+    {
+        for cell_x in (base_cell_x - APPLY_SCAN_RADIUS_CELLS)
+            ..=(base_cell_x + APPLY_SCAN_RADIUS_CELLS)
+        {
             let coord = AtlasCoord::new(cell_x, cell_z);
             let Some(cell) = guides.cells().get(coord).copied() else {
                 continue;
@@ -897,4 +901,5 @@ mod tests {
             "expected hill clusters to keep a broader shoulder than core, got {sample:?}"
         );
     }
+
 }

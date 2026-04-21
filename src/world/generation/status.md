@@ -130,7 +130,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
   - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
-  - hill clusters now use atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass, with broader shoulder fade and a soft low-budget cap so hills blend into surrounding plains more naturally
+  - hill clusters now use atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass, with broader shoulder fade, a soft low-budget cap, and a widened neighboring-guide scan so hills do not clip apart at chunk or meso-cell seams
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 

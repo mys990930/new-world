@@ -523,4 +523,58 @@ mod tests {
             "expected low-budget hill clusters to still produce some rise in plains, got {delta}"
         );
     }
+
+    #[test]
+    fn hill_cluster_meso_apply_shared_edge_stays_close_to_neighboring_slope() {
+        let meta = WorldMeta::new(42);
+        let left_chunk = ChunkCoord(-467, 0, -396);
+        let right_chunk = ChunkCoord(-466, 0, -396);
+        let left_inputs = prepare_chunk_v2_inputs(left_chunk, &meta);
+        let right_inputs = prepare_chunk_v2_inputs(right_chunk, &meta);
+        let left_realization = build_chunk_realization_field_patch(left_chunk, &left_inputs);
+        let right_realization = build_chunk_realization_field_patch(right_chunk, &right_inputs);
+        let left_corridor = build_chunk_corridor_window(left_chunk, &left_inputs);
+        let right_corridor = build_chunk_corridor_window(right_chunk, &right_inputs);
+        let left_prototype = build_chunk_base_heightfield_prototype(
+            left_chunk,
+            &left_inputs,
+            &left_realization,
+            &left_corridor,
+        );
+        let right_prototype = build_chunk_base_heightfield_prototype(
+            right_chunk,
+            &right_inputs,
+            &right_realization,
+            &right_corridor,
+        );
+        let left_meso = build_chunk_meso_applied_prototype(
+            left_chunk,
+            &left_inputs,
+            &left_corridor,
+            &left_prototype,
+        );
+        let right_meso = build_chunk_meso_applied_prototype(
+            right_chunk,
+            &right_inputs,
+            &right_corridor,
+            &right_prototype,
+        );
+        let edge = CHUNK_EDGE_I32 as usize;
+
+        for row in 0..edge {
+            let left_edge = left_meso.columns[row * edge + (edge - 1)].height;
+            let left_inner = left_meso.columns[row * edge + (edge - 2)].height;
+            let right_edge = right_meso.columns[row * edge].height;
+            let right_inner = right_meso.columns[row * edge + 1].height;
+            let seam_delta = (right_edge - left_edge).abs();
+            let local_delta = (left_edge - left_inner)
+                .abs()
+                .max((right_inner - right_edge).abs());
+
+            assert!(
+                seam_delta <= local_delta + 4.0,
+                "shared meso edge delta {seam_delta:.3} should stay close to neighboring local slope {local_delta:.3} at row {row}"
+            );
+        }
+    }
 }

@@ -156,6 +156,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
   - atlas meso guide generation rasterizes a shared clustered hill envelope with several strong guide cells across a few chunks
   - feature-owned chunk-side macro-lobe-chain resolution turns those strong neighboring guide cells into several nearby asymmetric hills with visible saddles during meso apply
 - the current hill-cluster runtime helper also keeps a broader shoulder envelope than the inner hill cores so plains transition into hill country more naturally at launch scale
+- the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
