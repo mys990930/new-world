@@ -24,6 +24,7 @@
 - Dense neighboring guide cells should be pruned into a smaller set of dominant hill masses so one cluster does not degenerate into many tiny overlapping bumps.
 - Individual hill lobes should be visibly irregular and asymmetric rather than reading as clean circular blobs.
 - Launch tuning should prefer fewer, broader, taller hills over many small peaks packed into the same area.
+- Source pruning should stay sample-relevance-aware so dominant hill support does not jump abruptly at chunk or meso-cell boundaries.
 - At the current `0.5m` block scale, launch tuning should produce several-meter prototype relief so the feature reads as real hill country rather than sub-meter noise.
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill mass has room to read before the next saddle begins.
 - Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.

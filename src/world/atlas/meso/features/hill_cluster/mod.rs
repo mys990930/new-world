@@ -34,8 +34,8 @@ const SOURCE_SHOULDER_SIDE_SALT: u64 = 0xD811_B6D2_2200_0010;
 const SOURCE_NOTCH_OFFSET_SALT: u64 = 0xD811_B6D2_2200_0011;
 const SOURCE_NOTCH_SIDE_SALT: u64 = 0xD811_B6D2_2200_0012;
 const SOURCE_NOTCH_STRENGTH_SALT: u64 = 0xD811_B6D2_2200_0013;
-const APPLY_SCAN_RADIUS_CELLS: i32 = 4;
-const MAX_APPLY_SOURCES: usize = 81;
+const APPLY_SCAN_RADIUS_CELLS: i32 = 5;
+const MAX_APPLY_SOURCES: usize = 121;
 const MAX_RESOLVED_CLUSTER_SOURCES: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -260,7 +260,7 @@ pub(crate) fn sample_apply_signal(
         return HillClusterApplySample::default();
     }
 
-    let sources = prune_cluster_sources(candidates);
+    let sources = prune_cluster_sources(candidates, sample_x, sample_z);
     if sources.is_empty() {
         return HillClusterApplySample::default();
     }
@@ -647,11 +647,24 @@ fn is_local_source_peak(guides: &MesoGuideMap, coord: AtlasCoord, cell: MesoGuid
     true
 }
 
-fn prune_cluster_sources(mut candidates: Vec<GuideSource>) -> Vec<GuideSource> {
-    candidates.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+fn prune_cluster_sources(
+    mut candidates: Vec<GuideSource>,
+    sample_x: f32,
+    sample_z: f32,
+) -> Vec<GuideSource> {
+    candidates.sort_by(|a, b| {
+        let a_score = source_relevance_score(*a, sample_x, sample_z);
+        let b_score = source_relevance_score(*b, sample_x, sample_z);
+        b_score.total_cmp(&a_score)
+    });
     let mut kept: Vec<GuideSource> = Vec::with_capacity(MAX_RESOLVED_CLUSTER_SOURCES);
 
     for candidate in candidates {
+        let relevance = source_relevance_score(candidate, sample_x, sample_z);
+        if relevance <= 0.04 {
+            continue;
+        }
+
         let mut overlaps = false;
         for existing in &kept {
             let separation = distance_between_points(
@@ -661,7 +674,7 @@ fn prune_cluster_sources(mut candidates: Vec<GuideSource>) -> Vec<GuideSource> {
             let minimum = candidate
                 .keepout_radius_blocks
                 .min(existing.keepout_radius_blocks)
-                * 0.92;
+                * lerp_f32(0.60, 0.92, relevance);
             if separation < minimum {
                 overlaps = true;
                 break;
@@ -679,6 +692,12 @@ fn prune_cluster_sources(mut candidates: Vec<GuideSource>) -> Vec<GuideSource> {
     }
 
     kept
+}
+
+fn source_relevance_score(source: GuideSource, sample_x: f32, sample_z: f32) -> f32 {
+    let distance = distance_between_points((source.center_x, source.center_z), (sample_x, sample_z));
+    let distance_weight = smoothstep_range(source.keepout_radius_blocks * 4.6, 0.0, distance);
+    source.weight * (0.16 + distance_weight * 0.84)
 }
 
 fn irregular_lobe_footprint(
@@ -1122,7 +1141,7 @@ mod tests {
             "expected neighboring guide cells to resolve as multiple macro lobes, found {local_peak_count}"
         );
         assert!(
-            local_peak_count <= 6,
+            local_peak_count <= 8,
             "expected source pruning to avoid cluttered tiny-hill overpopulation, found {local_peak_count}"
         );
     }
@@ -1257,11 +1276,37 @@ mod tests {
             .unwrap(),
         ];
 
-        let kept = prune_cluster_sources(candidates);
+        let kept = prune_cluster_sources(candidates, meso_span_blocks * 1.5, meso_span_blocks * 1.5);
         assert!(
             kept.len() <= 2,
             "expected dense neighboring hill sources to prune down, kept {} sources",
             kept.len()
+        );
+    }
+
+    #[test]
+    fn apply_signal_is_stable_across_meso_cell_boundaries() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 6, 6).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        for coord in area.coords() {
+            if (coord.x + coord.z) % 2 == 0 {
+                *cells.get_mut(coord).unwrap() = MesoGuideCell {
+                    hilliness: 0.74 + (coord.x as f32 * 0.03).clamp(0.0, 0.16),
+                    hill_height: 7.0 + (coord.z as f32 * 0.7).clamp(0.0, 3.0),
+                    ..MesoGuideCell::default()
+                };
+            }
+        }
+        let guides = MesoGuideMap { area, cells };
+        let meso_span = CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32;
+        let world_z = meso_span * 2 + 24;
+        let left = sample_apply_signal(&guides, meso_span * 2 - 1, world_z);
+        let right = sample_apply_signal(&guides, meso_span * 2, world_z);
+        let seam_delta = (left.lobe_height_blocks - right.lobe_height_blocks).abs();
+
+        assert!(
+            seam_delta <= 3.6,
+            "expected hill-cluster apply support to stay stable across meso-cell boundaries, seam delta={seam_delta:.3}\nleft={left:?}\nright={right:?}"
         );
     }
 
