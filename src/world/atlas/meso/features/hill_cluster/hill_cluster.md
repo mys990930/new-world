@@ -32,7 +32,7 @@
 - The resolved shape should keep a broader shoulder envelope than the inner hill cores so plains can ease upward naturally instead of stepping into a hard wall.
 - Neighboring hill lobes inside the same cluster should merge through a soft shared support envelope rather than producing a circular Venn-diagram saddle in plan view.
 - Different hills should keep different summit ceilings within a tuned min/max band so nearby peaks do not all stall at the same y level; resolved blob caps should vary inside the broader cluster too.
-- Summit profiles should stay rounded and sigmoid-like near the top instead of reading as a flat cap above a mostly constant side slope.
+- Summit profiles should stay rounded and sigmoid-like from plain -> side -> top, with cluster-wide support fading back out before the apex so the summit does not read as a flat cap above a mostly constant side slope.
 - Corridor-adjacent hill clusters may be damped, but the feature should still keep a materially visible uplift where the resolved hill mass survives beside the corridor.
 - The chunk-side helper must scan a wide enough neighboring guide neighborhood that the same broad hill mass does not disappear or clip when the sample crosses a chunk or meso-cell boundary.
 - Neighboring chunks that overlap the same hill footprint should resolve the same world-space hill blobs from the same meso-region-owned cluster set, not just similar guide samples.

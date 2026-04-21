@@ -275,10 +275,13 @@ pub(crate) fn sample_apply_signal_from_window(
             0.76,
             cluster_coverage.max(envelope_footprint).max(cluster_shoulder_coverage),
         );
+        let interior_fill_fade =
+            1.0 - smoothstep_range(0.26, 0.84, cluster_coverage.max(cluster_strongest / cluster.peak_height_hint.max(1.0)));
         let cluster_fill = cluster.peak_height_hint
             * envelope_footprint
             * cluster.envelope.fill_scale
-            * (0.34 + merge_support * 0.44 + cluster_coverage * 0.22);
+            * interior_fill_fade
+            * (0.20 + merge_support * 0.34 + cluster_shoulder_coverage * 0.18);
         let second_weight = lerp_f32(0.40, 0.74, merge_support);
         let third_weight = lerp_f32(0.10, 0.24, merge_support);
         let cluster_contribution = cluster_strongest
@@ -349,7 +352,7 @@ pub(crate) fn sample_surface_from_window(
     let raise_cap = apply
         .peak_raise_cap_blocks
         .max((relief_budget * 1.08).max(16.0))
-        .min((relief_budget * 3.00).max(46.0));
+        .min((relief_budget * 3.20).max(52.0));
     let target_raise = soft_cap_positive(raw_target_raise, raise_cap);
     if target_raise <= f32::EPSILON {
         return HillClusterSurfaceSample::flat(base_surface_y);
@@ -502,8 +505,8 @@ fn resolve_cluster(builder: ClusterBuilder) -> Option<ResolvedHillCluster> {
                 lobe_index,
                 core_scale: (0.38 + source.cell.hilliness * 0.46).clamp(0.0, 1.0),
                 peak_exponent: lerp_f32(
-                    1.06,
-                    1.58,
+                    1.18,
+                    1.92,
                     indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SUMMIT_PROFILE_SALT),
                 ),
                 raise_cap_blocks: (lobe.height_blocks
@@ -742,10 +745,34 @@ fn summit_profile(footprint: f32, exponent: f32) -> f32 {
     }
 
     let exponent = exponent.max(1.0);
-    let eased = smoothstep01(footprint.clamp(0.0, 1.0));
-    let upper = eased.powf(exponent);
-    let lower = eased.powf(0.92 + (exponent - 1.0) * 0.22);
-    (upper * 0.60 + lower * 0.40).clamp(0.0, 1.0)
+    let t = footprint.clamp(0.0, 1.0);
+    let base = smoothstep01(t);
+    let mid = smoothstep01(base);
+    let shoulder = base.powf(0.92 + (exponent - 1.0) * 0.16);
+    let dome = mid.powf(1.12 + (exponent - 1.0) * 0.60);
+    let apex = smoothstep_range(0.80, 1.0, t);
+    (shoulder * 0.42 + dome * 0.42 + apex * 0.16).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summit_profile;
+
+    #[test]
+    fn summit_profile_keeps_sigmoid_upper_dome() {
+        let lower_mid = summit_profile(0.60, 1.6);
+        let upper_mid = summit_profile(0.85, 1.6);
+        let apex_band = summit_profile(0.97, 1.6);
+
+        assert!(
+            upper_mid - lower_mid >= 0.24,
+            "expected hill sides to steepen meaningfully through the mid band, lower_mid={lower_mid:.3}, upper_mid={upper_mid:.3}"
+        );
+        assert!(
+            apex_band - upper_mid >= 0.10,
+            "expected summit profile to keep gaining into the apex instead of flattening too early, upper_mid={upper_mid:.3}, apex_band={apex_band:.3}"
+        );
+    }
 }
 
 fn coverage_union(current: f32, addition: f32) -> f32 {
