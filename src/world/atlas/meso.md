@@ -11,7 +11,7 @@
 - define the ownership and cache unit for meso terrain guides
 - define how meso guides are derived from atlas region classification plus skeleton context
 - define how meso candidates are selected from atlas/structure-conditioned weights plus deterministic randomness
-- expose per-sample guide weights and directional hints that generation can consume before hydrology and block fill
+- expose per-sample guide weights and directional hints that feature-owned generation resolvers can consume before hydrology and block fill
 - stay deterministic and generation-order-independent
 - stay broad enough to be visible across several chunks inside normal play view
 
@@ -125,7 +125,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
   - terrace band bias
   - escarpment signed-distance and heading hints
   - terrace signed-distance, spacing, and heading hints
-- generation can then consume those channels without having to know which exact authoring name originally produced them
+- generation can then hand those channels to feature-owned runtime resolvers without forcing every meso landform through one shared `delta_y` formula
 
 ## Generation Integration
 
@@ -134,7 +134,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 3. generation requests region classification before base heightfield solving
 4. generation requests meso guides for several-chunk local accents inside that region archetype
 5. generation solves a biome-aware base heightfield with river corridors as constraints
-6. generation applies meso deformation on top of that base scaffold before local smoothing
+6. generation asks feature-owned meso resolvers to build target local surfaces on top of that base scaffold, then composites those results before local smoothing
 7. generation applies local micro detail, final hydrology, and material fill
 
 ## Invariants
@@ -154,10 +154,10 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
 - current `hill_cluster` runtime emission now has two layers:
   - atlas meso guide generation rasterizes a shared clustered hill envelope with several strong guide cells across a few chunks
-  - feature-owned chunk-side macro-lobe-chain resolution turns those strong neighboring guide cells into several nearby asymmetric hills with visible saddles during meso apply
+  - feature-owned chunk-side resolution turns those strong neighboring guide cells plus the prototype baseline into several nearby asymmetric hills with visible saddles and a blended target surface during meso apply
 - the current hill-cluster runtime helper also keeps a broader shoulder envelope than the inner hill cores so plains transition into hill country more naturally at launch scale
 - the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
-- generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing
+- generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing, but target architecture is feature-owned surface resolution rather than one shared additive deformation formula
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input

@@ -18,6 +18,9 @@
 - Biases inland terrain prototypes without taking over the owning region identity.
 - Atlas-owned guide emission should describe one shared inland cluster envelope with several strong guide cells across a few chunks rather than a point-like object list.
 - Chunk-side realization should resolve that guide into coherent asymmetric macro-lobe chains with visible saddles between nearby hills, so the player reads hill country rather than circles, tiny local hilllets, or one smeared swell.
+- The runtime helper should own the hill surface resolve itself instead of returning only a generic additive `delta_y`.
+- A resolved hill cluster should produce one feature-owned target surface that rises several blocks above the local prototype baseline, with broad shoulders and soft falloff blended back into the surrounding plain.
+- At launch tuning, strong hill-cluster lobes should be able to exceed roughly `+8` blocks relative to the nearby prototype where guide support and archetype allowance justify it.
 - At the current `0.5m` block scale, launch tuning should produce several-meter prototype relief so the feature reads as real hill country rather than sub-meter noise.
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill mass has room to read before the next saddle begins.
 - Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.
@@ -32,4 +35,4 @@
 
 ## Follow-up
 
-- lock final allowed-archetype coverage, deformation operator, and material/ecology hooks before implementation becomes authoritative
+- lock final allowed-archetype coverage, feature-owned surface resolver behavior, and material/ecology hooks before implementation becomes authoritative

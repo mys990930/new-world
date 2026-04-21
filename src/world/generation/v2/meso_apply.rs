@@ -1,6 +1,6 @@
 use crate::world::atlas::{
-    HillClusterApplySample, RiverPathKind, region_archetype_def,
-    sample_hill_cluster_apply_signal, sample_meso_guides,
+    HillClusterSurfaceSample, RiverPathKind, region_archetype_def,
+    sample_hill_cluster_surface, sample_meso_guides,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
@@ -58,8 +58,6 @@ pub fn build_chunk_meso_applied_prototype(
             let world_x = chunk_origin_x + local_x;
             let world_z = chunk_origin_z + local_z;
             let meso = sample_meso_guides(&inputs.meso_guides, world_x, world_z);
-            let hill_cluster_apply =
-                sample_hill_cluster_apply_signal(&inputs.meso_guides, world_x, world_z);
             let region_samples =
                 sample_region_weights(&inputs.region_classes, world_x as f32 + 0.5, world_z as f32 + 0.5);
             let corridor_avoidance = corridor_avoidance_factor(
@@ -68,13 +66,19 @@ pub fn build_chunk_meso_applied_prototype(
                 &corridor_window.corridors,
             );
             let column_relief_scale = relief_budget_scale(base.relief_budget);
-
-            let hill_cluster = hill_cluster_delta(
-                &meso,
-                hill_cluster_apply,
-                allowed_feature_weight(&region_samples, "hill_cluster"),
+            let hill_cluster_allowed = allowed_feature_weight(&region_samples, "hill_cluster");
+            let hill_cluster_surface = sample_hill_cluster_surface(
+                &inputs.meso_guides,
+                world_x,
+                world_z,
+                base.base_height,
                 base.relief_budget,
-                column_relief_scale,
+            );
+
+            let hill_cluster = hill_cluster_surface_delta(
+                base.base_height,
+                hill_cluster_surface,
+                hill_cluster_allowed,
                 corridor_avoidance,
             );
             let shallow_basin = shallow_basin_delta(
@@ -160,31 +164,19 @@ fn allowed_feature_weight(region_samples: &[RegionSampleWeight; 4], key: &str) -
     allowed.clamp(0.0, 1.0)
 }
 
-fn hill_cluster_delta(
-    meso: &crate::world::atlas::MesoGuideSample,
-    hill_cluster_apply: HillClusterApplySample,
+fn hill_cluster_surface_delta(
+    base_height: f32,
+    hill_cluster_surface: HillClusterSurfaceSample,
     allowed_weight: f32,
-    relief_budget: f32,
-    relief_scale: f32,
     corridor_avoidance: f32,
 ) -> f32 {
-    let coverage = hill_cluster_apply.coverage.clamp(0.0, 1.0);
-    let shoulder = hill_cluster_apply.shoulder_coverage.max(coverage).clamp(0.0, 1.0);
-    let footprint_bias = smoothstep01((0.10 + meso.hilliness * 0.12 + shoulder * 0.78).clamp(0.0, 1.0));
-    let weight = footprint_bias * allowed_weight * corridor_avoidance;
+    let weight = hill_cluster_surface.blend_weight * allowed_weight * corridor_avoidance;
     if weight <= f32::EPSILON {
         return 0.0;
     }
 
-    let shoulder_raise =
-        meso.hill_height * shoulder * (0.24 + shoulder * 0.28 + meso.hilliness * 0.18);
-    let core_raise = hill_cluster_apply.lobe_height_blocks
-        * smoothstep_range(0.12, 0.86, coverage)
-        * (0.44 + shoulder * 0.14 + coverage * 0.16);
-    let raw_raise = (shoulder_raise + core_raise) * weight * relief_scale * 0.96;
-    let hill_cap = (relief_budget * 0.82).max(0.60);
-
-    soft_cap_positive(raw_raise, hill_cap)
+    let blended_surface_y = lerp_f32(base_height, hill_cluster_surface.target_surface_y, weight);
+    blended_surface_y - base_height
 }
 
 fn shallow_basin_delta(
@@ -317,13 +309,8 @@ fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn soft_cap_positive(value: f32, cap: f32) -> f32 {
-    if value <= 0.0 {
-        return 0.0;
-    }
-
-    let safe_cap = cap.max(f32::EPSILON);
-    safe_cap * (1.0 - (-value / safe_cap).exp())
+fn lerp_f32(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -468,59 +455,52 @@ mod tests {
             terrace_signed_distance_cells: -0.75,
             ..MesoGuideSample::default()
         };
-        let hill_cluster_apply = HillClusterApplySample {
-            coverage: 0.82,
+        let hill_cluster_surface = HillClusterSurfaceSample {
+            target_surface_y: 112.0,
+            blend_weight: 0.84,
+            relief_spend: 10.08,
+            core_coverage: 0.82,
             shoulder_coverage: 0.93,
-            lobe_height_blocks: 6.2,
         };
 
-        assert!(hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 12.0, 1.0, 1.0) > 0.0);
+        assert!(hill_cluster_surface_delta(100.0, hill_cluster_surface, 1.0, 1.0) > 0.0);
         assert!(shallow_basin_delta(&meso, 1.0, 1.0, 1.0) < 0.0);
         assert!(escarpment_band_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
         assert!(upland_terrace_delta(&meso, 1.0, 1.0, 1.0) > 0.0);
     }
 
     #[test]
-    fn hill_cluster_delta_keeps_macro_lobe_material_at_partial_footprint() {
-        let meso = MesoGuideSample {
-            hilliness: 0.55,
-            hill_height: 7.5,
-            ..MesoGuideSample::default()
-        };
-        let hill_cluster_apply = HillClusterApplySample {
-            coverage: 0.68,
+    fn hill_cluster_surface_delta_keeps_material_rise_at_partial_blend() {
+        let hill_cluster_surface = HillClusterSurfaceSample {
+            target_surface_y: 112.0,
+            blend_weight: 0.70,
+            relief_spend: 8.4,
+            core_coverage: 0.68,
             shoulder_coverage: 0.86,
-            lobe_height_blocks: 7.0,
         };
 
-        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 12.0, 1.0, 1.0);
+        let delta = hill_cluster_surface_delta(100.0, hill_cluster_surface, 1.0, 1.0);
         assert!(
-            delta >= 4.6,
-            "expected partial-footprint hill clusters to still raise terrain materially, got {delta}"
+            delta >= 8.0,
+            "expected partial-blend hill clusters to still raise terrain materially, got {delta}"
         );
     }
 
     #[test]
-    fn hill_cluster_delta_soft_caps_against_low_plain_budget() {
-        let meso = MesoGuideSample {
-            hilliness: 0.64,
-            hill_height: 8.0,
-            ..MesoGuideSample::default()
-        };
-        let hill_cluster_apply = HillClusterApplySample {
-            coverage: 0.92,
+    fn hill_cluster_surface_delta_respects_external_gating() {
+        let hill_cluster_surface = HillClusterSurfaceSample {
+            target_surface_y: 113.5,
+            blend_weight: 0.88,
+            relief_spend: 11.88,
+            core_coverage: 0.92,
             shoulder_coverage: 0.98,
-            lobe_height_blocks: 15.0,
         };
 
-        let delta = hill_cluster_delta(&meso, hill_cluster_apply, 1.0, 3.0, 1.0, 1.0);
+        let full = hill_cluster_surface_delta(100.0, hill_cluster_surface, 1.0, 1.0);
+        let gated = hill_cluster_surface_delta(100.0, hill_cluster_surface, 0.45, 0.60);
         assert!(
-            delta < 2.46,
-            "expected low-budget hill clusters to ease into plains instead of clipping to a hard wall, got {delta}"
-        );
-        assert!(
-            delta > 1.2,
-            "expected low-budget hill clusters to still produce some rise in plains, got {delta}"
+            gated < full,
+            "expected gating to attenuate feature-owned hill surfaces, full={full}, gated={gated}"
         );
     }
 

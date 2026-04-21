@@ -118,7 +118,7 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 7. Meso Solve
 
-- status: `implemented as initial Wave 1 chunk deformation pass`
+- status: `implemented as initial Wave 1 chunk surface-resolution pass`
 - owner:
   - atlas ownership: `atlas/meso.rs`
   - chunk-side application scaffold: `v2/meso_apply.rs`
@@ -130,7 +130,8 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
   - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
-  - hill clusters now use atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass, with broader shoulder fade, a soft low-budget cap, and a widened neighboring-guide scan so hills do not clip apart at chunk or meso-cell seams
+  - the target architecture is now feature-owned meso surface resolution: `meso_apply.rs` should orchestrate gating, corridor policy, compositing, and relief accounting, while each feature module owns its own target local surface logic
+  - hill clusters are the first launch feature being moved toward that model, using atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass with broader shoulders and a blended target surface
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 
@@ -178,7 +179,7 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 4. document launch fallback behavior for extended and deferred archetypes
 5. tune and extend the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles at larger scales too
 6. expand and tune archetype coverage in `v2/prototype.rs` and `v2/realization_field.rs` as more launch and extended landform cases come online
-7. tune and tighten the Wave 1 meso operators in `v2/meso_apply.rs` once the authoritative matrix is published
+7. migrate the remaining Wave 1 meso features from legacy delta operators to feature-owned surface resolvers once the authoritative matrix is published
 8. implement smoothing/local refinement in `v2/smoothing.rs`
 9. implement connected hydrology in `v2/hydrology.rs`
 10. implement final material + block voxelization in `v2/voxelize.rs`

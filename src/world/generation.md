@@ -11,7 +11,7 @@
 
 - define the public `generate_chunk(...)` contract for future V2 realization
 - assemble padded atlas field / skeleton / region / meso inputs for a chunk
-- keep the V2 stage split explicit: realization field, corridors, prototype, meso apply, smoothing, hydrology, voxelize
+- keep the V2 stage split explicit: realization field, corridors, prototype, meso surface resolve, smoothing, hydrology, voxelize
 - preserve compile-time probe and LOD data shapes while runtime diagnostic behavior is intentionally disabled
 - keep generation independent from loaded-world mutation, jobs scheduling, and renderer concerns
 
@@ -136,7 +136,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 5. Generate or read river corridors, basin outlets, and downstream grade for the same footprint.
 6. Solve a biome-aware base heightfield from realization-field control samples plus water-corridor constraints.
 7. Generate or read the matching meso guide window from region context and aligned meso regions.
-8. Apply meso deformation on top of the base heightfield.
+8. Resolve feature-owned meso surfaces on top of the base heightfield and blend them back into the prototype baseline.
 9. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
 10. Solve final hydrology and connected water surfaces from the pre-defined branch model.
 11. Resolve region/material ownership and topsoil / sediment / cover policy.
@@ -175,7 +175,7 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 - `v2/realization_field.md`: continuous prototype-control field derived from semantic region classes and sampled by prototype before corridor shaping
 - `v2/corridors.md`: river corridor and downstream-grade scaffold
 - `v2/prototype.md`: biome-aware base heightfield prototype scaffold
-- `v2/meso_apply.md`: meso application scaffold
+- `v2/meso_apply.md`: meso surface-resolution and compositing scaffold
 - `v2/smoothing.md`: smoothing and local refinement scaffold
 - `v2/hydrology.md`: final hydrology scaffold
 - `v2/voxelize.md`: final material and block placement scaffold

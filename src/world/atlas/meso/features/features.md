@@ -12,6 +12,7 @@
   - `<feature>.md`
 - the Rust module always exposes a `MesoFeatureDef`
 - launch features that are already wired into runtime guide generation may also keep their feature-specific build, rasterize, and chunk-apply shaping helpers in that same folder instead of centralizing every implementation detail in `atlas/meso.rs`
+- runtime-wired features should prefer feature-owned resolve helpers such as `sample_surface(...)`, `sample_apply_signal(...)`, or similar contracts that return a target local landform surface instead of forcing all meso behavior through a shared generic `delta_y` operator
 - the markdown file holds planning content:
   - stage label
   - placement family
@@ -95,3 +96,4 @@
 - the full scaffolded pool is broader than the currently emitted runtime guide subset
 - current guide generation still only emits the Wave 1A subset: `hill_cluster`, `shallow_basin`, `escarpment_band`, and `upland_terrace`
 - `atlas/meso.rs` should stay focused on shared lottery, sampling, and raster dispatch, while feature-specific realization details for runtime-wired launch features should live under the matching `features/<name>/` folder
+- `world/generation/v2/meso_apply.rs` should stay focused on feature orchestration, gating, and compositing rather than owning every concrete terrain-shape formula itself

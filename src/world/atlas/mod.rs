@@ -23,7 +23,7 @@ pub use meso::{
     meso_feature_def, meso_feature_defs, meso_region_coord_for_atlas,
     meso_regions_covering_area, sample_meso_guides,
 };
-pub(crate) use meso::{HillClusterApplySample, sample_hill_cluster_apply_signal};
+pub(crate) use meso::{HillClusterSurfaceSample, sample_hill_cluster_surface};
 pub use region::{
     BiomeFamily, ClimateRegime, CoastalContext, ElevationBand, HydrologyContext, MoistureBand,
     PrototypeArchetypeHint, RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS,

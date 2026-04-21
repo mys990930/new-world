@@ -1,12 +1,13 @@
 use std::f32::consts::TAU;
 
-use crate::world::atlas::{AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap};
+use crate::world::atlas::{
+    AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap, sample_meso_guides,
+};
 use crate::world::{CHUNK_EDGE_I32, MESO_GUIDE_CELL_SIZE_IN_CHUNKS};
 
 use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 use super::super::{
     FeatureInstance, MesoFeatureKind, cell_center_jitter, ellipse_footprint, hash01, lerp_f32,
-    smoothstep_range,
 };
 
 const STRENGTH_MIN_BLOCKS: f32 = 6.4;
@@ -33,6 +34,27 @@ pub struct HillClusterApplySample {
     pub coverage: f32,
     pub shoulder_coverage: f32,
     pub lobe_height_blocks: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HillClusterSurfaceSample {
+    pub target_surface_y: f32,
+    pub blend_weight: f32,
+    pub relief_spend: f32,
+    pub core_coverage: f32,
+    pub shoulder_coverage: f32,
+}
+
+impl HillClusterSurfaceSample {
+    pub fn flat(base_surface_y: f32) -> Self {
+        Self {
+            target_surface_y: base_surface_y,
+            blend_weight: 0.0,
+            relief_spend: 0.0,
+            core_coverage: 0.0,
+            shoulder_coverage: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -329,6 +351,47 @@ pub(crate) fn sample_apply_signal(
         coverage: coverage.clamp(0.0, 1.0),
         shoulder_coverage: shoulder_coverage.max(coverage).clamp(0.0, 1.0),
         lobe_height_blocks: strongest + second * 0.66 + third * 0.30,
+    }
+}
+
+pub(crate) fn sample_surface(
+    guides: &MesoGuideMap,
+    world_x: i32,
+    world_z: i32,
+    base_surface_y: f32,
+    relief_budget: f32,
+) -> HillClusterSurfaceSample {
+    let apply = sample_apply_signal(guides, world_x, world_z);
+    let coverage = apply.coverage.clamp(0.0, 1.0);
+    let shoulder = apply.shoulder_coverage.max(coverage).clamp(0.0, 1.0);
+    if shoulder <= f32::EPSILON || apply.lobe_height_blocks <= f32::EPSILON {
+        return HillClusterSurfaceSample::flat(base_surface_y);
+    }
+
+    let meso = sample_meso_guides(guides, world_x, world_z);
+    let shoulder_raise = meso.hill_height
+        * (0.34 + meso.hilliness * 0.20 + shoulder * 0.22)
+        * smoothstep_range(0.08, 0.96, shoulder);
+    let core_raise = apply.lobe_height_blocks
+        * (0.72 + meso.hilliness * 0.14 + coverage * 0.12)
+        * smoothstep_range(0.06, 0.88, coverage);
+    let raw_target_raise = shoulder_raise * (0.68 + shoulder * 0.18) + core_raise;
+    let target_raise =
+        soft_cap_positive(raw_target_raise, (relief_budget * 1.10).max(8.6));
+    if target_raise <= f32::EPSILON {
+        return HillClusterSurfaceSample::flat(base_surface_y);
+    }
+
+    let blend_weight = smoothstep01(
+        (shoulder * 0.84 + coverage * 0.28 + meso.hilliness * 0.08).clamp(0.0, 1.0),
+    );
+
+    HillClusterSurfaceSample {
+        target_surface_y: base_surface_y + target_raise,
+        blend_weight,
+        relief_spend: target_raise * blend_weight,
+        core_coverage: coverage,
+        shoulder_coverage: shoulder,
     }
 }
 
@@ -640,6 +703,29 @@ fn splitmix64(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     value ^ (value >> 31)
+}
+
+fn smoothstep01(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if (edge1 - edge0).abs() <= f32::EPSILON {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn soft_cap_positive(value: f32, cap: f32) -> f32 {
+    if value <= 0.0 {
+        return 0.0;
+    }
+
+    let safe_cap = cap.max(f32::EPSILON);
+    safe_cap * (1.0 - (-value / safe_cap).exp())
 }
 
 #[cfg(test)]
@@ -966,6 +1052,61 @@ mod tests {
                 "expected hill lobes to avoid extreme one-axis stretch, got aspect ratio {aspect_ratio:.3} for lobe {lobe_index}"
             );
         }
+    }
+
+    #[test]
+    fn sample_surface_returns_flat_when_guides_are_absent() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
+        let cells = crate::world::AtlasGrid::defaulted(area);
+        let guides = MesoGuideMap { area, cells };
+        let sample = sample_surface(&guides, 96, 96, 100.0, 12.0);
+
+        assert_eq!(sample, HillClusterSurfaceSample::flat(100.0));
+    }
+
+    #[test]
+    fn sample_surface_can_raise_strong_peak_more_than_eight_blocks() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        *cells.get_mut(AtlasCoord::new(1, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.95,
+            hill_height: 11.8,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.90,
+            hill_height: 10.6,
+            ..MesoGuideCell::default()
+        };
+        let guides = MesoGuideMap { area, cells };
+        let origin_world = CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32;
+        let mut strongest = HillClusterSurfaceSample::flat(100.0);
+
+        for sample_z in (8..120).step_by(4) {
+            for sample_x in (8..120).step_by(4) {
+                let sample = sample_surface(
+                    &guides,
+                    origin_world + sample_x,
+                    origin_world + sample_z,
+                    100.0,
+                    12.0,
+                );
+                if sample.target_surface_y > strongest.target_surface_y {
+                    strongest = sample;
+                }
+            }
+        }
+
+        assert!(
+            strongest.target_surface_y - 100.0 >= 8.0,
+            "expected strong hill-cluster surface resolve to exceed +8 blocks above base, got {:?}",
+            strongest
+        );
+        assert!(
+            strongest.blend_weight >= 0.55,
+            "expected strong hill-cluster peak to keep meaningful blend support, got {:?}",
+            strongest
+        );
     }
 
 }
