@@ -50,6 +50,6 @@ build_chunk_meso_applied_prototype(
   - sampled guide fields still provide broad cluster envelope and macro hill-strength context
   - the feature-owned runtime helper should turn those guides plus the base prototype into a smaller set of broader, taller, irregular hill lobes with explicit shoulders and a smoothly blended target surface
   - the resolved hill mass should rise from the plain through feature-owned falloff rather than by abruptly stacking a narrow additive delta on top of the base
-  - dense neighboring guide cells are filtered by local-peak rules, then resolved with continuous distance-faded support blending so one cluster does not explode into many overlapping small hills
-  - hill support should fade smoothly across neighboring columns and chunk boundaries instead of snapping through hard top-N source switches
+  - dense neighboring guide cells should be pruned down before surface resolve so one cluster does not explode into many overlapping small hills
+  - scan support and fallback orientation must stay stable enough across neighboring chunk / meso-cell contexts that the same broad hill mass does not clip or rotate at shared boundaries
 - the other Wave 1 launch features may temporarily remain on legacy delta operators during the transition, but the target architecture is feature-owned surface resolution for every meso landform
