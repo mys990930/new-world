@@ -1,4 +1,4 @@
-use crate::world::atlas::{MesoGuideMap, sample_meso_guides};
+use crate::world::atlas::{AtlasCoord, MesoGuideMap, MesoRegionCoord, sample_meso_guides};
 use crate::world::coord::ChunkCoord;
 
 use super::{
@@ -15,6 +15,8 @@ use super::super::super::lerp_f32;
 const CLUSTER_ASSIGN_RADIUS_MULTIPLIER: f32 = 2.35;
 const CLUSTER_BLOB_BOUND_PAD_BLOCKS: f32 = 18.0;
 const CLUSTER_SHOULDER_BOUND_PAD_BLOCKS: f32 = 12.0;
+const REGION_RESOLVE_PADDING_REGIONS: i32 = 2;
+const WINDOW_OWNER_PADDING_REGIONS: i32 = 1;
 
 #[derive(Debug, Clone)]
 pub(crate) struct HillClusterWindow {
@@ -65,9 +67,29 @@ struct ClusterBuilder {
 pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClusterWindow {
     let meso_span_blocks =
         (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
-    let source_padding_blocks = (super::APPLY_SCAN_RADIUS_CELLS as f32 + 1.0) * meso_span_blocks;
-    let source_bounds = chunk_bounds(chunk, source_padding_blocks);
     let chunk_bounds = chunk_bounds(chunk, 0.0);
+    let candidates = collect_candidate_sources(guides, meso_span_blocks);
+    let (min_region_x, max_region_x, min_region_z, max_region_z) =
+        owner_region_range_for_chunk(chunk, WINDOW_OWNER_PADDING_REGIONS);
+    let mut clusters = Vec::new();
+
+    for region_z in min_region_z..=max_region_z {
+        for region_x in min_region_x..=max_region_x {
+            clusters.extend(resolve_owned_clusters(
+                &candidates,
+                MesoRegionCoord::new(region_x, region_z),
+            ));
+        }
+    }
+
+    clusters.retain(|cluster| {
+        bounds_overlap(chunk_bounds, cluster.min_x, cluster.max_x, cluster.min_z, cluster.max_z)
+    });
+
+    HillClusterWindow { chunk, clusters }
+}
+
+fn collect_candidate_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<GuideSource> {
     let mut candidates = Vec::new();
 
     for coord in guides.area().coords() {
@@ -80,16 +102,25 @@ pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClus
         let Some(source) = guide_source(coord, cell, meso_span_blocks) else {
             continue;
         };
-        if !bounds_contains_point(source_bounds, source.center_x, source.center_z) {
-            continue;
-        }
         candidates.push(source);
     }
 
     candidates.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+    candidates
+}
+
+fn resolve_owned_clusters(
+    candidates: &[GuideSource],
+    owner_region: MesoRegionCoord,
+) -> Vec<ResolvedHillCluster> {
+    let search_bounds = guide_region_bounds(owner_region, REGION_RESOLVE_PADDING_REGIONS);
     let mut builders: Vec<ClusterBuilder> = Vec::new();
 
-    for candidate in candidates {
+    for candidate in candidates
+        .iter()
+        .copied()
+        .filter(|candidate| bounds_contains_coord(search_bounds, candidate.coord))
+    {
         if let Some(index) = assign_cluster_index(&builders, candidate) {
             builders[index].members.push(candidate);
         } else {
@@ -100,15 +131,11 @@ pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClus
         }
     }
 
-    let clusters = builders
+    builders
         .into_iter()
+        .filter(|builder| owner_region_for_coord(builder.anchor.coord) == owner_region)
         .filter_map(resolve_cluster)
-        .filter(|cluster| {
-            bounds_overlap(chunk_bounds, cluster.min_x, cluster.max_x, cluster.min_z, cluster.max_z)
-        })
-        .collect::<Vec<_>>();
-
-    HillClusterWindow { chunk, clusters }
+        .collect::<Vec<_>>()
 }
 
 pub(crate) fn sample_apply_signal_from_window(
@@ -437,8 +464,44 @@ fn chunk_bounds(chunk: ChunkCoord, padding_blocks: f32) -> (f32, f32, f32, f32) 
     (min_x, max_x, min_z, max_z)
 }
 
-fn bounds_contains_point(bounds: (f32, f32, f32, f32), x: f32, z: f32) -> bool {
-    x >= bounds.0 && x <= bounds.1 && z >= bounds.2 && z <= bounds.3
+fn owner_region_range_for_chunk(
+    chunk: ChunkCoord,
+    padding_regions: i32,
+) -> (i32, i32, i32, i32) {
+    let region_span_blocks = crate::world::CHUNK_EDGE_I32 * crate::world::ATLAS_CELL_SIZE_IN_CHUNKS as i32;
+    let min_world_x = chunk.0 * crate::world::CHUNK_EDGE_I32;
+    let max_world_x = (chunk.0 + 1) * crate::world::CHUNK_EDGE_I32 - 1;
+    let min_world_z = chunk.2 * crate::world::CHUNK_EDGE_I32;
+    let max_world_z = (chunk.2 + 1) * crate::world::CHUNK_EDGE_I32 - 1;
+
+    (
+        min_world_x.div_euclid(region_span_blocks) - padding_regions,
+        max_world_x.div_euclid(region_span_blocks) + padding_regions,
+        min_world_z.div_euclid(region_span_blocks) - padding_regions,
+        max_world_z.div_euclid(region_span_blocks) + padding_regions,
+    )
+}
+
+fn owner_region_for_coord(coord: AtlasCoord) -> MesoRegionCoord {
+    let region_span_cells = crate::world::MESO_GUIDE_CELLS_PER_ATLAS_CELL as i32;
+    MesoRegionCoord::new(
+        coord.x.div_euclid(region_span_cells),
+        coord.z.div_euclid(region_span_cells),
+    )
+}
+
+fn guide_region_bounds(region: MesoRegionCoord, padding_regions: i32) -> (i32, i32, i32, i32) {
+    let region_span_cells = crate::world::MESO_GUIDE_CELLS_PER_ATLAS_CELL as i32;
+    (
+        (region.x - padding_regions) * region_span_cells,
+        (region.x + padding_regions + 1) * region_span_cells - 1,
+        (region.z - padding_regions) * region_span_cells,
+        (region.z + padding_regions + 1) * region_span_cells - 1,
+    )
+}
+
+fn bounds_contains_coord(bounds: (i32, i32, i32, i32), coord: AtlasCoord) -> bool {
+    coord.x >= bounds.0 && coord.x <= bounds.1 && coord.z >= bounds.2 && coord.z <= bounds.3
 }
 
 fn bounds_overlap(

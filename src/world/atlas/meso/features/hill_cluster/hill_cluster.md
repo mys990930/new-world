@@ -19,7 +19,7 @@
 - Atlas-owned guide emission should describe one shared inland cluster envelope with several strong guide cells across a few chunks rather than a point-like object list.
 - Chunk-side realization should resolve that guide into coherent asymmetric macro-lobe chains with visible saddles between nearby hills, so the player reads hill country rather than circles, tiny local hilllets, or one smeared swell.
 - The runtime helper should own the hill surface resolve itself instead of returning only a generic additive `delta_y`.
-- Chunk-side realization should not reconstruct a different hill guess per sampled column; it should first resolve a shared set of world-space hill objects for the current chunk window and then sample those objects.
+- Chunk-side realization should not reconstruct a different hill guess per sampled column; it should sample a shared set of world-space hill objects whose ownership is stable at the meso-region layer rather than re-owned per chunk.
 - A resolved hill cluster should produce one feature-owned target surface that rises several blocks above the local prototype baseline, with broad shoulders and soft falloff blended back into the surrounding plain.
 - At launch tuning, strong hill-cluster lobes should be able to exceed roughly `+8` blocks relative to the nearby prototype where guide support and archetype allowance justify it.
 - Dense neighboring guide cells should be pruned into a smaller set of dominant hill masses so one cluster does not degenerate into many tiny overlapping bumps.
@@ -31,7 +31,7 @@
 - The resolved shape should keep a broader shoulder envelope than the inner hill cores so plains can ease upward naturally instead of stepping into a hard wall.
 - Corridor-adjacent hill clusters may be damped, but the feature should still keep a materially visible uplift where the resolved hill mass survives beside the corridor.
 - The chunk-side helper must scan a wide enough neighboring guide neighborhood that the same broad hill mass does not disappear or clip when the sample crosses a chunk or meso-cell boundary.
-- Neighboring chunks that overlap the same hill footprint should resolve the same world-space hill blobs, not just similar guide samples.
+- Neighboring chunks that overlap the same hill footprint should resolve the same world-space hill blobs from the same meso-region-owned cluster set, not just similar guide samples.
 - When the resolved source layout is too compact to infer a clear shared axis, fallback orientation must stay source-stable across neighboring samples instead of re-rolling per chunk or per meso cell.
 - Should avoid displacing major river corridors and instead sit beside or above them.
 

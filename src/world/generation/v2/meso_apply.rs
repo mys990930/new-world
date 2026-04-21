@@ -632,6 +632,39 @@ mod tests {
     }
 
     #[test]
+    fn hill_cluster_reported_seam_zone_matches_across_neighboring_chunk_windows() {
+        let meta = WorldMeta::new(42);
+        let left_chunk = ChunkCoord(-48, 0, 90);
+        let right_chunk = ChunkCoord(-47, 0, 90);
+        let left_inputs = prepare_chunk_v2_inputs(left_chunk, &meta);
+        let right_inputs = prepare_chunk_v2_inputs(right_chunk, &meta);
+        let left_window = build_hill_cluster_window(&left_inputs.meso_guides, left_chunk);
+        let right_window = build_hill_cluster_window(&right_inputs.meso_guides, right_chunk);
+
+        for world_z in 2888..=2895 {
+            for world_x in -1506..=-1502 {
+                let left = sample_hill_cluster_surface_from_window(
+                    &left_window,
+                    &left_inputs.meso_guides,
+                    world_x,
+                    world_z,
+                    100.0,
+                    12.0,
+                );
+                let right = sample_hill_cluster_surface_from_window(
+                    &right_window,
+                    &right_inputs.meso_guides,
+                    world_x,
+                    world_z,
+                    100.0,
+                    12.0,
+                );
+                assert_hill_cluster_samples_match(left, right, world_x, world_z);
+            }
+        }
+    }
+
+    #[test]
     fn hill_cluster_preview_window_keeps_material_uplift_after_compositing() {
         let meta = WorldMeta::new(42);
         let center_chunk_x = -67;
