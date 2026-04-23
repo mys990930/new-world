@@ -2,12 +2,16 @@
 
 ## Role
 
-- own the last step that turns material and seasonal policy into actual block placement
+- own the last step that turns a resolved chunk surface plan into actual `ChunkData` block placement
 
 ## Current Types
 
+- `VoxelizationColumnPlan`
 - `VoxelizationPlan`
 
 ## Notes
 
-- this stage should eventually consume surface policy, hydrology, and final cover overrides together
+- the current runtime path now consumes a pre-resolved `ChunkSurfacePlan`
+- voxelize still owns the final write into `ChunkData`
+- voxelize should quantize hydrology's carved surface and connected water result into blocks; it should not perform a second independent channel or basin carve
+- deposition hints such as `gravel_bar_strength` should continue to influence earlier surface-plan choice, not trigger a second transport solve here

@@ -23,7 +23,7 @@ pub use atlas::{
     AtlasResolvedMap, AtlasResolverTuning, AtlasRidgeTuning, AtlasStructureMap,
     AtlasStructureRegion, AtlasStructureRegionCoord, AtlasTerrainTuning, AtlasTuning,
     AtlasWeightTuning, BiomeFamily, BiomePreview, ClimateRegime, CoastalContext, DrainageGraph,
-    DrainageNode, DrainageNodeKind, ElevationBand, HydrologyContext,
+    DrainageBasinId, DrainageNode, DrainageNodeKind, ElevationBand, HydrologyContext,
     MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
     MoistureBand, MoistureClass, MesoCatalogEntry, MesoCatalogStatus, MesoFeatureDef,
     MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
@@ -73,16 +73,21 @@ pub use edit::{EditError, EditResult, WorldEdit};
 pub use generation::{
     FLAT_WORLD_SURFACE_Y, SEA_LEVEL_Y, V2_GENERATOR_LABEL, WORLD_FLOOR_Y,
     BaseHeightfieldPrototype, ChunkCorridorWindow, ChunkGenerationV2Inputs,
-    ChunkGenerationV2Scaffold, ChunkRealizationFieldPatch, HydrologySolve, MesoAppliedColumn,
-    MesoAppliedPrototype, PrototypeColumn, REALIZATION_NODE_BLOCK_SPAN,
+    ChunkGenerationV2Scaffold, ChunkRealizationFieldPatch, HydrologyColumn, HydrologyMode,
+    HydrologySolve, MesoAppliedColumn, MesoAppliedPrototype, PrototypeColumn,
+    REALIZATION_NODE_BLOCK_SPAN,
     REALIZATION_NODE_CHUNK_SPAN, RealizationFieldNode, RealizationSample,
-    RiverCorridorConstraint, SmoothedPrototype, V2ScaffoldStage, VoxelizationPlan,
+    RiverCorridorConstraint, SmoothedColumn, SmoothedPrototype, V2ScaffoldStage,
+    VoxelizationColumnPlan, VoxelizationPlan,
     build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
-    build_chunk_meso_applied_prototype, build_chunk_realization_field_patch,
-    build_chunk_v2_scaffold, default_voxelization_plan, empty_base_heightfield_prototype,
-    empty_chunk_corridor_window, empty_chunk_realization_field_patch, empty_hydrology_solve,
-    empty_meso_applied_prototype, empty_smoothed_prototype, generate_chunk,
-    prepare_chunk_v2_inputs, sample_chunk_realization_field,
+    build_chunk_hydrology_solve, build_chunk_meso_applied_prototype,
+    build_chunk_meso_applied_prototype_for_feature,
+    build_chunk_realization_field_patch, build_chunk_smoothed_prototype,
+    build_chunk_v2_scaffold, build_chunk_voxelization_plan, default_voxelization_plan,
+    empty_base_heightfield_prototype, empty_chunk_corridor_window,
+    empty_chunk_realization_field_patch, empty_hydrology_solve, empty_meso_applied_prototype,
+    empty_smoothed_prototype, generate_chunk, prepare_chunk_v2_inputs,
+    sample_chunk_realization_field, voxelize_chunk,
 };
 #[allow(unused_imports)]
 pub use generation::{
@@ -105,9 +110,12 @@ pub use registry::{
 pub use storage::{StorageError, load_chunk, save_chunk};
 #[allow(unused_imports)]
 pub use surface::{
-    CoverOverrideRule, CoverPhase, MaterialPolicyDef, MaterialPolicyId, SeasonalBiomeStateDef,
-    SeasonalBiomeStateId, SeasonalPhase, default_cover_override_rules,
-    default_material_policies, default_seasonal_biome_states,
+    ChunkSurfacePlan, CoverOverrideRule, CoverPhase, MaterialPolicyDef, MaterialPolicyId,
+    SeasonalBiomeStateDef, SeasonalBiomeStateId, SeasonalPhase, SurfaceColumnPlan,
+    SurfaceRuntimeContext, cover_override_rule, default_cover_override_rules,
+    default_material_policies, default_seasonal_biome_states, empty_chunk_surface_plan,
+    material_policy_def, resolve_chunk_surface_plan, resolve_chunk_surface_plan_with_runtime,
+    resolve_material_policy_for_archetype, seasonal_biome_state_def,
 };
 #[allow(unused_imports)]
 pub use topdown::{

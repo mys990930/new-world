@@ -25,3 +25,5 @@
 - this file defines the stable runtime seasonal-state vocabulary, not the fixed-tick progression loop
 - world should own the authoritative seasonal state and any deferred far-region seasonal patches
 - simulation should own how those states advance over time
+- the current chunk-generation path may resolve one of these states only when an explicit runtime context is provided
+- the baseline `generate_chunk(...)` path still keeps seasonal state optional so static generation does not invent world calendar ownership

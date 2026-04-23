@@ -344,13 +344,17 @@ pub use corridors::{
     ChunkCorridorWindow, RiverCorridorConstraint, build_chunk_corridor_window,
     empty_chunk_corridor_window,
 };
-pub use hydrology::{HydrologySolve, empty_hydrology_solve};
+pub use hydrology::{
+    HydrologyColumn, HydrologyMode, HydrologySolve, build_chunk_hydrology_solve,
+    empty_hydrology_solve,
+};
 pub use inputs::{
     ChunkGenerationV2Inputs, ChunkGenerationV2Scaffold, V2ScaffoldStage, build_chunk_v2_scaffold,
     prepare_chunk_v2_inputs,
 };
 pub use meso_apply::{
     MesoAppliedColumn, MesoAppliedPrototype, build_chunk_meso_applied_prototype,
+    build_chunk_meso_applied_prototype_for_feature,
     empty_meso_applied_prototype,
 };
 pub use prototype::{
@@ -362,5 +366,10 @@ pub use realization_field::{
     REALIZATION_NODE_BLOCK_SPAN, REALIZATION_NODE_CHUNK_SPAN, build_chunk_realization_field_patch,
     empty_chunk_realization_field_patch, sample_chunk_realization_field,
 };
-pub use smoothing::{SmoothedPrototype, empty_smoothed_prototype};
-pub use voxelize::{VoxelizationPlan, default_voxelization_plan};
+pub use smoothing::{
+    SmoothedColumn, SmoothedPrototype, build_chunk_smoothed_prototype, empty_smoothed_prototype,
+};
+pub use voxelize::{
+    VoxelizationColumnPlan, VoxelizationPlan, build_chunk_voxelization_plan,
+    default_voxelization_plan, voxelize_chunk,
+};

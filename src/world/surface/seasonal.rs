@@ -76,3 +76,7 @@ pub const SEASONAL_BIOME_STATES: &[SeasonalBiomeStateDef] = &[
 pub fn default_seasonal_biome_states() -> &'static [SeasonalBiomeStateDef] {
     SEASONAL_BIOME_STATES
 }
+
+pub fn seasonal_biome_state_def(id: SeasonalBiomeStateId) -> Option<&'static SeasonalBiomeStateDef> {
+    SEASONAL_BIOME_STATES.iter().find(|state| state.id == id)
+}

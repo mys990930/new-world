@@ -32,3 +32,7 @@ pub const COVER_OVERRIDE_RULES: &[CoverOverrideRule] = &[
 pub fn default_cover_override_rules() -> &'static [CoverOverrideRule] {
     COVER_OVERRIDE_RULES
 }
+
+pub fn cover_override_rule(key: &str) -> Option<&'static CoverOverrideRule> {
+    COVER_OVERRIDE_RULES.iter().find(|rule| rule.key == key)
+}

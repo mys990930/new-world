@@ -35,8 +35,10 @@
   - profile-local relief noise, smoothing, and small contour breakup
 - `seasonal biome state`
   - current in-year surface state derived from region archetype, climate regime, world calendar, elevation, and hydrology
-- `hydrology/material fill`
-  - final river carve, water surface, sediment choice, topsoil, stone core, and block fill
+- `final hydrology carve`
+  - connected river/lake/wetland solve plus the final post-smoothing terrain carve for channels, floodplains, basins, and outlets
+- `material/block fill`
+  - sediment choice, topsoil, stone core, water voxel fill, and final block placement from hydrology plus surface policy
 
 ## Non-Responsibilities
 
@@ -90,6 +92,21 @@ generation::build_chunk_meso_applied_prototype(
     corridor_window: &ChunkCorridorWindow,
     prototype: &BaseHeightfieldPrototype,
 ) -> MesoAppliedPrototype
+generation::build_chunk_smoothed_prototype(
+    chunk: ChunkCoord,
+    corridor_window: &ChunkCorridorWindow,
+    meso: &MesoAppliedPrototype,
+) -> SmoothedPrototype
+generation::build_chunk_hydrology_solve(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationV2Inputs,
+    corridor_window: &ChunkCorridorWindow,
+    smoothed: &SmoothedPrototype,
+) -> HydrologySolve
+generation::build_chunk_voxelization_plan(
+    chunk: ChunkCoord,
+    surface: &ChunkSurfacePlan,
+) -> VoxelizationPlan
 
 generation::probe_chunk(coord: ChunkCoord, meta: &WorldMeta) -> ChunkGenerationProbe
 generation::probe_column(
@@ -108,7 +125,7 @@ generation::sample_chunk_surface_lod(
 ## Current Generator Contract
 
 - Sea level is still fixed at world-space `y = 0`.
-- `generate_chunk(...)` currently exists only as a compile-only TODO stub.
+- `generate_chunk(...)` now runs the initial end-to-end V2 path through inputs, realization field, corridors, prototype, meso apply, smoothing, hydrology, surface resolve, and voxelization.
 - probe helpers also exist only as compile-only TODO stubs.
 - the last working V1 realization stack has been intentionally removed instead of being kept as a silent fallback.
 - the authoritative transition summary now lives in `status.md`.
@@ -137,8 +154,8 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 6. Solve a biome-aware base heightfield from realization-field control samples plus water-corridor constraints.
 7. Generate or read the matching meso guide window from region context and aligned meso regions.
 8. Resolve feature-owned meso surfaces on top of the base heightfield and blend them back into the prototype baseline.
-9. Smooth that surface while preserving major corridor and ridge intent, then derive local refinement signals.
-10. Solve final hydrology and connected water surfaces from the pre-defined branch model.
+9. Smooth that surface while preserving major corridor and ridge intent, then derive local slope / concavity refinement signals.
+10. Solve final hydrology, connected water surfaces, and hydrology-driven terrain carve from the pre-defined branch model.
 11. Resolve region/material ownership and topsoil / sediment / cover policy.
 12. Write block ids into `ChunkData`.
 13. Return the finished chunk without mutating any live world state.
@@ -162,6 +179,8 @@ This flow is no longer implemented. See `status.md` for what remains from the ol
 
 - `v2/corridors.md` defines the river-corridor contract that feeds the base-heightfield solve.
 - `v2/prototype.md` is the authoritative design for the base-heightfield solve stage.
+- `v2/hydrology.md` owns the post-smoothing connected water solve and the final terrain carve driven by that water structure.
+- `v2/voxelize.md` should consume hydrology output rather than inventing a second late carve.
 - later V2 stages should treat prototype output as the broad landform source of truth, not as a late convenience mask.
 
 ## Internal Submodules

@@ -9,7 +9,7 @@
 
 The project now treats region-first V2 generation as the only intended terrain architecture.
 
-The old V1 realization stack has been removed instead of kept alive in parallel. Public generation entrypoints still exist so the rest of the workspace can compile, but they are now explicit TODO stubs until V2 chunk realization is implemented.
+The old V1 realization stack has been removed instead of kept alive in parallel. The main `generate_chunk(...)` path now runs the initial end-to-end V2 stack, while the public probe helpers still remain compile-only TODO stubs until richer diagnostics land.
 
 ## Current Module Map
 
@@ -39,8 +39,8 @@ The old V1 realization stack has been removed instead of kept alive in parallel.
 
 - `src/world/generation/mod.rs`
   - public generation facade
-  - `generate_chunk(...)` is now an explicit TODO stub
-  - probe helpers are also TODO stubs
+  - `generate_chunk(...)` now runs the initial V2 terrain-to-block path
+  - probe helpers are still TODO stubs
 - `src/world/generation/profile.rs`
   - retains only the diagnostic `TerrainProfile` enum used by tools and previews
 - `src/world/generation/probe.rs`
@@ -118,20 +118,30 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 7. Meso Solve
 
-- status: `implemented as initial Wave 1 chunk surface-resolution pass`
+- status: `implemented as initial launch chunk surface-resolution pass`
 - owner:
   - atlas ownership: `atlas/meso.rs`
   - chunk-side application scaffold: `v2/meso_apply.rs`
 - note:
   - guide ownership and a full per-feature scaffolded catalog exist
   - the scaffolded pool now carries `launch / extended / deferred` labels and per-feature planning stubs
-  - runtime guide generation still only emits the current Wave 1A subset from `atlas/meso.rs`
+  - runtime guide generation in `atlas/meso.rs` still emits only the broad Wave 1A channel set
   - shared meso lottery and dispatch stay in `atlas/meso.rs`, but runtime-wired feature-specific hill-cluster shaping now lives under `atlas/meso/features/hill_cluster/`
   - some landform-owned launch archetypes intentionally keep launch meso empty or nearly empty until prototype solving exists, notably `desert_dune_field` and `glaciated_alpine`
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
-  - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
+  - runtime gating is currently conservative and temporary: the stage consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
   - the target architecture is now feature-owned meso surface resolution: `meso_apply.rs` should orchestrate gating, corridor policy, compositing, and relief accounting, while each feature module owns its own target local surface logic
-  - hill clusters are the first launch feature being moved toward that model, using atlas-owned broad hill guides plus feature-owned sparse independent-hill resolution in the chunk pass with dominant-peak ownership pruning, low-amplitude support shoulders, source-stable fallback orientation, stronger visible uplift tuning, basin-aware compositing, summit-dominant uplift weighting, and a shared resolved hill-object window assembled from stable meso-region-owned hills instead of per-column hill re-interpretation
+  - the current runtime-backed launch subset is:
+    - `hill_cluster`
+    - `shallow_basin`
+    - `escarpment_band`
+    - `upland_terrace`
+    - `ravine`
+    - `coastal_cliff_band`
+    - `dune_field`
+    - `crater`
+  - hill clusters now use atlas-owned broad hill guides plus feature-owned sparse independent-hill resolution in the chunk pass with dominant-peak ownership pruning, low-amplitude support shoulders, source-stable fallback orientation, stronger visible uplift tuning, basin-aware compositing, summit-dominant uplift weighting, and a shared resolved hill-object window assembled from stable meso-region-owned hills instead of per-column hill re-interpretation
+  - `ravine`, `coastal_cliff_band`, `dune_field`, and `crater` now also use feature-owned resolved windows in the chunk pass, but they still borrow existing Wave 1A guide channels provisionally until dedicated atlas-side channels are published
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 
@@ -156,24 +166,34 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
 
 ### 10. Region / Material Policy
 
-- status: `definitions exist, not wired into generation`
-- owner: `src/world/surface/material.rs`, `src/world/surface/cover.rs`
+- status: `implemented as initial chunk surface-plan resolve`
+- owner: `src/world/surface/material.rs`, `src/world/surface/cover.rs`, `src/world/surface/resolve.rs`
+- note:
+  - launch-oriented material policies now carry actual block palette keys instead of hint-only ids
+  - `resolve_chunk_surface_plan(...)` now maps sampled region ownership plus hydrology and local slope hints into one column plan with quantized terrain/water tops and top/filler/core block keys
+  - hydrology may override local sediment expression, but it does not replace region ownership
 
 ### 11. Seasonal Biome State
 
-- status: `definitions exist, not wired into generation`
+- status: `implemented as initial optional runtime layer`
 - owner: `src/world/surface/seasonal.rs`
+- note:
+  - the generation-side surface resolver can now attach a seasonal biome state when an explicit runtime context is provided
+  - the baseline `generate_chunk(...)` path still keeps that state optional until world-owned calendar/runtime climate is threaded into generation
 
 ### 12. Voxelization
 
-- status: `scaffold only`
+- status: `implemented as initial block fill`
 - owner: `v2/voxelize.rs`
+- note:
+  - `build_chunk_voxelization_plan(...)` now converts the resolved chunk surface plan into a per-column block-write plan
+  - `voxelize_chunk(...)` writes top, filler, core, and standing-water blocks into `ChunkData`
+  - the public `generate_chunk(...)` path now uses that initial end-to-end V2 flow instead of staying a TODO stub
 
 ## What Was Intentionally Broken
 
 The following public calls now compile but no longer function at runtime:
 
-- `generate_chunk(...)`
 - `probe_chunk(...)`
 - `probe_column(...)`
 - `sample_chunk_surface_lod(...)`
@@ -188,11 +208,13 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 4. document launch fallback behavior for extended and deferred archetypes
 5. tune and extend the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles at larger scales too
 6. expand and tune archetype coverage in `v2/prototype.rs` and `v2/realization_field.rs` as more launch and extended landform cases come online
-7. migrate the remaining Wave 1 meso features from legacy delta operators to feature-owned surface resolvers once the authoritative matrix is published
+7. publish dedicated atlas-side guide channels for runtime-backed features that currently borrow the Wave 1A channel set, especially `ravine`, `coastal_cliff_band`, `dune_field`, and `crater`
 8. tune and extend smoothing/local refinement in `v2/smoothing.rs`
 9. tune and extend the initial connected hydrology and hydrology-driven terrain carve in `v2/hydrology.rs`
-10. implement final material + block voxelization in `v2/voxelize.rs`
-11. replace the compile-only generation stubs with real V2 behavior
+10. tune and extend the initial surface-plan palette mapping and hydrology material overrides beyond the locked launch set
+11. thread authoritative world-owned season/runtime climate context into chunk surface resolve
+12. tune and extend the initial voxel block fill in `v2/voxelize.rs`, including better quantization and deeper per-policy layering
+13. replace the remaining compile-only probe stubs with real V2 diagnostics
 
 ## Short Summary
 
@@ -207,6 +229,6 @@ We now have:
 
 We no longer have:
 
-- a functioning fallback terrain generator
+- a hidden V1 fallback path
 
-That tradeoff is deliberate so the codebase stops drifting around V1 assumptions and forces the next work directly through the V2 pipeline.
+That tradeoff is deliberate so the codebase stops drifting around V1 assumptions and keeps the remaining work focused on tuning and extending the V2 path that now reaches real block output.
