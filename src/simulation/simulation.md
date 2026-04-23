@@ -63,6 +63,7 @@
   - advance calendar/date/season progression
   - adjust active atlas-cell temperature and humidity drift
   - derive deterministic local weather outcomes such as rain or snow
+  - expose read-only local climate interpretation helpers so ECS/HUD can turn the same simulation signals into readable Celsius / humidity status
   - derive seasonal progression such as bloom, leaf-color change, snow accumulation, thaw, or bare-branch conversion
   - emit nearby `WorldEdit`s or far-away deferred seasonal patches through world-owned contracts
 
@@ -132,4 +133,5 @@ NOT:
 
 - the first concrete implementation only wires the `time` subsystem
 - `SimulationResult` can now carry a world-owned `CalendarAdvance` contract plus generic `WorldEdit` / event / follow-up fields
+- the same `time` module now also exports read-only local climate interpretation helpers so ECS HUD can display biome-consistent Celsius / humidity values without inventing a separate app-only climate scale
 - ecology, power, fluid, fire, and farming remain planned subsystem boundaries but are not implemented yet

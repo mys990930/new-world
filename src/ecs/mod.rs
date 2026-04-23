@@ -1,6 +1,7 @@
 mod camera;
 mod chunk;
 mod command;
+mod environment;
 mod fixed;
 mod inventory;
 mod input;
@@ -24,6 +25,8 @@ pub use chunk::{
 };
 #[allow(unused_imports)]
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
+#[allow(unused_imports)]
+pub use environment::{LocalEnvironmentSnapshot, LocalEnvironmentStatus};
 #[allow(unused_imports)]
 pub use fixed::{
     ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,

@@ -8,7 +8,9 @@ use super::{
     AppMinimapViewport,
     MINIMAP_BLOCK_SPAN,
 };
-use crate::ecs::{InventoryItem, PlayerInventory, QUICKSLOT_COUNT, Transform};
+use crate::ecs::{
+    InventoryItem, LocalEnvironmentSnapshot, PlayerInventory, QUICKSLOT_COUNT, Transform,
+};
 use crate::renderer::RenderUiSprite;
 use crate::world::{
     color_topdown_cell, darken_topdown_color, topdown_edge_strength_for_cell, BlockRegistry,
@@ -41,6 +43,7 @@ pub(super) fn build_ingame_ui_sprites(
     viewport: [f32; 2],
     inventory: Option<PlayerInventory>,
     player_transform: Option<Transform>,
+    environment: Option<LocalEnvironmentSnapshot>,
     block_registry: &BlockRegistry,
     minimap_viewport: Option<&AppMinimapViewport>,
 ) -> Vec<RenderUiSprite> {
@@ -50,6 +53,7 @@ pub(super) fn build_ingame_ui_sprites(
             &mut sprites,
             viewport,
             player_transform,
+            environment,
             minimap_viewport,
             block_registry,
         );
@@ -154,6 +158,7 @@ fn push_minimap_overlay(
     sprites: &mut Vec<RenderUiSprite>,
     viewport: [f32; 2],
     player_transform: Option<Transform>,
+    environment: Option<LocalEnvironmentSnapshot>,
     minimap_viewport: Option<&AppMinimapViewport>,
     block_registry: &BlockRegistry,
 ) {
@@ -161,7 +166,7 @@ fn push_minimap_overlay(
         x: viewport[0] - 264.0,
         y: 22.0,
         w: 232.0,
-        h: 236.0,
+        h: 336.0,
     };
     let inset = panel.inset(18.0);
     let map_rect = UiRectPx {
@@ -201,6 +206,16 @@ fn push_minimap_overlay(
         },
         [0.42, 0.40, 0.32, 0.98],
         [0.08, 0.10, 0.12, 0.96],
+    );
+    push_minimap_status_panel(
+        sprites,
+        UiRectPx {
+            x: inset.x,
+            y: map_rect.y + map_rect.h + 18.0,
+            w: inset.w,
+            h: (panel.y + panel.h) - (map_rect.y + map_rect.h + 18.0) - 18.0,
+        },
+        environment,
     );
 
     let Some(player_transform) = player_transform else {
@@ -256,6 +271,98 @@ fn push_minimap_overlay(
         },
         [0.98, 0.90, 0.30, 1.0],
     );
+}
+
+fn push_minimap_status_panel(
+    sprites: &mut Vec<RenderUiSprite>,
+    rect: UiRectPx,
+    environment: Option<LocalEnvironmentSnapshot>,
+) {
+    push_small_panel(
+        sprites,
+        rect,
+        [0.40, 0.38, 0.30, 0.98],
+        [0.08, 0.10, 0.12, 0.96],
+    );
+    push_text(
+        sprites,
+        rect.x + 10.0,
+        rect.y + 8.0,
+        1.0,
+        "STATUS",
+        [0.95, 0.88, 0.70, 1.0],
+    );
+
+    let lines = minimap_status_lines(environment);
+    let mut y = rect.y + 24.0;
+    for (index, line) in lines.iter().enumerate() {
+        push_text(
+            sprites,
+            rect.x + 10.0,
+            y,
+            1.0,
+            &truncate_text_to_width(line, rect.w - 20.0, 1.0),
+            if index < 2 {
+                [0.92, 0.96, 1.0, 1.0]
+            } else {
+                [0.74, 0.80, 0.88, 1.0]
+            },
+        );
+        y += 12.0;
+    }
+}
+
+fn minimap_status_lines(environment: Option<LocalEnvironmentSnapshot>) -> Vec<String> {
+    let Some(environment) = environment else {
+        return vec![
+            "BIOME UNAVAILABLE".to_string(),
+            "FORM UNAVAILABLE".to_string(),
+            "SEASON --".to_string(),
+            "DAY -- --:--".to_string(),
+            "WX --".to_string(),
+            "TEMP --".to_string(),
+            "HUM --".to_string(),
+        ];
+    };
+
+    let day = environment.calendar.day.saturating_add(1);
+    let day_text = if day < 1000 {
+        format!("{day:03}")
+    } else {
+        day.to_string()
+    };
+    let humidity_percent = environment.display.humidity_percent.round().clamp(0.0, 100.0) as i32;
+    let temperature_celsius = environment.display.temperature_celsius.round() as i32;
+
+    vec![
+        format!("BIOME {}", ui_label(environment.region.biome_family)),
+        format!("FORM {}", ui_label(environment.region.terrain_form_family)),
+        format!("SEASON {}", ui_label(environment.calendar.season_phase)),
+        format!(
+            "DAY {} {:02}:{:02}",
+            day_text, environment.calendar.hour, environment.calendar.minute
+        ),
+        format!("WX {}", ui_label(environment.weather.kind)),
+        format!("TEMP {}C", temperature_celsius),
+        format!("HUM {} PCT", humidity_percent),
+    ]
+}
+
+fn ui_label(value: impl std::fmt::Debug) -> String {
+    let raw = format!("{value:?}");
+    let mut label = String::with_capacity(raw.len() + 4);
+    let mut previous_was_lowercase = false;
+
+    for character in raw.chars() {
+        let uppercase = character.to_ascii_uppercase();
+        if previous_was_lowercase && uppercase.is_ascii_uppercase() {
+            label.push(' ');
+        }
+        label.push(uppercase);
+        previous_was_lowercase = character.is_ascii_lowercase();
+    }
+
+    label
 }
 
 fn push_minimap_cell_edges(

@@ -29,8 +29,10 @@
 - `MoveWorldIntent`
 - current camera follow state
 - `SelectionState`
+- `LocalEnvironmentStatus`
 - local player inventory / manipulation state
 - local player body/transform snapshot for app bridge
+- local player environment snapshot for app HUD bridge
 
 ## Process
 
@@ -40,6 +42,7 @@
 4. let app drive the phase boundaries
 5. let app call world-aware helpers for:
    - local player collision / gravity motion
+   - player-local environment snapshot refresh
    - selection raycast updates
 
 ## Current Implementation Notes
@@ -58,7 +61,8 @@
  - `SimClock`
  - `ActiveSimRegion`
  - `SimulationControlState`
- - `PendingSimulationResults`
+- `PendingSimulationResults`
+- `LocalEnvironmentStatus`
 - current frame schedule:
   - pre: clear command buffer, clear frame camera impulses
   - update: input interpretation -> inventory command application -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
@@ -67,6 +71,7 @@
   - fixed: advance `SimClock` -> refresh `ActiveSimRegion` from the local player transform
 - current world-aware helpers are intentionally outside pure ECS systems because `WorldCore` stays app-owned:
   - `simulate_local_player_motion(&WorldCore)`
+  - `update_local_environment_from_world(&WorldCore)`
   - `update_selection_from_world(&WorldCore, viewport_width, viewport_height)`
   - `place_local_player_on_surface(&WorldCore, anchor_xz)`
 
@@ -97,6 +102,8 @@ EcsRuntime::local_player_physics_state() -> Option<PlayerPhysicsState>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
+EcsRuntime::update_local_environment_from_world(world: &WorldCore)
+EcsRuntime::local_environment_status() -> Option<LocalEnvironmentSnapshot>
 EcsRuntime::update_selection_from_world(
     world: &WorldCore,
     viewport_width: u32,
@@ -128,7 +135,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - runtime owns phase order and schedule ownership
 - gameplay interpretation remains in leaf ECS systems/helpers
 - frame phase and fixed phase remain separate
-- world-aware motion and selection helpers only run after app has applied the latest world/job results
+- world-aware motion, local-environment refresh, and selection helpers only run after app has applied the latest world/job results
 
 ## Non-Responsibilities
 

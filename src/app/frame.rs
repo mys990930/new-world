@@ -32,6 +32,7 @@ impl GameApp {
         self.collect_job_results();
 
         let window = self.platform.window_state();
+        self.ecs.update_local_environment_from_world(&self.world);
         self.ecs
             .update_selection_from_world(&self.world, window.width, window.height);
         self.log_clicked_block();

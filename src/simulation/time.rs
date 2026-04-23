@@ -55,6 +55,18 @@ pub struct TimeSimInput {
     pub cells: Vec<TimeSimCellInput>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalClimateState {
+    pub temperature_signal: f32,
+    pub humidity_factor: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalClimateDisplay {
+    pub temperature_celsius: f32,
+    pub humidity_percent: f32,
+}
+
 pub struct TimeSim {
     config: TimeSimConfig,
 }
@@ -200,14 +212,9 @@ fn derive_local_weather(
     region: RegionClassSample,
     climate_state: AtlasClimateRuntimeState,
 ) -> LocalWeatherState {
-    let base_temperature = base_temperature_for_band(region.temperature_band);
-    let base_humidity = base_humidity_for_band(region.moisture_band);
-    let regime_humidity = humidity_bias_for_regime(region.climate_regime);
-    let regime_temperature = temperature_bias_for_regime(region.climate_regime);
-    let effective_temperature =
-        base_temperature + regime_temperature + climate_state.temperature_offset;
-    let effective_humidity = (base_humidity + regime_humidity + climate_state.humidity_offset)
-        .clamp(0.0, 1.0);
+    let local_climate = evaluate_local_climate(region, climate_state);
+    let effective_temperature = local_climate.temperature_signal;
+    let effective_humidity = local_climate.humidity_factor;
 
     let weather_window = calendar.absolute_minutes();
     let cloud_seed = hash01(world_seed, coord, weather_window, 0x0C10_D001);
@@ -244,6 +251,50 @@ fn derive_local_weather(
         window_end_tick: tick_index.saturating_add(ticks_per_game_minute),
         source_atlas: coord,
         climate_regime: region.climate_regime,
+    }
+}
+
+pub fn evaluate_local_climate(
+    region: RegionClassSample,
+    climate_state: AtlasClimateRuntimeState,
+) -> LocalClimateState {
+    let base_temperature = base_temperature_for_band(region.temperature_band);
+    let base_humidity = base_humidity_for_band(region.moisture_band);
+    let regime_humidity = humidity_bias_for_regime(region.climate_regime);
+    let regime_temperature = temperature_bias_for_regime(region.climate_regime);
+
+    LocalClimateState {
+        temperature_signal: base_temperature + regime_temperature + climate_state.temperature_offset,
+        humidity_factor: (base_humidity + regime_humidity + climate_state.humidity_offset)
+            .clamp(0.0, 1.0),
+    }
+}
+
+pub fn display_local_climate(
+    climate: LocalClimateState,
+    weather: LocalWeatherState,
+) -> LocalClimateDisplay {
+    let mut temperature_celsius = (climate.temperature_signal * 21.0) + 13.5;
+    temperature_celsius = match weather.kind {
+        LocalWeatherKind::Snow => temperature_celsius.min(1.0),
+        LocalWeatherKind::Rain if temperature_celsius < 1.0 => 1.0,
+        _ => temperature_celsius,
+    }
+    .clamp(-28.0, 42.0);
+
+    let mut humidity_percent = climate.humidity_factor * 100.0;
+    humidity_percent = match weather.kind {
+        LocalWeatherKind::Clear => humidity_percent,
+        LocalWeatherKind::Overcast => humidity_percent.max(60.0),
+        LocalWeatherKind::Rain => humidity_percent.max(82.0),
+        LocalWeatherKind::Snow => humidity_percent.max(72.0),
+        LocalWeatherKind::Storm => humidity_percent.max(90.0),
+    }
+    .clamp(0.0, 100.0);
+
+    LocalClimateDisplay {
+        temperature_celsius,
+        humidity_percent,
     }
 }
 
@@ -502,5 +553,70 @@ mod tests {
         let left = sim.step(input.clone());
         let right = sim.step(input);
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn display_local_climate_maps_temperate_conditions_into_mild_units() {
+        let climate = evaluate_local_climate(
+            sample_region(),
+            AtlasClimateRuntimeState {
+                temperature_offset: 0.0,
+                humidity_offset: 0.0,
+                last_updated_tick: 0,
+            },
+        );
+        let display = display_local_climate(
+            climate,
+            LocalWeatherState::clear(
+                AtlasCoord::new(0, 0),
+                ClimateRegime::TemperateSeasonal,
+                0,
+                20,
+            ),
+        );
+
+        assert!((13.0..=15.0).contains(&display.temperature_celsius));
+        assert!((64.0..=68.0).contains(&display.humidity_percent));
+    }
+
+    #[test]
+    fn snowy_weather_caps_display_temperature_near_freezing() {
+        let display = display_local_climate(
+            LocalClimateState {
+                temperature_signal: 0.48,
+                humidity_factor: 0.88,
+            },
+            LocalWeatherState {
+                kind: LocalWeatherKind::Snow,
+                intensity: 0.6,
+                window_start_tick: 0,
+                window_end_tick: 20,
+                source_atlas: AtlasCoord::new(0, 0),
+                climate_regime: ClimateRegime::ColdAlpine,
+            },
+        );
+
+        assert!(display.temperature_celsius <= 1.0);
+        assert!(display.humidity_percent >= 72.0);
+    }
+
+    #[test]
+    fn storm_display_applies_a_high_humidity_floor() {
+        let display = display_local_climate(
+            LocalClimateState {
+                temperature_signal: 0.12,
+                humidity_factor: 0.42,
+            },
+            LocalWeatherState {
+                kind: LocalWeatherKind::Storm,
+                intensity: 0.9,
+                window_start_tick: 0,
+                window_end_tick: 20,
+                source_atlas: AtlasCoord::new(1, -1),
+                climate_regime: ClimateRegime::TemperateSeasonal,
+            },
+        );
+
+        assert_eq!(display.humidity_percent, 90.0);
     }
 }

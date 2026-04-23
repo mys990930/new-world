@@ -8,6 +8,7 @@ use super::chunk::ChunkStates;
 use super::command::{
     clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
 };
+use super::environment::{LocalEnvironmentSnapshot, LocalEnvironmentStatus};
 use super::fixed::{
     ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,
     advance_sim_clock_system, update_active_sim_region_system,
@@ -46,6 +47,7 @@ impl EcsRuntime {
         world.insert_resource(ToolCatalog::default());
         world.insert_resource(ChunkStates::default());
         world.insert_resource(SelectionState::default());
+        world.insert_resource(LocalEnvironmentStatus::default());
         world.insert_resource(SimClock::default());
         world.insert_resource(ActiveSimRegion::default());
         world.insert_resource(SimulationControlState::default());
@@ -217,5 +219,16 @@ impl EcsRuntime {
 
     pub fn selection_state(&self) -> SelectionState {
         self.world.resource::<SelectionState>().clone()
+    }
+
+    pub fn update_local_environment_from_world(&mut self, world: &WorldCore) {
+        let player_translation = self.local_player_transform().map(|transform| transform.translation);
+        self.world
+            .resource_mut::<LocalEnvironmentStatus>()
+            .refresh_from_world(player_translation, world);
+    }
+
+    pub fn local_environment_status(&self) -> Option<LocalEnvironmentSnapshot> {
+        self.world.resource::<LocalEnvironmentStatus>().current()
     }
 }

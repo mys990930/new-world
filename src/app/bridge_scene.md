@@ -15,7 +15,7 @@
 ## Inputs
 
 - `GameApp` runtime state
-- ECS camera / player / selection snapshots
+- ECS camera / player / selection / local-environment snapshots
 - `WorldCore`
 - current app mode and minimap cache viewport
 - `world::CpuMesh`
@@ -30,6 +30,7 @@
 - camera policy still stays ECS-owned; this layer only exports the current render-facing pose
 - world mesh semantics stay world-owned until they are copied into renderer DTOs
 - selection preview rules stay ECS-owned even though preview cubes are emitted here
+- HUD/environment text remains ECS-derived data even though the actual sprite layout stays app-owned
 
 ## Invariants
 

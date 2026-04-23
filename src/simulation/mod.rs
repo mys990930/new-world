@@ -6,7 +6,10 @@ use crate::world::{
     AtlasArea, AtlasCoord, CalendarAdvance, ChunkCoord, LocalWeatherKind, WorldEdit,
 };
 
-pub use time::{TimeSim, TimeSimBundleInput, TimeSimCellInput, TimeSimConfig, TimeSimInput};
+pub use time::{
+    LocalClimateDisplay, LocalClimateState, TimeSim, TimeSimBundleInput, TimeSimCellInput,
+    TimeSimConfig, TimeSimInput, display_local_climate, evaluate_local_climate,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FixedStepConfig {
@@ -163,4 +166,3 @@ impl SimulationCore {
         results
     }
 }
-

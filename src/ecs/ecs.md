@@ -17,6 +17,7 @@
 - selection state management
 - active simulation region calculation for time/season/weather progression
 - gameplay consumption of world calendar, local weather, and seasonal state
+- player-local environment snapshot derivation for HUD / ambience bridges
 - chunk meta-state management
 - jobs result interpretation
 - schedule ordering
@@ -44,6 +45,7 @@
 - `ChunkStates`
 - `ChunkLifecyclePlan`
 - `SelectionState`
+- `LocalEnvironmentStatus`
 - `SimClock`
 - `ActiveSimRegion`
 - `SimulationControlState`
@@ -105,6 +107,7 @@
   - ECS does not own the authoritative world calendar or season state
   - ECS fixed-phase logic selects the active simulation region around the player
   - ECS can request or consume local weather / seasonal state for gameplay, HUD, audio, and renderer bridge output
+  - ECS also keeps one player-centered `LocalEnvironmentStatus` snapshot so app HUD code does not need to resample world state directly
   - nearby changes may appear as immediate gameplay/environment feedback, while far-away seasonal changes may remain deferred until their chunks become interesting
 - moving entity render-facing state
   - gameplay-facing movement / yaw may stay continuous in ECS
@@ -150,6 +153,8 @@ EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
+EcsRuntime::update_local_environment_from_world(world: &WorldCore)
+EcsRuntime::local_environment_status() -> Option<LocalEnvironmentSnapshot>
 EcsRuntime::update_selection_from_world(
     world: &WorldCore,
     viewport_width: u32,
@@ -180,6 +185,7 @@ EcsRuntime::plan_chunk_lifecycle(
 7. the local player inventory stays player-owned ECS state rather than app-owned HUD state
 8. inventory-open UI blocking affects gameplay interpretation inside ECS rather than changing renderer ownership
 9. ECS may decide which regions need eager environmental simulation, but world remains the source of truth for calendar and seasonal state
+10. app HUD code may read ECS-local environment snapshots, but those snapshots are derived views over world/simulation truth rather than a new owning layer
 
 ### Submodules
 - mod.rs: public facade, re-export
@@ -190,6 +196,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
 - camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
 - selection.rs: world-raycast-based hover target state, tool preview, and build preview rules
+- environment.rs: player-local climate / weather / biome snapshot for HUD-facing bridges
 - chunk.rs: chunk interest / acquisition / render-ready meta state
 - jobs.rs: jobs result interpretation and deterministic follow-up requests
 - fixed.rs: fixed-tick simulation bridge resources and region selection
@@ -205,3 +212,4 @@ EcsRuntime::plan_chunk_lifecycle(
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
 - the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
 - time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries
+- the current frame slice now also refreshes one player-local environment snapshot after world-aware motion and job result application so minimap HUD status can read biome/terrain, date/time, weather, temperature, and humidity without giving `app` new world-query ownership

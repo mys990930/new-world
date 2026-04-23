@@ -34,6 +34,7 @@ impl GameApp {
                 let inventory = self.ecs.local_player_inventory();
                 let player_transform = self.ecs.local_player_transform();
                 let player_body = self.ecs.local_player_body();
+                let local_environment = self.ecs.local_environment_status();
                 let mut cube_instances = player_transform
                     .zip(player_body)
                     .map(|(transform, body)| {
@@ -83,6 +84,7 @@ impl GameApp {
                         viewport,
                         inventory,
                         player_transform,
+                        local_environment,
                         self.world.block_registry(),
                         minimap_viewport.as_ref(),
                     ),

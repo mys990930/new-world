@@ -10,6 +10,7 @@
 - handle minute / hour / day rollover deterministically
 - update runtime atlas-cell temperature and humidity drift for active regions
 - derive deterministic or seeded-probabilistic local weather outcomes from calendar plus climate state
+- expose read-only helpers that interpret the same local climate signals into HUD-friendly Celsius and relative-humidity displays
 - derive seasonal/ecology progression such as bloom progress, leaf-color shift, snow accumulation, thaw, or bare-branch transition
 - decide whether effects become immediate nearby `WorldEdit`s or deferred seasonal patches for distant regions
 
@@ -42,6 +43,8 @@
 - `TimeSimBundleInput`
 - `TimeSimCellInput`
 - `TimeSimInput`
+- `LocalClimateState`
+- `LocalClimateDisplay`
 
 ## Processing Scale
 
@@ -76,3 +79,14 @@
 - the current minute boundary updates per-atlas-cell climate drift and local weather windows
 - the current season-change path emits deferred `SetSeasonalState(...)` patches rather than direct block edits
 - the current implementation is deterministic and tested, but it intentionally keeps nearby `WorldEdit` emission for later slices
+- HUD-facing temperature / humidity now deliberately reuse the same local climate signal that weather derivation reads:
+  - the underlying simulation signal is still normalized and solver-oriented
+  - ECS converts that signal into a readable Celsius / percent view through read-only helpers in this module
+  - that display mapping is intentionally calibrated for human readability rather than treated as a literal raw-atlas scalar dump
+- rough climate interpretation targets are:
+  - `Polar`: persistent sub-freezing climate, comparable to high-latitude tundra or polar barrens
+  - `Cold`: around freezing to cool single digits for much of the year, closer to subarctic / boreal margins
+  - `Temperate`: mild double-digit Celsius climate, similar to many mid-latitude plains and forests
+  - `Warm`: low-to-mid 20s Celsius, similar to subtropical or Mediterranean warm seasons
+  - `Hot`: high 20s to upper 30s Celsius, comparable to equatorial lowlands or desert heat
+- display humidity is likewise derived from the local climate signal, then clamped upward during overcast/rain/snow/storm presentation so HUD readouts stay believable next to the active weather state
