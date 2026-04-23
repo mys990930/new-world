@@ -53,7 +53,7 @@ const SOURCE_ENVELOPE_FILL_SALT: u64 = 0xD811_B6D2_2200_0019;
 const SOURCE_ENVELOPE_RADIUS_SALT: u64 = 0xD811_B6D2_2200_001A;
 const SOURCE_ENVELOPE_SHOULDER_SALT: u64 = 0xD811_B6D2_2200_001B;
 const SOURCE_SUMMIT_CAP_SALT: u64 = 0xD811_B6D2_2200_001C;
-const MAX_RESOLVED_CLUSTER_SOURCES: usize = 4;
+const MAX_RESOLVED_CLUSTER_SOURCES: usize = 3;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct HillClusterApplySample {
@@ -323,11 +323,11 @@ fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -
         .clamp(0.18, 1.52);
     let keepout_radius_blocks = meso_span_blocks
         * lerp_f32(
-            0.72,
-            1.18,
+            0.60,
+            0.94,
             lobe_hash01(coord, cell, SOURCE_KEEPOUT_RADIUS_SALT),
         )
-        * (0.84 + cell.hilliness * 0.34 + (cell.hill_height / 20.0).clamp(0.0, 0.24));
+        * (0.80 + cell.hilliness * 0.26 + (cell.hill_height / 20.0).clamp(0.0, 0.18));
 
     Some(GuideSource {
         coord,
@@ -521,8 +521,8 @@ fn prune_cluster_sources(mut candidates: Vec<GuideSource>) -> Vec<GuideSource> {
             );
             let minimum = candidate
                 .keepout_radius_blocks
-                .min(existing.keepout_radius_blocks)
-                * 0.92;
+                .max(existing.keepout_radius_blocks)
+                * 1.22;
             if separation < minimum {
                 overlaps = true;
                 break;

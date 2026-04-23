@@ -15,10 +15,10 @@ use super::{
 };
 use super::super::super::lerp_f32;
 
-const CLUSTER_ASSIGN_RADIUS_MULTIPLIER: f32 = 2.35;
-const CLUSTER_BLOB_BOUND_PAD_BLOCKS: f32 = 18.0;
-const CLUSTER_SHOULDER_BOUND_PAD_BLOCKS: f32 = 12.0;
-const REGION_RESOLVE_PADDING_REGIONS: i32 = 2;
+const CLUSTER_ASSIGN_RADIUS_MULTIPLIER: f32 = 2.00;
+const CLUSTER_BLOB_BOUND_PAD_BLOCKS: f32 = 10.0;
+const CLUSTER_SHOULDER_BOUND_PAD_BLOCKS: f32 = 8.0;
+const REGION_RESOLVE_PADDING_REGIONS: i32 = 1;
 const WINDOW_OWNER_PADDING_REGIONS: i32 = 1;
 
 #[derive(Debug, Clone)]
@@ -426,23 +426,23 @@ fn resolve_cluster(builder: ClusterBuilder) -> Option<ResolvedHillCluster> {
             (0.92 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 20.0).clamp(0.0, 0.20))
                 .clamp(0.92, 1.26);
         let base_major = lerp_f32(
-            52.0,
-            86.0,
+            38.0,
+            62.0,
             lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
         ) * major_scale;
         let base_minor = lerp_f32(
-            38.0,
-            62.0,
+            28.0,
+            46.0,
             lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
         ) * minor_scale;
         let chain_spacing = lerp_f32(
-            24.0,
-            38.0,
+            18.0,
+            28.0,
             lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT),
         ) * (1.02 + source.cell.hilliness * 0.18);
-        let lobe_count = if lobe_hash01(source.coord, source.cell, SOURCE_COUNT_SALT) >= 0.70
-            || source.cell.hilliness >= 0.86
-            || source.cell.hill_height >= 12.4
+        let lobe_count = if lobe_hash01(source.coord, source.cell, SOURCE_COUNT_SALT) >= 0.84
+            && source.cell.hilliness >= 0.92
+            && source.cell.hill_height >= 13.0
         {
             3
         } else {
@@ -566,8 +566,8 @@ fn resolve_shoulder(
     base_minor: f32,
     chain_span: f32,
 ) -> ResolvedHillShoulder {
-    let radius_x_blocks = base_major + chain_span * 1.16 + 12.0;
-    let radius_z_blocks = base_minor * 2.18 + 16.0;
+    let radius_x_blocks = base_major * 0.82 + chain_span * 0.68 + 8.0;
+    let radius_z_blocks = base_minor * 1.34 + 10.0;
     let (half_extent_x, half_extent_z) =
         rotated_ellipse_half_extents(heading_x, heading_z, radius_x_blocks, radius_z_blocks);
 
@@ -578,7 +578,7 @@ fn resolve_shoulder(
         heading_z,
         radius_x_blocks,
         radius_z_blocks,
-        strength_scale: (0.20 + source.cell.hilliness * 0.32).clamp(0.0, 0.90),
+        strength_scale: (0.14 + source.cell.hilliness * 0.22).clamp(0.0, 0.72),
         half_extent_x: half_extent_x + CLUSTER_SHOULDER_BOUND_PAD_BLOCKS,
         half_extent_z: half_extent_z + CLUSTER_SHOULDER_BOUND_PAD_BLOCKS,
     }
@@ -605,11 +605,11 @@ fn resolve_cluster_envelope(
 
     let radius_scale = lerp_f32(
         1.00,
-        1.24,
+        1.16,
         lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_RADIUS_SALT),
     );
-    let radius_x_blocks = along_extent.max(38.0) * radius_scale + 18.0;
-    let radius_z_blocks = across_extent.max(32.0) * (radius_scale * 1.12) + 16.0;
+    let radius_x_blocks = along_extent.max(24.0) * radius_scale + 10.0;
+    let radius_z_blocks = across_extent.max(20.0) * (radius_scale * 1.04) + 8.0;
     let (half_extent_x, half_extent_z) = rotated_ellipse_half_extents(
         cluster_heading.0,
         cluster_heading.1,
@@ -626,13 +626,13 @@ fn resolve_cluster_envelope(
         radius_x_blocks,
         radius_z_blocks,
         fill_scale: lerp_f32(
-            0.22,
-            0.42,
+            0.14,
+            0.28,
             lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_FILL_SALT),
         ),
         shoulder_scale: lerp_f32(
-            0.42,
-            0.74,
+            0.26,
+            0.46,
             lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_SHOULDER_SALT),
         ),
         half_extent_x,
@@ -659,8 +659,8 @@ fn weighted_centroid(sources: &[GuideSource]) -> (f32, f32) {
 }
 
 fn blob_half_extents(lobe: MacroLobeDescriptor) -> (f32, f32) {
-    let radius_x = lobe.radius_x_blocks * 1.46 + CLUSTER_BLOB_BOUND_PAD_BLOCKS;
-    let radius_z = lobe.radius_z_blocks * 1.58 + CLUSTER_BLOB_BOUND_PAD_BLOCKS;
+    let radius_x = lobe.radius_x_blocks * 1.26 + CLUSTER_BLOB_BOUND_PAD_BLOCKS;
+    let radius_z = lobe.radius_z_blocks * 1.32 + CLUSTER_BLOB_BOUND_PAD_BLOCKS;
     rotated_ellipse_half_extents(lobe.heading_x, lobe.heading_z, radius_x, radius_z)
 }
 
