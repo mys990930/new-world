@@ -80,7 +80,10 @@ fn frame_deadline(&self) -> Option<Instant>
 - runner.rs: winit `ApplicationHandler`, frame cadence, redraw, shutdown handling
 - frame.rs: frame update pipeline orchestration
 - fixed.rs: future fixed timestep orchestration
-- bridge.rs: cross-module DTO translation
+- bridge.rs: shared bridge DTO surface
+- bridge_input.rs: platform snapshot to ECS input translation
+- bridge_scene.rs: scene-frame and mesh-upload render translation
+- bridge_ui.rs: HUD/menu/minimap sprite translation
 - minimap.rs: app-owned minimap cache, chunk-column rebuild scheduling state, viewport composition
 - ui.rs: app-mode and lightweight overlay state
 - shutdown.rs: future teardown / flush

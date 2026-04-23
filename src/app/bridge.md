@@ -34,6 +34,13 @@
 - `AppRenderFrameData`
 - `RenderUploadRequest`
 
+## Submodules
+
+- `bridge.rs`: shared bridge DTO definitions such as `AppRenderFrameData`
+- `bridge_input.rs`: `platform -> ecs` snapshot conversion
+- `bridge_scene.rs`: scene-frame and mesh-upload DTO conversion
+- `bridge_ui.rs`: minimap, HUD, inventory, and world-select UI sprite conversion
+
 ## Boundary Rules
 
 - `bridge` stays mostly stateless
@@ -71,3 +78,4 @@
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
 - in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes
 - the minimap overlay now uses the same pixel-sprite path, but bridge only reads app-owned cached viewport data; minimap chunk-column derivation happens earlier through jobs and cache composition
+- bridge is now physically split so raw input mapping, scene DTO export, and UI sprite export can evolve independently without re-growing one monolithic file
