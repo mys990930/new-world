@@ -23,6 +23,7 @@
 ## Outputs
 
 - a top-down PNG under `target/meso-preview/` by default
+  - the image includes chunk grid lines plus a top/left coordinate frame with chunk `x/z` labels and center-chunk highlight
 - stdout diagnostics for:
   - center chunk region identity
   - original vs filtered meso guide sample
@@ -36,7 +37,7 @@
 3. If a single feature was requested, zero the non-target guide channels on that cloned guide map.
 4. Replace the normal base prototype with a flat plain prototype using the requested `base_height` and `relief_budget`.
 5. Run the existing `build_chunk_meso_applied_prototype(...)` path.
-6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, and chunk grid lines.
+6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, chunk grid lines, and explicit chunk-coordinate reference labels.
 
 ## Why Flat-Base Preview Exists
 

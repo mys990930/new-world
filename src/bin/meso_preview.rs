@@ -20,6 +20,14 @@ const DEFAULT_BLOCKS_PER_PIXEL: u32 = 1;
 const DEFAULT_BASE_HEIGHT: f32 = 48.0;
 const DEFAULT_RELIEF_BUDGET: f32 = 24.0;
 const DEFAULT_CONTOUR_STEP: f32 = 1.0;
+const PREVIEW_MARGIN_LEFT: u32 = 52;
+const PREVIEW_MARGIN_TOP: u32 = 28;
+const PREVIEW_MARGIN_RIGHT: u32 = 8;
+const PREVIEW_MARGIN_BOTTOM: u32 = 8;
+const LABEL_FONT_SCALE: u32 = 2;
+const LABEL_CHAR_WIDTH: u32 = 3;
+const LABEL_CHAR_HEIGHT: u32 = 5;
+const LABEL_CHAR_SPACING: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PreviewWindow {
@@ -100,6 +108,27 @@ impl PreviewWindow {
 
     fn max_chunk_z(self) -> i32 {
         self.center_z + self.radius
+    }
+
+    fn canvas_layout(self) -> Result<PreviewCanvasLayout, Box<dyn Error>> {
+        let (map_width, map_height) = self.image_dimensions()?;
+        let width = PREVIEW_MARGIN_LEFT
+            .checked_add(map_width)
+            .and_then(|value| value.checked_add(PREVIEW_MARGIN_RIGHT))
+            .ok_or_else(|| cli_error("preview canvas width overflowed"))?;
+        let height = PREVIEW_MARGIN_TOP
+            .checked_add(map_height)
+            .and_then(|value| value.checked_add(PREVIEW_MARGIN_BOTTOM))
+            .ok_or_else(|| cli_error("preview canvas height overflowed"))?;
+
+        Ok(PreviewCanvasLayout {
+            width,
+            height,
+            map_offset_x: PREVIEW_MARGIN_LEFT,
+            map_offset_z: PREVIEW_MARGIN_TOP,
+            map_width,
+            map_height,
+        })
     }
 }
 
@@ -207,6 +236,16 @@ struct CenterChunkDiagnostics {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PreviewSummary {
     delta: DeltaSummary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreviewCanvasLayout {
+    width: u32,
+    height: u32,
+    map_offset_x: u32,
+    map_offset_z: u32,
+    map_width: u32,
+    map_height: u32,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -526,14 +565,14 @@ fn render_preview(
     patches: &[ChunkPreviewPatch],
     summary: PreviewSummary,
 ) -> Result<RgbImage, Box<dyn Error>> {
-    let (width, height) = window.image_dimensions()?;
-    let mut image = RgbImage::new(width, height);
+    let layout = window.canvas_layout()?;
+    let mut image = RgbImage::from_pixel(layout.width, layout.height, Rgb([244, 240, 228]));
     let mut raster = vec![
         PreviewPixel {
             surface_height: config.base_height,
             delta: 0.0,
         };
-        width as usize * height as usize
+        layout.map_width as usize * layout.map_height as usize
     ];
     let pixels_per_chunk = window.pixels_per_chunk();
     let min_chunk_x = window.min_chunk_x();
@@ -549,7 +588,7 @@ fn render_preview(
         let pixel_origin_z = chunk_offset_z * pixels_per_chunk;
 
         for local_z in 0..pixels_per_chunk {
-            let row_offset = (pixel_origin_z + local_z) * width;
+            let row_offset = (pixel_origin_z + local_z) * layout.map_width;
             for local_x in 0..pixels_per_chunk {
                 let source_index = (local_z * pixels_per_chunk + local_x) as usize;
                 let target_index = (row_offset + pixel_origin_x + local_x) as usize;
@@ -566,17 +605,30 @@ fn render_preview(
         .max(1.0);
     let chunk_stride = pixels_per_chunk.max(1);
 
-    for pixel_z in 0..height {
-        for pixel_x in 0..width {
-            let index = (pixel_z * width + pixel_x) as usize;
+    for pixel_z in 0..layout.map_height {
+        for pixel_x in 0..layout.map_width {
+            let index = (pixel_z * layout.map_width + pixel_x) as usize;
             let cell = raster[index];
-            let shade = hillshade(&raster, width, height, pixel_x, pixel_z);
-            let contour = contour_strength(&raster, width, height, pixel_x, pixel_z, config.contour_step);
+            let shade = hillshade(&raster, layout.map_width, layout.map_height, pixel_x, pixel_z);
+            let contour = contour_strength(
+                &raster,
+                layout.map_width,
+                layout.map_height,
+                pixel_x,
+                pixel_z,
+                config.contour_step,
+            );
             let grid = chunk_grid_strength(pixel_x, pixel_z, chunk_stride);
             let rgb = colorize_delta(cell.delta, delta_peak, shade, contour, grid);
-            image.put_pixel(pixel_x, pixel_z, Rgb(rgb));
+            image.put_pixel(
+                layout.map_offset_x + pixel_x,
+                layout.map_offset_z + pixel_z,
+                Rgb(rgb),
+            );
         }
     }
+
+    draw_coordinate_frame(&mut image, layout, window, pixels_per_chunk);
 
     Ok(image)
 }
@@ -681,6 +733,228 @@ fn colorize_delta(
     }
 
     [color[0] as u8, color[1] as u8, color[2] as u8]
+}
+
+fn draw_coordinate_frame(
+    image: &mut RgbImage,
+    layout: PreviewCanvasLayout,
+    window: PreviewWindow,
+    pixels_per_chunk: u32,
+) {
+    let axis_color = [68, 66, 60];
+    let tick_color = [110, 106, 96];
+    let center_color = [150, 58, 52];
+    let label_color = [54, 52, 48];
+    let top_axis_y = layout.map_offset_z.saturating_sub(10);
+    let left_axis_x = layout.map_offset_x.saturating_sub(10);
+    let map_min_x = layout.map_offset_x;
+    let map_max_x = layout.map_offset_x + layout.map_width.saturating_sub(1);
+    let map_min_z = layout.map_offset_z;
+    let map_max_z = layout.map_offset_z + layout.map_height.saturating_sub(1);
+
+    draw_hline(image, map_min_x, map_max_x, top_axis_y, axis_color);
+    draw_vline(image, left_axis_x, map_min_z, map_max_z, axis_color);
+    draw_arrow_right(image, map_max_x.saturating_sub(14), top_axis_y, axis_color);
+    draw_arrow_down(image, left_axis_x, map_max_z.saturating_sub(14), axis_color);
+    draw_text(image, 6, 6, "X", label_color);
+    draw_text(image, 6, top_axis_y.saturating_add(6), "Z", label_color);
+
+    let label_every = label_every_chunks(pixels_per_chunk);
+    for chunk_x in window.min_chunk_x()..=window.max_chunk_x() {
+        let chunk_index = u32::try_from(chunk_x - window.min_chunk_x()).unwrap_or(0);
+        let chunk_start_x = layout.map_offset_x + chunk_index * pixels_per_chunk;
+        let chunk_center_x = chunk_start_x + pixels_per_chunk / 2;
+        let is_center = chunk_x == window.center_x;
+        let tick_len = if is_center { 8 } else { 5 };
+        draw_vline(
+            image,
+            chunk_start_x,
+            top_axis_y.saturating_sub(tick_len / 2),
+            top_axis_y.saturating_add(tick_len / 2),
+            if is_center { center_color } else { tick_color },
+        );
+
+        if is_center || (chunk_index % label_every == 0) {
+            let label = chunk_x.to_string();
+            let label_width = measure_text_width(&label);
+            let label_x = chunk_center_x.saturating_sub(label_width / 2);
+            draw_text(image, label_x, 4, &label, if is_center { center_color } else { label_color });
+        }
+    }
+
+    for chunk_z in window.min_chunk_z()..=window.max_chunk_z() {
+        let chunk_index = u32::try_from(chunk_z - window.min_chunk_z()).unwrap_or(0);
+        let chunk_start_z = layout.map_offset_z + chunk_index * pixels_per_chunk;
+        let chunk_center_z = chunk_start_z + pixels_per_chunk / 2;
+        let is_center = chunk_z == window.center_z;
+        let tick_len = if is_center { 8 } else { 5 };
+        draw_hline(
+            image,
+            left_axis_x.saturating_sub(tick_len / 2),
+            left_axis_x.saturating_add(tick_len / 2),
+            chunk_start_z,
+            if is_center { center_color } else { tick_color },
+        );
+
+        if is_center || (chunk_index % label_every == 0) {
+            let label = chunk_z.to_string();
+            let label_width = measure_text_width(&label);
+            let label_x = left_axis_x.saturating_sub(label_width).saturating_sub(6);
+            let label_y = chunk_center_z.saturating_sub(measure_text_height() / 2);
+            draw_text(image, label_x, label_y, &label, if is_center { center_color } else { label_color });
+        }
+    }
+
+    let center_chunk_offset_x =
+        u32::try_from(window.center_x - window.min_chunk_x()).unwrap_or(0) * pixels_per_chunk;
+    let center_chunk_offset_z =
+        u32::try_from(window.center_z - window.min_chunk_z()).unwrap_or(0) * pixels_per_chunk;
+    let center_rect_x = layout.map_offset_x + center_chunk_offset_x;
+    let center_rect_z = layout.map_offset_z + center_chunk_offset_z;
+    draw_rect_outline(
+        image,
+        center_rect_x,
+        center_rect_z,
+        pixels_per_chunk.max(1),
+        pixels_per_chunk.max(1),
+        center_color,
+    );
+}
+
+fn label_every_chunks(pixels_per_chunk: u32) -> u32 {
+    let min_spacing_px = 56;
+    let step = (min_spacing_px + pixels_per_chunk.saturating_sub(1)) / pixels_per_chunk.max(1);
+    step.max(1)
+}
+
+fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3]) {
+    let mut cursor_x = x;
+    for character in text.chars() {
+        if character == ' ' {
+            cursor_x = cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
+            continue;
+        }
+        if let Some(rows) = glyph_rows(character) {
+            draw_glyph(image, cursor_x, y, rows, color);
+        }
+        cursor_x = cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
+    }
+}
+
+fn draw_glyph(image: &mut RgbImage, x: u32, y: u32, rows: [u8; 5], color: [u8; 3]) {
+    for (row_index, row_bits) in rows.into_iter().enumerate() {
+        for column in 0..LABEL_CHAR_WIDTH {
+            let shift = LABEL_CHAR_WIDTH - 1 - column;
+            if (row_bits >> shift) & 1 == 0 {
+                continue;
+            }
+            let pixel_x = x + column * LABEL_FONT_SCALE;
+            let pixel_y = y + row_index as u32 * LABEL_FONT_SCALE;
+            fill_rect(
+                image,
+                pixel_x,
+                pixel_y,
+                LABEL_FONT_SCALE,
+                LABEL_FONT_SCALE,
+                color,
+            );
+        }
+    }
+}
+
+fn glyph_rows(character: char) -> Option<[u8; 5]> {
+    match character.to_ascii_uppercase() {
+        '0' => Some([0b111, 0b101, 0b101, 0b101, 0b111]),
+        '1' => Some([0b010, 0b110, 0b010, 0b010, 0b111]),
+        '2' => Some([0b111, 0b001, 0b111, 0b100, 0b111]),
+        '3' => Some([0b111, 0b001, 0b111, 0b001, 0b111]),
+        '4' => Some([0b101, 0b101, 0b111, 0b001, 0b001]),
+        '5' => Some([0b111, 0b100, 0b111, 0b001, 0b111]),
+        '6' => Some([0b111, 0b100, 0b111, 0b101, 0b111]),
+        '7' => Some([0b111, 0b001, 0b001, 0b001, 0b001]),
+        '8' => Some([0b111, 0b101, 0b111, 0b101, 0b111]),
+        '9' => Some([0b111, 0b101, 0b111, 0b001, 0b111]),
+        '-' => Some([0b000, 0b000, 0b111, 0b000, 0b000]),
+        'X' => Some([0b101, 0b101, 0b010, 0b101, 0b101]),
+        'Z' => Some([0b111, 0b001, 0b010, 0b100, 0b111]),
+        _ => None,
+    }
+}
+
+fn measure_text_width(text: &str) -> u32 {
+    text.chars().count() as u32 * (LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE
+}
+
+fn measure_text_height() -> u32 {
+    LABEL_CHAR_HEIGHT * LABEL_FONT_SCALE
+}
+
+fn draw_rect_outline(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: [u8; 3]) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let right = x + width.saturating_sub(1);
+    let bottom = y + height.saturating_sub(1);
+    draw_hline(image, x, right, y, color);
+    draw_hline(image, x, right, bottom, color);
+    draw_vline(image, x, y, bottom, color);
+    draw_vline(image, right, y, bottom, color);
+}
+
+fn draw_hline(image: &mut RgbImage, x0: u32, x1: u32, y: u32, color: [u8; 3]) {
+    if image.height() == 0 || y >= image.height() {
+        return;
+    }
+    let start = x0.min(x1);
+    let end = x0.max(x1).min(image.width().saturating_sub(1));
+    for x in start..=end {
+        image.put_pixel(x, y, Rgb(color));
+    }
+}
+
+fn draw_vline(image: &mut RgbImage, x: u32, y0: u32, y1: u32, color: [u8; 3]) {
+    if image.width() == 0 || x >= image.width() {
+        return;
+    }
+    let start = y0.min(y1);
+    let end = y0.max(y1).min(image.height().saturating_sub(1));
+    for y in start..=end {
+        image.put_pixel(x, y, Rgb(color));
+    }
+}
+
+fn draw_arrow_right(image: &mut RgbImage, tip_x: u32, y: u32, color: [u8; 3]) {
+    draw_hline(image, tip_x.saturating_sub(10), tip_x, y, color);
+    if y > 0 {
+        image.put_pixel(tip_x.saturating_sub(2), y.saturating_sub(2), Rgb(color));
+        image.put_pixel(tip_x.saturating_sub(1), y.saturating_sub(1), Rgb(color));
+    }
+    if y + 2 < image.height() {
+        image.put_pixel(tip_x.saturating_sub(2), y + 2, Rgb(color));
+        image.put_pixel(tip_x.saturating_sub(1), y + 1, Rgb(color));
+    }
+}
+
+fn draw_arrow_down(image: &mut RgbImage, x: u32, tip_y: u32, color: [u8; 3]) {
+    draw_vline(image, x, tip_y.saturating_sub(10), tip_y, color);
+    if x > 0 {
+        image.put_pixel(x.saturating_sub(2), tip_y.saturating_sub(2), Rgb(color));
+        image.put_pixel(x.saturating_sub(1), tip_y.saturating_sub(1), Rgb(color));
+    }
+    if x + 2 < image.width() {
+        image.put_pixel(x + 2, tip_y.saturating_sub(2), Rgb(color));
+        image.put_pixel(x + 1, tip_y.saturating_sub(1), Rgb(color));
+    }
+}
+
+fn fill_rect(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: [u8; 3]) {
+    let max_x = x.saturating_add(width).min(image.width());
+    let max_y = y.saturating_add(height).min(image.height());
+    for pixel_y in y..max_y {
+        for pixel_x in x..max_x {
+            image.put_pixel(pixel_x, pixel_y, Rgb(color));
+        }
+    }
 }
 
 fn collect_center_chunk_diagnostics(
@@ -1003,5 +1277,25 @@ mod tests {
         assert!(patch.summary.sample_count > 0);
         assert!(patch.summary.min_delta.is_finite());
         assert!(patch.summary.max_delta.is_finite());
+    }
+
+    #[test]
+    fn canvas_layout_adds_coordinate_margins() {
+        let window = PreviewWindow::new(0, 0, 2, 2).expect("window should build");
+        let layout = window.canvas_layout().expect("layout should build");
+        let (map_width, map_height) = window.image_dimensions().expect("map dimensions should build");
+
+        assert_eq!(layout.map_offset_x, PREVIEW_MARGIN_LEFT);
+        assert_eq!(layout.map_offset_z, PREVIEW_MARGIN_TOP);
+        assert_eq!(layout.map_width, map_width);
+        assert_eq!(layout.map_height, map_height);
+        assert_eq!(
+            layout.width,
+            PREVIEW_MARGIN_LEFT + map_width + PREVIEW_MARGIN_RIGHT
+        );
+        assert_eq!(
+            layout.height,
+            PREVIEW_MARGIN_TOP + map_height + PREVIEW_MARGIN_BOTTOM
+        );
     }
 }
