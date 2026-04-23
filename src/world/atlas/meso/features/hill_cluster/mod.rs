@@ -600,16 +600,16 @@ fn irregular_lobe_footprint(
         + (((across / lobe.radius_z_blocks.max(1.0)) * 1.55) + along_phase).sin()
             * lobe.radius_x_blocks
             * lerp_f32(
-                0.06,
-                0.16,
+                0.04,
+                0.10,
                 indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ALONG_SALT),
             );
     let warped_across = across
         + (((along / lobe.radius_x_blocks.max(1.0)) * 1.85) + across_phase).sin()
             * lobe.radius_z_blocks
             * lerp_f32(
-                0.10,
-                0.22,
+                0.06,
+                0.14,
                 indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ACROSS_SALT),
             );
     let outline_primary =
@@ -629,18 +629,24 @@ fn irregular_lobe_footprint(
                 + outline_secondary * TAU;
             let contour_scale = 1.0
                 + (contour_angle * 2.0 + outline_primary * TAU + ripple_phase * 0.44).sin()
-                    * lerp_f32(0.16, 0.30, outline_primary)
+                    * lerp_f32(0.10, 0.18, outline_primary)
                 + (contour_angle * 3.0 + outline_secondary * TAU - ripple_phase * 0.32).sin()
-                    * lerp_f32(0.10, 0.20, outline_secondary)
+                    * lerp_f32(0.06, 0.12, outline_secondary)
                 + (contour_angle * 5.0 + outline_tertiary * TAU + ripple_phase * 0.58).cos()
-                    * lerp_f32(0.06, 0.14, outline_tertiary);
+                    * lerp_f32(0.04, 0.08, outline_tertiary);
             let contour_push =
-                (contour_angle * 4.0 + ripple_phase * 0.86 + outline_primary * TAU).sin() * 0.10
+                (contour_angle * 4.0 + ripple_phase * 0.86 + outline_primary * TAU).sin() * 0.05
                     + (contour_angle * 7.0 - ripple_phase * 0.52 + outline_tertiary * TAU).cos()
-                        * 0.06;
-            let radial = (radial_span + contour_push + edge_bias) / contour_scale.max(0.56);
-            smoothstep_range(1.06, 0.0, radial)
+                        * 0.03;
+            let radial = (radial_span + contour_push + edge_bias) / contour_scale.max(0.76);
+            smoothstep_range(1.10, 0.0, radial)
         };
+    let rounded_core = ellipse_footprint(
+        warped_along,
+        warped_across,
+        lobe.radius_x_blocks * 1.06,
+        lobe.radius_z_blocks * 1.08,
+    );
     let core = irregular_radial_footprint(
         warped_along,
         warped_across,
@@ -649,53 +655,54 @@ fn irregular_lobe_footprint(
         0.0,
     );
     let shoulder_offset = lerp_f32(
-        -0.18,
-        0.26,
+        -0.10,
+        0.18,
         indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SHOULDER_OFFSET_SALT),
     );
     let shoulder_side = lerp_f32(
-        -0.24,
-        0.30,
+        -0.16,
+        0.20,
         indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SHOULDER_SIDE_SALT),
     );
     let shoulder = irregular_radial_footprint(
         warped_along - lobe.radius_x_blocks * shoulder_offset,
         warped_across + lobe.radius_z_blocks * shoulder_side,
-        lobe.radius_x_blocks * 0.86,
-        lobe.radius_z_blocks * 0.98,
+        lobe.radius_x_blocks * 0.94,
+        lobe.radius_z_blocks * 1.04,
         -0.04,
     );
     let backfill = irregular_radial_footprint(
-        warped_along + lobe.radius_x_blocks * 0.14,
-        warped_across - lobe.radius_z_blocks * 0.10,
-        lobe.radius_x_blocks * 0.74,
-        lobe.radius_z_blocks * 0.82,
+        warped_along + lobe.radius_x_blocks * 0.08,
+        warped_across - lobe.radius_z_blocks * 0.06,
+        lobe.radius_x_blocks * 0.82,
+        lobe.radius_z_blocks * 0.90,
         -0.02,
     );
     let notch = ellipse_footprint(
         warped_along
             + lobe.radius_x_blocks
                 * lerp_f32(
-                    -0.10,
-                    0.22,
+                    -0.06,
+                    0.14,
                     indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_OFFSET_SALT),
                 ),
         warped_across
             + lobe.radius_z_blocks
                 * lerp_f32(
-                    -0.34,
-                    0.34,
+                    -0.18,
+                    0.18,
                     indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_SIDE_SALT),
                 ),
-        lobe.radius_x_blocks * 0.28,
-        lobe.radius_z_blocks * 0.24,
+        lobe.radius_x_blocks * 0.22,
+        lobe.radius_z_blocks * 0.20,
     ) * lerp_f32(
-        0.14,
-        0.30,
+        0.06,
+        0.16,
         indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_STRENGTH_SALT),
     );
 
-    (core * 0.62 + shoulder * 0.28 + backfill * 0.22 - notch).clamp(0.0, 1.0)
+    (core * 0.46 + rounded_core * 0.34 + shoulder * 0.20 + backfill * 0.16 - notch * 0.55)
+        .clamp(0.0, 1.0)
 }
 
 fn distance_between_points(a: (f32, f32), b: (f32, f32)) -> f32 {

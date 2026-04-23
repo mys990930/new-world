@@ -140,20 +140,20 @@ fn resolve_hill(source: GuideSource, nearby_sources: &[GuideSource]) -> Option<R
     let normal_x = -heading_z;
     let normal_z = heading_x;
     let primary_major = lerp_f32(
-        38.0,
-        60.0,
+        56.0,
+        88.0,
         lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
-    ) * (0.94 + source.cell.hilliness * 0.22 + (source.cell.hill_height / 18.0).clamp(0.0, 0.18));
+    ) * (0.98 + source.cell.hilliness * 0.24 + (source.cell.hill_height / 18.0).clamp(0.0, 0.20));
     let primary_minor = lerp_f32(
-        28.0,
-        46.0,
+        44.0,
+        72.0,
         lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
-    ) * (0.94 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 22.0).clamp(0.0, 0.14));
+    ) * (1.00 + source.cell.hilliness * 0.22 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16));
     let primary_height = source.cell.hill_height
-        * (1.36 + source.cell.hilliness * 0.40)
+        * (1.32 + source.cell.hilliness * 0.36)
         * lerp_f32(
-            1.18,
-            1.72,
+            1.12,
+            1.60,
             lobe_hash01(source.coord, source.cell, SOURCE_SUMMIT_HEIGHT_SALT),
         );
     let primary = make_blob(
@@ -294,10 +294,10 @@ fn make_blob(
         lobe,
         source,
         lobe_index,
-        core_scale: (0.62 + source.cell.hilliness * 0.24).clamp(0.0, 0.96),
+        core_scale: (0.58 + source.cell.hilliness * 0.22).clamp(0.0, 0.92),
         peak_exponent: lerp_f32(
-            1.18,
-            1.82,
+            1.10,
+            1.56,
             indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SUMMIT_PROFILE_SALT),
         ),
         raise_cap_blocks: (height_blocks
@@ -331,33 +331,33 @@ fn resolve_secondary_blob(
     };
     let offset_along = along_sign
         * lerp_f32(
-            primary.radius_x_blocks * 0.22,
-            primary.radius_x_blocks * 0.42,
+            primary.radius_x_blocks * 0.14,
+            primary.radius_x_blocks * 0.28,
             lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT ^ 0x55AA),
         );
     let offset_across = lerp_f32(
-        -primary.radius_z_blocks * 0.28,
-        primary.radius_z_blocks * 0.28,
+        -primary.radius_z_blocks * 0.18,
+        primary.radius_z_blocks * 0.18,
         lobe_hash01(source.coord, source.cell, SOURCE_ENVELOPE_SHOULDER_SALT),
     );
     let center_x = source.center_x + heading_x * offset_along + normal_x * offset_across;
     let center_z = source.center_z + heading_z * offset_along + normal_z * offset_across;
     let radius_x_blocks = primary.radius_x_blocks
         * lerp_f32(
-            0.60,
-            0.80,
+            0.72,
+            0.92,
             lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT ^ 0xAA55),
         );
     let radius_z_blocks = primary.radius_z_blocks
         * lerp_f32(
-            0.66,
-            0.88,
+            0.78,
+            0.98,
             lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT ^ 0xAA55),
         );
     let height_blocks = primary.height_blocks
         * lerp_f32(
-            0.44,
-            0.70,
+            0.38,
+            0.62,
             lobe_hash01(source.coord, source.cell, SOURCE_SUMMIT_HEIGHT_SALT ^ 0xAA55),
         );
 
@@ -393,20 +393,20 @@ fn resolve_support(
     let delta_z = secondary.map(|blob| (blob.center_z - primary.center_z).abs()).unwrap_or(0.0);
     let radius_x_blocks = primary.radius_x_blocks.max(
         secondary.map(|blob| blob.radius_x_blocks).unwrap_or(primary.radius_x_blocks),
-    ) * 1.20
-        + delta_x * 0.36
-        + 8.0;
+    ) * 1.42
+        + delta_x * 0.42
+        + 14.0;
     let radius_z_blocks = primary.radius_z_blocks.max(
         secondary.map(|blob| blob.radius_z_blocks).unwrap_or(primary.radius_z_blocks),
-    ) * 1.24
-        + delta_z * 0.44
-        + 10.0;
+    ) * 1.48
+        + delta_z * 0.50
+        + 16.0;
     let support_height_blocks = primary
         .height_blocks
         .max(secondary.map(|blob| blob.height_blocks).unwrap_or(0.0))
         * lerp_f32(
-            0.08,
-            0.14,
+            0.06,
+            0.11,
             lobe_hash01(source.coord, source.cell, SOURCE_ENVELOPE_FILL_SALT),
         );
     let (half_extent_x, half_extent_z) =
@@ -553,9 +553,9 @@ pub(crate) fn sample_surface_from_window(
     }
 
     let meso = sample_meso_guides(guides, world_x, world_z);
-    let core_presence = smoothstep_range(0.10, 0.88, coverage);
+    let core_presence = smoothstep_range(0.08, 0.84, coverage);
     let support_presence =
-        smoothstep_range(0.12, 0.88, shoulder) * (1.0 - smoothstep_range(0.08, 0.58, coverage));
+        smoothstep_range(0.10, 0.90, shoulder) * (1.0 - smoothstep_range(0.06, 0.52, coverage));
     let guide_raise = meso.hill_height
         * (0.10 + meso.hilliness * 0.06)
         * support_presence;
@@ -599,17 +599,17 @@ fn support_footprint(support: ResolvedHillSupport, sample_x: f32, sample_z: f32)
             + lobe_hash01(support.source.coord, support.source.cell, SOURCE_ENVELOPE_RADIUS_SALT)
                 * std::f32::consts::TAU)
             .sin()
-            * 0.10
+            * 0.07
         + (contour_angle * 3.0
             + lobe_hash01(support.source.coord, support.source.cell, SOURCE_ENVELOPE_SHOULDER_SALT)
                 * std::f32::consts::TAU)
             .cos()
-            * 0.08;
+            * 0.05;
     let radial = ((normalized_along * normalized_along) + (normalized_across * normalized_across)).sqrt()
-        / contour_scale.max(0.70);
-    let outer = smoothstep_range(1.04, 0.0, radial);
-    let inner = smoothstep_range(0.72, 0.0, radial);
-    (outer * 0.58 + inner * 0.42).clamp(0.0, 1.0)
+        / contour_scale.max(0.82);
+    let outer = smoothstep_range(1.10, 0.0, radial);
+    let inner = smoothstep_range(0.80, 0.0, radial);
+    (outer * 0.62 + inner * 0.38).clamp(0.0, 1.0)
 }
 
 fn coverage_union(a: f32, b: f32) -> f32 {

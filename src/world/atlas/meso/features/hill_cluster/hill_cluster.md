@@ -30,13 +30,15 @@
 - Launch tuning should also favor a clearly broader few-chunk footprint so each hill has room to read before the next saddle begins, but should avoid support staying alive across so many chunks that no individual hill reads clearly in top-down preview.
 - Launch tuning should avoid overly extreme major-axis stretch so broad hill groups still read as clustered hills, not as a single ridge-like strip.
 - The resolved shape should keep a broader shoulder support zone than the inner hill cores so plains can ease upward naturally instead of stepping into a hard wall.
-- Current launch tuning target is roughly `2..4` chunks for the visually obvious hill core and roughly `4..6` chunks for the full shoulder/support footprint, with owner-region sparsening chosen to avoid one resolved hill set swallowing large parts of a preview window.
+- Current launch tuning target is roughly `3..6` chunks for the visually obvious hill core and roughly `6..9` chunks for the full shoulder/support footprint, with owner-region sparsening chosen to avoid one resolved hill set swallowing large parts of a preview window.
 - Current launch tuning should keep ownership pruning conservative enough that nearby strong sources do not immediately collapse into one oversized bright mass across a whole preview edge.
 - Nearby hills may overlap through low shared support, but should not form circular Venn-diagram plan-view saddles or a synthetic shared summit.
 - Different hills should keep different summit ceilings within a tuned min/max band so nearby peaks do not all stall at the same y level; resolved blob caps should vary from hill to hill.
 - Summit profiles should stay rounded and sigmoid-like from plain -> side -> top, with support fading back out before the apex so the summit does not read as a flat cap above a mostly constant side slope.
 - Broad shoulder support should help hills ease back into plains, but should not by itself saturate to the same near-peak uplift as the summit core in top-down preview.
 - Support fill should remain a foothill / transition signal, not a hidden substitute for blob-core height that can create a broad synthetic summit where no direct hill core exists.
+- Current launch tuning should bias strongly toward wider x/z footprint rather than higher caps so hills read gentler at the game's `0.5m` block scale.
+- Irregular contour wobble and notch carving should stay present, but be damped enough that most hills still read as rounded landforms rather than sharp star-shaped blobs.
 - Corridor-adjacent hills may be damped, but the feature should still keep a materially visible uplift where the resolved hill mass survives beside the corridor.
 - The chunk-side helper must scan a wide enough neighboring guide neighborhood that the same broad hill mass does not disappear or clip when the sample crosses a chunk or meso-cell boundary.
 - Neighboring chunks that overlap the same hill footprint should resolve the same world-space hill blobs from the same meso-region-owned hill set, not just similar guide samples.
