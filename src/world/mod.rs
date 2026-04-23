@@ -1,4 +1,5 @@
 pub mod atlas;
+mod calendar;
 mod created;
 mod chunk;
 mod coord;
@@ -41,6 +42,12 @@ pub use atlas::{
     resolve_atlas_with_tuning, resolve_region_classes, sample_meso_guides,
     sample_region_classes, write_debug_images, write_debug_images_with_options,
     write_debug_images_with_options_and_tuning,
+};
+#[allow(unused_imports)]
+pub use calendar::{
+    AtlasClimateRuntimeState, AtlasClimateRuntimeUpdate, CalendarAdvance, CalendarApplyResult,
+    DeferredSeasonPatch, DeferredSeasonPatchKind, DeferredSeasonPatchTarget, LocalWeatherKind,
+    LocalWeatherState, LocalWeatherUpdate, WorldCalendar,
 };
 #[allow(unused_imports)]
 pub use created::{

@@ -130,6 +130,13 @@ WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
 WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
 WorldCore::loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)>
+WorldCore::calendar(&self) -> &WorldCalendar
+WorldCore::climate_state(coord: AtlasCoord) -> AtlasClimateRuntimeState
+WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
+WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
+WorldCore::resolve_region_class_area(area: AtlasArea) -> RegionClassMap
+WorldCore::sample_region_class_atlas(coord: AtlasCoord) -> RegionClassSample
 
 read_created_world_manifest(root: &Path) -> Result<CreatedWorldManifest, CreatedWorldError>
 load_created_world_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, CreatedWorldError>
@@ -239,6 +246,7 @@ NOT:
 - the current minimap cache flow uses snapshot-based top-down chunk-column derivation in jobs, while render-time viewport composition stays app-owned
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - planned time/season ownership also stays world-owned: calendar, active climate drift state, and deferred far-region seasonal patches should remain world truth even when only a small active region is simulated eagerly
+- the first runtime slice now implements that ownership directly in `WorldCore`: calendar/climate/weather state is no longer spec-only, and simulation feeds it through `CalendarAdvance`
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
 - atlas-owned region classification now resolves biome and terrain-form archetypes before base heightfield solving
