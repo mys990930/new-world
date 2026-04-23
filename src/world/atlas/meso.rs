@@ -159,6 +159,10 @@ impl MesoGuideMap {
     pub fn cells(&self) -> &AtlasGrid<MesoGuideCell> {
         &self.cells
     }
+
+    pub fn cells_mut(&mut self) -> &mut AtlasGrid<MesoGuideCell> {
+        &mut self.cells
+    }
 }
 
 impl PartialEq for MesoGuideMap {

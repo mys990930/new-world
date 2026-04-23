@@ -50,6 +50,10 @@ sample_meso_guides(
     world_z: i32,
 ) -> MesoGuideSample
 
+MesoGuideMap::area(&self) -> AtlasArea
+MesoGuideMap::cells(&self) -> &AtlasGrid<MesoGuideCell>
+MesoGuideMap::cells_mut(&mut self) -> &mut AtlasGrid<MesoGuideCell>
+
 meso_region_coord_for_atlas(coord: AtlasCoord) -> MesoRegionCoord
 meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 ```
@@ -161,6 +165,7 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
 - feature-owned chunk-side resolved windows must be deterministic from stable guide ownership alone; neighboring chunks sampling the same hill mass should not re-roll a different object graph at the seam
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing, but target architecture is feature-owned surface resolution rather than one shared additive deformation formula
+- preview and debugging tooling may clone a `MesoGuideMap`, zero non-target channels through `cells_mut()`, and run the same feature-owned runtime on a flat baseline to inspect meso shape in isolation before blending it back onto the real prototype
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input
