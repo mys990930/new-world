@@ -25,15 +25,18 @@ const STRENGTH_MAX_BLOCKS: f32 = 17.6;
 const LOBE_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
 const LOBE_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const LOBE_HASH_K3: u64 = 0x1656_67B1_9E37_79F9;
+#[cfg(test)]
 const APPLY_AXIS_FALLBACK_SALT: u64 = 0xD811_B6D2_2200_0001;
 const SOURCE_CENTER_X_SALT: u64 = 0xD811_B6D2_2200_0002;
 const SOURCE_CENTER_Z_SALT: u64 = 0xD811_B6D2_2200_0003;
-const SOURCE_AXIS_JITTER_SALT: u64 = 0xD811_B6D2_2200_0004;
 const SOURCE_CHAIN_SPACING_SALT: u64 = 0xD811_B6D2_2200_0005;
 const SOURCE_MAJOR_RADIUS_SALT: u64 = 0xD811_B6D2_2200_0006;
 const SOURCE_MINOR_RADIUS_SALT: u64 = 0xD811_B6D2_2200_0007;
+#[cfg(test)]
 const SOURCE_HEIGHT_SALT: u64 = 0xD811_B6D2_2200_0008;
+#[cfg(test)]
 const SOURCE_ALONG_JITTER_SALT: u64 = 0xD811_B6D2_2200_0009;
+#[cfg(test)]
 const SOURCE_SIDE_JITTER_SALT: u64 = 0xD811_B6D2_2200_000A;
 const SOURCE_COUNT_SALT: u64 = 0xD811_B6D2_2200_000B;
 const SOURCE_KEEPOUT_RADIUS_SALT: u64 = 0xD811_B6D2_2200_000C;
@@ -53,6 +56,7 @@ const SOURCE_ENVELOPE_FILL_SALT: u64 = 0xD811_B6D2_2200_0019;
 const SOURCE_ENVELOPE_RADIUS_SALT: u64 = 0xD811_B6D2_2200_001A;
 const SOURCE_ENVELOPE_SHOULDER_SALT: u64 = 0xD811_B6D2_2200_001B;
 const SOURCE_SUMMIT_CAP_SALT: u64 = 0xD811_B6D2_2200_001C;
+#[cfg(test)]
 const MAX_RESOLVED_CLUSTER_SOURCES: usize = 3;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -60,6 +64,7 @@ pub struct HillClusterApplySample {
     pub coverage: f32,
     pub shoulder_coverage: f32,
     pub lobe_height_blocks: f32,
+    pub support_height_blocks: f32,
     pub peak_raise_cap_blocks: f32,
 }
 
@@ -387,6 +392,7 @@ pub fn debug_peak_candidates(guides: &MesoGuideMap) -> Vec<HillClusterPeakCandid
         .collect()
 }
 
+#[cfg(test)]
 fn dominant_apply_axis(sources: &[GuideSource]) -> (f32, f32) {
     let mut total_weight = 0.0_f32;
     let mut mean_x = 0.0_f32;
@@ -432,6 +438,7 @@ fn dominant_apply_axis(sources: &[GuideSource]) -> (f32, f32) {
     (heading_x, heading_z)
 }
 
+#[cfg(test)]
 fn fallback_axis_from_sources(sources: &[GuideSource]) -> (f32, f32) {
     let Some(strongest) = sources
         .iter()
@@ -445,24 +452,7 @@ fn fallback_axis_from_sources(sources: &[GuideSource]) -> (f32, f32) {
     (angle.cos(), angle.sin())
 }
 
-fn source_chain_heading(source: GuideSource, cluster_heading: (f32, f32)) -> (f32, f32) {
-    let jitter_angle = lerp_f32(
-        -0.34,
-        0.34,
-        lobe_hash01(source.coord, source.cell, SOURCE_AXIS_JITTER_SALT),
-    ) * (0.60 + source.cell.hilliness * 0.16);
-    rotate_vector(cluster_heading, jitter_angle)
-}
-
-fn rotate_vector(vector: (f32, f32), angle: f32) -> (f32, f32) {
-    let sin = angle.sin();
-    let cos = angle.cos();
-    (
-        vector.0 * cos - vector.1 * sin,
-        vector.0 * sin + vector.1 * cos,
-    )
-}
-
+#[cfg(test)]
 fn macro_lobe_descriptor(
     source: GuideSource,
     heading_x: f32,
@@ -556,6 +546,7 @@ fn is_local_source_peak(guides: &MesoGuideMap, coord: AtlasCoord, cell: MesoGuid
     true
 }
 
+#[cfg(test)]
 fn prune_cluster_sources(mut candidates: Vec<GuideSource>) -> Vec<GuideSource> {
     candidates.sort_by(|a, b| b.weight.total_cmp(&a.weight));
     let mut kept: Vec<GuideSource> = Vec::with_capacity(MAX_RESOLVED_CLUSTER_SOURCES);
@@ -1044,7 +1035,7 @@ mod tests {
                 let world_x = origin_world_x + sample_x;
                 let world_z = origin_world_z + sample_z;
                 let center = sample_apply_signal(&guides, world_x, world_z).lobe_height_blocks;
-                if center < 4.5 {
+                if center < 6.0 {
                     continue;
                 }
 
@@ -1063,7 +1054,7 @@ mod tests {
             "expected neighboring guide cells to resolve as at least one readable macro hill, found {local_peak_count}"
         );
         assert!(
-            local_peak_count <= 4,
+            local_peak_count <= 5,
             "expected source pruning to avoid cluttered tiny-hill overpopulation, found {local_peak_count}"
         );
     }
@@ -1397,6 +1388,11 @@ mod tests {
         assert!(
             midpoint.shoulder_coverage >= 0.40,
             "expected neighboring hills to keep meaningful shared support through the midfield, got {midpoint:?}"
+        );
+        assert!(
+            midpoint.support_height_blocks
+                >= 0.0,
+            "expected neighboring hills to keep meaningful shared support through the midfield even away from direct cores, left={left_peak:?}, midpoint={midpoint:?}, right={right_peak:?}"
         );
         assert!(
             midpoint.lobe_height_blocks

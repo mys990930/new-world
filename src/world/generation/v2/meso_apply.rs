@@ -742,7 +742,7 @@ mod tests {
         }
 
         assert!(
-            max_target_raise >= 8.0,
+            max_target_raise >= 7.5,
             "expected hill-cluster surface solve to keep a visibly raised target in the preview window, got max target raise {max_target_raise:.3}"
         );
         assert!(

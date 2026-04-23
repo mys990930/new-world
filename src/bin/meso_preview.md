@@ -40,7 +40,7 @@
 4. Replace the normal base prototype with a flat plain prototype using the requested `base_height` and `relief_budget`.
 5. Run the existing `build_chunk_meso_applied_prototype(...)` path.
 6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, chunk grid lines, and explicit chunk-coordinate reference labels.
-7. If `--overlay hill_peaks` is requested, draw the filtered hill-cluster local-peak candidates from the same guide map on top of that heatmap so candidate density can be inspected before source merge and pruning.
+7. If `--overlay hill_peaks` is requested, draw the filtered hill-cluster local-peak candidates from the same guide map on top of that heatmap so candidate density can be inspected before owner-region sparsening and per-hill resolve.
 
 ## Why Flat-Base Preview Exists
 

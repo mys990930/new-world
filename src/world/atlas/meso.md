@@ -160,14 +160,15 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - current implemented selection still follows an atlas/structure-constrained deterministic lottery model
 - runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
 - current `hill_cluster` runtime emission now has two layers:
-  - atlas meso guide generation rasterizes a shared clustered hill envelope with several strong guide cells across a few chunks
-- feature-owned chunk-side resolution must first resolve shared multi-chunk hill objects from a stable meso-region ownership layer, then sample those same resolved objects per column during meso apply
-- the current hill-cluster runtime helper also keeps a broader shoulder envelope than the inner hill cores so plains transition into hill country more naturally at launch scale
+  - atlas meso guide generation rasterizes a broad multi-chunk hill signal with several strong guide cells across a few chunks
+- feature-owned chunk-side resolution must first resolve sparse multi-chunk hill objects from a stable meso-region ownership layer, then sample those same resolved objects per column during meso apply
+- the current hill-cluster runtime helper keeps a broader low-amplitude shoulder/support zone than the inner hill cores so plains transition into hill country more naturally at launch scale
 - the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
 - feature-owned chunk-side resolved windows must be deterministic from stable guide ownership alone; neighboring chunks sampling the same hill mass should not re-roll a different object graph at the seam
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing, but target architecture is feature-owned surface resolution rather than one shared additive deformation formula
 - preview and debugging tooling may clone a `MesoGuideMap`, zero non-target channels through `cells_mut()`, and run the same feature-owned runtime on a flat baseline to inspect meso shape in isolation before blending it back onto the real prototype
-- preview and debugging tooling may also query `debug_hill_cluster_peak_candidates(...)` from the same filtered guide map to visualize which local hill-guide peaks are even entering hill-cluster resolve before source merge and pruning
+- preview and debugging tooling may also query `debug_hill_cluster_peak_candidates(...)` from the same filtered guide map to visualize which local hill-guide peaks are even entering hill-cluster resolve before owner-region sparsening and per-hill resolve
+- hill-cluster runtime resolve should keep low-amplitude support and direct blob-core height as separate signals so transition fill cannot silently become a synthetic peak far away from the actual guide sources
 - the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input

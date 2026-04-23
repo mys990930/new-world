@@ -47,14 +47,15 @@ build_chunk_meso_applied_prototype(
 - avoid-primary-corridor features are attenuated near carried river corridors so meso does not close prototype outlets or overwrite the broad hydrology read
 - the stage spends only part of each column's prototype relief budget and forwards the remaining budget to later smoothing and hydrology work
 - `hill_cluster` is the first feature being moved from `generic delta_y` treatment to `feature-owned target-surface resolve`
-  - sampled guide fields still provide broad cluster envelope and macro hill-strength context
-  - the feature-owned runtime helper should turn those guides plus the base prototype into a smaller set of broader, taller, irregular hill lobes with explicit shoulders and a smoothly blended target surface
-  - hill-cluster runtime should first gather the meso-region-owned hill clusters relevant to the chunk window, then sample that same resolved object set per column rather than rebuilding hill guesses column-by-column
+  - sampled guide fields still provide broad hill-strength context and dominant local peaks
+  - the feature-owned runtime helper should turn those guides plus the base prototype into a smaller set of broader, taller, irregular independent hills with explicit shoulders and a smoothly blended target surface
+  - hill-cluster runtime should first gather the meso-region-owned hills relevant to the chunk window, then sample that same resolved object set per column rather than rebuilding hill guesses column-by-column
   - the resolved hill mass should rise from the plain through feature-owned falloff rather than by abruptly stacking a narrow additive delta on top of the base
-  - hill-cluster shape solve should keep irregular closed contours, a soft shared support envelope between nearby peaks, and per-hill / per-blob summit caps so different hills do not all terminate at the same y
-  - hill-cluster summit shaping should read as a sigmoid ground-to-summit curve; envelope fill should support shoulders and inter-peak merges without flattening the apex into a broad cap
-  - hill-cluster compositing should treat shoulder and envelope coverage as support for transitions and merges, not as enough on their own to create a huge near-max bright core across many chunks
-  - dense neighboring guide cells should be pruned down before surface resolve so one cluster does not explode into many overlapping small hills
+  - hill-cluster shape solve should keep irregular closed contours, low-amplitude support between nearby hills, and per-hill / per-blob summit caps so different hills do not all terminate at the same y
+  - hill-cluster summit shaping should read as a sigmoid ground-to-summit curve; support fill should help shoulders and local merges without flattening the apex into a broad cap
+  - hill-cluster compositing should treat shoulder/support coverage as transition help, not as enough on its own to create a huge near-max bright core across many chunks
+  - hill-cluster support fill must stay separate from direct blob-core height in runtime resolve; broad support may raise foothills, but only real blob coverage should drive the highest summit-like uplift
+  - dense neighboring guide cells should be sparsened before surface resolve so one window does not explode into many overlapping small hills
   - scan support and fallback orientation must stay stable enough across neighboring chunk / meso-cell contexts that the same broad hill mass does not clip or rotate at shared boundaries
   - hill-cluster compositing should keep a material visible uplift after corridor gating; avoid-primary-corridor attenuation should damp the feature, not erase it wholesale
   - cross-feature compositing should not let `shallow_basin` fully flatten an already-resolved hill mass inside the same footprint
