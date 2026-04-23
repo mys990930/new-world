@@ -131,19 +131,28 @@ These files previously owned the actual V1 chunk realization pipeline, terrain-p
   - the current chunk-side apply stage now samples those guides per block column after prototype and before smoothing
   - runtime gating is currently conservative and temporary: the stage only applies the Wave 1 core subset and consults each archetype's current `allowed_meso_keys` stub until the authoritative per-archetype matrix is published
   - the target architecture is now feature-owned meso surface resolution: `meso_apply.rs` should orchestrate gating, corridor policy, compositing, and relief accounting, while each feature module owns its own target local surface logic
-  - hill clusters are the first launch feature being moved toward that model, using atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass with broader shoulders, dominant-source pruning, a wider neighboring-guide scan, source-stable fallback orientation, stronger visible uplift tuning, gentler corridor attenuation, basin-aware compositing, and a shared resolved hill-object window assembled from stable meso-region-owned clusters instead of per-column hill re-interpretation
+  - hill clusters are the first launch feature being moved toward that model, using atlas-owned clustered guide envelopes plus feature-owned asymmetric macro-lobe-chain resolution in the chunk pass with broader shoulders, dominant-source pruning, conservative source merge, source-stable fallback orientation, stronger visible uplift tuning, basin-aware compositing, summit-dominant uplift weighting, and a shared resolved hill-object window assembled from stable meso-region-owned clusters instead of per-column hill re-interpretation
   - avoid-primary-corridor behavior is enforced in the chunk-side pass so meso does not overwrite broad river corridor intent
   - authoritative per-archetype allowance matrix still needs to be locked and may tighten the current temporary gate
 
 ### 8. Local Detail / Smoothing
 
-- status: `scaffold only`
+- status: `implemented as initial constrained local refinement pass`
 - owner: `v2/smoothing.rs`
+- note:
+  - `build_chunk_smoothed_prototype(...)` now performs a minimal post-meso in-chunk smoothing pass
+  - the current implementation only spends a small portion of remaining relief budget, suppresses blending near carried corridors and sharp local landforms, and leaves chunk-border columns unchanged to avoid introducing new seam drift
+  - the stage also derives local slope and signed concavity hints for later hydrology / voxelization work
 
 ### 9. Final Hydrology
 
-- status: `scaffold only`
+- status: `implemented as initial connected carve and water solve`
 - owner: `v2/hydrology.rs`
+- note:
+  - `build_chunk_hydrology_solve(...)` now consumes the post-smoothing surface plus carried corridor intent
+  - the current implementation emits one hydrology result per chunk column with carved terrain height, optional water surface, optional floor depth, saturation, and coarse hydrology mode
+  - final connected water solve and hydrology-driven terrain carve both belong here, and `chunk_preview --stage hydrology` now renders that stage directly
+  - voxelization should read its output rather than recarving channels later
 
 ### 10. Region / Material Policy
 
@@ -180,8 +189,8 @@ This is intentional. We are no longer pretending the removed V1 generator is sti
 5. tune and extend the generation-side realization-field stage so atlas-cell semantic classes stop projecting directly into large-scale terrain rectangles at larger scales too
 6. expand and tune archetype coverage in `v2/prototype.rs` and `v2/realization_field.rs` as more launch and extended landform cases come online
 7. migrate the remaining Wave 1 meso features from legacy delta operators to feature-owned surface resolvers once the authoritative matrix is published
-8. implement smoothing/local refinement in `v2/smoothing.rs`
-9. implement connected hydrology in `v2/hydrology.rs`
+8. tune and extend smoothing/local refinement in `v2/smoothing.rs`
+9. tune and extend the initial connected hydrology and hydrology-driven terrain carve in `v2/hydrology.rs`
 10. implement final material + block voxelization in `v2/voxelize.rs`
 11. replace the compile-only generation stubs with real V2 behavior
 

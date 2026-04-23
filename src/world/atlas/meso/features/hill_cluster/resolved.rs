@@ -15,9 +15,9 @@ use super::{
 };
 use super::super::super::lerp_f32;
 
-const CLUSTER_ASSIGN_RADIUS_MULTIPLIER: f32 = 2.00;
-const CLUSTER_BLOB_BOUND_PAD_BLOCKS: f32 = 10.0;
-const CLUSTER_SHOULDER_BOUND_PAD_BLOCKS: f32 = 8.0;
+const CLUSTER_ASSIGN_RADIUS_MULTIPLIER: f32 = 1.76;
+const CLUSTER_BLOB_BOUND_PAD_BLOCKS: f32 = 8.0;
+const CLUSTER_SHOULDER_BOUND_PAD_BLOCKS: f32 = 6.0;
 const REGION_RESOLVE_PADDING_REGIONS: i32 = 1;
 const WINDOW_OWNER_PADDING_REGIONS: i32 = 1;
 
@@ -212,7 +212,7 @@ pub(crate) fn sample_apply_signal_from_window(
             );
             cluster_shoulder_coverage = coverage_union(
                 cluster_shoulder_coverage,
-                (footprint * shoulder.strength_scale).clamp(0.0, 0.90),
+                (footprint * shoulder.strength_scale).clamp(0.0, 0.72),
             );
         }
 
@@ -222,7 +222,7 @@ pub(crate) fn sample_apply_signal_from_window(
             let footprint = cluster_envelope_footprint(cluster.envelope, sample_x, sample_z);
             cluster_shoulder_coverage = coverage_union(
                 cluster_shoulder_coverage,
-                (footprint * cluster.envelope.shoulder_scale).clamp(0.0, 0.96),
+                (footprint * cluster.envelope.shoulder_scale).clamp(0.0, 0.78),
             );
         }
 
@@ -252,7 +252,7 @@ pub(crate) fn sample_apply_signal_from_window(
             );
             cluster_shoulder_coverage = coverage_union(
                 cluster_shoulder_coverage,
-                (footprint * 0.18).clamp(0.0, 0.72),
+                (footprint * 0.12).clamp(0.0, 0.58),
             );
             let cap_weight = contribution.max(footprint * blob.lobe.height_blocks * 0.18);
             cluster_raise_cap_weighted_sum += blob.raise_cap_blocks * cap_weight;
@@ -271,19 +271,19 @@ pub(crate) fn sample_apply_signal_from_window(
             0.0
         };
         let merge_support = smoothstep_range(
-            0.10,
-            0.76,
+            0.14,
+            0.70,
             cluster_coverage.max(envelope_footprint).max(cluster_shoulder_coverage),
         );
         let interior_fill_fade =
-            1.0 - smoothstep_range(0.26, 0.84, cluster_coverage.max(cluster_strongest / cluster.peak_height_hint.max(1.0)));
+            1.0 - smoothstep_range(0.22, 0.78, cluster_coverage.max(cluster_strongest / cluster.peak_height_hint.max(1.0)));
         let cluster_fill = cluster.peak_height_hint
             * envelope_footprint
             * cluster.envelope.fill_scale
             * interior_fill_fade
-            * (0.20 + merge_support * 0.34 + cluster_shoulder_coverage * 0.18);
-        let second_weight = lerp_f32(0.40, 0.74, merge_support);
-        let third_weight = lerp_f32(0.10, 0.24, merge_support);
+            * (0.08 + merge_support * 0.16 + cluster_shoulder_coverage * 0.08);
+        let second_weight = lerp_f32(0.34, 0.62, merge_support);
+        let third_weight = lerp_f32(0.08, 0.18, merge_support);
         let cluster_contribution = cluster_strongest
             + cluster_second * second_weight
             + cluster_third * third_weight
@@ -299,11 +299,11 @@ pub(crate) fn sample_apply_signal_from_window(
         insert_top3(cluster_contribution, &mut strongest, &mut second, &mut third);
         coverage = coverage_union(
             coverage,
-            (cluster_coverage * 0.84 + envelope_footprint * 0.24).clamp(0.0, 1.0),
+            (cluster_coverage * 0.88 + envelope_footprint * 0.10).clamp(0.0, 1.0),
         );
         shoulder_coverage = coverage_union(
             shoulder_coverage,
-            cluster_shoulder_coverage.max(cluster_coverage * 0.92 + envelope_footprint * 0.12),
+            cluster_shoulder_coverage.max(cluster_coverage * 0.74 + envelope_footprint * 0.08),
         );
         raise_cap_weighted_sum += cluster_raise_cap * cluster_cap_presence.max(0.0);
         raise_cap_weight += cluster_cap_presence.max(0.0);
@@ -342,13 +342,13 @@ pub(crate) fn sample_surface_from_window(
 
     let meso = sample_meso_guides(guides, world_x, world_z);
     let shoulder_raise = meso.hill_height
-        * (1.34 + meso.hilliness * 0.52 + shoulder * 0.60)
-        * smoothstep_range(0.04, 1.02, shoulder);
+        * (0.76 + meso.hilliness * 0.24 + shoulder * 0.28)
+        * smoothstep_range(0.10, 0.92, shoulder);
     let core_raise = apply.lobe_height_blocks
-        * (2.26 + meso.hilliness * 0.38 + coverage * 0.24)
-        * smoothstep_range(0.02, 0.98, coverage);
+        * (1.94 + meso.hilliness * 0.30 + coverage * 0.16)
+        * smoothstep_range(0.06, 0.98, coverage);
     let raw_target_raise =
-        shoulder_raise * (1.10 + shoulder * 0.26) + core_raise * (1.12 + coverage * 0.14);
+        shoulder_raise * (0.60 + shoulder * 0.18) + core_raise * (1.12 + coverage * 0.10);
     let raise_cap = apply
         .peak_raise_cap_blocks
         .max((relief_budget * 1.08).max(16.0))
@@ -359,7 +359,7 @@ pub(crate) fn sample_surface_from_window(
     }
 
     let blend_weight = smoothstep01(
-        (shoulder * 0.92 + coverage * 0.44 + meso.hilliness * 0.18).clamp(0.0, 1.0),
+        (shoulder * 0.48 + coverage * 0.62 + meso.hilliness * 0.10).clamp(0.0, 1.0),
     );
 
     HillClusterSurfaceSample {
@@ -566,8 +566,8 @@ fn resolve_shoulder(
     base_minor: f32,
     chain_span: f32,
 ) -> ResolvedHillShoulder {
-    let radius_x_blocks = base_major * 0.82 + chain_span * 0.68 + 8.0;
-    let radius_z_blocks = base_minor * 1.34 + 10.0;
+    let radius_x_blocks = base_major * 0.72 + chain_span * 0.50 + 6.0;
+    let radius_z_blocks = base_minor * 1.18 + 8.0;
     let (half_extent_x, half_extent_z) =
         rotated_ellipse_half_extents(heading_x, heading_z, radius_x_blocks, radius_z_blocks);
 
@@ -578,7 +578,7 @@ fn resolve_shoulder(
         heading_z,
         radius_x_blocks,
         radius_z_blocks,
-        strength_scale: (0.14 + source.cell.hilliness * 0.22).clamp(0.0, 0.72),
+        strength_scale: (0.10 + source.cell.hilliness * 0.18).clamp(0.0, 0.52),
         half_extent_x: half_extent_x + CLUSTER_SHOULDER_BOUND_PAD_BLOCKS,
         half_extent_z: half_extent_z + CLUSTER_SHOULDER_BOUND_PAD_BLOCKS,
     }
@@ -599,17 +599,17 @@ fn resolve_cluster_envelope(
         let delta_z = blob.lobe.center_z - center_z;
         let along = delta_x * cluster_heading.0 + delta_z * cluster_heading.1;
         let across = delta_x * -cluster_heading.1 + delta_z * cluster_heading.0;
-        along_extent = along_extent.max(along.abs() + blob.lobe.radius_x_blocks * 0.62);
-        across_extent = across_extent.max(across.abs() + blob.lobe.radius_z_blocks * 0.92);
+        along_extent = along_extent.max(along.abs() + blob.lobe.radius_x_blocks * 0.54);
+        across_extent = across_extent.max(across.abs() + blob.lobe.radius_z_blocks * 0.78);
     }
 
     let radius_scale = lerp_f32(
-        1.00,
-        1.16,
+        0.96,
+        1.08,
         lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_RADIUS_SALT),
     );
-    let radius_x_blocks = along_extent.max(24.0) * radius_scale + 10.0;
-    let radius_z_blocks = across_extent.max(20.0) * (radius_scale * 1.04) + 8.0;
+    let radius_x_blocks = along_extent.max(18.0) * radius_scale + 6.0;
+    let radius_z_blocks = across_extent.max(16.0) * (radius_scale * 1.02) + 6.0;
     let (half_extent_x, half_extent_z) = rotated_ellipse_half_extents(
         cluster_heading.0,
         cluster_heading.1,
@@ -626,13 +626,13 @@ fn resolve_cluster_envelope(
         radius_x_blocks,
         radius_z_blocks,
         fill_scale: lerp_f32(
-            0.14,
-            0.28,
+            0.08,
+            0.18,
             lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_FILL_SALT),
         ),
         shoulder_scale: lerp_f32(
-            0.26,
-            0.46,
+            0.18,
+            0.32,
             lobe_hash01(seed_source.coord, seed_source.cell, SOURCE_ENVELOPE_SHOULDER_SALT),
         ),
         half_extent_x,
@@ -736,7 +736,7 @@ fn cluster_envelope_footprint(
         / contour_scale.max(0.66);
     let outer = smoothstep_range(1.06, 0.0, radial);
     let inner = smoothstep_range(0.76, 0.0, radial);
-    (outer * 0.68 + inner * 0.32).clamp(0.0, 1.0)
+    (outer * 0.54 + inner * 0.46).clamp(0.0, 1.0)
 }
 
 fn summit_profile(footprint: f32, exponent: f32) -> f32 {

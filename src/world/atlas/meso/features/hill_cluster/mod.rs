@@ -323,11 +323,11 @@ fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -
         .clamp(0.18, 1.52);
     let keepout_radius_blocks = meso_span_blocks
         * lerp_f32(
-            0.60,
-            0.94,
+            0.52,
+            0.82,
             lobe_hash01(coord, cell, SOURCE_KEEPOUT_RADIUS_SALT),
         )
-        * (0.80 + cell.hilliness * 0.26 + (cell.hill_height / 20.0).clamp(0.0, 0.18));
+        * (0.76 + cell.hilliness * 0.22 + (cell.hill_height / 20.0).clamp(0.0, 0.14));
 
     Some(GuideSource {
         coord,

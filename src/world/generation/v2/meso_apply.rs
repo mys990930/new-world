@@ -178,8 +178,8 @@ fn hill_cluster_surface_delta(
     corridor_avoidance: f32,
 ) -> f32 {
     let surface_weight = hill_cluster_surface.blend_weight.max(
-        (hill_cluster_surface.shoulder_coverage * 0.86 + hill_cluster_surface.core_coverage * 0.32)
-            .clamp(0.0, 0.94),
+        (hill_cluster_surface.shoulder_coverage * 0.44 + hill_cluster_surface.core_coverage * 0.54)
+            .clamp(0.0, 0.88),
     );
     let corridor_weight = corridor_avoidance.clamp(0.0, 1.0).powf(0.5);
     let weight = surface_weight * allowed_weight * corridor_weight;
