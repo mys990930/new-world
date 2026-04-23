@@ -30,6 +30,7 @@
 - `Platform`
 - `EcsRuntime`
 - `WorldCore`
+- `SimulationCore`
 - `Option<CreatedWorldSource>`
 - `JobSystem`
 - `Renderer`
@@ -50,6 +51,7 @@ fn gameplay_active(&self) -> bool
 fn bridge_platform_to_ecs(&mut self)
 fn bridge_app_to_render_frame(&self) -> AppRenderFrameData
 fn begin_timed_frame(&mut self, now: Instant)
+fn run_fixed_updates(&mut self)
 fn should_run_frame(&self, now: Instant) -> bool
 fn frame_deadline(&self) -> Option<Instant>
 ```
@@ -59,6 +61,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - `platform`
 - `ecs`
 - `world`
+- `simulation`
 - `jobs`
 - `renderer`
 
@@ -79,7 +82,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - bootstrap.rs: module creation, created-world detection, initial preload, and spawn placement
 - runner.rs: winit `ApplicationHandler`, frame cadence, redraw, shutdown handling
 - frame.rs: frame update pipeline orchestration
-- fixed.rs: future fixed timestep orchestration
+- fixed.rs: fixed timestep orchestration and world-time-to-render-environment sync
 - bridge.rs: shared bridge DTO surface
 - bridge_input.rs: platform snapshot to ECS input translation
 - bridge_scene.rs: scene-frame and mesh-upload render translation
@@ -93,6 +96,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - bootstrap still creates the renderer before the real OS window exists, so it starts from `StubSurfaceTarget`
 - the real GPU surface still attaches in `runner.rs` during `resumed()`
 - the current frame path supports both created-world chunk loading and procedural generation, then meshing and renderer upload
+- app now also owns the first fixed-tick slice: it accumulates frame time, advances ECS fixed state, calls the simulation time subsystem, applies world-owned calendar/climate/weather updates, and refreshes the renderer environment
 - app now also owns steady-state chunk unload application because it is the layer that can coordinate `world.remove_chunk(...)`, renderer mesh removal, minimap cache invalidation, and stale-result acceptance in one place
 - the current minimap path is app-owned cached state: chunk load/generate results trigger background minimap-column rebuild jobs, and render bridging only composes the current player-centered viewport from cached column data
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`

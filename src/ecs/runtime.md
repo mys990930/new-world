@@ -13,6 +13,7 @@
 - `update`
 - `post_update`
 - `fixed_update`
+- fixed-phase resources such as `SimClock`, `ActiveSimRegion`, and `PendingSimulationResults`
 
 ## Inputs
 
@@ -35,7 +36,7 @@
 
 1. initialize the ECS world and schedules
 2. register core resources
-3. register systems for `pre`, `update`, `post`, and future `fixed`
+3. register systems for `pre`, `update`, `post`, and `fixed`
 4. let app drive the phase boundaries
 5. let app call world-aware helpers for:
    - local player collision / gravity motion
@@ -51,13 +52,19 @@
 - `PlayerMovementConfig`
 - `ToolCatalog`
 - `CameraState`
-  - `LocalPlayerEntity`
-  - `ChunkStates`
-  - `SelectionState`
+ - `LocalPlayerEntity`
+ - `ChunkStates`
+ - `SelectionState`
+ - `SimClock`
+ - `ActiveSimRegion`
+ - `SimulationControlState`
+ - `PendingSimulationResults`
 - current frame schedule:
   - pre: clear command buffer, clear frame camera impulses
   - update: input interpretation -> inventory command application -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
   - post: camera follow update
+- current fixed schedule:
+  - fixed: advance `SimClock` -> refresh `ActiveSimRegion` from the local player transform
 - current world-aware helpers are intentionally outside pure ECS systems because `WorldCore` stays app-owned:
   - `simulate_local_player_motion(&WorldCore)`
   - `update_selection_from_world(&WorldCore, viewport_width, viewport_height)`
@@ -74,6 +81,10 @@ EcsRuntime::run_pre_update()
 EcsRuntime::run_update()
 EcsRuntime::run_post_update()
 EcsRuntime::run_fixed_update()
+EcsRuntime::sim_clock() -> SimClock
+EcsRuntime::active_sim_region() -> ActiveSimRegion
+EcsRuntime::enqueue_simulation_results(results)
+EcsRuntime::drain_pending_simulation_results() -> Vec<SimulationResult>
 
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>

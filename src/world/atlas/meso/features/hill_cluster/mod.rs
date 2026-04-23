@@ -105,6 +105,17 @@ struct GuideSource {
     keepout_radius_blocks: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HillClusterPeakCandidate {
+    pub coord: AtlasCoord,
+    pub center_x: f32,
+    pub center_z: f32,
+    pub weight: f32,
+    pub keepout_radius_blocks: f32,
+    pub hilliness: f32,
+    pub hill_height: f32,
+}
+
 impl Default for GuideSource {
     fn default() -> Self {
         Self {
@@ -337,6 +348,43 @@ fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -
         weight,
         keepout_radius_blocks,
     })
+}
+
+fn collect_peak_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<GuideSource> {
+    let mut candidates = Vec::new();
+
+    for coord in guides.area().coords() {
+        let Some(cell) = guides.cells().get(coord).copied() else {
+            continue;
+        };
+        if !is_local_source_peak(guides, coord, cell) {
+            continue;
+        }
+        let Some(source) = guide_source(coord, cell, meso_span_blocks) else {
+            continue;
+        };
+        candidates.push(source);
+    }
+
+    candidates.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+    candidates
+}
+
+pub fn debug_peak_candidates(guides: &MesoGuideMap) -> Vec<HillClusterPeakCandidate> {
+    let meso_span_blocks = (crate::world::CHUNK_EDGE_I32
+        * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+    collect_peak_sources(guides, meso_span_blocks)
+        .into_iter()
+        .map(|source| HillClusterPeakCandidate {
+            coord: source.coord,
+            center_x: source.center_x,
+            center_z: source.center_z,
+            weight: source.weight,
+            keepout_radius_blocks: source.keepout_radius_blocks,
+            hilliness: source.cell.hilliness,
+            hill_height: source.cell.hill_height,
+        })
+        .collect()
 }
 
 fn dominant_apply_axis(sources: &[GuideSource]) -> (f32, f32) {
@@ -1225,6 +1273,43 @@ mod tests {
         assert!(
             (a - b).abs() >= 0.04,
             "expected irregular hill lobes to avoid mirror-symmetric blobs, got a={a:.3}, b={b:.3}"
+        );
+    }
+
+    #[test]
+    fn debug_peak_candidates_only_emit_local_hill_peaks() {
+        let area = crate::world::AtlasArea::new(AtlasCoord::new(0, 0), 4, 4).unwrap();
+        let mut cells = crate::world::AtlasGrid::defaulted(area);
+        *cells.get_mut(AtlasCoord::new(1, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.96,
+            hill_height: 12.2,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = MesoGuideCell {
+            hilliness: 0.81,
+            hill_height: 8.6,
+            ..MesoGuideCell::default()
+        };
+        *cells.get_mut(AtlasCoord::new(3, 3)).unwrap() = MesoGuideCell {
+            hilliness: 0.92,
+            hill_height: 10.4,
+            ..MesoGuideCell::default()
+        };
+        let guides = MesoGuideMap { area, cells };
+
+        let candidates = debug_peak_candidates(&guides);
+
+        assert!(
+            candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(1, 1)),
+            "expected strongest local hill cell to appear as a peak candidate, got {candidates:?}"
+        );
+        assert!(
+            candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(3, 3)),
+            "expected separated strong hill cell to appear as a peak candidate, got {candidates:?}"
+        );
+        assert!(
+            !candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(2, 1)),
+            "expected weaker adjacent hill cell to be filtered out as a non-peak, got {candidates:?}"
         );
     }
 

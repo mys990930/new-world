@@ -3,9 +3,9 @@ use crate::world::coord::ChunkCoord;
 
 use super::{
     GuideSource, HillClusterApplySample, HillClusterSurfaceSample, MacroLobeDescriptor,
-    dominant_apply_axis, ellipse_footprint, guide_source, indexed_lobe_hash01, insert_top3,
-    irregular_lobe_footprint, is_local_source_peak, lobe_hash01, macro_lobe_descriptor,
-    prune_cluster_sources, smoothstep01, smoothstep_range, soft_cap_positive, source_chain_heading,
+    dominant_apply_axis, ellipse_footprint, indexed_lobe_hash01, insert_top3,
+    irregular_lobe_footprint, lobe_hash01, macro_lobe_descriptor, prune_cluster_sources,
+    smoothstep01, smoothstep_range, soft_cap_positive, source_chain_heading,
 };
 use super::{
     SOURCE_CHAIN_SPACING_SALT, SOURCE_COUNT_SALT, SOURCE_ENVELOPE_FILL_SALT,
@@ -91,7 +91,7 @@ pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClus
     let meso_span_blocks =
         (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
     let chunk_bounds = chunk_bounds(chunk, 0.0);
-    let candidates = collect_candidate_sources(guides, meso_span_blocks);
+    let candidates = super::collect_peak_sources(guides, meso_span_blocks);
     let (min_region_x, max_region_x, min_region_z, max_region_z) =
         owner_region_range_for_chunk(chunk, WINDOW_OWNER_PADDING_REGIONS);
     let mut clusters = Vec::new();
@@ -110,26 +110,6 @@ pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClus
     });
 
     HillClusterWindow { chunk, clusters }
-}
-
-fn collect_candidate_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<GuideSource> {
-    let mut candidates = Vec::new();
-
-    for coord in guides.area().coords() {
-        let Some(cell) = guides.cells().get(coord).copied() else {
-            continue;
-        };
-        if !is_local_source_peak(guides, coord, cell) {
-            continue;
-        }
-        let Some(source) = guide_source(coord, cell, meso_span_blocks) else {
-            continue;
-        };
-        candidates.push(source);
-    }
-
-    candidates.sort_by(|a, b| b.weight.total_cmp(&a.weight));
-    candidates
 }
 
 fn resolve_owned_clusters(

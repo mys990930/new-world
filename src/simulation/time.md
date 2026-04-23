@@ -36,6 +36,13 @@
 - deferred seasonal patch records for far-away regions
 - dirty chunk / remesh hints when visual surface state changes
 
+## Concrete Types
+
+- `TimeSimConfig`
+- `TimeSimBundleInput`
+- `TimeSimCellInput`
+- `TimeSimInput`
+
 ## Processing Scale
 
 - every fixed tick
@@ -62,3 +69,10 @@
 - `../world/calendar.md`
 - `../world/surface/seasonal.md`
 - `../ecs/fixed.md`
+
+## Current Implementation Notes
+
+- the current step advances `WorldCalendar.absolute_tick` every fixed tick
+- the current minute boundary updates per-atlas-cell climate drift and local weather windows
+- the current season-change path emits deferred `SetSeasonalState(...)` patches rather than direct block edits
+- the current implementation is deterministic and tested, but it intentionally keeps nearby `WorldEdit` emission for later slices

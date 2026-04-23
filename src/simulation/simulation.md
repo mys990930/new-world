@@ -70,6 +70,7 @@
 
 ```rust
 SimulationCore::new(config: SimulationConfig) -> SimulationCore
+SimulationCore::config(&self) -> &SimulationConfig
 
 SimulationCore::step(
     subsystem: SubsystemId,
@@ -126,3 +127,9 @@ NOT:
 - world owns the source of truth for calendar, season phase, climate runtime state, and deferred environmental patches
 - simulation owns how those values advance on fixed tick boundaries
 - ECS should choose which regions are active enough for eager simulation and should consume the resulting state for gameplay and rendering bridges
+
+### Current Implementation Notes
+
+- the first concrete implementation only wires the `time` subsystem
+- `SimulationResult` can now carry a world-owned `CalendarAdvance` contract plus generic `WorldEdit` / event / follow-up fields
+- ecology, power, fluid, fire, and farming remain planned subsystem boundaries but are not implemented yet

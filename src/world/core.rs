@@ -1,6 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::atlas::{
+    AtlasArea, AtlasCoord, RegionClassMap, RegionClassSample, generate_atlas_fields,
+    generate_atlas_structure, resolve_region_classes,
+};
+use super::calendar::{
+    AtlasClimateRuntimeState, CalendarAdvance, CalendarApplyResult, DeferredSeasonPatch,
+    LocalWeatherState, WorldCalendar,
+};
 use super::chunk::{BlockId, ChunkData, ChunkSnapshot};
 use super::coord::{ChunkCoord, WorldBlockCoord, world_to_chunk_local};
 use super::edit::{EditError, EditResult, WorldEdit, remesh_targets_for_block};
@@ -12,6 +20,10 @@ pub struct WorldCore {
     meta: WorldMeta,
     block_registry: Arc<BlockRegistry>,
     loaded_chunks: HashMap<ChunkCoord, ChunkData>,
+    calendar: WorldCalendar,
+    climate_runtime: HashMap<AtlasCoord, AtlasClimateRuntimeState>,
+    local_weather: HashMap<AtlasCoord, LocalWeatherState>,
+    deferred_season_patches: Vec<DeferredSeasonPatch>,
 }
 
 impl WorldCore {
@@ -20,6 +32,10 @@ impl WorldCore {
             meta,
             block_registry,
             loaded_chunks: HashMap::new(),
+            calendar: WorldCalendar::default(),
+            climate_runtime: HashMap::new(),
+            local_weather: HashMap::new(),
+            deferred_season_patches: Vec::new(),
         }
     }
 
@@ -37,6 +53,51 @@ impl WorldCore {
 
     pub fn block_registry_handle(&self) -> Arc<BlockRegistry> {
         Arc::clone(&self.block_registry)
+    }
+
+    pub fn calendar(&self) -> &WorldCalendar {
+        &self.calendar
+    }
+
+    pub fn climate_state(&self, coord: AtlasCoord) -> AtlasClimateRuntimeState {
+        self.climate_runtime
+            .get(&coord)
+            .copied()
+            .unwrap_or_else(|| AtlasClimateRuntimeState::new(self.calendar.absolute_tick))
+    }
+
+    pub fn local_weather(&self, coord: AtlasCoord) -> Option<LocalWeatherState> {
+        self.local_weather.get(&coord).copied()
+    }
+
+    pub fn deferred_season_patches(&self) -> &[DeferredSeasonPatch] {
+        &self.deferred_season_patches
+    }
+
+    pub fn apply_calendar_advance(&mut self, advance: CalendarAdvance) -> CalendarApplyResult {
+        let mut result = CalendarApplyResult::default();
+        self.calendar = advance.calendar;
+
+        for update in advance.climate_updates {
+            self.climate_runtime.insert(update.coord, update.state);
+            if !result.changed_atlas_cells.contains(&update.coord) {
+                result.changed_atlas_cells.push(update.coord);
+            }
+        }
+
+        for update in advance.local_weather_updates {
+            self.local_weather.insert(update.coord, update.state);
+            if !result.weather_changed_cells.contains(&update.coord) {
+                result.weather_changed_cells.push(update.coord);
+            }
+            if !result.changed_atlas_cells.contains(&update.coord) {
+                result.changed_atlas_cells.push(update.coord);
+            }
+        }
+
+        result.deferred_patch_count = advance.deferred_patches.len();
+        self.deferred_season_patches.extend(advance.deferred_patches);
+        result
     }
 
     pub fn insert_chunk(&mut self, coord: ChunkCoord, mut chunk: ChunkData) {
@@ -83,6 +144,21 @@ impl WorldCore {
 
     pub fn snapshot_chunk(&self, coord: ChunkCoord) -> Option<ChunkSnapshot> {
         self.loaded_chunks.get(&coord).map(ChunkData::snapshot)
+    }
+
+    pub fn resolve_region_class_area(&self, area: AtlasArea) -> RegionClassMap {
+        let fields = generate_atlas_fields(self.meta(), area);
+        let structure = generate_atlas_structure(self.meta(), area);
+        resolve_region_classes(self.meta(), area, &fields, &structure)
+    }
+
+    pub fn sample_region_class_atlas(&self, coord: AtlasCoord) -> RegionClassSample {
+        let area = AtlasArea::new(coord, 1, 1).expect("single atlas-cell area must be valid");
+        let classes = self.resolve_region_class_area(area);
+        classes
+            .get(coord)
+            .copied()
+            .expect("resolved atlas area must contain its origin sample")
     }
 
     pub fn snapshot_region(&self, min: ChunkCoord, max: ChunkCoord) -> Vec<ChunkSnapshot> {
@@ -343,6 +419,46 @@ mod tests {
                 .and_then(|chunk| chunk.get_block(local_edge)),
             Some(BlockId::STONE)
         );
+    }
+
+    #[test]
+    fn apply_calendar_advance_updates_world_owned_environment_state() {
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
+        let coord = AtlasCoord::new(1, -2);
+        let calendar = WorldCalendar::default().advanced_minute(360);
+
+        let result = world.apply_calendar_advance(CalendarAdvance {
+            calendar,
+            climate_updates: vec![super::super::calendar::AtlasClimateRuntimeUpdate {
+                coord,
+                state: AtlasClimateRuntimeState {
+                    temperature_offset: 0.2,
+                    humidity_offset: -0.1,
+                    last_updated_tick: 20,
+                },
+            }],
+            local_weather_updates: vec![super::super::calendar::LocalWeatherUpdate {
+                coord,
+                state: LocalWeatherState::clear(coord, super::super::atlas::ClimateRegime::Continental, 20, 40),
+            }],
+            deferred_patches: vec![DeferredSeasonPatch {
+                target: super::super::calendar::DeferredSeasonPatchTarget::AtlasCell(coord),
+                kind: super::super::calendar::DeferredSeasonPatchKind::Bloom,
+                authored_at_tick: 20,
+                apply_on_realization: true,
+            }],
+        });
+
+        assert_eq!(world.calendar(), &calendar);
+        assert_eq!(world.climate_state(coord).temperature_offset, 0.2);
+        assert_eq!(
+            world.local_weather(coord).expect("weather update should be stored").kind,
+            super::super::calendar::LocalWeatherKind::Clear
+        );
+        assert_eq!(result.changed_atlas_cells, vec![coord]);
+        assert_eq!(result.weather_changed_cells, vec![coord]);
+        assert_eq!(result.deferred_patch_count, 1);
+        assert_eq!(world.deferred_season_patches().len(), 1);
     }
 
     #[test]

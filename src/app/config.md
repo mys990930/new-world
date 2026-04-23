@@ -16,6 +16,8 @@
 
 ### TimingConfig
 - `target_frame_rate: Option<u32>`
+- `fixed_tick_rate: u32`
+- `max_fixed_steps_per_frame: u32`
 
 ## Inputs
 
@@ -26,6 +28,7 @@
 
 - typed bootstrap inputs
 - frame pacing policy for `runner.rs`
+- fixed-step pacing policy for `fixed.rs`
 - created-world preferred-root and auto-detection policy for `bootstrap.rs`
 
 ## State Transition Rules
@@ -37,6 +40,8 @@
 
 - `target_frame_rate = Some(n)` is only valid for `n > 0`
 - `target_frame_rate = None` means uncapped frame cadence
+- `fixed_tick_rate` must be greater than zero
+- `max_fixed_steps_per_frame` bounds catch-up work
 - `preferred_created_world_root = Some(path)` means bootstrap should try that created world root before scanning the created worlds directory
 - `created_worlds_dir = Some(path)` means bootstrap may scan that directory for the latest created world root
 - `created_worlds_dir = None` disables created-world auto-detection
@@ -56,5 +61,7 @@
 ## Notes
 
 - the current default frame cap is `60 FPS`
-- the current default preferred created world is `target/world-create/runtime_seed_42_cx5_cz-8_r6_v10`
+- the current default fixed rate is `20 Hz`
+- the current default `max_fixed_steps_per_frame` is `4`
+- the current default preferred created world is `target/world-create/runtime_seed_42_160_-144`
 - the current default created-world scan directory is `target/world-create`

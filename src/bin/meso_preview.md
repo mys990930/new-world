@@ -14,6 +14,7 @@
 - optional sampling density via `--blocks-per-pixel <u32>`
 - optional feature isolation via `--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace>`
 - optional corridor mode via `--corridors <none|live>`
+- optional overlay via `--overlay <none|hill_peaks>`
 - optional flat baseline controls via:
   - `--base-height <f32>`
   - `--relief-budget <f32>`
@@ -28,6 +29,7 @@
   - center chunk region identity
   - original vs filtered meso guide sample
   - per-preview delta range and occupancy
+  - optional hill-peak candidate count when `--overlay hill_peaks` is enabled
   - applied feature keys on the center chunk
 
 ## Preview Model
@@ -38,6 +40,7 @@
 4. Replace the normal base prototype with a flat plain prototype using the requested `base_height` and `relief_budget`.
 5. Run the existing `build_chunk_meso_applied_prototype(...)` path.
 6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, chunk grid lines, and explicit chunk-coordinate reference labels.
+7. If `--overlay hill_peaks` is requested, draw the filtered hill-cluster local-peak candidates from the same guide map on top of that heatmap so candidate density can be inspected before source merge and pruning.
 
 ## Why Flat-Base Preview Exists
 
@@ -66,6 +69,12 @@ Inspect only hill clusters on a flat baseline:
 
 ```bash
 cargo run --bin meso_preview -- 42 --center-x -57 --center-z 93 --radius 10 --feature hill_cluster
+```
+
+Inspect hill clusters with local peak candidates overlaid:
+
+```bash
+cargo run --bin meso_preview -- 42 --center-x -57 --center-z 93 --radius 10 --feature hill_cluster --overlay hill_peaks
 ```
 
 Inspect all currently runtime-backed meso channels together:

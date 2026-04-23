@@ -18,10 +18,11 @@ pub use atlas_fields::{
 };
 pub use meso::{
     MESO_GUIDE_CELL_SIZE_IN_CHUNKS, MESO_GUIDE_CELLS_PER_ATLAS_CELL, MESO_REGION_EDGE_CELLS,
-    MesoCatalogEntry, MesoCatalogStatus, MesoFeatureDef, MesoGuideCell, MesoGuideMap,
-    MesoGuideSample, MesoRegion, MesoRegionCoord, generate_meso_guides, meso_catalog_entries,
-    meso_feature_def, meso_feature_defs, meso_region_coord_for_atlas,
-    meso_regions_covering_area, sample_meso_guides,
+    HillClusterPeakCandidate, MesoCatalogEntry, MesoCatalogStatus, MesoFeatureDef,
+    MesoGuideCell, MesoGuideMap, MesoGuideSample, MesoRegion, MesoRegionCoord,
+    debug_hill_cluster_peak_candidates, generate_meso_guides, meso_catalog_entries,
+    meso_feature_def, meso_feature_defs, meso_region_coord_for_atlas, meso_regions_covering_area,
+    sample_meso_guides,
 };
 pub(crate) use meso::{
     HillClusterSurfaceSample, build_hill_cluster_window, sample_hill_cluster_surface_from_window,

@@ -8,6 +8,10 @@ use super::chunk::ChunkStates;
 use super::command::{
     clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
 };
+use super::fixed::{
+    ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,
+    advance_sim_clock_system, update_active_sim_region_system,
+};
 use super::inventory::{
     PlayerInventory, ToolCatalog, apply_inventory_commands_system, local_player_inventory,
 };
@@ -18,6 +22,7 @@ use super::player::{
     LocalPlayerEntity, PlayerBody, PlayerMovementConfig, PlayerPhysicsState, Transform,
 };
 use super::selection::{SelectionState, update_selection_from_world};
+use crate::simulation::SimulationResult;
 use crate::world::WorldCore;
 
 pub struct EcsRuntime {
@@ -41,6 +46,10 @@ impl EcsRuntime {
         world.insert_resource(ToolCatalog::default());
         world.insert_resource(ChunkStates::default());
         world.insert_resource(SelectionState::default());
+        world.insert_resource(SimClock::default());
+        world.insert_resource(ActiveSimRegion::default());
+        world.insert_resource(SimulationControlState::default());
+        world.insert_resource(PendingSimulationResults::default());
 
         let mut pre_update = Schedule::default();
         pre_update.add_systems((clear_player_command_buffer_system, clear_camera_impulses_system));
@@ -59,13 +68,21 @@ impl EcsRuntime {
         );
         let mut post_update = Schedule::default();
         post_update.add_systems(update_camera_follow_system);
+        let mut fixed_update = Schedule::default();
+        fixed_update.add_systems(
+            (
+                advance_sim_clock_system,
+                update_active_sim_region_system,
+            )
+                .chain(),
+        );
 
         Self {
             world,
             pre_update,
             update,
             post_update,
-            fixed_update: Schedule::default(),
+            fixed_update,
         }
     }
 
@@ -104,6 +121,29 @@ impl EcsRuntime {
 
     pub fn run_fixed_update(&mut self) {
         self.fixed_update.run(&mut self.world);
+    }
+
+    pub fn sim_clock(&self) -> SimClock {
+        *self.world.resource::<SimClock>()
+    }
+
+    pub fn active_sim_region(&self) -> ActiveSimRegion {
+        *self.world.resource::<ActiveSimRegion>()
+    }
+
+    pub fn enqueue_simulation_results<I>(&mut self, results: I)
+    where
+        I: IntoIterator<Item = SimulationResult>,
+    {
+        self.world
+            .resource_mut::<PendingSimulationResults>()
+            .0
+            .extend(results);
+    }
+
+    pub fn drain_pending_simulation_results(&mut self) -> Vec<SimulationResult> {
+        let mut pending = self.world.resource_mut::<PendingSimulationResults>();
+        std::mem::take(&mut pending.0)
     }
 
     pub fn drain_player_commands(&mut self) -> Vec<PlayerCommand> {

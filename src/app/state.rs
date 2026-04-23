@@ -5,6 +5,7 @@ use crate::ecs::EcsRuntime;
 use crate::jobs::JobSystem;
 use crate::platform::Platform;
 use crate::renderer::Renderer;
+use crate::simulation::SimulationCore;
 use crate::world::{CreatedWorldSource, WorldCore};
 
 use super::{AppMinimapCache, AppUiState};
@@ -14,6 +15,7 @@ pub struct GameApp {
     pub platform: Platform,
     pub ecs: EcsRuntime,
     pub world: WorldCore,
+    pub simulation: SimulationCore,
     pub created_world: Option<CreatedWorldSource>,
     pub jobs: JobSystem,
     pub renderer: Renderer,
@@ -27,6 +29,7 @@ pub struct AppTimingState {
     pub frame_dt: Duration,
     pub last_frame_instant: Instant,
     pub next_frame_deadline: Option<Instant>,
+    pub fixed_accumulator: Duration,
 }
 
 impl AppTimingState {
@@ -43,6 +46,7 @@ impl AppTimingState {
             frame_dt: Duration::ZERO,
             last_frame_instant: now,
             next_frame_deadline,
+            fixed_accumulator: Duration::ZERO,
         }
     }
 }

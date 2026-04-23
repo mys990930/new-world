@@ -41,6 +41,16 @@
 - dirty chunk / remesh / save follow-up requests
 - active region envelopes for time/season/weather progression
 
+## Public Interface
+
+```rust
+EcsRuntime::run_fixed_update()
+EcsRuntime::sim_clock() -> SimClock
+EcsRuntime::active_sim_region() -> ActiveSimRegion
+EcsRuntime::enqueue_simulation_results(results)
+EcsRuntime::drain_pending_simulation_results() -> Vec<SimulationResult>
+```
+
 ## Process
 
 1. app requests a fixed-phase step
@@ -75,3 +85,10 @@
 - `chunk.rs`, `jobs.rs`, `world`, and `simulation` meet here
 - `player.rs` state is one of the key inputs for active-region selection
 - `../simulation/time.md` defines the time/season/weather rule side that this bridge should call into
+
+## Current Implementation Notes
+
+- the current fixed schedule only advances `SimClock` and refreshes a player-centered `ActiveSimRegion`
+- the current default active region is a single atlas cell around the local player
+- `PendingSimulationResults` now exists as the ECS-owned handoff buffer from fixed simulation into app/world follow-up handling
+- only the `time` simulation subsystem is wired in the current slice

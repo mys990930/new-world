@@ -13,6 +13,7 @@ impl GameApp {
 
         self.ecs
             .set_frame_delta_seconds(self.timing.frame_dt.as_secs_f32());
+        self.run_fixed_updates();
         self.bridge_platform_to_ecs();
         self.ecs.run_pre_update();
         self.ecs.run_update();

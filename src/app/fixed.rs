@@ -1,0 +1,217 @@
+use crate::renderer::RenderEnvironment;
+use crate::simulation::{
+    SimInputBundle, SimRegion, SimTick, SimulationResult, TimeSimBundleInput, TimeSimCellInput,
+};
+use crate::world::{
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasClimateRuntimeState, AtlasCoord, LocalWeatherState,
+    WorldCalendar, CHUNK_EDGE_I32,
+};
+
+use super::GameApp;
+
+impl GameApp {
+    pub(crate) fn run_fixed_updates(&mut self) {
+        let fixed_dt = self.config.timing.fixed_step_interval();
+        self.timing.fixed_accumulator = self
+            .timing
+            .fixed_accumulator
+            .saturating_add(self.timing.frame_dt);
+
+        let max_steps = self.config.timing.max_fixed_steps_per_frame.max(1);
+        let mut executed_steps = 0;
+        while self.timing.fixed_accumulator >= fixed_dt && executed_steps < max_steps {
+            self.ecs.run_fixed_update();
+            let active_region = self.ecs.active_sim_region();
+            let tick = SimTick {
+                index: self.ecs.sim_clock().tick_index,
+                delta: fixed_dt,
+            };
+            let sim_region = SimRegion {
+                center_atlas: active_region.center_atlas,
+                atlas_area: active_region.area,
+            };
+            let input = SimInputBundle {
+                time: Some(self.build_time_sim_input_bundle(active_region.center_atlas, active_region.area, tick)),
+            };
+            let results = self.simulation.step_all(tick, sim_region, input);
+            self.ecs.enqueue_simulation_results(results);
+            for result in self.ecs.drain_pending_simulation_results() {
+                self.apply_simulation_result(&result);
+            }
+
+            self.timing.fixed_accumulator = self.timing.fixed_accumulator.saturating_sub(fixed_dt);
+            executed_steps += 1;
+        }
+
+        if executed_steps >= max_steps && self.timing.fixed_accumulator > fixed_dt {
+            self.timing.fixed_accumulator = fixed_dt;
+        }
+    }
+
+    pub(crate) fn sync_renderer_environment_from_world(&mut self) {
+        let focus_atlas = self
+            .ecs
+            .local_player_transform()
+            .map(|transform| atlas_coord_for_translation(transform.translation))
+            .unwrap_or_else(|| self.ecs.active_sim_region().center_atlas);
+        let region = self.world.sample_region_class_atlas(focus_atlas);
+        let climate = self.world.climate_state(focus_atlas);
+        let weather = self.world.local_weather(focus_atlas).unwrap_or_else(|| {
+            LocalWeatherState::clear(
+                focus_atlas,
+                region.climate_regime,
+                self.world.calendar().absolute_tick,
+                self.world.calendar().absolute_tick,
+            )
+        });
+        self.renderer.set_environment(render_environment_from_world(
+            *self.world.calendar(),
+            climate,
+            weather,
+        ));
+    }
+
+    fn build_time_sim_input_bundle(
+        &self,
+        center_atlas: AtlasCoord,
+        area: crate::world::AtlasArea,
+        tick: SimTick,
+    ) -> TimeSimBundleInput {
+        let classes = self.world.resolve_region_class_area(area);
+        let weather_window_end = tick.index.saturating_add(
+            u64::from(self.simulation.config().time.ticks_per_game_minute.max(1)),
+        );
+        let mut cells = Vec::with_capacity(area.len());
+        for coord in area.coords() {
+            let region = classes
+                .get(coord)
+                .copied()
+                .unwrap_or_else(|| self.world.sample_region_class_atlas(center_atlas));
+            let climate_state = self.world.climate_state(coord);
+            let current_weather = self.world.local_weather(coord).unwrap_or_else(|| {
+                LocalWeatherState::clear(coord, region.climate_regime, tick.index, weather_window_end)
+            });
+            cells.push(TimeSimCellInput {
+                coord,
+                region,
+                climate_state,
+                current_weather,
+            });
+        }
+
+        TimeSimBundleInput {
+            world_seed: self.world.meta().seed,
+            calendar: *self.world.calendar(),
+            cells,
+        }
+    }
+
+    fn apply_simulation_result(&mut self, result: &SimulationResult) {
+        if let Some(advance) = result.calendar_advance.clone() {
+            self.world.apply_calendar_advance(advance);
+        }
+
+        for edit in result.world_edits.iter().cloned() {
+            let _ = self.world.apply_edit(edit);
+        }
+
+        self.sync_renderer_environment_from_world();
+    }
+}
+
+fn render_environment_from_world(
+    calendar: WorldCalendar,
+    climate: AtlasClimateRuntimeState,
+    weather: LocalWeatherState,
+) -> RenderEnvironment {
+    let hours = calendar.time_of_day_hours();
+    let day_angle = ((hours - 6.0) / 24.0) * std::f32::consts::TAU;
+    let solar = day_angle.sin().clamp(-1.0, 1.0);
+    let daylight = ((solar + 0.12) / 1.12).clamp(0.0, 1.0);
+    let twilight = (1.0 - ((hours - 18.0).abs() / 6.0)).clamp(0.0, 1.0);
+    let overcast = weather.overcast_factor();
+    let wetness = weather.wetness_factor();
+    let weather_strength = weather.weather_strength();
+    let temperature_bias = climate.temperature_offset.clamp(-1.0, 1.0);
+    let humidity = (0.46 + climate.humidity_offset + overcast * 0.18).clamp(0.0, 1.0);
+
+    let sky_day = [0.42, 0.69, 0.98];
+    let sky_dusk = [0.61, 0.44, 0.56];
+    let sky_night = [0.08, 0.10, 0.16];
+    let horizon_day = [0.80, 0.91, 0.99];
+    let horizon_dusk = [0.98, 0.63, 0.41];
+    let horizon_night = [0.11, 0.13, 0.20];
+    let sun_color_day = [1.02, 1.0, 0.95];
+    let sun_color_dusk = [1.10, 0.76, 0.49];
+
+    let mut sky_color = lerp3(
+        lerp3(sky_night, sky_dusk, twilight),
+        sky_day,
+        daylight,
+    );
+    let mut horizon_color = lerp3(
+        lerp3(horizon_night, horizon_dusk, twilight),
+        horizon_day,
+        daylight,
+    );
+    sky_color = lerp3(sky_color, [0.55, 0.58, 0.64], overcast * 0.45);
+    horizon_color = lerp3(horizon_color, [0.58, 0.61, 0.66], overcast * 0.38);
+
+    RenderEnvironment {
+        time_of_day_hours: hours,
+        sun_direction: normalize3([0.42, 0.12 + daylight * 0.88, -0.24]),
+        sun_color: lerp3(sun_color_dusk, sun_color_day, daylight),
+        sun_intensity: (0.10 + daylight * 1.18) * (1.0 - overcast * 0.28),
+        ambient_color: lerp3([0.13, 0.15, 0.22], [0.56, 0.64, 0.74], daylight),
+        ambient_intensity: 0.22 + daylight * 0.84,
+        fog_color: lerp3(horizon_color, sky_color, 0.35),
+        fog_density: 0.011 + overcast * 0.010 + (1.0 - daylight) * 0.009,
+        fog_height_falloff: 0.046 + overcast * 0.018,
+        sky_color,
+        horizon_color,
+        overcast,
+        weather_strength,
+        wetness,
+        climate_tint: [
+            (1.0 + temperature_bias * 0.10).clamp(0.82, 1.18),
+            (1.0 + humidity * 0.04).clamp(0.86, 1.14),
+            (1.0 - temperature_bias * 0.08).clamp(0.82, 1.18),
+        ],
+        climate_humidity: humidity,
+        climate_temperature_bias: temperature_bias,
+        top_face_boost: 0.18 + daylight * 0.16,
+        side_shadow_strength: 0.28 + (1.0 - daylight) * 0.18 + overcast * 0.10,
+        silhouette_boost: 0.16 + (1.0 - daylight) * 0.14,
+        saturation_boost: 0.02 + daylight * 0.04 - overcast * 0.03,
+    }
+}
+
+fn atlas_coord_for_translation(translation: [f32; 3]) -> AtlasCoord {
+    let atlas_span_blocks = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32).max(1);
+    AtlasCoord::new(
+        (translation[0].floor() as i32).div_euclid(atlas_span_blocks),
+        (translation[2].floor() as i32).div_euclid(atlas_span_blocks),
+    )
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length_sq = vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2];
+    if length_sq <= f32::EPSILON {
+        [0.0, 1.0, 0.0]
+    } else {
+        let inv_length = length_sq.sqrt().recip();
+        [
+            vector[0] * inv_length,
+            vector[1] * inv_length,
+            vector[2] * inv_length,
+        ]
+    }
+}
+
+fn lerp3(start: [f32; 3], end: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        start[0] + (end[0] - start[0]) * t,
+        start[1] + (end[1] - start[1]) * t,
+        start[2] + (end[2] - start[2]) * t,
+    ]
+}

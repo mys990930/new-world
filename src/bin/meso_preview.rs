@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
@@ -12,6 +13,7 @@ use new_world::world::{
     RegionClassSample, WorldMeta, build_chunk_meso_applied_prototype, build_chunk_v2_scaffold,
     empty_chunk_corridor_window, region_archetype_def, sample_meso_guides,
 };
+use new_world::world::atlas::{HillClusterPeakCandidate, debug_hill_cluster_peak_candidates};
 
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
@@ -187,10 +189,34 @@ impl CorridorMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewOverlay {
+    None,
+    HillPeaks,
+}
+
+impl PreviewOverlay {
+    fn parse(value: &str) -> Option<Self> {
+        match canonical_key(value).as_str() {
+            "none" | "off" => Some(Self::None),
+            "hillpeaks" | "hillpeak" | "peaks" => Some(Self::HillPeaks),
+            _ => None,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::HillPeaks => "hill_peaks",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PreviewConfig {
     feature: PreviewFeature,
     corridor_mode: CorridorMode,
+    overlay: PreviewOverlay,
     base_height: f32,
     relief_budget: f32,
     contour_step: f32,
@@ -220,6 +246,7 @@ struct ChunkPreviewPatch {
     cells: Vec<PreviewPixel>,
     summary: DeltaSummary,
     applied_feature_keys: Vec<&'static str>,
+    peak_candidates: Vec<HillClusterPeakCandidate>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -261,6 +288,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut blocks_per_pixel = DEFAULT_BLOCKS_PER_PIXEL;
     let mut feature = PreviewFeature::HillCluster;
     let mut corridor_mode = CorridorMode::None;
+    let mut overlay = PreviewOverlay::None;
     let mut base_height = DEFAULT_BASE_HEIGHT;
     let mut relief_budget = DEFAULT_RELIEF_BUDGET;
     let mut contour_step = DEFAULT_CONTOUR_STEP;
@@ -295,6 +323,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ))
                 })?;
             }
+            "--overlay" => {
+                let value = parse_required::<String>(&mut args, "overlay")?;
+                overlay = PreviewOverlay::parse(&value).ok_or_else(|| {
+                    cli_error(format!(
+                        "unknown overlay '{value}'; expected none or hill_peaks"
+                    ))
+                })?;
+            }
             "--base-height" => base_height = parse_required::<f32>(&mut args, "base-height")?,
             "--relief-budget" => {
                 relief_budget = parse_required::<f32>(&mut args, "relief-budget")?
@@ -316,6 +352,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let config = PreviewConfig {
         feature,
         corridor_mode,
+        overlay,
         base_height,
         relief_budget,
         contour_step,
@@ -329,6 +366,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             window.blocks_per_pixel,
             config.feature,
             config.corridor_mode,
+            config.overlay,
         )
     });
 
@@ -344,7 +382,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .find(|patch| patch.coord.0 == window.center_x && patch.coord.2 == window.center_z)
         .ok_or_else(|| cli_error("center chunk patch was not generated"))?;
     let summary = summarize_preview(&patches);
-    let image = render_preview(window, config, &patches, summary)?;
+    let peak_candidates = collect_unique_peak_candidates(window, &patches);
+    let image = render_preview(window, config, &patches, summary, &peak_candidates)?;
 
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
@@ -383,6 +422,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         summary.delta.positive_count,
         summary.delta.negative_count,
     );
+    if matches!(config.overlay, PreviewOverlay::HillPeaks) {
+        println!("hill peak candidates: {}", peak_candidates.len());
+    }
     println!(
         "center chunk delta: min={:.2}, max={:.2}, mean={:.2}, applied_features={}",
         center_patch.summary.min_delta,
@@ -434,6 +476,11 @@ fn build_chunk_preview_patch(
     };
     let prototype = flat_base_prototype(chunk, config.base_height, config.relief_budget);
     let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
+    let peak_candidates = if matches!(config.overlay, PreviewOverlay::HillPeaks) {
+        debug_hill_cluster_peak_candidates(&inputs.meso_guides)
+    } else {
+        Vec::new()
+    };
     let pixels_per_chunk = CHUNK_EDGE_I32 as u32 / blocks_per_pixel;
     let mut cells = Vec::with_capacity((pixels_per_chunk * pixels_per_chunk) as usize);
 
@@ -471,6 +518,7 @@ fn build_chunk_preview_patch(
         summary: summarize_patch(&cells),
         cells,
         applied_feature_keys: meso.applied_feature_keys,
+        peak_candidates,
     }
 }
 
@@ -564,6 +612,7 @@ fn render_preview(
     config: PreviewConfig,
     patches: &[ChunkPreviewPatch],
     summary: PreviewSummary,
+    peak_candidates: &[HillClusterPeakCandidate],
 ) -> Result<RgbImage, Box<dyn Error>> {
     let layout = window.canvas_layout()?;
     let mut image = RgbImage::from_pixel(layout.width, layout.height, Rgb([244, 240, 228]));
@@ -628,9 +677,101 @@ fn render_preview(
         }
     }
 
+    if matches!(config.overlay, PreviewOverlay::HillPeaks) {
+        draw_peak_overlay(&mut image, layout, window, peak_candidates);
+    }
+
     draw_coordinate_frame(&mut image, layout, window, pixels_per_chunk);
 
     Ok(image)
+}
+
+fn collect_unique_peak_candidates(
+    window: PreviewWindow,
+    patches: &[ChunkPreviewPatch],
+) -> Vec<HillClusterPeakCandidate> {
+    let min_world_x = window.min_chunk_x() * CHUNK_EDGE_I32;
+    let max_world_x = (window.max_chunk_x() + 1) * CHUNK_EDGE_I32;
+    let min_world_z = window.min_chunk_z() * CHUNK_EDGE_I32;
+    let max_world_z = (window.max_chunk_z() + 1) * CHUNK_EDGE_I32;
+    let mut deduped = BTreeMap::new();
+
+    for patch in patches {
+        for candidate in &patch.peak_candidates {
+            if candidate.center_x < min_world_x as f32
+                || candidate.center_x >= max_world_x as f32
+                || candidate.center_z < min_world_z as f32
+                || candidate.center_z >= max_world_z as f32
+            {
+                continue;
+            }
+            deduped
+                .entry((candidate.coord.x, candidate.coord.z))
+                .or_insert(*candidate);
+        }
+    }
+
+    let mut candidates = deduped.into_values().collect::<Vec<_>>();
+    candidates.sort_by(|a, b| {
+        b.weight
+            .total_cmp(&a.weight)
+            .then_with(|| a.coord.z.cmp(&b.coord.z))
+            .then_with(|| a.coord.x.cmp(&b.coord.x))
+    });
+    candidates
+}
+
+fn draw_peak_overlay(
+    image: &mut RgbImage,
+    layout: PreviewCanvasLayout,
+    window: PreviewWindow,
+    peak_candidates: &[HillClusterPeakCandidate],
+) {
+    let min_world_x = window.min_chunk_x() as f32 * CHUNK_EDGE_I32 as f32;
+    let min_world_z = window.min_chunk_z() as f32 * CHUNK_EDGE_I32 as f32;
+    let blocks_per_pixel = window.blocks_per_pixel as f32;
+
+    for candidate in peak_candidates {
+        let pixel_x = ((candidate.center_x - min_world_x) / blocks_per_pixel).round() as i32;
+        let pixel_z = ((candidate.center_z - min_world_z) / blocks_per_pixel).round() as i32;
+        draw_peak_marker(
+            image,
+            layout.map_offset_x as i32 + pixel_x,
+            layout.map_offset_z as i32 + pixel_z,
+        );
+    }
+}
+
+fn draw_peak_marker(image: &mut RgbImage, center_x: i32, center_z: i32) {
+    let outline = [36, 24, 22];
+    let fill = [210, 58, 52];
+    let accent = [255, 238, 224];
+
+    for offset in -3..=3 {
+        put_pixel_if_in_bounds(image, center_x + offset, center_z, outline);
+        put_pixel_if_in_bounds(image, center_x, center_z + offset, outline);
+    }
+    for offset in -2..=2 {
+        put_pixel_if_in_bounds(image, center_x + offset, center_z, fill);
+        put_pixel_if_in_bounds(image, center_x, center_z + offset, fill);
+    }
+    put_pixel_if_in_bounds(image, center_x, center_z, accent);
+}
+
+fn put_pixel_if_in_bounds(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3]) {
+    if x < 0 || y < 0 {
+        return;
+    }
+    let Ok(x) = u32::try_from(x) else {
+        return;
+    };
+    let Ok(y) = u32::try_from(y) else {
+        return;
+    };
+    if x >= image.width() || y >= image.height() {
+        return;
+    }
+    image.put_pixel(x, y, Rgb(color));
 }
 
 fn hillshade(
@@ -1146,11 +1287,13 @@ fn default_output_path(
     blocks_per_pixel: u32,
     feature: PreviewFeature,
     corridor_mode: CorridorMode,
+    overlay: PreviewOverlay,
 ) -> PathBuf {
     PathBuf::from(format!(
-        "target/meso-preview/seed_{seed}_{}_{}_cx{center_x}_cz{center_z}_r{radius}_bpp{blocks_per_pixel}.png",
+        "target/meso-preview/seed_{seed}_{}_{}_{}_cx{center_x}_cz{center_z}_r{radius}_bpp{blocks_per_pixel}.png",
         feature.key(),
         corridor_mode.key(),
+        overlay.key(),
     ))
 }
 
@@ -1205,7 +1348,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin meso_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace>] [--corridors <none|live>] [--base-height <f32>] [--relief-budget <f32>] [--contour-step <f32>] [--output <path>]\n\nThis preview isolates the post-prototype meso surface by replacing the normal base heightfield with a flat plain baseline and rendering the resulting meso delta field as a top-down heatmap."
+    "usage: cargo run --bin meso_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace>] [--corridors <none|live>] [--overlay <none|hill_peaks>] [--base-height <f32>] [--relief-budget <f32>] [--contour-step <f32>] [--output <path>]\n\nThis preview isolates the post-prototype meso surface by replacing the normal base heightfield with a flat plain baseline and rendering the resulting meso delta field as a top-down heatmap."
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1248,9 +1391,10 @@ mod tests {
             1,
             PreviewFeature::HillCluster,
             CorridorMode::None,
+            PreviewOverlay::None,
         );
         let output = output.to_string_lossy();
-        assert!(output.contains("seed_42_hill_cluster_none_cx-57_cz93_r10_bpp1.png"));
+        assert!(output.contains("seed_42_hill_cluster_none_none_cx-57_cz93_r10_bpp1.png"));
     }
 
     #[test]
@@ -1263,6 +1407,7 @@ mod tests {
             PreviewConfig {
                 feature: PreviewFeature::HillCluster,
                 corridor_mode: CorridorMode::None,
+                overlay: PreviewOverlay::None,
                 base_height: DEFAULT_BASE_HEIGHT,
                 relief_budget: DEFAULT_RELIEF_BUDGET,
                 contour_step: DEFAULT_CONTOUR_STEP,

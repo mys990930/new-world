@@ -3,6 +3,9 @@ pub mod features;
 
 pub use catalog::{MesoCatalogEntry, MesoCatalogStatus, meso_catalog_entries};
 pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
+pub use features::hill_cluster::{
+    HillClusterPeakCandidate, debug_peak_candidates as debug_hill_cluster_peak_candidates,
+};
 pub(crate) use features::hill_cluster::{
     HillClusterSurfaceSample, build_window as build_hill_cluster_window,
     sample_surface_from_window as sample_hill_cluster_surface_from_window,

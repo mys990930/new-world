@@ -44,7 +44,10 @@
 - `ChunkStates`
 - `ChunkLifecyclePlan`
 - `SelectionState`
-- future active-environment region metadata
+- `SimClock`
+- `ActiveSimRegion`
+- `SimulationControlState`
+- `PendingSimulationResults`
 
 #### Entities / Components
 
@@ -132,6 +135,10 @@ EcsRuntime::run_pre_update()
 EcsRuntime::run_update()
 EcsRuntime::run_post_update()
 EcsRuntime::run_fixed_update()
+EcsRuntime::sim_clock() -> SimClock
+EcsRuntime::active_sim_region() -> ActiveSimRegion
+EcsRuntime::enqueue_simulation_results(results)
+EcsRuntime::drain_pending_simulation_results() -> Vec<SimulationResult>
 
 EcsRuntime::spawn_default_player()
 EcsRuntime::drain_player_commands() -> Vec<PlayerCommand>
@@ -185,7 +192,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - selection.rs: world-raycast-based hover target state, tool preview, and build preview rules
 - chunk.rs: chunk interest / acquisition / render-ready meta state
 - jobs.rs: jobs result interpretation and deterministic follow-up requests
-- fixed.rs: future fixed-tick simulation flow
+- fixed.rs: fixed-tick simulation bridge resources and region selection
 
 ### Current Implementation Notes
 
@@ -196,4 +203,5 @@ EcsRuntime::plan_chunk_lifecycle(
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
-- planned time/season/weather work should keep the source-of-truth calendar and climate state in world, the fixed-tick progression rules in simulation, and the active-region plus gameplay-consumption logic in ECS
+- the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
+- time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries

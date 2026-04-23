@@ -7,6 +7,7 @@
 ## Responsibilities
 
 - inject app timing state as ECS frame delta
+- accumulate and execute app-owned fixed ticks before frame-phase gameplay work
 - handle app-owned screen shortcuts before gameplay logic
 - bridge platform snapshot into ECS input
 - run ECS `pre/update/post` phases
@@ -48,22 +49,23 @@
 ## Process
 
 1. inject `frame_dt` into ECS
-2. handle app-owned screen shortcuts
-3. if gameplay is inactive, only collect completed jobs and stop before ECS/world gameplay work
-4. `bridge_platform_to_ecs()`
-5. `ecs.run_pre_update()`
-6. `ecs.run_update()`
-7. collect any already-completed jobs into ECS/world/renderer/minimap cache
-8. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
-9. `ecs.run_post_update()`
-10. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
-11. apply unload coords to `WorldCore`, renderer chunk meshes, and minimap cache
-12. submit the planned jobs
-13. collect newly completed jobs again
-14. update `SelectionState` from the latest world state and viewport
-15. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-16. drain discrete commands without per-frame debug output
-17. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
+2. execute app-owned fixed ticks from the accumulated frame delta
+3. handle app-owned screen shortcuts
+4. if gameplay is inactive, only collect completed jobs and stop before ECS/world gameplay work
+5. `bridge_platform_to_ecs()`
+6. `ecs.run_pre_update()`
+7. `ecs.run_update()`
+8. collect any already-completed jobs into ECS/world/renderer/minimap cache
+9. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth
+10. `ecs.run_post_update()`
+11. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
+12. apply unload coords to `WorldCore`, renderer chunk meshes, and minimap cache
+13. submit the planned jobs
+14. collect newly completed jobs again
+15. update `SelectionState` from the latest world state and viewport
+16. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
+17. drain discrete commands without per-frame debug output
+18. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
 
@@ -90,6 +92,7 @@
 
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
+- the current fixed slice is intentionally narrow: world calendar, per-atlas climate drift, local weather windows, and renderer environment sync now advance on fixed ticks, while direct simulation-driven `WorldEdit` application remains a later step
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - the current inventory / quickslot HUD remains in normal `InGame` mode and is rendered as ECS-derived pixel-atlas UI over the scene
 - the current minimap no longer scans `WorldCore` every frame; it composes a one-chunk viewport from cached chunk-column top-down data rebuilt through jobs

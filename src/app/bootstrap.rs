@@ -10,6 +10,7 @@ use crate::renderer::{
     RenderConfig, RenderTextureArraySource, RenderTextureSource, RenderTextureTile, Renderer,
     RenderUiTextureSource, StubSurfaceTarget,
 };
+use crate::simulation::{SimulationConfig, SimulationCore};
 use crate::world::{
     CreatedWorldSource, CreateWorldConfig, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord,
     TextureTileSource, WorldCore, WorldMeta, detect_latest_created_world_root, generate_chunk,
@@ -52,12 +53,16 @@ impl GameApp {
             }
         }
         let jobs = JobSystem::new(JobConfig::default());
+        let simulation = SimulationCore::new(SimulationConfig::with_fixed_ticks_per_second(
+            config.timing.fixed_tick_rate,
+        ));
         let timing = AppTimingState::new(&config);
         let mut app = Self {
             config,
             platform,
             ecs,
             world,
+            simulation,
             created_world,
             jobs,
             renderer,
@@ -66,6 +71,7 @@ impl GameApp {
             timing,
         };
         app.queue_loaded_world_minimap_rebuilds();
+        app.sync_renderer_environment_from_world();
         app
     }
 
@@ -144,6 +150,7 @@ impl GameApp {
         self.jobs = JobSystem::new(JobConfig::default());
         self.minimap = AppMinimapCache::default();
         self.queue_loaded_world_minimap_rebuilds();
+        self.sync_renderer_environment_from_world();
         println!(
             "[app] loaded created world {} at chunk {} {}",
             root.display(),

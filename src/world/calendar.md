@@ -51,6 +51,16 @@
 - deferred patch queues for later realization
 - lazy catch-up surfaces for active-region realization
 
+## Public Interface
+
+```rust
+WorldCore::calendar(&self) -> &WorldCalendar
+WorldCore::climate_state(coord: AtlasCoord) -> AtlasClimateRuntimeState
+WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
+WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
+```
+
 ## Invariants
 
 1. world owns the source of truth for calendar/date/season state
@@ -69,3 +79,4 @@
 
 - this layer is meant to keep long-lived environmental truth in world even when only a small active region is simulated eagerly
 - nearby chunks may receive direct `WorldEdit` application, while distant chunks may receive deferred patches that are realized later
+- the current first slice stores runtime climate/weather state per atlas cell and appends deferred seasonal patches, but it does not yet mutate nearby realized blocks for seasonal visuals

@@ -1,6 +1,7 @@
 mod camera;
 mod chunk;
 mod command;
+mod fixed;
 mod inventory;
 mod input;
 mod jobs;
@@ -23,6 +24,10 @@ pub use chunk::{
 };
 #[allow(unused_imports)]
 pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
+#[allow(unused_imports)]
+pub use fixed::{
+    ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,
+};
 #[allow(unused_imports)]
 pub use inventory::{
     BUILD_REACH_BLOCKS, GENERAL_SLOT_COUNT, QUICKSLOT_COUNT, InventoryItem, InventorySlot,

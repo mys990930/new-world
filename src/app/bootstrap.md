@@ -15,12 +15,14 @@
 - open the configured preferred created world when available, otherwise auto-detect the latest created world
 - create `EcsRuntime`
 - create `WorldCore`
+- create `SimulationCore`
 - preload the initial spawn neighborhood into memory
 - spawn the default local player
 - place the player on a safe surface when preload data is available
 - create `JobSystem`
 - create `AppMinimapCache`
 - create `AppTimingState`
+- sync the initial renderer environment from world-owned calendar/weather state
 - assemble `GameApp`
 - provide app-owned create-world request / created-world reload helpers for the world-select screen
 
@@ -46,10 +48,12 @@
 11. spawn the default local player entity
 12. snap the local player to a safe loaded surface near the preload anchor when possible
 13. create `JobSystem`
-14. create an empty app-owned minimap cache
-15. queue initial minimap rebuild work for the already-preloaded chunk columns
-16. create app timing state
-17. return `GameApp`
+14. create `SimulationCore` from the configured fixed tick rate
+15. create an empty app-owned minimap cache
+16. queue initial minimap rebuild work for the already-preloaded chunk columns
+17. create app timing state
+18. sync the renderer environment from the initial world calendar/weather state
+19. return `GameApp`
 
 ## Output
 
@@ -81,5 +85,6 @@
 - bootstrap now aligns the renderer camera FOV with the ECS weak-perspective quarter-view constant so render projection and selection ray construction stay in sync
 - when a created world is found, bootstrap preloads a `5x5` horizontal neighborhood of created-world chunk columns around the created-world preview chunk so spawn placement and first-frame movement do not expose chunk edges immediately
 - when no created world is found, bootstrap falls back to generating a small procedural `5x5` neighborhood on the player plane
+- bootstrap now also seeds the renderer environment from world-owned calendar/climate/weather state instead of leaving startup on a permanently fixed renderer preset
 - the current app-owned world-select screen reuses bootstrap-style helpers to queue create-world work and reload the runtime into a newly selected created-world root without changing lower-layer ownership
 - after bootstrap or created-world reload, the current runtime seeds minimap jobs from the already-loaded chunk columns instead of deriving minimap cells directly in `bridge.rs`

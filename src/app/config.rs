@@ -14,6 +14,8 @@ pub struct AppConfig {
 #[derive(Debug, Clone)]
 pub struct TimingConfig {
     pub target_frame_rate: Option<u32>,
+    pub fixed_tick_rate: u32,
+    pub max_fixed_steps_per_frame: u32,
 }
 
 impl TimingConfig {
@@ -21,6 +23,10 @@ impl TimingConfig {
         self.target_frame_rate
             .filter(|target| *target > 0)
             .map(|target| Duration::from_secs_f64(1.0 / target as f64))
+    }
+
+    pub fn fixed_step_interval(&self) -> Duration {
+        Duration::from_secs_f64(1.0 / self.fixed_tick_rate.max(1) as f64)
     }
 }
 
@@ -43,6 +49,8 @@ impl Default for TimingConfig {
     fn default() -> Self {
         Self {
             target_frame_rate: Some(60),
+            fixed_tick_rate: 20,
+            max_fixed_steps_per_frame: 4,
         }
     }
 }

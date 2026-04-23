@@ -31,6 +31,10 @@
 - `meta`
 - `block_registry`
 - loaded chunk map keyed by `ChunkCoord`
+- `calendar`
+- atlas climate runtime map keyed by `AtlasCoord`
+- local weather map keyed by `AtlasCoord`
+- deferred seasonal patch queue
 
 ## Inputs
 
@@ -39,6 +43,7 @@
 - loaded/generated `ChunkData`
 - block/chunk queries
 - explicit `WorldEdit`
+- structured calendar/climate/weather advancement requests
 - `Ray3` and max ray distance
 
 ## Outputs
@@ -46,6 +51,7 @@
 - chunk presence / reference results
 - inserted or removed `ChunkData`
 - `EditResult`
+- `CalendarApplyResult`
 - snapshots and query results
 - `RaycastHit`
 - loaded chunk bounds
@@ -56,6 +62,10 @@ WorldCore::new(meta: WorldMeta, block_registry: Arc<BlockRegistry>) -> WorldCore
 WorldCore::block_registry(&self) -> &BlockRegistry
 WorldCore::block_registry_handle(&self) -> Arc<BlockRegistry>
 WorldCore::meta(&self) -> &WorldMeta
+WorldCore::calendar(&self) -> &WorldCalendar
+WorldCore::climate_state(coord: AtlasCoord) -> AtlasClimateRuntimeState
+WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
 
 WorldCore::has_chunk(coord: ChunkCoord) -> bool
 WorldCore::insert_chunk(coord: ChunkCoord, chunk: ChunkData)
@@ -68,6 +78,9 @@ WorldCore::get_chunk_mut(coord: ChunkCoord) -> Option<&mut ChunkData>
 WorldCore::snapshot_chunk(coord: ChunkCoord) -> Option<ChunkSnapshot>
 
 WorldCore::apply_edit(edit: WorldEdit) -> EditResult
+WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
+WorldCore::resolve_region_class_area(area: AtlasArea) -> RegionClassMap
+WorldCore::sample_region_class_atlas(coord: AtlasCoord) -> RegionClassSample
 WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 ```
 
@@ -95,3 +108,4 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 
 - `loaded_chunk_bounds()` exists specifically to support app/ECS helpers such as safe spawn placement without leaking the raw chunk map
 - created-world loading still inserts chunks through `WorldCore::insert_chunk(...)`; `world` owns the in-memory source of truth regardless of how a chunk was acquired
+- the first time/weather slice now also stores world-owned calendar, per-atlas climate drift, local weather windows, and deferred seasonal patch state directly in `WorldCore`

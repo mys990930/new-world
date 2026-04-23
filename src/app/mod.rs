@@ -6,6 +6,7 @@ mod bridge;
 mod bridge_input;
 mod bridge_scene;
 mod bridge_ui;
+mod fixed;
 mod frame;
 mod runner;
 mod ui;
