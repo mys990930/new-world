@@ -46,6 +46,32 @@ build_chunk_hydrology_solve(
 
 The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` plus `empty_hydrology_solve(...)`.
 
+## Internal Submodules
+
+- `hydrology.rs`
+  - public hydrology types and chunk-level orchestration
+  - selects the strongest corridor response per column, applies basin fallback, sanitizes output, and counts connected waterlines
+- `hydrology/context.rs`
+  - internal DTOs shared across hydrology passes, including branch keys, region style signals, corridor responses, and projected segment points
+- `hydrology/water_profile.rs`
+  - resolves the local longitudinal water-profile anchor before terrain shaping
+  - produces the common water-surface baseline and core floor target used by downstream passes
+- `hydrology/channel_carve.rs`
+  - computes active-channel incision layers and the base carved terrain height
+  - keeps core, bank, floodplain, and outer cut deltas explicit for later deposition/bench passes
+- `hydrology/floodplain_bench.rs`
+  - computes channel-adjacent shelf and floodplain bench adjustments that soften the carved transition
+  - returns inside-bend alignment for later bar/point-bar decisions
+- `hydrology/bars.rs`
+  - owns gravel bar / point-bar strength and near-water bar terrain adjustment
+  - creates explicit bank-side depositional flats against the expected visible-water reference rather than only painting a material mask
+  - keeps same-height depositional bands continuous across weak-curvature reaches, while allowing stronger bends to shift or concentrate the bar side
+- `hydrology/water_surface.rs`
+  - decides whether the final shaped column can hold visible standing water
+  - remains downstream of terrain shaping so water does not appear on unsupported shoulders
+- `hydrology/masks.rs`
+  - derives basin, saturation, water-presence, and final hydrology-mode masks for voxel/material policy
+
 ## Current Types
 
 - `HydrologyMode`
@@ -70,6 +96,7 @@ The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` p
   - optional `water_surface_height`
   - optional `channel_floor_height`
   - `saturation`
+  - `gravel_bar_strength`
   - `mode`
 
 ## Type Semantics
@@ -107,22 +134,29 @@ The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` p
 
 1. read the smoothed post-meso surface for the target chunk
 2. gather the relevant carried corridor branches, outlet context, and region hydrology modulation already assembled in `inputs`
-3. solve connected longitudinal water surfaces and outlet anchors from branch identity plus downstream grade, not from isolated local puddle heuristics
-4. derive local hydrology mode per column such as active channel, floodplain bench, lake bowl, wet basin margin, saturated lowland, or unaffected terrain
-5. carve the final hydrology-driven terrain surface from the smoothed baseline while preserving major non-water landform identity outside the active water influence
-6. assign standing-water or saturated-ground state from the connected solve
-7. emit a chunk-local `HydrologySolve` for voxelization
+3. resolve shared branch context and region hydrology style signals
+4. solve water-profile anchors from branch identity plus downstream grade, not from isolated local puddle heuristics
+5. carve active channel layers against the shared profile
+6. apply floodplain / bank bench shaping to blend the carve into surrounding terrain
+7. apply gravel bar / point-bar shaping outside the wetted ribbon where deposition is likely
+8. decide visible water surface only after terrain can physically support it
+9. derive hydrology masks and final mode per column such as active channel, floodplain bench, lake bowl, wet basin margin, saturated lowland, or unaffected terrain
+10. emit a chunk-local `HydrologySolve` for voxelization
 
 ## Current Minimal Implementation
 
 - evaluates the nearest carried corridor response per column after smoothing
+- now splits the monolithic corridor solve into internal pass modules for context, water profile, channel carve, floodplain bench, bars, visible water surface, and hydrology masks while preserving the public `build_chunk_hydrology_solve(...)` contract
 - blends biome, terrain-form, relief, and hydrology-context signals into late-stage river style knobs such as incision strength, transition softness, width variation, depth variation, meander support, outer spread, and confinement
 - derives a late-stage carved terrain height plus optional visible standing water from corridor geometry, downstream anchor tendencies, wetness, basinness, and region hydrology context
 - warps the carried branch into a deterministic meandered centerline before lateral distance falloff is evaluated, so the late carve can bend inside a macro corridor instead of staying locked to one straight segment
 - uses world-space domain-warped noise to vary channel width, wetted width, bank asymmetry, bed depth, floodplain reach, and outer transition distance continuously along the branch
-- composes the carve from nested outer-spread, floodplain, bank, and core incision layers instead of applying one flat y-delta inside one fixed mask, so the river influence can fade into the surrounding terrain rather than ending at a hard edge
+- composes the carve from nested outer-spread, floodplain, bank, and core incision layers plus noisy bank-shelf / bench lifting instead of applying one flat y-delta inside one fixed mask, so the river influence can fade into the surrounding terrain rather than ending at a hard edge
+- adds extra world-space carve breakup so channel-adjacent cut depth, bench height, and floodplain transitions do not resolve into one perfectly uniform band
 - treats atlas corridor width as a broad valley-envelope hint, not as the final wetted width; visible water now appears only when the carried branch segment actually approaches the chunk
 - only keeps standing water when the local carved trough and bank support can actually contain it; hydrology should not leave deep visible water perched on an uncarved shoulder
+- uses corridor ownership to detect local parent-child confluences and raises deposition strength near inside bends, widenings, slow reaches, and junctions
+- now emits `gravel_bar_strength` from an actual near-water bench pass so later voxel/material policy can recognize adjacent depositional benches without rediscovering them from scratch
 - includes a small basin fallback for standing-water bowls and wetland marking when no corridor dominates
 - keeps the result deterministic and chunk-local while preserving shared-edge water continuity for neighboring chunks that see the same carried branch
 - now normalizes late-stage saturation / height outputs to finite ranges before handoff so preview tinting and later consumers do not inherit `NaN` artifacts from rejected intermediate responses
@@ -139,6 +173,12 @@ The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` p
   - may lower or flatten terrain around active channels where region and corridor context support a broad wet opening
   - should remain shallower and wider than the main channel
   - may project a softer outer transition beyond the visible wetted ribbon so the carve can blend into adjacent terrain instead of terminating like a step cut
+- gravel bars and depositional benches
+  - flatten terrain immediately beside water toward a near-water freeboard where inside bends, local widenings, parent-child confluences, or slowing reaches imply lower transport energy
+  - should stay outside the core wetted ribbon and read as a bank-adjacent gravel flat before the valley wall or hillside climbs away, not as a mid-channel blockage or generic rocky exposure
+  - should be close enough to the local water surface to read as a depositional bar / creekside gravel beach rather than a high terrace
+  - should continue along matching depositional height bands unless branch curvature changes enough to move deposition to the opposite bank or concentrate it into a point bar
+  - should remain deterministic and continuous with the owning branch across chunk seams
 - lake basins and ponded outlets
   - may carve or preserve closed bowls only when the broader basin and outlet context supports standing water
   - should not trap water uphill from a valid basin spill path or coastal exit
@@ -155,6 +195,7 @@ The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` p
 5. hydrology must remain downstream of smoothing and upstream of voxelization
 6. final block materials and water voxels should derive from hydrology output plus surface policy, not from raw atlas wetness thresholds alone
 7. `terrain_height`, `water_surface_height`, `channel_floor_height`, and `saturation` exposed through `HydrologyColumn` must always be finite when present
+8. `gravel_bar_strength` exposed through `HydrologyColumn` must always stay finite and normalized to `0..1`
 
 ## Notes
 
