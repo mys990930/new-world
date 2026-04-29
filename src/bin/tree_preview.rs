@@ -4,7 +4,7 @@ use std::error::Error;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
-use new_world::ecs::{QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye};
+use new_world::ecs::QUARTER_VIEW_VERTICAL_WORLD_SIZE;
 use new_world::renderer::{
     CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex, OffscreenRenderRequest,
     RenderCameraState, RenderEnvironment, RenderMaterialKind, RenderProjectionMode,
@@ -17,8 +17,12 @@ use new_world::world::{
     generate_tree_blueprint, world_to_chunk_local,
 };
 
-const DEFAULT_IMAGE_WIDTH: u32 = 1200;
-const DEFAULT_IMAGE_HEIGHT: u32 = 900;
+const DEFAULT_IMAGE_WIDTH: u32 = 1600;
+const DEFAULT_IMAGE_HEIGHT: u32 = 1000;
+const PREVIEW_TREE_COUNT: usize = 5;
+const PREVIEW_TREE_SPACING_BLOCKS: i32 = 36;
+const PREVIEW_CAMERA_DISTANCE: f32 = 520.0;
+const PREVIEW_CAMERA_DOWNWARD_COMPONENT: f32 = 0.42;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
@@ -57,13 +61,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let registry = BlockRegistry::load_default()
         .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?;
     let palette = TreeBlockPalette::resolve_default(kind, &registry)?;
-    let blueprint = generate_tree_blueprint(TreeGenRequest {
-        kind,
-        origin: WorldBlockCoord(16, 1, 16),
-        seed,
-        palette,
-    });
-    let chunks = build_preview_chunks(&blueprint, &registry);
+    let blueprints = generate_preview_blueprints(kind, seed, palette);
+    let chunks = build_preview_chunks(&blueprints, &registry);
     let render_meshes = collect_render_meshes(&chunks, &registry);
     let bounds = combined_render_bounds(&render_meshes)
         .ok_or_else(|| cli_error("generated tree produced no renderable mesh"))?;
@@ -88,41 +87,99 @@ fn main() -> Result<(), Box<dyn Error>> {
     write_offscreen_png(&output, &image)?;
 
     println!("tree kind: {} ({})", kind.key(), kind.display_name());
-    println!("seed: {seed}");
-    println!("voxel count: {}", blueprint.voxels.len());
-    println!(
-        "bounds: min={:?} max={:?}",
-        blueprint.bounds.min, blueprint.bounds.max
-    );
+    println!("preview seed: {seed}");
+    for (index, blueprint) in blueprints.iter().enumerate() {
+        println!(
+            "tree {}: origin=({},{},{}) seed={} voxels={} bounds={:?}..{:?}",
+            index + 1,
+            blueprint.origin.0,
+            blueprint.origin.1,
+            blueprint.origin.2,
+            preview_tree_seed(seed, kind, index),
+            blueprint.voxels.len(),
+            blueprint.bounds.min,
+            blueprint.bounds.max
+        );
+    }
     println!("output: {}", output.display());
     Ok(())
 }
 
+fn generate_preview_blueprints(
+    kind: TreeKind,
+    preview_seed: u64,
+    palette: TreeBlockPalette,
+) -> Vec<TreeBlueprint> {
+    let start_x = -((PREVIEW_TREE_COUNT as i32 - 1) * PREVIEW_TREE_SPACING_BLOCKS) / 2;
+    (0..PREVIEW_TREE_COUNT)
+        .map(|index| {
+            let origin =
+                WorldBlockCoord(start_x + index as i32 * PREVIEW_TREE_SPACING_BLOCKS, 1, 0);
+            generate_tree_blueprint(TreeGenRequest {
+                kind,
+                origin,
+                seed: preview_tree_seed(preview_seed, kind, index),
+                palette,
+            })
+        })
+        .collect()
+}
+
 fn build_preview_chunks(
-    blueprint: &TreeBlueprint,
+    blueprints: &[TreeBlueprint],
     registry: &BlockRegistry,
 ) -> HashMap<ChunkCoord, ChunkData> {
     let mut chunks = HashMap::new();
     let ground = registry
         .block_id("grass")
         .unwrap_or(new_world::world::BlockId::GRASS);
+    let (min_x, max_x, min_z, max_z) = preview_ground_bounds(blueprints);
 
-    for x in -8..=24 {
-        for z in -8..=24 {
+    for x in min_x..=max_x {
+        for z in min_z..=max_z {
             set_world_block(&mut chunks, WorldBlockCoord(x, 0, z), ground);
         }
     }
 
-    for voxel in &blueprint.voxels {
-        let world = WorldBlockCoord(
-            blueprint.origin.0 + i32::from(voxel.offset[0]),
-            blueprint.origin.1 + i32::from(voxel.offset[1]),
-            blueprint.origin.2 + i32::from(voxel.offset[2]),
-        );
-        set_world_block(&mut chunks, world, voxel.block);
+    for blueprint in blueprints {
+        for voxel in &blueprint.voxels {
+            let world = WorldBlockCoord(
+                blueprint.origin.0 + i32::from(voxel.offset[0]),
+                blueprint.origin.1 + i32::from(voxel.offset[1]),
+                blueprint.origin.2 + i32::from(voxel.offset[2]),
+            );
+            set_world_block(&mut chunks, world, voxel.block);
+        }
     }
 
     chunks
+}
+
+fn preview_ground_bounds(blueprints: &[TreeBlueprint]) -> (i32, i32, i32, i32) {
+    let mut min_x = 0;
+    let mut max_x = 0;
+    let mut min_z = 0;
+    let mut max_z = 0;
+
+    for (index, blueprint) in blueprints.iter().enumerate() {
+        let tree_min_x = blueprint.origin.0 + i32::from(blueprint.bounds.min[0]);
+        let tree_max_x = blueprint.origin.0 + i32::from(blueprint.bounds.max[0]);
+        let tree_min_z = blueprint.origin.2 + i32::from(blueprint.bounds.min[2]);
+        let tree_max_z = blueprint.origin.2 + i32::from(blueprint.bounds.max[2]);
+        if index == 0 {
+            min_x = tree_min_x;
+            max_x = tree_max_x;
+            min_z = tree_min_z;
+            max_z = tree_max_z;
+        } else {
+            min_x = min_x.min(tree_min_x);
+            max_x = max_x.max(tree_max_x);
+            min_z = min_z.min(tree_min_z);
+            max_z = max_z.max(tree_max_z);
+        }
+    }
+
+    (min_x - 8, max_x + 8, min_z - 8, max_z + 8)
 }
 
 fn set_world_block(
@@ -253,7 +310,7 @@ fn build_preview_camera(
     quarter_turns: u8,
 ) -> RenderCameraState {
     let aspect = width as f32 / height as f32;
-    let basis = quarter_view_basis(quarter_turns);
+    let basis = low_angle_preview_basis(quarter_turns);
     let target = [
         (bounds.min[0] + bounds.max[0]) * 0.5,
         bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.45,
@@ -273,10 +330,10 @@ fn build_preview_camera(
     }
 
     let half_height =
-        (up_extent.max(right_extent / aspect) * 1.22).max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.35);
+        (up_extent.max(right_extent / aspect) * 1.08).max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.32);
 
     RenderCameraState {
-        eye: quarter_view_eye(target, quarter_turns),
+        eye: add3(target, scale3(basis.forward, -PREVIEW_CAMERA_DISTANCE)),
         target,
         up: basis.up,
         aspect_override: Some(aspect),
@@ -294,11 +351,32 @@ fn build_preview_camera(
 fn preview_environment() -> RenderEnvironment {
     let mut environment = RenderEnvironment::midday_quarter_view();
     environment.fog_density = 0.0;
-    environment.ambient_intensity = 1.05;
-    environment.sun_intensity = 1.05;
-    environment.top_face_boost = 0.20;
-    environment.side_shadow_strength = 0.22;
+    environment.ambient_intensity = 0.98;
+    environment.sun_intensity = 1.24;
+    environment.top_face_boost = 0.28;
+    environment.side_shadow_strength = 0.36;
+    environment.silhouette_boost = 0.22;
+    environment.saturation_boost = 0.08;
     environment
+}
+
+fn low_angle_preview_basis(quarter_turns: u8) -> RenderViewBasis {
+    let horizontal = (1.0 - PREVIEW_CAMERA_DOWNWARD_COMPONENT * PREVIEW_CAMERA_DOWNWARD_COMPONENT)
+        .max(0.0)
+        .sqrt();
+    let inv_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
+    let right = rotate_y_quarter_turns([inv_sqrt_2, 0.0, inv_sqrt_2], quarter_turns);
+    let forward = normalize3(rotate_y_quarter_turns(
+        [
+            -horizontal * inv_sqrt_2,
+            -PREVIEW_CAMERA_DOWNWARD_COMPONENT,
+            horizontal * inv_sqrt_2,
+        ],
+        quarter_turns,
+    ));
+    let up = normalize3(cross3(forward, right));
+
+    RenderViewBasis { right, up, forward }
 }
 
 fn bounds_corners(bounds: new_world::renderer::RenderBounds) -> [[f32; 3]; 8] {
@@ -316,6 +394,57 @@ fn bounds_corners(bounds: new_world::renderer::RenderBounds) -> [[f32; 3]; 8] {
 
 fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+fn scale3(vector: [f32; 3], scalar: f32) -> [f32; 3] {
+    [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar]
+}
+
+fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length_sq = dot3(vector, vector);
+    if length_sq <= f32::EPSILON {
+        [0.0, 1.0, 0.0]
+    } else {
+        scale3(vector, length_sq.sqrt().recip())
+    }
+}
+
+fn rotate_y_quarter_turns(vector: [f32; 3], quarter_turns: u8) -> [f32; 3] {
+    match quarter_turns % 4 {
+        0 => vector,
+        1 => [vector[2], vector[1], -vector[0]],
+        2 => [-vector[0], vector[1], -vector[2]],
+        3 => [-vector[2], vector[1], vector[0]],
+        _ => unreachable!(),
+    }
+}
+
+fn preview_tree_seed(preview_seed: u64, kind: TreeKind, index: usize) -> u64 {
+    let value = preview_seed
+        ^ (kind.key().bytes().fold(0_u64, |hash, byte| {
+            hash.wrapping_mul(131).wrapping_add(u64::from(byte))
+        }))
+        ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    splitmix64(value)
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 fn parse_required<T>(args: &mut Vec<String>, name: &'static str) -> Result<T, Box<dyn Error>>

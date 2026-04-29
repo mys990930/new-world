@@ -48,14 +48,20 @@ generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
 
 ## Tree Kinds
 
-- `PolarTundraShrub`: low, crooked shrub form.
-- `BorealTaigaConifer`: tall pointed conifer with stacked triangular leaf shelves.
-- `TemperateDeciduous`: broad oak-like trunk with rounded crown.
-- `TemperateBirch`: pale straight trunk with light oval crown.
-- `MediterraneanOlive`: low, spreading, sparse dry-climate crown.
-- `SwampCypress`: wetland tree with exposed roots and hanging vines.
-- `SavannaAcacia`: tall trunk with sparse branches and umbrella crown.
-- `TropicalRainforestJungle`: very tall dense tree with layered crown and vines.
+- `PolarTundraShrub`: low, crooked shrub form, roughly 1.0-2.0m tall.
+- `BorealTaigaConifer`: pointed conifer with stacked triangular leaf shelves, roughly 7.0-11.5m tall.
+- `TemperateDeciduous`: broad oak-like trunk with rounded crown, roughly 5.0-8.0m tall.
+- `TemperateBirch`: pale straight trunk with light oval crown, roughly 6.0-10.0m tall.
+- `MediterraneanOlive`: low, spreading, sparse dry-climate crown, roughly 3.0-5.5m tall.
+- `SwampCypress`: wetland tree with exposed roots and hanging vines, roughly 7.0-11.5m tall.
+- `SavannaAcacia`: tall trunk with sparse branches and umbrella crown, roughly 5.5-9.0m tall.
+- `TropicalRainforestJungle`: very tall dense tree with layered crown and vines, roughly 12.0-19.0m tall.
+
+## Scale
+
+- Tree rules emit block offsets, but their dimensions are authored against the world coordinate contract in `coord.md`.
+- The current world scale is `1 block = 0.5m`, so tree heights and crown radii use two block units per meter.
+- Rule constants should be kept in block counts that correspond to the intended physical tree size, not in abstract visual units.
 
 ## Invariants
 

@@ -19,7 +19,7 @@
 | `terrain_corridor` | Atlas-scale ocean-to-mountain corridor search and chart | Works |
 | `terrain_find` | Search for chunk candidates by launch archetype and meso preferences | Works |
 | `terrain_probe` | Per-chunk / per-column generation probe dump | Currently blocked by `probe_chunk(...)` and `probe_column(...)` TODO |
-| `tree_preview` | Quarter-view preview of one generated climate tree blueprint | Works |
+| `tree_preview` | Quarter-view preview of five generated variants for one climate tree blueprint | Works |
 | `world_coords` | Inspect an existing created-world manifest and print preview coordinates | Works if `manifest.toml` already exists |
 | `world_create` | Generate and persist a created-world dump | Currently blocked by `generate_chunk(...)` TODO |
 
@@ -240,15 +240,15 @@ cargo run --bin terrain_probe -- 42 --chunk-x 0 --chunk-z 0 --local-x 16 --local
 
 ## tree_preview
 
-- Purpose: render one deterministic `world::tree` blueprint with the default tree block palette.
+- Purpose: render five deterministic variants of one `world::tree` blueprint kind with the default tree block palette.
 - Parameters:
-  - positional: `<tree-kind> <seed>`
+  - positional: `<tree-kind> <preview-seed>`
   - optional: `--output <path>`, `--width <u32>`, `--height <u32>`, `--quarter-turns <u8>`
 - Defaults:
-  - `--width 1200`
-  - `--height 900`
+  - `--width 1600`
+  - `--height 1000`
   - `--quarter-turns 0`
-  - `--output target/tree-preview/<tree-kind>_seed_<seed>.png`
+  - `--output target/tree-preview/<tree-kind>_seed_<preview-seed>.png`
 - Example:
 
 ```bash
@@ -257,6 +257,8 @@ cargo run --bin tree_preview -- jungle 42 --output target/tree-preview/jungle.pn
 
 - Notes:
   - This tool does not mutate `WorldCore`; it folds the generated tree voxels into temporary chunks only for meshing and offscreen rendering.
+  - The preview renders five same-kind variants spaced 36 blocks apart on a temporary `grass` block plane.
+  - The preview uses a lower-than-gameplay camera angle and tighter framing for clearer tree reads.
   - See [tree_preview.md](./tree_preview.md).
 
 ## world_coords

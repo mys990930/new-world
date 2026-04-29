@@ -267,7 +267,7 @@ fn build_polar_tundra_shrub(
     rng: &mut TreeRng,
     palette: TreeBlockPalette,
 ) {
-    let height = 3 + rng.range_i16(0, 2);
+    let height = 2 + rng.range_i16(0, 2);
     let lean = direction4(rng.next_u32());
     let bend_at = 1 + rng.range_i16(0, 1);
     let mut x = 0;
@@ -290,7 +290,8 @@ fn build_polar_tundra_shrub(
     }
 
     for center in [[x, height, z], [x - lean.0, height - 1, z - lean.1]] {
-        add_blob(builder, rng, center, 2, 1, palette.leaves, 70);
+        let radius = 2 + rng.range_i16(0, 1);
+        add_blob(builder, rng, center, radius, 1, palette.leaves, 66);
         builder.put(center, palette.leaves, TreeVoxelRole::Leaf);
     }
 }
@@ -300,18 +301,19 @@ fn build_boreal_taiga_conifer(
     rng: &mut TreeRng,
     palette: TreeBlockPalette,
 ) {
-    let height = 9 + rng.range_i16(0, 5);
+    let height = 14 + rng.range_i16(0, 8);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
     }
 
     for y in 2..=height {
         let distance_from_top = height - y;
-        let mut radius = 1 + distance_from_top / 3;
-        radius = radius.clamp(1, 4);
+        let mut radius = 1 + distance_from_top / 4;
+        radius = radius.clamp(1, 5);
         if y % 2 == 0 {
             radius += 1;
         }
+        radius = radius.clamp(1, 6);
         add_conifer_layer(builder, rng, y, radius, palette.leaves);
     }
 
@@ -323,17 +325,17 @@ fn build_temperate_deciduous(
     rng: &mut TreeRng,
     palette: TreeBlockPalette,
 ) {
-    let height = 6 + rng.range_i16(0, 3);
+    let height = 10 + rng.range_i16(0, 5);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        if y < 3 && rng.chance(1, 2) {
+        if y < 5 && rng.chance(1, 2) {
             builder.put([1, y, 0], palette.trunk, TreeVoxelRole::Trunk);
         }
     }
 
-    let branch_y = height - 2;
+    let branch_y = height - 4;
     for dir in shuffled_dirs4(rng.next_u32()) {
-        let length = 2 + rng.range_i16(0, 1);
+        let length = 3 + rng.range_i16(0, 2);
         for step in 1..=length {
             builder.put(
                 [dir.0 * step, branch_y + step / 2, dir.1 * step],
@@ -343,12 +345,13 @@ fn build_temperate_deciduous(
         }
     }
 
-    add_blob(builder, rng, [0, height, 0], 4, 3, palette.leaves, 82);
-    add_blob(builder, rng, [1, height - 1, -1], 3, 2, palette.leaves, 78);
+    add_blob(builder, rng, [0, height, 0], 5, 4, palette.leaves, 78);
+    add_blob(builder, rng, [2, height - 2, -1], 4, 3, palette.leaves, 72);
+    add_blob(builder, rng, [-2, height - 1, 1], 3, 2, palette.leaves, 70);
 }
 
 fn build_temperate_birch(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: TreeBlockPalette) {
-    let height = 7 + rng.range_i16(0, 4);
+    let height = 12 + rng.range_i16(0, 6);
     let lean = if rng.chance(1, 3) {
         direction4(rng.next_u32())
     } else {
@@ -364,8 +367,8 @@ fn build_temperate_birch(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: 
         builder.put([x, y, z], palette.trunk, TreeVoxelRole::Trunk);
     }
 
-    add_blob(builder, rng, [x, height, z], 3, 3, palette.leaves, 72);
-    add_blob(builder, rng, [x, height + 1, z], 2, 2, palette.leaves, 76);
+    add_blob(builder, rng, [x, height, z], 4, 4, palette.leaves, 66);
+    add_blob(builder, rng, [x, height + 2, z], 3, 2, palette.leaves, 70);
 }
 
 fn build_mediterranean_olive(
@@ -373,16 +376,16 @@ fn build_mediterranean_olive(
     rng: &mut TreeRng,
     palette: TreeBlockPalette,
 ) {
-    let height = 4 + rng.range_i16(0, 2);
+    let height = 6 + rng.range_i16(0, 3);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        if y < 2 {
+        if y < 3 {
             builder.put([1, y, 0], palette.trunk, TreeVoxelRole::Trunk);
         }
     }
 
     for dir in shuffled_dirs4(rng.next_u32()) {
-        let length = 3 + rng.range_i16(0, 2);
+        let length = 5 + rng.range_i16(0, 3);
         for step in 1..=length {
             builder.put(
                 [dir.0 * step, height - 1 + step / 3, dir.1 * step],
@@ -394,16 +397,16 @@ fn build_mediterranean_olive(
             builder,
             rng,
             [dir.0 * length, height, dir.1 * length],
-            3,
-            1,
+            4,
+            2,
             palette.leaves,
-            52,
+            44,
         );
     }
 }
 
 fn build_swamp_cypress(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: TreeBlockPalette) {
-    let height = 8 + rng.range_i16(0, 4);
+    let height = 14 + rng.range_i16(0, 7);
     let root_block = palette.root.unwrap_or(palette.trunk);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
@@ -413,7 +416,7 @@ fn build_swamp_cypress(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: Tr
     }
 
     for dir in dirs8() {
-        let length = if dir.0 == 0 || dir.1 == 0 { 3 } else { 2 };
+        let length = if dir.0 == 0 || dir.1 == 0 { 5 } else { 3 };
         for step in 1..=length {
             builder.put(
                 [dir.0 * step, 0, dir.1 * step],
@@ -430,21 +433,21 @@ fn build_swamp_cypress(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: Tr
         }
     }
 
-    add_blob(builder, rng, [0, height, 0], 4, 2, palette.leaves, 68);
-    add_blob(builder, rng, [1, height - 1, 1], 3, 2, palette.leaves, 64);
+    add_blob(builder, rng, [0, height, 0], 5, 3, palette.leaves, 64);
+    add_blob(builder, rng, [1, height - 2, 1], 4, 3, palette.leaves, 58);
     if let Some(vine) = palette.vine {
-        add_hanging_vines(builder, rng, height - 1, 4, vine, 7);
+        add_hanging_vines(builder, rng, height - 1, 5, vine, 10);
     }
 }
 
 fn build_savanna_acacia(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: TreeBlockPalette) {
-    let height = 7 + rng.range_i16(0, 3);
+    let height = 11 + rng.range_i16(0, 5);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
     }
 
     for dir in shuffled_dirs4(rng.next_u32()).into_iter().take(3) {
-        let length = 3 + rng.range_i16(0, 2);
+        let length = 5 + rng.range_i16(0, 3);
         for step in 1..=length {
             builder.put(
                 [dir.0 * step, height - 1 + step / 3, dir.1 * step],
@@ -454,8 +457,8 @@ fn build_savanna_acacia(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: T
         }
     }
 
-    add_flat_canopy(builder, rng, [0, height + 1, 0], 5, palette.leaves, 64);
-    add_flat_canopy(builder, rng, [1, height, -1], 4, palette.leaves, 54);
+    add_flat_canopy(builder, rng, [0, height + 2, 0], 8, palette.leaves, 54);
+    add_flat_canopy(builder, rng, [2, height + 1, -1], 6, palette.leaves, 46);
 }
 
 fn build_tropical_rainforest_jungle(
@@ -463,11 +466,11 @@ fn build_tropical_rainforest_jungle(
     rng: &mut TreeRng,
     palette: TreeBlockPalette,
 ) {
-    let height = 13 + rng.range_i16(0, 6);
+    let height = 24 + rng.range_i16(0, 10);
     let root_block = palette.root.unwrap_or(palette.trunk);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        if y < height - 3 {
+        if y < height - 5 {
             builder.put([1, y, 0], palette.trunk, TreeVoxelRole::Trunk);
             if y % 2 == 0 {
                 builder.put([0, y, 1], palette.trunk, TreeVoxelRole::Trunk);
@@ -476,7 +479,7 @@ fn build_tropical_rainforest_jungle(
     }
 
     for dir in dirs8() {
-        for step in 1..=2 {
+        for step in 1..=3 {
             builder.put(
                 [dir.0 * step, step - 1, dir.1 * step],
                 root_block,
@@ -485,12 +488,20 @@ fn build_tropical_rainforest_jungle(
         }
     }
 
-    add_blob(builder, rng, [0, height, 0], 5, 3, palette.leaves, 86);
-    add_blob(builder, rng, [2, height - 3, 1], 4, 2, palette.leaves, 76);
-    add_blob(builder, rng, [-2, height - 6, -1], 3, 2, palette.leaves, 72);
+    add_blob(builder, rng, [0, height, 0], 6, 4, palette.leaves, 78);
+    add_blob(builder, rng, [3, height - 5, 1], 5, 3, palette.leaves, 68);
+    add_blob(
+        builder,
+        rng,
+        [-3, height - 10, -1],
+        4,
+        3,
+        palette.leaves,
+        62,
+    );
 
     if let Some(vine) = palette.vine {
-        add_hanging_vines(builder, rng, height, 5, vine, 12);
+        add_hanging_vines(builder, rng, height, 6, vine, 18);
     }
 }
 
@@ -610,7 +621,7 @@ impl TreeBuilder {
         Self {
             kind,
             origin,
-            voxels: Vec::with_capacity(256),
+            voxels: Vec::with_capacity(768),
         }
     }
 
