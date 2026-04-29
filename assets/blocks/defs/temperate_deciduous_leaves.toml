@@ -1,0 +1,9 @@
+id = 37
+key = "temperate_deciduous_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "temperate_deciduous_leaves"
+bottom = "temperate_deciduous_leaves"
+side = "temperate_deciduous_leaves"

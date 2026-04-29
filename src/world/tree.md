@@ -1,0 +1,72 @@
+# tree
+
+## Role
+
+- provide deterministic voxel tree blueprints for later chunk generation
+- own tree form rules without mutating loaded world storage
+
+## Responsibilities
+
+- define supported climate tree kinds
+- define per-kind trunk, branch, leaf, root, and vine voxel rules
+- vary each tree deterministically from a seed while keeping the same rule family
+- emit compact relative voxel lists that generation can place into chunks later
+- resolve default per-tree block palettes through `BlockRegistry`
+
+## Non-Responsibilities
+
+- deciding where trees spawn
+- deciding forest density
+- mutating `WorldCore`
+- writing blocks into live chunks
+- owning ecology, seasonal growth, or biome classification
+- loading PNG textures or renderer resources
+
+## Owned Data
+
+- `TreeKind`
+- `TreeBlockPalette`
+- `TreeGenRequest`
+- `TreeVoxelRole`
+- `TreeVoxel`
+- `TreeBounds`
+- `TreeBlueprint`
+- `TreePaletteError`
+
+## Public Interface
+
+```rust
+TreeKind::from_key(key: &str) -> Option<TreeKind>
+TreeKind::key(self) -> &'static str
+TreeKind::all() -> &'static [TreeKind]
+
+TreeBlockPalette::resolve_default(kind: TreeKind, registry: &BlockRegistry)
+    -> Result<TreeBlockPalette, TreePaletteError>
+
+generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
+```
+
+## Tree Kinds
+
+- `PolarTundraShrub`: low, crooked shrub form.
+- `BorealTaigaConifer`: tall pointed conifer with stacked triangular leaf shelves.
+- `TemperateDeciduous`: broad oak-like trunk with rounded crown.
+- `TemperateBirch`: pale straight trunk with light oval crown.
+- `MediterraneanOlive`: low, spreading, sparse dry-climate crown.
+- `SwampCypress`: wetland tree with exposed roots and hanging vines.
+- `SavannaAcacia`: tall trunk with sparse branches and umbrella crown.
+- `TropicalRainforestJungle`: very tall dense tree with layered crown and vines.
+
+## Invariants
+
+1. The same `(kind, origin, seed, palette)` always emits the same blueprint.
+2. The tree module never stores a tree in the live world.
+3. Output voxels are relative to `TreeGenRequest.origin`.
+4. Trunk/root/branch voxels are emitted before leaves and vines so later generation can apply woody support first.
+5. Leaf and vine voxels never replace trunk/root/branch voxels at the same offset.
+6. Generation rules use bounded integer loops and small hash/RNG helpers so dozens of trees per chunk remain cheap.
+7. Block meaning comes from `BlockId` / `BlockRegistry`; tree rules do not parse asset files directly.
+
+## Preview
+
+`src/bin/tree_preview.rs` renders a single generated tree blueprint through the existing world meshing and offscreen renderer path. It is a diagnostic tool only and does not change the generation pipeline.

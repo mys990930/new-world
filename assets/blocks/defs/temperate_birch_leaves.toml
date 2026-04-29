@@ -1,0 +1,9 @@
+id = 39
+key = "temperate_birch_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "temperate_birch_leaves"
+bottom = "temperate_birch_leaves"
+side = "temperate_birch_leaves"

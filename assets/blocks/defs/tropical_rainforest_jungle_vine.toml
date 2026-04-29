@@ -1,0 +1,9 @@
+id = 51
+key = "tropical_rainforest_jungle_vine"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "tropical_rainforest_jungle_vine"
+bottom = "tropical_rainforest_jungle_vine"
+side = "tropical_rainforest_jungle_vine"

@@ -1,0 +1,9 @@
+id = 34
+key = "boreal_taiga_conifer_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "boreal_taiga_conifer_trunk"
+bottom = "boreal_taiga_conifer_trunk"
+side = "boreal_taiga_conifer_trunk"

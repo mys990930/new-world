@@ -1,0 +1,9 @@
+id = 32
+key = "polar_tundra_shrub_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "polar_tundra_shrub_trunk"
+bottom = "polar_tundra_shrub_trunk"
+side = "polar_tundra_shrub_trunk"

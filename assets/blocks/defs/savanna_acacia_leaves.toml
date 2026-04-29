@@ -1,0 +1,9 @@
+id = 47
+key = "savanna_acacia_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "savanna_acacia_leaves"
+bottom = "savanna_acacia_leaves"
+side = "savanna_acacia_leaves"

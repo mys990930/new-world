@@ -1,0 +1,9 @@
+id = 49
+key = "tropical_rainforest_jungle_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "tropical_rainforest_jungle_leaves"
+bottom = "tropical_rainforest_jungle_leaves"
+side = "tropical_rainforest_jungle_leaves"

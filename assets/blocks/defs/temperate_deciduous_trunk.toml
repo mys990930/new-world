@@ -1,0 +1,9 @@
+id = 36
+key = "temperate_deciduous_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "temperate_deciduous_trunk"
+bottom = "temperate_deciduous_trunk"
+side = "temperate_deciduous_trunk"

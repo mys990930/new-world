@@ -1,0 +1,9 @@
+id = 42
+key = "swamp_cypress_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "swamp_cypress_trunk"
+bottom = "swamp_cypress_trunk"
+side = "swamp_cypress_trunk"

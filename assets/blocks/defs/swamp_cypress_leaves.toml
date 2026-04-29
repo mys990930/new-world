@@ -1,0 +1,9 @@
+id = 43
+key = "swamp_cypress_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "swamp_cypress_leaves"
+bottom = "swamp_cypress_leaves"
+side = "swamp_cypress_leaves"

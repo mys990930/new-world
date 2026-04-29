@@ -1,0 +1,9 @@
+id = 33
+key = "polar_tundra_shrub_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "polar_tundra_shrub_leaves"
+bottom = "polar_tundra_shrub_leaves"
+side = "polar_tundra_shrub_leaves"

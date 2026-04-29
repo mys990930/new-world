@@ -38,6 +38,26 @@ block_files = [
   "defs/alpine_soil.toml",
   "defs/moraine.toml",
   "defs/laterite.toml",
+  "defs/polar_tundra_shrub_trunk.toml",
+  "defs/polar_tundra_shrub_leaves.toml",
+  "defs/boreal_taiga_conifer_trunk.toml",
+  "defs/boreal_taiga_conifer_leaves.toml",
+  "defs/temperate_deciduous_trunk.toml",
+  "defs/temperate_deciduous_leaves.toml",
+  "defs/temperate_birch_trunk.toml",
+  "defs/temperate_birch_leaves.toml",
+  "defs/mediterranean_olive_trunk.toml",
+  "defs/mediterranean_olive_leaves.toml",
+  "defs/swamp_cypress_trunk.toml",
+  "defs/swamp_cypress_leaves.toml",
+  "defs/swamp_cypress_root.toml",
+  "defs/swamp_cypress_vine.toml",
+  "defs/savanna_acacia_trunk.toml",
+  "defs/savanna_acacia_leaves.toml",
+  "defs/tropical_rainforest_jungle_trunk.toml",
+  "defs/tropical_rainforest_jungle_leaves.toml",
+  "defs/tropical_rainforest_jungle_root.toml",
+  "defs/tropical_rainforest_jungle_vine.toml",
 ]
 
 [[textures]]
@@ -167,3 +187,83 @@ path = "textures/moraine.png"
 [[textures]]
 key = "laterite"
 path = "textures/laterite.png"
+
+[[textures]]
+key = "polar_tundra_shrub_trunk"
+path = "textures/polar_tundra_shrub_trunk.png"
+
+[[textures]]
+key = "polar_tundra_shrub_leaves"
+path = "textures/polar_tundra_shrub_leaves.png"
+
+[[textures]]
+key = "boreal_taiga_conifer_trunk"
+path = "textures/boreal_taiga_conifer_trunk.png"
+
+[[textures]]
+key = "boreal_taiga_conifer_leaves"
+path = "textures/boreal_taiga_conifer_leaves.png"
+
+[[textures]]
+key = "temperate_deciduous_trunk"
+path = "textures/temperate_deciduous_trunk.png"
+
+[[textures]]
+key = "temperate_deciduous_leaves"
+path = "textures/temperate_deciduous_leaves.png"
+
+[[textures]]
+key = "temperate_birch_trunk"
+path = "textures/temperate_birch_trunk.png"
+
+[[textures]]
+key = "temperate_birch_leaves"
+path = "textures/temperate_birch_leaves.png"
+
+[[textures]]
+key = "mediterranean_olive_trunk"
+path = "textures/mediterranean_olive_trunk.png"
+
+[[textures]]
+key = "mediterranean_olive_leaves"
+path = "textures/mediterranean_olive_leaves.png"
+
+[[textures]]
+key = "swamp_cypress_trunk"
+path = "textures/swamp_cypress_trunk.png"
+
+[[textures]]
+key = "swamp_cypress_leaves"
+path = "textures/swamp_cypress_leaves.png"
+
+[[textures]]
+key = "swamp_cypress_root"
+path = "textures/swamp_cypress_root.png"
+
+[[textures]]
+key = "swamp_cypress_vine"
+path = "textures/swamp_cypress_vine.png"
+
+[[textures]]
+key = "savanna_acacia_trunk"
+path = "textures/savanna_acacia_trunk.png"
+
+[[textures]]
+key = "savanna_acacia_leaves"
+path = "textures/savanna_acacia_leaves.png"
+
+[[textures]]
+key = "tropical_rainforest_jungle_trunk"
+path = "textures/tropical_rainforest_jungle_trunk.png"
+
+[[textures]]
+key = "tropical_rainforest_jungle_leaves"
+path = "textures/tropical_rainforest_jungle_leaves.png"
+
+[[textures]]
+key = "tropical_rainforest_jungle_root"
+path = "textures/tropical_rainforest_jungle_root.png"
+
+[[textures]]
+key = "tropical_rainforest_jungle_vine"
+path = "textures/tropical_rainforest_jungle_vine.png"

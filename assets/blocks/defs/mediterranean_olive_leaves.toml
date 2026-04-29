@@ -1,0 +1,9 @@
+id = 41
+key = "mediterranean_olive_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "mediterranean_olive_leaves"
+bottom = "mediterranean_olive_leaves"
+side = "mediterranean_olive_leaves"

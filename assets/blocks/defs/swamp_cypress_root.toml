@@ -1,0 +1,9 @@
+id = 44
+key = "swamp_cypress_root"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "swamp_cypress_root"
+bottom = "swamp_cypress_root"
+side = "swamp_cypress_root"

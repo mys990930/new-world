@@ -1,0 +1,9 @@
+id = 38
+key = "temperate_birch_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "temperate_birch_trunk"
+bottom = "temperate_birch_trunk"
+side = "temperate_birch_trunk"

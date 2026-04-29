@@ -19,6 +19,7 @@
 | `terrain_corridor` | Atlas-scale ocean-to-mountain corridor search and chart | Works |
 | `terrain_find` | Search for chunk candidates by launch archetype and meso preferences | Works |
 | `terrain_probe` | Per-chunk / per-column generation probe dump | Currently blocked by `probe_chunk(...)` and `probe_column(...)` TODO |
+| `tree_preview` | Quarter-view preview of one generated climate tree blueprint | Works |
 | `world_coords` | Inspect an existing created-world manifest and print preview coordinates | Works if `manifest.toml` already exists |
 | `world_create` | Generate and persist a created-world dump | Currently blocked by `generate_chunk(...)` TODO |
 
@@ -235,7 +236,28 @@ cargo run --bin terrain_probe -- 42 --chunk-x 0 --chunk-z 0 --local-x 16 --local
 
 - Notes:
   - The CLI shape is present, but the binary currently hits `probe_chunk(...)` and `probe_column(...)`, which are still generation `todo!` paths.
-  - See [terrain_probe.md](./terrain_probe.md).
+- See [terrain_probe.md](./terrain_probe.md).
+
+## tree_preview
+
+- Purpose: render one deterministic `world::tree` blueprint with the default tree block palette.
+- Parameters:
+  - positional: `<tree-kind> <seed>`
+  - optional: `--output <path>`, `--width <u32>`, `--height <u32>`, `--quarter-turns <u8>`
+- Defaults:
+  - `--width 1200`
+  - `--height 900`
+  - `--quarter-turns 0`
+  - `--output target/tree-preview/<tree-kind>_seed_<seed>.png`
+- Example:
+
+```bash
+cargo run --bin tree_preview -- jungle 42 --output target/tree-preview/jungle.png
+```
+
+- Notes:
+  - This tool does not mutate `WorldCore`; it folds the generated tree voxels into temporary chunks only for meshing and offscreen rendering.
+  - See [tree_preview.md](./tree_preview.md).
 
 ## world_coords
 

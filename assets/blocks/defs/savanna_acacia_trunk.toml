@@ -1,0 +1,9 @@
+id = 46
+key = "savanna_acacia_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "savanna_acacia_trunk"
+bottom = "savanna_acacia_trunk"
+side = "savanna_acacia_trunk"

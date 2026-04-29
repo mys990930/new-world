@@ -1,0 +1,9 @@
+id = 48
+key = "tropical_rainforest_jungle_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "tropical_rainforest_jungle_trunk"
+bottom = "tropical_rainforest_jungle_trunk"
+side = "tropical_rainforest_jungle_trunk"

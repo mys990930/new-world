@@ -1,0 +1,9 @@
+id = 50
+key = "tropical_rainforest_jungle_root"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "tropical_rainforest_jungle_root"
+bottom = "tropical_rainforest_jungle_root"
+side = "tropical_rainforest_jungle_root"

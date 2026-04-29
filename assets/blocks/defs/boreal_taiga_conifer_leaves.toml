@@ -1,0 +1,9 @@
+id = 35
+key = "boreal_taiga_conifer_leaves"
+solid = true
+opaque = true
+render = "cube"
+material = "foliage"
+top = "boreal_taiga_conifer_leaves"
+bottom = "boreal_taiga_conifer_leaves"
+side = "boreal_taiga_conifer_leaves"

@@ -35,6 +35,7 @@
 - exact top-down column sampling for previews such as debug dumps and minimap overlays
 - snapshot-based top-down chunk-column derivation for cached minimap rebuild jobs
 - runtime region-classification sample cache for main-thread environment consumers
+- deterministic climate-tree voxel blueprint generation for later generator placement
 
 ### Non-Responsibilities
 
@@ -72,6 +73,7 @@
 - `NeighborChunks`
 - `Ray3`, `RaycastHit`
 - `TopdownCell`, `TopdownColumnScan`, `TopdownSurfaceRange`, `TopdownEdge`
+- `TreeKind`, `TreeBlockPalette`, `TreeGenRequest`, `TreeVoxel`, `TreeBlueprint`
 - `MaterialPolicyDef`, `MaterialPolicyId`
 - `SeasonalBiomeStateDef`, `SeasonalBiomeStateId`, `SeasonalPhase`
 - `CoverOverrideRule`, `CoverPhase`
@@ -195,6 +197,12 @@ topdown_edge_strength_for_cell(
     z: usize,
     edge: TopdownEdge,
 ) -> f32
+
+TreeKind::from_key(key: &str) -> Option<TreeKind>
+TreeKind::key(self) -> &'static str
+TreeKind::all() -> &'static [TreeKind]
+TreeBlockPalette::resolve_default(kind: TreeKind, registry: &BlockRegistry) -> Result<TreeBlockPalette, TreePaletteError>
+generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
 ```
 
 ### Dependencies
@@ -220,6 +228,7 @@ NOT:
 8. atlas-owned meso terrain guides must remain deterministic, span multiple chunks, and avoid whole-world precomputation
 9. atlas cells, meso guide cells, structure regions, and raw skeleton segments are not visible output primitives; downstream generation must diffuse, warp, resolve, or mask them before height, hydrology, or material block decisions reach `ChunkData`
 10. frame-time environment/HUD consumers must prefer cached region classification and avoid forcing atlas structure/classification resolution on the main thread
+11. tree generation emits relative voxel blueprints only and does not mutate live `WorldCore` storage
 
 ### Submodules
 
@@ -244,6 +253,7 @@ NOT:
 - `atlas/meso/features/features.md`: per-feature module/doc structure
 - `surface/surface.md`: material, cover, and seasonal surface policy contract
 - `surface/resolve.md`: chunk-column surface-plan resolve contract
+- `tree.md`: deterministic per-climate tree voxel blueprint contract
 - `calendar.md`: world-owned calendar, runtime climate, and deferred seasonal patch contract
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract

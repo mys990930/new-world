@@ -13,6 +13,7 @@ mod registry;
 mod storage;
 mod surface;
 mod topdown;
+mod tree;
 
 #[allow(unused_imports)]
 pub use atlas::{
@@ -124,4 +125,9 @@ pub use topdown::{
     TopdownSurfaceRange, color_topdown_cell, darken_topdown_color, sample_single_topdown_column,
     sample_topdown_chunk_column, sample_topdown_columns, topdown_edge_strength_for_cell,
     topdown_outline_strength, topdown_surface_range,
+};
+#[allow(unused_imports)]
+pub use tree::{
+    TreeBlockPalette, TreeBlueprint, TreeBounds, TreeGenRequest, TreeKind, TreePaletteError,
+    TreePaletteKeys, TreeVoxel, TreeVoxelRole, default_palette_keys, generate_tree_blueprint,
 };

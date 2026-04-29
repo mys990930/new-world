@@ -1,0 +1,9 @@
+id = 40
+key = "mediterranean_olive_trunk"
+solid = true
+opaque = true
+render = "cube"
+material = "generic_opaque"
+top = "mediterranean_olive_trunk"
+bottom = "mediterranean_olive_trunk"
+side = "mediterranean_olive_trunk"
