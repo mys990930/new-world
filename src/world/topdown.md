@@ -69,6 +69,9 @@
 ## State Rules
 
 - sampling uses exact realized `WorldCore` block contents only
+- `chunk_topdown_preview` may also render seed-only generation stage grids for prototype and
+  hydrology diagnostics; those stage views are explicit debug overlays, not realized block-column
+  scans.
 - snapshot-based chunk-column derivation uses only the provided immutable chunk snapshots and never reaches back into `WorldCore`
 - sampling never generates or loads missing chunks implicitly
 - visible cells are based on the topmost non-air block in each scanned column
@@ -91,5 +94,8 @@
 ## Notes
 
 - the current color rules intentionally match the diagnostic style used by `chunk_topdown_preview` rather than final live renderer shading
+- `chunk_topdown_preview --stage prototype|hydrology` mirrors the stage selection exposed by
+  `chunk_preview`, but keeps the camera as an exact top-down raster so large-scale grid artifacts
+  can be compared against the final material view.
 - the current minimap overlay uses these helpers with atlas-backed UI sprites instead of a separate UI texture path
 - the current runtime now prefers snapshot-based chunk-column rebuilds in jobs, and only uses single-column live resampling for future local patch updates after world edits

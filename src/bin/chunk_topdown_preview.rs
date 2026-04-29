@@ -9,8 +9,11 @@ use image::{Rgb, RgbImage};
 use rayon::prelude::*;
 
 use new_world::world::{
-    BlockId, BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkGenerationInputs,
-    WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta, build_chunk_mesh,
+    BlockId, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
+    ChunkGenerationInputs, HydrologyMode, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta,
+    build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
+    build_chunk_hydrology_solve, build_chunk_mesh, build_chunk_meso_applied_prototype,
+    build_chunk_realization_field_patch, build_chunk_smoothed_prototype,
     chunk_generation_input_area, generate_chunk_from_generation_inputs,
     prepare_chunk_generation_inputs,
 };
@@ -26,11 +29,19 @@ const DEFAULT_RADIUS: i32 = 0;
 const DEFAULT_MIN_Y_CHUNK: i32 = -2;
 const DEFAULT_MAX_Y_CHUNK: i32 = 3;
 const DEFAULT_PIXELS_PER_BLOCK: u32 = 6;
+const DEFAULT_STAGE_GENERATION_PADDING: i32 = 2;
 
 #[derive(Debug, Clone)]
 enum PreviewSource {
     Seed(u64),
     CreatedWorld(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewStage {
+    Full,
+    Prototype,
+    Hydrology,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +99,75 @@ struct MeshDebugSummary {
     chunks_with_water_faces: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StagePreviewCell {
+    top_y: i32,
+    height: f32,
+    relief_budget: f32,
+    water_surface_height: Option<f32>,
+    hydrology_mode: HydrologyMode,
+    saturation: f32,
+}
+
+#[derive(Debug, Clone)]
+struct StagePreviewGrid {
+    origin_x: i32,
+    origin_z: i32,
+    width: usize,
+    depth: usize,
+    cells: Vec<StagePreviewCell>,
+}
+
+impl StagePreviewGrid {
+    fn index_of(&self, world_x: i32, world_z: i32) -> Option<usize> {
+        if world_x < self.origin_x || world_z < self.origin_z {
+            return None;
+        }
+
+        let dx = usize::try_from(world_x - self.origin_x).ok()?;
+        let dz = usize::try_from(world_z - self.origin_z).ok()?;
+        if dx >= self.width || dz >= self.depth {
+            return None;
+        }
+
+        Some(dz * self.width + dx)
+    }
+
+    fn cell(&self, world_x: i32, world_z: i32) -> Option<StagePreviewCell> {
+        self.index_of(world_x, world_z)
+            .map(|index| self.cells[index])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StagePreviewColumn {
+    height: f32,
+    relief_budget: f32,
+    water_surface_height: Option<f32>,
+    hydrology_mode: HydrologyMode,
+    saturation: f32,
+}
+
+#[derive(Debug, Clone)]
+struct StagePreviewChunk {
+    coord: ChunkCoord,
+    columns: Vec<StagePreviewColumn>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StageDebugSummary {
+    total_columns: usize,
+    min_y: i32,
+    max_y: i32,
+    mean_y: f32,
+    water_columns: usize,
+    channel_columns: usize,
+    floodplain_columns: usize,
+    lake_columns: usize,
+    wetland_columns: usize,
+    mean_saturation: f32,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
@@ -111,6 +191,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut min_y_chunk = DEFAULT_MIN_Y_CHUNK;
     let mut max_y_chunk = DEFAULT_MAX_Y_CHUNK;
     let mut pixels_per_block = DEFAULT_PIXELS_PER_BLOCK;
+    let mut stage = PreviewStage::Full;
     let mut output: Option<PathBuf> = None;
 
     while let Some(flag) = args.first().cloned() {
@@ -140,6 +221,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--pixels-per-block" => {
                 pixels_per_block = parse_required::<u32>(&mut args, "pixels-per-block")?
             }
+            "--stage" => {
+                stage = parse_preview_stage(parse_required::<String>(&mut args, "stage")?)?;
+            }
             "--output" => {
                 output = Some(PathBuf::from(parse_required::<String>(
                     &mut args, "output",
@@ -157,6 +241,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if pixels_per_block == 0 {
         return Err(cli_error("pixels-per-block must be >= 1"));
+    }
+    if created_world_stage_requested(stage) && matches!(source, PreviewSource::CreatedWorld(_)) {
+        return Err(cli_error(
+            "prototype and hydrology stages are supported only for direct seed previews",
+        ));
     }
 
     let block_registry = Arc::new(
@@ -188,65 +277,85 @@ fn main() -> Result<(), Box<dyn Error>> {
     center_x = requested_center.0;
     center_z = requested_center.1;
 
-    let output = output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius));
-    let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
+    let output =
+        output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius, stage));
+    let (image, surface_range, debug_summary, mesh_debug, stage_debug) = match stage {
+        PreviewStage::Full => {
+            let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-    match created_world_dir.as_deref() {
-        Some(world_dir) => {
-            let manifest = created_world_manifest
-                .as_ref()
-                .expect("created-world preview metadata should exist");
-            ensure_created_world_bounds_cover_request(
-                manifest.min_chunk_coord(),
-                manifest.max_chunk_coord(),
+            match created_world_dir.as_deref() {
+                Some(world_dir) => {
+                    let manifest = created_world_manifest
+                        .as_ref()
+                        .expect("created-world preview metadata should exist");
+                    ensure_created_world_bounds_cover_request(
+                        manifest.min_chunk_coord(),
+                        manifest.max_chunk_coord(),
+                        center_x,
+                        center_z,
+                        radius,
+                        min_y_chunk,
+                        max_y_chunk,
+                    )?;
+                    load_preview_chunks(
+                        &mut world,
+                        world_dir,
+                        manifest.min_chunk_coord(),
+                        manifest.max_chunk_coord(),
+                        center_x,
+                        center_z,
+                        radius,
+                        min_y_chunk,
+                        max_y_chunk,
+                    )?;
+                }
+                None => generate_preview_chunks(
+                    &mut world,
+                    block_registry.as_ref(),
+                    center_x,
+                    center_z,
+                    radius,
+                    min_y_chunk,
+                    max_y_chunk,
+                ),
+            }
+
+            let (image, surface_range, debug_summary) = render_topdown_preview(
+                &world,
+                block_registry.as_ref(),
                 center_x,
                 center_z,
                 radius,
                 min_y_chunk,
                 max_y_chunk,
+                pixels_per_block,
             )?;
-            load_preview_chunks(
-                &mut world,
-                world_dir,
-                manifest.min_chunk_coord(),
-                manifest.max_chunk_coord(),
+            let mesh_debug = collect_mesh_debug_summary(
+                &world,
+                block_registry.as_ref(),
                 center_x,
                 center_z,
                 radius,
                 min_y_chunk,
                 max_y_chunk,
-            )?;
+            );
+            (
+                image,
+                surface_range,
+                Some(debug_summary),
+                Some(mesh_debug),
+                None,
+            )
         }
-        None => generate_preview_chunks(
-            &mut world,
-            block_registry.as_ref(),
-            center_x,
-            center_z,
-            radius,
-            min_y_chunk,
-            max_y_chunk,
-        ),
-    }
-
-    let (image, surface_range, debug_summary) = render_topdown_preview(
-        &world,
-        block_registry.as_ref(),
-        center_x,
-        center_z,
-        radius,
-        min_y_chunk,
-        max_y_chunk,
-        pixels_per_block,
-    )?;
-    let mesh_debug = collect_mesh_debug_summary(
-        &world,
-        block_registry.as_ref(),
-        center_x,
-        center_z,
-        radius,
-        min_y_chunk,
-        max_y_chunk,
-    );
+        PreviewStage::Prototype | PreviewStage::Hydrology => {
+            let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
+            let grid =
+                build_stage_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
+            let (image, surface_range, stage_debug) =
+                render_stage_topdown_preview(&grid, center_x, center_z, radius, pixels_per_block)?;
+            (image, surface_range, None, None, Some(stage_debug))
+        }
+    };
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -258,6 +367,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("preview source: created world {}", world_dir.display())
         }
     }
+    println!("preview stage: {}", preview_stage_label(stage));
     println!("center chunk: ({center_x}, {center_z})");
     println!(
         "footprint: xz radius={}, y={}..{}, pixels-per-block={}",
@@ -267,12 +377,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         "surface relief: {}..{}",
         surface_range.min_y, surface_range.max_y
     );
-    print_preview_debug_summary(&debug_summary);
-    print_mesh_debug_summary(mesh_debug);
-    println!(
-        "water diagnostic: {}",
-        diagnose_water_visibility(&debug_summary, mesh_debug)
-    );
+    if let Some(debug_summary) = debug_summary.as_ref() {
+        print_preview_debug_summary(debug_summary);
+    }
+    if let Some(mesh_debug) = mesh_debug {
+        print_mesh_debug_summary(mesh_debug);
+        println!(
+            "water diagnostic: {}",
+            diagnose_water_visibility(
+                debug_summary
+                    .as_ref()
+                    .expect("full preview should include column debug"),
+                mesh_debug
+            )
+        );
+    }
+    if let Some(stage_debug) = stage_debug {
+        print_stage_debug_summary(stage_debug);
+    }
     println!("output: {}", output.display());
     println!("image: {}x{}", image.width(), image.height());
 
@@ -383,6 +505,206 @@ fn render_topdown_preview(
     Ok((image, surface_range, debug_summary))
 }
 
+fn build_stage_preview_grid(
+    meta: &WorldMeta,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+    stage: PreviewStage,
+) -> Result<StagePreviewGrid, Box<dyn Error>> {
+    let min_chunk_x = center_x - generation_radius;
+    let max_chunk_x = center_x + generation_radius;
+    let min_chunk_z = center_z - generation_radius;
+    let max_chunk_z = center_z + generation_radius;
+    let width_chunks = usize::try_from(max_chunk_x - min_chunk_x + 1)
+        .map_err(|_| cli_error("invalid stage preview width"))?;
+    let depth_chunks = usize::try_from(max_chunk_z - min_chunk_z + 1)
+        .map_err(|_| cli_error("invalid stage preview depth"))?;
+    let width = width_chunks * CHUNK_EDGE;
+    let depth = depth_chunks * CHUNK_EDGE;
+    let origin_x = min_chunk_x * CHUNK_EDGE_I32;
+    let origin_z = min_chunk_z * CHUNK_EDGE_I32;
+    let mut cells = vec![
+        StagePreviewCell {
+            top_y: WORLD_FLOOR_Y,
+            height: WORLD_FLOOR_Y as f32,
+            relief_budget: 0.0,
+            water_surface_height: None,
+            hydrology_mode: HydrologyMode::Dry,
+            saturation: 0.0,
+        };
+        width * depth
+    ];
+    let input_cache =
+        PreviewInputCache::for_preview_window(meta, center_x, center_z, generation_radius);
+    let chunks = preview_chunk_xz_coords(center_x, center_z, generation_radius)
+        .into_par_iter()
+        .map(|(chunk_x, chunk_z)| {
+            let chunk = ChunkCoord(chunk_x, 0, chunk_z);
+            let inputs = input_cache.inputs_for_chunk(chunk);
+            let realization = build_chunk_realization_field_patch(chunk, &inputs);
+            let corridors = build_chunk_corridor_window(chunk, &inputs);
+            let prototype =
+                build_chunk_base_heightfield_prototype(chunk, &inputs, &realization, &corridors);
+            let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridors, &prototype);
+            let columns = match stage {
+                PreviewStage::Prototype => meso
+                    .columns
+                    .into_iter()
+                    .map(|column| StagePreviewColumn {
+                        height: column.height,
+                        relief_budget: column.remaining_relief_budget,
+                        water_surface_height: None,
+                        hydrology_mode: HydrologyMode::Dry,
+                        saturation: 0.0,
+                    })
+                    .collect(),
+                PreviewStage::Hydrology => {
+                    let smoothed = build_chunk_smoothed_prototype(chunk, &corridors, &meso);
+                    let hydrology =
+                        build_chunk_hydrology_solve(chunk, &inputs, &corridors, &smoothed);
+
+                    hydrology
+                        .columns
+                        .into_iter()
+                        .zip(smoothed.columns)
+                        .map(|(column, smoothed)| StagePreviewColumn {
+                            height: column.terrain_height,
+                            relief_budget: smoothed.remaining_relief_budget,
+                            water_surface_height: column.water_surface_height,
+                            hydrology_mode: column.mode,
+                            saturation: column.saturation,
+                        })
+                        .collect()
+                }
+                PreviewStage::Full => unreachable!(
+                    "stage preview grids are only used for prototype and hydrology previews"
+                ),
+            };
+
+            StagePreviewChunk {
+                coord: chunk,
+                columns,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for chunk in chunks {
+        let chunk_row = usize::try_from(chunk.coord.2 - min_chunk_z)
+            .map_err(|_| cli_error("invalid stage preview chunk row"))?;
+        let chunk_col = usize::try_from(chunk.coord.0 - min_chunk_x)
+            .map_err(|_| cli_error("invalid stage preview chunk column"))?;
+
+        for local_z in 0..CHUNK_EDGE_I32 {
+            let global_z = chunk_row * CHUNK_EDGE
+                + usize::try_from(local_z).map_err(|_| cli_error("invalid local z"))?;
+            let row_offset = global_z * width;
+            for local_x in 0..CHUNK_EDGE_I32 {
+                let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
+                    .map_err(|_| cli_error("invalid stage column index"))?;
+                let column = chunk.columns[column_index];
+                let global_x = chunk_col * CHUNK_EDGE
+                    + usize::try_from(local_x).map_err(|_| cli_error("invalid local x"))?;
+                let top_y = column.height.round() as i32;
+                cells[row_offset + global_x] = StagePreviewCell {
+                    top_y,
+                    height: column.height,
+                    relief_budget: column.relief_budget,
+                    water_surface_height: column.water_surface_height,
+                    hydrology_mode: column.hydrology_mode,
+                    saturation: column.saturation,
+                };
+            }
+        }
+    }
+
+    Ok(StagePreviewGrid {
+        origin_x,
+        origin_z,
+        width,
+        depth,
+        cells,
+    })
+}
+
+fn render_stage_topdown_preview(
+    grid: &StagePreviewGrid,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    pixels_per_block: u32,
+) -> Result<(RgbImage, SurfaceRange, StageDebugSummary), Box<dyn Error>> {
+    let chunk_span = u32::try_from(radius.saturating_mul(2).saturating_add(1))
+        .map_err(|_| cli_error("radius produced an invalid chunk span"))?;
+    let blocks_per_axis = chunk_span
+        .checked_mul(CHUNK_EDGE_I32 as u32)
+        .ok_or_else(|| cli_error("preview block width overflowed"))?;
+    let width = blocks_per_axis
+        .checked_mul(pixels_per_block)
+        .ok_or_else(|| cli_error("preview image width overflowed"))?;
+    let height = blocks_per_axis
+        .checked_mul(pixels_per_block)
+        .ok_or_else(|| cli_error("preview image height overflowed"))?;
+    let grid_width =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid width overflowed"))?;
+    let grid_height =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid height overflowed"))?;
+    let min_world_x = (center_x - radius) * CHUNK_EDGE_I32;
+    let min_world_z = (center_z - radius) * CHUNK_EDGE_I32;
+    let mut cells = Vec::with_capacity(grid_width * grid_height);
+
+    for z_offset in 0..grid_height {
+        let world_z =
+            min_world_z + i32::try_from(z_offset).expect("grid z index should fit in i32");
+        for x_offset in 0..grid_width {
+            let world_x =
+                min_world_x + i32::try_from(x_offset).expect("grid x index should fit in i32");
+            cells.push(
+                grid.cell(world_x, world_z)
+                    .ok_or_else(|| cli_error("stage grid did not cover requested render area"))?,
+            );
+        }
+    }
+
+    let surface_range = surface_range_for_stage_cells(&cells)
+        .ok_or_else(|| cli_error("stage preview did not produce any cells"))?;
+    let stage_debug = summarize_stage_cells(&cells);
+    let mut image = RgbImage::new(width, height);
+
+    for z in 0..grid_height {
+        for x in 0..grid_width {
+            let cell = cells[z * grid_width + x];
+            let base = color_for_stage_cell(cell, surface_range);
+            let pixel_origin_x =
+                u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
+            let pixel_origin_y =
+                u32::try_from(z).expect("grid z index should fit in u32") * pixels_per_block;
+
+            for local_y in 0..pixels_per_block {
+                for local_x in 0..pixels_per_block {
+                    let outline = stage_outline_strength(
+                        &cells,
+                        grid_width,
+                        grid_height,
+                        x,
+                        z,
+                        local_x,
+                        local_y,
+                        pixels_per_block,
+                    );
+                    image.put_pixel(
+                        pixel_origin_x + local_x,
+                        pixel_origin_y + local_y,
+                        Rgb(darken(base, outline)),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok((image, surface_range, stage_debug))
+}
+
 fn sample_column_scan(
     world: &WorldCore,
     registry: &BlockRegistry,
@@ -447,6 +769,25 @@ fn surface_range_for_cells(cells: &[ColumnScan]) -> Option<SurfaceRange> {
     Some(SurfaceRange { min_y, max_y })
 }
 
+fn surface_range_for_stage_cells(cells: &[StagePreviewCell]) -> Option<SurfaceRange> {
+    let mut heights = cells.iter().map(|cell| {
+        cell.water_surface_height
+            .map(|water| water.ceil() as i32)
+            .unwrap_or(cell.top_y)
+            .max(cell.top_y)
+    });
+    let first = heights.next()?;
+    let mut min_y = first;
+    let mut max_y = first;
+
+    for top_y in heights {
+        min_y = min_y.min(top_y);
+        max_y = max_y.max(top_y);
+    }
+
+    Some(SurfaceRange { min_y, max_y })
+}
+
 fn summarize_column_scans(cells: &[ColumnScan], registry: &BlockRegistry) -> PreviewDebugSummary {
     let mut columns_with_any_water = 0_usize;
     let mut columns_with_top_water = 0_usize;
@@ -497,6 +838,58 @@ fn summarize_column_scans(cells: &[ColumnScan], registry: &BlockRegistry) -> Pre
         max_water_depth,
         top_visible_blocks: top_visible,
         top_solid_blocks: top_solid,
+    }
+}
+
+fn summarize_stage_cells(cells: &[StagePreviewCell]) -> StageDebugSummary {
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
+    let mut sum_y = 0_i64;
+    let mut water_columns = 0_usize;
+    let mut channel_columns = 0_usize;
+    let mut floodplain_columns = 0_usize;
+    let mut lake_columns = 0_usize;
+    let mut wetland_columns = 0_usize;
+    let mut sum_saturation = 0.0_f32;
+
+    for cell in cells {
+        min_y = min_y.min(cell.top_y);
+        max_y = max_y.max(cell.top_y);
+        sum_y += i64::from(cell.top_y);
+        sum_saturation += cell.saturation;
+        if cell.water_surface_height.is_some() {
+            water_columns += 1;
+        }
+
+        match cell.hydrology_mode {
+            HydrologyMode::Dry => {}
+            HydrologyMode::Channel => channel_columns += 1,
+            HydrologyMode::Floodplain => floodplain_columns += 1,
+            HydrologyMode::Lake => lake_columns += 1,
+            HydrologyMode::Wetland => wetland_columns += 1,
+        }
+    }
+
+    let total_columns = cells.len();
+    StageDebugSummary {
+        total_columns,
+        min_y: if total_columns == 0 { 0 } else { min_y },
+        max_y: if total_columns == 0 { 0 } else { max_y },
+        mean_y: if total_columns == 0 {
+            0.0
+        } else {
+            sum_y as f32 / total_columns as f32
+        },
+        water_columns,
+        channel_columns,
+        floodplain_columns,
+        lake_columns,
+        wetland_columns,
+        mean_saturation: if total_columns == 0 {
+            0.0
+        } else {
+            sum_saturation / total_columns as f32
+        },
     }
 }
 
@@ -581,6 +974,36 @@ fn color_for_cell(
     brighten(modulated, brightness)
 }
 
+fn color_for_stage_cell(cell: StagePreviewCell, surface_range: SurfaceRange) -> [u8; 3] {
+    if let Some(water_height) = cell.water_surface_height {
+        let water_t = ((water_height - cell.height) / 8.0).clamp(0.0, 1.0);
+        return brighten([68, 122, 192], 0.86 + water_t * 0.18);
+    }
+
+    let relief_t = if surface_range.max_y > surface_range.min_y {
+        (cell.top_y - surface_range.min_y) as f32
+            / (surface_range.max_y - surface_range.min_y) as f32
+    } else {
+        0.5
+    };
+    let relief_budget_t = ((cell.relief_budget - 4.0) / 36.0).clamp(0.0, 1.0);
+    let saturation_t = cell.saturation.clamp(0.0, 1.0);
+    let base = match cell.hydrology_mode {
+        HydrologyMode::Dry => [126, 105, 74],
+        HydrologyMode::Wetland => [74, 118, 92],
+        HydrologyMode::Floodplain => [92, 126, 102],
+        HydrologyMode::Channel => [62, 104, 150],
+        HydrologyMode::Lake => [70, 118, 176],
+    };
+    let color = [
+        (base[0] as f32 * (0.74 + relief_t * 0.20) + relief_budget_t * 28.0) as u8,
+        (base[1] as f32 * (0.78 + relief_t * 0.16) + saturation_t * 24.0) as u8,
+        (base[2] as f32 * (0.84 + relief_budget_t * 0.10) + saturation_t * 18.0) as u8,
+    ];
+
+    brighten(color, 0.92)
+}
+
 fn block_base_color(def: &new_world::world::BlockDef) -> [u8; 3] {
     match def.key.as_str() {
         // Snow keeps a dedicated override so preview diagnostics do not read as gray stone.
@@ -650,6 +1073,65 @@ fn outline_strength(
     }
 
     strength
+}
+
+fn stage_outline_strength(
+    cells: &[StagePreviewCell],
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    local_x: u32,
+    local_y: u32,
+    pixels_per_block: u32,
+) -> f32 {
+    if pixels_per_block <= 1 {
+        return 0.0;
+    }
+
+    let index = z * width + x;
+    let cell = cells[index];
+    let mut strength = 0.0_f32;
+
+    if local_x == 0 {
+        strength = strength.max(stage_edge_strength(
+            cell,
+            x.checked_sub(1).map(|nx| cells[z * width + nx]),
+        ));
+    }
+    if local_y == 0 {
+        strength = strength.max(stage_edge_strength(
+            cell,
+            z.checked_sub(1).map(|nz| cells[nz * width + x]),
+        ));
+    }
+    if local_x + 1 == pixels_per_block {
+        let right = if x + 1 < width {
+            Some(cells[z * width + (x + 1)])
+        } else {
+            None
+        };
+        strength = strength.max(stage_edge_strength(cell, right));
+    }
+    if local_y + 1 == pixels_per_block {
+        let bottom = if z + 1 < height {
+            Some(cells[(z + 1) * width + x])
+        } else {
+            None
+        };
+        strength = strength.max(stage_edge_strength(cell, bottom));
+    }
+
+    strength
+}
+
+fn stage_edge_strength(cell: StagePreviewCell, neighbor: Option<StagePreviewCell>) -> f32 {
+    match neighbor {
+        None => 0.24,
+        Some(other) if other.hydrology_mode != cell.hydrology_mode => 0.24,
+        Some(other) if other.top_y.abs_diff(cell.top_y) >= 2 => 0.20,
+        Some(_) => 0.08,
+    }
 }
 
 fn edge_strength(cell: TopdownCell, neighbor: Option<TopdownCell>) -> f32 {
@@ -740,6 +1222,25 @@ fn print_mesh_debug_summary(summary: MeshDebugSummary) {
         summary.water_face_count,
         percent(summary.water_face_count, summary.total_face_count),
         summary.chunks_with_water_faces
+    );
+}
+
+fn print_stage_debug_summary(summary: StageDebugSummary) {
+    println!("stage debug:");
+    println!("  total columns: {}", summary.total_columns);
+    println!(
+        "  surface_y: avg={:.2}, min={}, max={}",
+        summary.mean_y, summary.min_y, summary.max_y
+    );
+    println!(
+        "  hydrology: water_columns={} ({:.1}%), channels={}, floodplain={}, lakes={}, wetlands={}, mean_saturation={:.3}",
+        summary.water_columns,
+        percent(summary.water_columns, summary.total_columns),
+        summary.channel_columns,
+        summary.floodplain_columns,
+        summary.lake_columns,
+        summary.wetland_columns,
+        summary.mean_saturation,
     );
 }
 
@@ -924,11 +1425,19 @@ fn default_output_path(
     center_x: i32,
     center_z: i32,
     radius: i32,
+    stage: PreviewStage,
 ) -> PathBuf {
     match source {
-        PreviewSource::Seed(seed) => PathBuf::from(format!(
-            "target/chunk-topdown-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}.png"
-        )),
+        PreviewSource::Seed(seed) => {
+            let stage_suffix = match stage {
+                PreviewStage::Full => String::new(),
+                PreviewStage::Prototype => String::from("_prototype"),
+                PreviewStage::Hydrology => String::from("_hydrology"),
+            };
+            PathBuf::from(format!(
+                "target/chunk-topdown-preview/seed_{seed}{stage_suffix}_cx{center_x}_cz{center_z}_r{radius}.png"
+            ))
+        }
         PreviewSource::CreatedWorld(world_dir) => {
             world_dir.join(format!("topdown_cx{center_x}_cz{center_z}_r{radius}.png"))
         }
@@ -1051,8 +1560,31 @@ where
         .map_err(|error| cli_error(format!("invalid {label}: {error}")))
 }
 
+fn parse_preview_stage(value: String) -> Result<PreviewStage, Box<dyn Error>> {
+    match value.to_ascii_lowercase().as_str() {
+        "full" | "default" => Ok(PreviewStage::Full),
+        "prototype" => Ok(PreviewStage::Prototype),
+        "hydrology" => Ok(PreviewStage::Hydrology),
+        other => Err(cli_error(format!(
+            "unknown stage '{other}'; expected 'full', 'prototype', or 'hydrology'"
+        ))),
+    }
+}
+
+fn preview_stage_label(stage: PreviewStage) -> &'static str {
+    match stage {
+        PreviewStage::Full => "full",
+        PreviewStage::Prototype => "prototype",
+        PreviewStage::Hydrology => "hydrology",
+    }
+}
+
+fn created_world_stage_requested(stage: PreviewStage) -> bool {
+    matches!(stage, PreviewStage::Prototype | PreviewStage::Hydrology)
+}
+
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
+    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--stage <full|prototype|hydrology>] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--stage full] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1126,5 +1658,34 @@ mod tests {
             .expect("snow def should exist");
 
         assert_eq!(block_base_color(snow), [244, 248, 255]);
+    }
+
+    #[test]
+    fn parse_preview_stage_accepts_full_prototype_and_hydrology() {
+        assert_eq!(
+            parse_preview_stage("full".to_string()).unwrap(),
+            PreviewStage::Full
+        );
+        assert_eq!(
+            parse_preview_stage("prototype".to_string()).unwrap(),
+            PreviewStage::Prototype
+        );
+        assert_eq!(
+            parse_preview_stage("hydrology".to_string()).unwrap(),
+            PreviewStage::Hydrology
+        );
+        assert!(parse_preview_stage("material".to_string()).is_err());
+    }
+
+    #[test]
+    fn stage_default_output_path_marks_stage() {
+        let source = PreviewSource::Seed(42);
+        let output = default_output_path(&source, -200, -80, 4, PreviewStage::Hydrology);
+
+        assert!(
+            output
+                .to_string_lossy()
+                .contains("seed_42_hydrology_cx-200_cz-80_r4.png")
+        );
     }
 }
