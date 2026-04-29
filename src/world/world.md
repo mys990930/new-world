@@ -48,7 +48,7 @@ spline/domain warp, noise synthesis를 거쳐 현실화되어야 한다.
 - river, lake, wetland, coast, mountain, basin 같은 macro/meso 제약의 source-of-truth
 - 각 generation stage의 topdown preview binary 출력 계약
 - deterministic procedural generation result를 `ChunkData`로 표현
-- 기존 `world` 구현을 `legacy` 아래 보존하고, 새 generator가 대체될 때까지 runtime compatibility bridge 유지
+- 기존 `world` 구현을 `legacy` 아래 보존하고, 새 graph-first scaffold를 `generation` 아래에 둔 뒤 새 generator가 대체될 때까지 runtime compatibility bridge 유지
 
 ---
 
@@ -730,10 +730,11 @@ stage 결과를 검사할 수 있어야 한다.
 
 ## 하위 문서
 
-- `graph.md`: Voronoi graph ownership과 graph-region coordinate 계약
-- `field.md`: continuous blended field sampling 계약
-- `hydrology.md`: graph-first watershed와 river-edge 계약
-- `pipeline.md`: graph-first generation stage order와 column synthesis scaffold
+- `generation/generation.md`: graph-first generation 소유권, 단계 경계, preview 계약
+- `generation/graph/graph.md`: Voronoi graph ownership과 graph-region coordinate 계약
+- `generation/field/field.md`: continuous blended field sampling 계약
+- `generation/hydrology/hydrology.md`: graph-first watershed와 river-edge 계약
+- `generation/pipeline/pipeline.md`: graph-first generation stage order와 column synthesis scaffold
 - `legacy/legacy.md`: 이전 world 구현 보존과 compatibility bridge
 
 ---
@@ -742,7 +743,7 @@ stage 결과를 검사할 수 있어야 한다.
 
 - 이전 `world` 구현은 `src/world/legacy` 아래로 이동되어 보존되어 있다.
 - `src/world/mod.rs`는 기존 app/tool/runtime compile을 위해 legacy API를 re-export한다.
-- 새 graph-first 모듈은 현재 scaffold contract 단계다.
+- 새 graph-first 모듈은 `src/world/generation` 아래의 scaffold contract 단계다.
 - 아직 실제 Voronoi graph 생성, Delaunay/Voronoi construction, padded graph patch assembly, macro elevation, hydrology solve, Voronoi-derived map, Perlin micro relief 합성은 구현되지 않았다.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.
 

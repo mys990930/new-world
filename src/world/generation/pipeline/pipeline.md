@@ -38,4 +38,4 @@
 ## Current Status
 
 - this module is a compile-time scaffold for the v2 pipeline
-- legacy `world::generation` remains re-exported for runtime compatibility during migration
+- legacy generation entrypoints are re-exported through `world::generation` for runtime compatibility during migration
