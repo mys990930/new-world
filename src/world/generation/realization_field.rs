@@ -1,8 +1,8 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 
 use crate::world::atlas::{
-    AtlasCell, BiomeFamily, CoastalContext, HydrologyContext, RegionArchetype, RegionClassCell,
-    TerrainFormFamily,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, BiomeFamily, CoastalContext, HydrologyContext,
+    RegionArchetype, RegionClassCell, TerrainFormFamily,
 };
 use crate::world::coord::{CHUNK_EDGE_I32, ChunkCoord};
 
@@ -15,6 +15,17 @@ pub const REALIZATION_NODE_BLOCK_SPAN: u32 = (REALIZATION_NODE_CHUNK_SPAN * CHUN
 const REALIZATION_NODE_BLOCK_SPAN_F32: f32 = REALIZATION_NODE_BLOCK_SPAN as f32;
 const REALIZATION_PATCH_HALO_NODES: i32 = 2;
 const REALIZATION_DIFFUSION_RADIUS_NODES: i32 = 2;
+const REALIZATION_SOURCE_WARP_SALT_X: u64 = 0xD6E1_5A71_0000_0001;
+const REALIZATION_SOURCE_WARP_SALT_Z: u64 = 0xD6E1_5A71_0000_0002;
+const REALIZATION_SOURCE_WARP_SALT_FINE_X: u64 = 0xD6E1_5A71_0000_0003;
+const REALIZATION_SOURCE_WARP_SALT_FINE_Z: u64 = 0xD6E1_5A71_0000_0004;
+const REALIZATION_SOURCE_WARP_BROAD_PERIOD_BLOCKS: f32 = 760.0;
+const REALIZATION_SOURCE_WARP_FINE_PERIOD_BLOCKS: f32 = 156.0;
+const REALIZATION_SOURCE_WARP_BROAD_AMPLITUDE_BLOCKS: f32 = 132.0;
+const REALIZATION_SOURCE_WARP_FINE_AMPLITUDE_BLOCKS: f32 = 72.0;
+const ATLAS_CELL_BLOCK_SPAN_F32: f32 = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32) as f32;
+const NOISE_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
+const NOISE_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RealizationMaterialSupport {
@@ -428,11 +439,12 @@ fn solve_realization_node(
     }
 
     let smoothed = accumulated.scaled(total_weight.recip());
-    let anchor_pull = (0.28
-        + center.field.ecotone_strength * 0.32
+    let anchor_pull = (0.24
         + center.field.coast_factor * 0.18
-        + center.field.ridge_factor * 0.10)
-        .clamp(0.22, 0.78);
+        + center.field.ridge_factor * 0.12
+        + center.field.basinness * 0.06
+        - center.field.ecotone_strength * 0.18)
+        .clamp(0.16, 0.68);
 
     smoothed
         .blend_toward(center.sample, anchor_pull)
@@ -448,8 +460,14 @@ fn source_hint_for_node(
     *source_cache.entry((node_x, node_z)).or_insert_with(|| {
         let world_x = node_world_center(node_x);
         let world_z = node_world_center(node_z);
-        let field = sample_atlas_fields_fractional(&inputs.atlas_fields, world_x, world_z);
-        let region_samples = sample_region_weights(&inputs.region_classes, world_x, world_z);
+        let (source_x, source_z) = realization_source_sample_position(
+            inputs.seed,
+            world_x,
+            world_z,
+            inputs.region_classes.area(),
+        );
+        let field = sample_atlas_fields_fractional(&inputs.atlas_fields, source_x, source_z);
+        let region_samples = sample_region_weights(&inputs.region_classes, source_x, source_z);
         let dominant_region = dominant_region_cell(&region_samples);
         let mut source =
             basis_parameters_to_realization_sample(blended_basis_parameters(&region_samples));
@@ -469,6 +487,73 @@ fn source_hint_for_node(
             anchor_weight,
         }
     })
+}
+
+fn realization_source_sample_position(
+    seed: u64,
+    world_x: f32,
+    world_z: f32,
+    region_area: AtlasArea,
+) -> (f32, f32) {
+    let boundary_pressure = atlas_grid_boundary_pressure(world_x, world_z);
+    let amplitude_scale = (0.28 + boundary_pressure * 0.72).clamp(0.0, 1.0);
+    let broad_x = signed_value_noise_2d(
+        seed,
+        world_x,
+        world_z,
+        REALIZATION_SOURCE_WARP_BROAD_PERIOD_BLOCKS,
+        REALIZATION_SOURCE_WARP_SALT_X,
+    );
+    let broad_z = signed_value_noise_2d(
+        seed,
+        world_x,
+        world_z,
+        REALIZATION_SOURCE_WARP_BROAD_PERIOD_BLOCKS,
+        REALIZATION_SOURCE_WARP_SALT_Z,
+    );
+    let fine_x = signed_value_noise_2d(
+        seed,
+        world_x + 113.0,
+        world_z - 47.0,
+        REALIZATION_SOURCE_WARP_FINE_PERIOD_BLOCKS,
+        REALIZATION_SOURCE_WARP_SALT_FINE_X,
+    );
+    let fine_z = signed_value_noise_2d(
+        seed,
+        world_x - 71.0,
+        world_z + 139.0,
+        REALIZATION_SOURCE_WARP_FINE_PERIOD_BLOCKS,
+        REALIZATION_SOURCE_WARP_SALT_FINE_Z,
+    );
+    let warped_x = world_x
+        + (broad_x * REALIZATION_SOURCE_WARP_BROAD_AMPLITUDE_BLOCKS
+            + fine_x * REALIZATION_SOURCE_WARP_FINE_AMPLITUDE_BLOCKS)
+            * amplitude_scale;
+    let warped_z = world_z
+        + (broad_z * REALIZATION_SOURCE_WARP_BROAD_AMPLITUDE_BLOCKS
+            + fine_z * REALIZATION_SOURCE_WARP_FINE_AMPLITUDE_BLOCKS)
+            * amplitude_scale;
+
+    clamp_world_sample_to_atlas_area(warped_x, warped_z, region_area)
+}
+
+fn atlas_grid_boundary_pressure(world_x: f32, world_z: f32) -> f32 {
+    let atlas_x = world_x / ATLAS_CELL_BLOCK_SPAN_F32;
+    let atlas_z = world_z / ATLAS_CELL_BLOCK_SPAN_F32;
+    let local_x = atlas_x - atlas_x.floor();
+    let local_z = atlas_z - atlas_z.floor();
+    let edge_distance = local_x.min(1.0 - local_x).min(local_z.min(1.0 - local_z));
+
+    smootherstep01(1.0 - edge_distance / 0.42)
+}
+
+fn clamp_world_sample_to_atlas_area(world_x: f32, world_z: f32, area: AtlasArea) -> (f32, f32) {
+    let min_x = area.origin().x as f32 * ATLAS_CELL_BLOCK_SPAN_F32 + 1.0;
+    let min_z = area.origin().z as f32 * ATLAS_CELL_BLOCK_SPAN_F32 + 1.0;
+    let max_x = (area.origin().x + area.width() as i32) as f32 * ATLAS_CELL_BLOCK_SPAN_F32 - 1.0;
+    let max_z = (area.origin().z + area.height() as i32) as f32 * ATLAS_CELL_BLOCK_SPAN_F32 - 1.0;
+
+    (world_x.clamp(min_x, max_x), world_z.clamp(min_z, max_z))
 }
 
 fn dominant_region_cell(region_samples: &[super::RegionSampleWeight]) -> RegionClassCell {
@@ -707,7 +792,7 @@ fn modulate_source_hint(mut sample: RealizationSample, field: AtlasCell) -> Real
 }
 
 fn realization_permeability(a: RealizationSourceHint, b: RealizationSourceHint) -> f32 {
-    let mut permeability = 0.06_f32;
+    let mut permeability = 0.12_f32;
 
     if a.region.archetype == b.region.archetype {
         permeability += 0.26;
@@ -751,7 +836,7 @@ fn realization_permeability(a: RealizationSourceHint, b: RealizationSourceHint) 
         permeability *= 0.62;
     }
 
-    permeability.clamp(0.02, 1.0)
+    permeability.clamp(0.08, 1.0)
 }
 
 fn basin_wall_transition(a: RegionClassCell, b: RegionClassCell) -> bool {
@@ -808,6 +893,44 @@ fn node_world_center(node: i32) -> f32 {
 
 fn scalar_similarity(a: f32, b: f32) -> f32 {
     (1.0 - (a - b).abs()).clamp(0.0, 1.0)
+}
+
+fn signed_value_noise_2d(seed: u64, world_x: f32, world_z: f32, period: f32, salt: u64) -> f32 {
+    value_noise_2d(seed, world_x, world_z, period, salt) * 2.0 - 1.0
+}
+
+fn value_noise_2d(seed: u64, world_x: f32, world_z: f32, period: f32, salt: u64) -> f32 {
+    let sample_x = world_x / period.max(1.0);
+    let sample_z = world_z / period.max(1.0);
+    let base_x = sample_x.floor() as i32;
+    let base_z = sample_z.floor() as i32;
+    let tx = smootherstep01(sample_x - base_x as f32);
+    let tz = smootherstep01(sample_z - base_z as f32);
+    let v00 = hash_lattice_to_unit(seed, base_x, base_z, salt);
+    let v10 = hash_lattice_to_unit(seed, base_x + 1, base_z, salt);
+    let v01 = hash_lattice_to_unit(seed, base_x, base_z + 1, salt);
+    let v11 = hash_lattice_to_unit(seed, base_x + 1, base_z + 1, salt);
+    let north = lerp_f32(v00, v10, tx);
+    let south = lerp_f32(v01, v11, tx);
+
+    lerp_f32(north, south, tz)
+}
+
+fn hash_lattice_to_unit(seed: u64, x: i32, z: i32, salt: u64) -> f32 {
+    let mut hash = seed ^ salt;
+    hash ^= (x as i64 as u64).wrapping_mul(NOISE_HASH_K1);
+    hash = hash.rotate_left(27);
+    hash ^= (z as i64 as u64).wrapping_mul(NOISE_HASH_K2);
+    hash = mix_u64(hash);
+
+    ((hash >> 40) as u32 as f32) / ((1_u32 << 24) as f32)
+}
+
+fn mix_u64(mut value: u64) -> u64 {
+    value = value.wrapping_add(NOISE_HASH_K1);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
 }
 
 fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {

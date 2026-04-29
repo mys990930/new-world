@@ -8,6 +8,7 @@ use crate::world::generation::{HydrologyColumn, HydrologyMode, SmoothedColumn};
 const DOMAIN_BOUNDARY_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
 const DOMAIN_BOUNDARY_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const DOMAIN_BOUNDARY_SALT: u64 = 0x51A7_D0A1_0000_0001;
+const DOMAIN_BOUNDARY_FINE_SALT: u64 = 0x51A7_D0A1_0000_0002;
 const FOREIGN_SUPPORT_MIN: f32 = 0.24;
 const HARD_BARRIER_LIMIT: f32 = 0.84;
 const STRONG_SUPPORT: f32 = 0.72;
@@ -1023,10 +1024,9 @@ fn material_domain_transition_phase(
     let supported_push = support.total * 0.34;
     let compatibility_push = support.compatibility * 0.10;
     let barrier_pull = support.barrier * 0.24;
+    let ripple_push = boundary_displacement * (0.12 + support.total * 0.07);
 
-    (weight_edge + boundary_displacement * 0.08 + supported_push + compatibility_push
-        - barrier_pull
-        - 0.18)
+    (weight_edge + ripple_push + supported_push + compatibility_push - barrier_pull - 0.18)
         .clamp(-1.0, 1.0)
 }
 
@@ -1089,8 +1089,20 @@ fn material_domain_boundary_displacement(
         421.0,
         salt.rotate_left(31),
     );
+    let fine = signed_value_noise_2d(
+        world_x as f32 + 3.0,
+        world_z as f32 - 5.0,
+        9.0,
+        (salt ^ DOMAIN_BOUNDARY_FINE_SALT).rotate_left(11),
+    );
+    let subchunk = signed_value_noise_2d(
+        world_x as f32 - 17.0,
+        world_z as f32 + 23.0,
+        23.0,
+        (salt ^ DOMAIN_BOUNDARY_FINE_SALT).rotate_left(43),
+    );
 
-    ((meso * 0.56 + broad * 0.44) * 0.36).clamp(-1.0, 1.0)
+    ((meso * 0.34 + broad * 0.22 + subchunk * 0.28 + fine * 0.16) * 0.55).clamp(-1.0, 1.0)
 }
 
 fn signed_value_noise_2d(world_x: f32, world_z: f32, period: f32, salt: u64) -> f32 {

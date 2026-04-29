@@ -31,6 +31,7 @@ pub enum GenerationScaffoldStage {
 #[derive(Debug, Clone)]
 pub struct ChunkGenerationInputs {
     pub chunk: ChunkCoord,
+    pub seed: u64,
     pub atlas_fields: AtlasFieldMap,
     pub atlas_structure: AtlasStructureMap,
     pub region_classes: RegionClassMap,
@@ -39,6 +40,7 @@ pub struct ChunkGenerationInputs {
 
 #[derive(Debug, Clone)]
 struct SharedChunkGenerationInputs {
+    seed: u64,
     atlas_fields: AtlasFieldMap,
     atlas_structure: AtlasStructureMap,
     region_classes: RegionClassMap,
@@ -99,6 +101,7 @@ impl SharedChunkGenerationInputs {
     fn inputs_for_chunk(&self, coord: ChunkCoord) -> ChunkGenerationInputs {
         ChunkGenerationInputs {
             chunk: coord,
+            seed: self.seed,
             atlas_fields: self.atlas_fields.clone(),
             atlas_structure: self.atlas_structure.clone(),
             region_classes: self.region_classes.clone(),
@@ -110,6 +113,7 @@ impl SharedChunkGenerationInputs {
 impl PartialEq for ChunkGenerationInputs {
     fn eq(&self, other: &Self) -> bool {
         self.chunk == other.chunk
+            && self.seed == other.seed
             && self.atlas_fields.area() == other.atlas_fields.area()
             && self.atlas_fields.cells().values() == other.atlas_fields.cells().values()
             && self.atlas_structure == other.atlas_structure
@@ -161,6 +165,7 @@ fn build_shared_chunk_generation_inputs(
     let meso_guides = generate_chunk_meso_guides(coord, meta, &atlas_fields, &atlas_structure);
 
     SharedChunkGenerationInputs {
+        seed: meta.seed,
         atlas_fields,
         atlas_structure,
         region_classes,

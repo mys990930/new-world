@@ -1,4 +1,4 @@
-﻿#[cfg(test)]
+#[cfg(test)]
 use crate::world::atlas::{AtlasCoord, RegionClassInfluence};
 use crate::world::atlas::{
     ClimateRegime, CoastalContext, HydrologyContext, RegionArchetype, RegionClassCell,
@@ -11,13 +11,15 @@ use crate::world::generation::{
 use crate::world::{SEA_LEVEL_Y, SmoothedColumn};
 
 use super::cover::CoverPhase;
-use super::domain::{MaterialDomainInput, sample_material_domain};
+use super::domain::{MaterialDomainInput, MaterialDomainKind, sample_material_domain};
 use super::material::{MaterialPolicyDef, MaterialPolicyId, material_policy_def};
 use super::seasonal::{SeasonalBiomeStateId, SeasonalPhase};
 
 const MATERIAL_TRANSITION_HASH_K1: u64 = 0x9E37_79B9_7F4A_7C15;
 const MATERIAL_TRANSITION_HASH_K2: u64 = 0xC2B2_AE3D_27D4_EB4F;
 const MATERIAL_TRANSITION_SALT: u64 = 0x5A37_FACA_DE00_0001;
+const MATERIAL_TRANSITION_FINE_SALT: u64 = 0x5A37_FACA_DE00_0002;
+const MATERIAL_BOUNDARY_STEPPING_SALT: u64 = 0x5A37_FACA_DE00_0003;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SurfaceRuntimeContext {
@@ -51,6 +53,14 @@ struct MaterialTransitionSelection {
     policy: MaterialPolicyId,
     strength: f32,
     boundary_value: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VisualBoundaryStepClaim {
+    source: SurfaceColumnPlan,
+    source_dx: i32,
+    source_dz: i32,
+    score: f32,
 }
 
 pub fn empty_chunk_surface_plan(chunk: ChunkCoord) -> ChunkSurfacePlan {
@@ -148,11 +158,18 @@ pub fn resolve_chunk_surface_plan_with_runtime(
 
     let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
-    let mut columns = Vec::with_capacity(hydrology.columns.len());
+    let halo_edge = CHUNK_EDGE_I32 + 2;
+    let halo_origin_x = chunk_origin_x - 1;
+    let halo_origin_z = chunk_origin_z - 1;
+    let mut halo_columns = Vec::with_capacity((halo_edge * halo_edge) as usize);
 
-    for local_z in 0..CHUNK_EDGE_I32 {
-        for local_x in 0..CHUNK_EDGE_I32 {
-            let index = column_index(local_x, local_z);
+    for halo_z in 0..halo_edge {
+        for halo_x in 0..halo_edge {
+            let local_x = halo_x - 1;
+            let local_z = halo_z - 1;
+            let sample_x = local_x.clamp(0, CHUNK_EDGE_I32 - 1);
+            let sample_z = local_z.clamp(0, CHUNK_EDGE_I32 - 1);
+            let index = column_index(sample_x, sample_z);
             let world_x = chunk_origin_x + local_x;
             let world_z = chunk_origin_z + local_z;
             let region = sample_region_classes(&inputs.region_classes, world_x, world_z);
@@ -169,7 +186,7 @@ pub fn resolve_chunk_surface_plan_with_runtime(
                 material_sample_x,
                 material_sample_z,
             );
-            columns.push(resolve_surface_column_plan_with_influence(
+            halo_columns.push(resolve_surface_column_plan_with_influence(
                 region,
                 &influence,
                 world_x,
@@ -178,6 +195,21 @@ pub fn resolve_chunk_surface_plan_with_runtime(
                 hydrology_column,
                 runtime,
             ));
+        }
+    }
+
+    apply_visual_boundary_stepping(
+        &mut halo_columns,
+        halo_edge,
+        halo_origin_x,
+        halo_origin_z,
+        inputs.seed,
+    );
+
+    let mut columns = Vec::with_capacity(hydrology.columns.len());
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            columns.push(halo_columns[grid_column_index(local_x + 1, local_z + 1, halo_edge)]);
         }
     }
 
@@ -230,7 +262,10 @@ fn resolve_surface_column_plan_with_influence(
         world_z,
     });
     let material_region = material_domain.visible_owner;
-    let material_policy = resolve_material_policy_for_archetype(material_region.archetype);
+    let material_policy = resolve_material_policy_for_domain(
+        material_domain.visible_domain,
+        material_region.archetype,
+    );
     let material = material_policy_def(material_policy)
         .expect("every archetype surface policy should resolve to a definition");
     let seasonal_state = resolve_seasonal_state(
@@ -293,6 +328,239 @@ fn resolve_surface_column_plan_with_influence(
         water_block_key,
         filler_depth,
     }
+}
+
+fn resolve_material_policy_for_domain(
+    domain: MaterialDomainKind,
+    fallback_archetype: RegionArchetype,
+) -> MaterialPolicyId {
+    match domain {
+        MaterialDomainKind::MarineShelf => MaterialPolicyId::OceanicShelf,
+        MaterialDomainKind::SandyCoast => MaterialPolicyId::SandyBeach,
+        MaterialDomainKind::RockyCoast => MaterialPolicyId::CoastalCliff,
+        MaterialDomainKind::Wetland => MaterialPolicyId::ColdWetland,
+        MaterialDomainKind::TemperateGreen => MaterialPolicyId::TemperateGrassland,
+        MaterialDomainKind::DryGrassland => MaterialPolicyId::SteppeGrassland,
+        MaterialDomainKind::SavannaGrassland => MaterialPolicyId::SavannaGrassland,
+        MaterialDomainKind::TropicalForest => match fallback_archetype {
+            RegionArchetype::TropicalRainforestHills => MaterialPolicyId::TropicalHills,
+            _ => MaterialPolicyId::TropicalLowland,
+        },
+        MaterialDomainKind::DesertDry => MaterialPolicyId::DesertSurface,
+        MaterialDomainKind::ColdSparse => MaterialPolicyId::TundraExposure,
+        MaterialDomainKind::AlpineRock => MaterialPolicyId::AlpineExposed,
+    }
+}
+
+fn apply_visual_boundary_stepping(
+    columns: &mut Vec<SurfaceColumnPlan>,
+    grid_edge: i32,
+    origin_x: i32,
+    origin_z: i32,
+    seed: u64,
+) {
+    if columns.len() != (grid_edge * grid_edge) as usize {
+        return;
+    }
+
+    let original = columns.clone();
+    let mut claims: Vec<Option<VisualBoundaryStepClaim>> = vec![None; original.len()];
+
+    for depth in 0..3 {
+        let previous_claims = claims.clone();
+        let mut next_claims = previous_claims.clone();
+        let threshold = match depth {
+            0 => 0.56,
+            1 => 0.54,
+            _ => 0.60,
+        };
+
+        for local_z in 1..(grid_edge - 1) {
+            for local_x in 1..(grid_edge - 1) {
+                let index = grid_column_index(local_x, local_z, grid_edge);
+                if previous_claims[index].is_some() {
+                    continue;
+                }
+
+                let current = original[index];
+                let world_x = origin_x + local_x;
+                let world_z = origin_z + local_z;
+                let mut best: Option<VisualBoundaryStepClaim> = None;
+
+                for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let nx = local_x + dx;
+                    let nz = local_z + dz;
+                    if !(0..grid_edge).contains(&nx) || !(0..grid_edge).contains(&nz) {
+                        continue;
+                    }
+
+                    let neighbor_index = grid_column_index(nx, nz, grid_edge);
+                    if visual_boundary_source_is_halo(nx, nz, grid_edge)
+                        && !visual_boundary_has_internal_boundary(
+                            &original, local_x, local_z, grid_edge,
+                        )
+                    {
+                        continue;
+                    }
+                    let Some(source) = visual_boundary_step_source(
+                        depth,
+                        &original,
+                        &previous_claims,
+                        neighbor_index,
+                    ) else {
+                        continue;
+                    };
+                    if !visual_boundary_step_allowed(current, source) {
+                        continue;
+                    }
+
+                    let score = visual_boundary_step_score(
+                        world_x,
+                        world_z,
+                        seed,
+                        current.material_policy,
+                        source.material_policy,
+                        dx,
+                        dz,
+                    );
+                    if score <= threshold {
+                        continue;
+                    }
+
+                    let claim = VisualBoundaryStepClaim {
+                        source,
+                        source_dx: dx,
+                        source_dz: dz,
+                        score,
+                    };
+                    if claim.score > best.map(|best| best.score).unwrap_or(f32::NEG_INFINITY) {
+                        best = Some(claim);
+                    }
+                }
+
+                if let Some(claim) = best {
+                    next_claims[index] = Some(claim);
+                }
+            }
+        }
+
+        claims = next_claims;
+    }
+
+    for (index, claim) in claims.into_iter().enumerate() {
+        let Some(claim) = claim else {
+            continue;
+        };
+        let _ = (claim.source_dx, claim.source_dz);
+        copy_visual_material(&mut columns[index], claim.source);
+    }
+}
+
+fn visual_boundary_source_is_halo(local_x: i32, local_z: i32, grid_edge: i32) -> bool {
+    local_x == 0 || local_z == 0 || local_x == grid_edge - 1 || local_z == grid_edge - 1
+}
+
+fn visual_boundary_has_internal_boundary(
+    original: &[SurfaceColumnPlan],
+    local_x: i32,
+    local_z: i32,
+    grid_edge: i32,
+) -> bool {
+    let current = original[grid_column_index(local_x, local_z, grid_edge)];
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let nx = local_x + dx;
+        let nz = local_z + dz;
+        if nx <= 0 || nz <= 0 || nx >= grid_edge - 1 || nz >= grid_edge - 1 {
+            continue;
+        }
+
+        let neighbor = original[grid_column_index(nx, nz, grid_edge)];
+        if current.top_block_key != neighbor.top_block_key
+            || current.material_policy != neighbor.material_policy
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn visual_boundary_step_source(
+    depth: usize,
+    original: &[SurfaceColumnPlan],
+    previous_claims: &[Option<VisualBoundaryStepClaim>],
+    neighbor_index: usize,
+) -> Option<SurfaceColumnPlan> {
+    if depth == 0 {
+        Some(original[neighbor_index])
+    } else {
+        previous_claims[neighbor_index].map(|claim| claim.source)
+    }
+}
+
+fn visual_boundary_step_allowed(current: SurfaceColumnPlan, neighbor: SurfaceColumnPlan) -> bool {
+    if current.top_block_key == neighbor.top_block_key
+        && current.material_policy == neighbor.material_policy
+    {
+        return false;
+    }
+    if current.water_top_y.is_some()
+        || neighbor.water_top_y.is_some()
+        || current.water_block_key.is_some()
+        || neighbor.water_block_key.is_some()
+    {
+        return false;
+    }
+    if current.cover_override_key.is_some() || neighbor.cover_override_key.is_some() {
+        return false;
+    }
+    if current.terrain_top_y.abs_diff(neighbor.terrain_top_y) > 8 {
+        return false;
+    }
+
+    true
+}
+
+fn visual_boundary_step_score(
+    world_x: i32,
+    world_z: i32,
+    seed: u64,
+    current: MaterialPolicyId,
+    neighbor: MaterialPolicyId,
+    dx: i32,
+    dz: i32,
+) -> f32 {
+    let salt = MATERIAL_BOUNDARY_STEPPING_SALT
+        ^ seed
+        ^ ((current as u64).wrapping_mul(0xA24B_AED4_963E_E407))
+        ^ ((neighbor as u64).wrapping_mul(0x9FB2_1C65_1E98_DF25))
+        ^ ((dx as i64 as u64).wrapping_mul(0xD6E8_FD9D_52C7_129B))
+        ^ ((dz as i64 as u64).wrapping_mul(0xA5A3_56B9_77E3_45CF));
+    let short = value_noise_2d(world_x as f32, world_z as f32, 3.0, salt.rotate_left(13));
+    let medium = value_noise_2d(
+        world_x as f32 + 11.0,
+        world_z as f32 - 7.0,
+        5.0,
+        salt.rotate_left(37),
+    );
+    let bias = hash_lattice_to_unit(
+        world_x.div_euclid(2) + dx,
+        world_z.div_euclid(2) + dz,
+        salt.rotate_left(51),
+    );
+
+    short * 0.38 + medium * 0.44 + bias * 0.18
+}
+
+fn copy_visual_material(target: &mut SurfaceColumnPlan, source: SurfaceColumnPlan) {
+    target.material_policy = source.material_policy;
+    target.seasonal_state = source.seasonal_state;
+    target.cover_phase = source.cover_phase;
+    target.cover_override_key = source.cover_override_key;
+    target.top_block_key = source.top_block_key;
+    target.filler_block_key = source.filler_block_key;
+    target.core_block_key = source.core_block_key;
+    target.filler_depth = source.filler_depth;
 }
 
 fn resolve_seasonal_state(
@@ -673,10 +941,10 @@ fn resolve_material_transition(
         candidate_region.archetype,
     );
     let _ = smoothed;
-    let edge_score = candidate_weight
+    let coarse_edge_score = candidate_weight
         - owner_weight * (0.66 + influence.barrier_strength.clamp(0.0, 1.0) * 0.18)
-        + influence.transition_strength.clamp(0.0, 1.0) * 0.08
-        + boundary_displacement * 0.04;
+        + influence.transition_strength.clamp(0.0, 1.0) * 0.08;
+    let edge_score = coarse_edge_score + boundary_displacement * 0.025;
     if edge_score <= 0.0 {
         return None;
     }
@@ -1008,6 +1276,8 @@ fn material_transition_compatibility(
         | (MaterialPolicyId::TemperateGrassland, MaterialPolicyId::ColdWetland)
         | (MaterialPolicyId::ColdWetland, MaterialPolicyId::TundraExposure)
         | (MaterialPolicyId::TundraExposure, MaterialPolicyId::ColdWetland) => 0.46,
+        (MaterialPolicyId::ColdWetland, MaterialPolicyId::AlpineExposed)
+        | (MaterialPolicyId::AlpineExposed, MaterialPolicyId::ColdWetland) => 0.44,
         (MaterialPolicyId::AlpineExposed, MaterialPolicyId::TundraExposure)
         | (MaterialPolicyId::TundraExposure, MaterialPolicyId::AlpineExposed)
         | (MaterialPolicyId::AlpineExposed, MaterialPolicyId::TemperatePlateau)
@@ -1079,8 +1349,20 @@ fn material_transition_boundary_displacement(
         557.0,
         salt.rotate_left(31),
     );
+    let subchunk = signed_value_noise_2d(
+        world_x as f32 + 29.0,
+        world_z as f32 - 11.0,
+        21.0,
+        (salt ^ MATERIAL_TRANSITION_FINE_SALT).rotate_left(9),
+    );
+    let fine = signed_value_noise_2d(
+        world_x as f32 - 7.0,
+        world_z as f32 + 13.0,
+        7.0,
+        (salt ^ MATERIAL_TRANSITION_FINE_SALT).rotate_left(39),
+    );
 
-    ((medium * 0.58 + broad * 0.42) * 0.38).clamp(-1.0, 1.0)
+    ((medium * 0.34 + broad * 0.22 + subchunk * 0.28 + fine * 0.16) * 0.34).clamp(-1.0, 1.0)
 }
 
 fn signed_value_noise_2d(world_x: f32, world_z: f32, period: f32, salt: u64) -> f32 {
@@ -1140,7 +1422,11 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn column_index(local_x: i32, local_z: i32) -> usize {
-    local_z as usize * CHUNK_EDGE_I32 as usize + local_x as usize
+    grid_column_index(local_x, local_z, CHUNK_EDGE_I32)
+}
+
+fn grid_column_index(local_x: i32, local_z: i32, grid_edge: i32) -> usize {
+    local_z as usize * grid_edge as usize + local_x as usize
 }
 
 #[cfg(test)]

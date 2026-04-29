@@ -29,7 +29,6 @@
 
 ## Current Contract
 
-- region ownership remains deterministic per sampled column for query/storage, but visible material ownership comes from the shared domain-warped region influence dominant plus deterministic displaced material boundaries
 - region ownership remains deterministic per sampled column for query/storage, but visible material ownership now comes from support-driven competition among the foreign domains present in the shared region influence neighborhood, plus deterministic displaced material boundaries
 - generation-derived material support axes from `SmoothedColumn` are part of the visible material
   contract; hard atlas ownership alone must not force mud, scree, sand, grass, or rock when the
@@ -45,7 +44,10 @@
 - the default `generate_chunk(...)` path currently uses no runtime season context, so seasonal state may stay `None`
 - explicit runtime seasonal context remains the future integration point for `WorldCore` calendar ownership
 - surface resolve consumes the shared atlas `sample_region_class_influences(...)` output instead of deriving its own atlas-grid fractional sampler
-- surface resolve still samples hard owner separately for storage/query, but visible material policy is no longer tied to the single strongest foreign influence weight once broad generation/hydrology support favors a different neighboring domain
+- surface resolve still samples hard owner separately for storage/query, while visible material policy is selected from the resolved material domain before final transition breakup
+- visible material policy may be selected from the resolved material domain, not only from the
+  visible owner's archetype, so local terrain-supported domain overrides are not discarded before
+  block-stack selection
 
 ## Public Surface
 
@@ -73,7 +75,7 @@ resolve_chunk_surface_plan_with_runtime(
 - surface resolve is the final shield against visible atlas-cell material rectangles.
 - top/filler/core block choice should start from the domain-warped visible material owner, while preserving the hard sampled owner as `owner_archetype` for gameplay/query surfaces.
 - transition selection must be deterministic from world position and seed-derived fields, not from chunk order.
-- transition selection should behave like a displaced boundary: each column still resolves to one clear block stack, while the line where that stack changes is warped by low-frequency world fields plus broad hydrology/material support.
+- transition selection should behave like a displaced boundary: each column still resolves to one clear block stack, while the line where that stack changes is warped by broad hydrology/material support.
 - a domain-warped visible owner that crosses the hard atlas owner must be supported by local terrain or hydrology evidence; a large smooth curve from warp alone is still an artifact.
 - visible material influence sampling may be displaced by smoothed material support and strong
   hydrology. This displacement is a final boundary-placement tool, not a new owner for gameplay
@@ -81,6 +83,17 @@ resolve_chunk_surface_plan_with_runtime(
 - resolver-side boundary displacement should stay weaker than region influence and material-domain
   support. It may soften a tie, but must not draw a second macro curve independent of the accepted
   environment boundary.
+- after the first per-column plan pass, surface resolve may apply a deterministic visual boundary
+  stepping pass. This pass can copy visual material fields from a directly adjacent dry neighbor
+  when the two columns already share a material boundary, then grow that copied visual material for
+  a few columns only through cardinal adjacency to the same source material. This gives the line a
+  block-scale wobble without diagonal-only connections or scattered interior spots.
+- the visual boundary stepping pass runs on a one-column halo around the target chunk and then
+  crops back to the central chunk columns, so material steps that cross chunk edges are judged with
+  the same world-position noise instead of being clipped by the local chunk border.
+- halo cells may extend an existing interior boundary across a chunk edge, but they must not create
+  a new edge-only dotted boundary when the target chunk has no cardinally adjacent internal
+  material transition at that edge.
 - material support may decide where the boundary falls, but it must not recolor every height,
   slope, or contour band inside a single environment. Once a column belongs to the same visible
   environment, its cover block should stay stable unless hydrology, season, coast, or a clear

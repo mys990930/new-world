@@ -42,14 +42,16 @@ sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainSample
 ## Boundary Contract
 
 - `hard_owner` remains the gameplay/query owner even when `visible_owner` is accepted for material expression.
-- `hard_owner` remains the gameplay/query owner even when `visible_owner` is accepted for material expression.
 - `visible_owner` may cross the hard owner only when the foreign domain is supported by broad generation material axes, hydrology, or coastal evidence.
 - among foreign domains present in the influence neighborhood, the resolver should consider the best supported candidate rather than blindly favoring whichever foreign domain has the highest raw influence weight.
 - the support test compares whether the candidate visible domain is better supported than the hard
   domain by the generation material-support axes and final hydrology.
-- Low-frequency boundary displacement can move an already supported boundary, but it cannot by itself authorize a large smooth foreign-owner curve.
+- Boundary displacement can move an already supported boundary, but it cannot by itself authorize a large smooth foreign-owner curve.
 - Domain-local displacement is a small tie-breaker after broad support and atlas-edge influence,
   not a second broad owner field; it must not introduce a new large curve over the region boundary.
+- Domain displacement may contain subchunk value-noise components sampled at block columns, but it
+  must not use independent hash speckles that create isolated visible-domain spots away from the
+  edge.
 - Each sampled column still resolves to one categorical visible domain; interiors must not be mottled with dither.
 - The phase is deterministic from world x/z and the two categorical domains, so adjacent samples should form connected runs rather than salt-and-pepper alternation.
 - Material policy mapping remains in `resolve.rs`; this module only reasons about `RegionArchetype` and region-category data.

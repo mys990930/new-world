@@ -98,6 +98,8 @@ move as connected terrain signals and must not be used as per-column speckle mas
 - current implementation:
   - `REALIZATION_NODE_CHUNK_SPAN = 2`
   - `REALIZATION_PATCH_HALO_NODES = 2`
+  - source hints sample atlas fields and region influence through a deterministic seed-based
+    world-space warp so source nodes do not stay locked to atlas-cell edge lines
 
 ## Source Construction
 
@@ -141,6 +143,7 @@ Permeability should decrease when the macro context says a boundary should remai
   - the first solve uses a bounded neighborhood gather with permeability-weighted averaging plus an anchor-strength blend, rather than a multi-iteration global relaxation pass
   - source construction now reads the full displaced `RegionClassInfluenceSet` neighborhood instead of an axis-aligned four-corner atlas bilerp, so the solved control field inherits the same low-frequency boundary breakup already used by region/material sampling
   - permeability already considers distance, semantic compatibility, scalar-context similarity, marine/inland transitions, and basin-wall pressure
+  - ecotone-heavy source nodes keep less direct anchor pull than true coast/ridge/basin barriers so compatible control values can cross atlas-cell edges without flattening real macro breaks
 
 The solve target is not "blur everything"; it is "carry compatible landform intent across atlas-cell boundaries without losing macro barriers".
 

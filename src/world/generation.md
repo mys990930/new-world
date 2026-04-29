@@ -155,6 +155,7 @@ generation::sample_chunk_surface_lod(
 - Region classification should resolve stable biome and terrain-form archetypes from raw continuous fields plus skeleton context, instead of asking meso or material thresholds to decide primary local identity.
 - Climate regime should be treated as a derived long-pattern class, while seasonal biome state should stay a later runtime layer that changes cover/material expression without constantly reclassifying the region archetype.
 - Region classification should no longer feed prototype as a direct per-cell parameter switch. Generation should first derive a continuous realization field that carries flatness, relief, ridge, terrace, and wetness biases across atlas-cell boundaries.
+- Realization source construction may deterministically warp its atlas/region sample positions before solving the continuous control field; this keeps atlas cells as ownership/cache units without letting their straight edges become the first visible control boundary.
 - River corridors should be defined before biome-aware base heightfield solving, so heightfield generation treats them as constraints rather than as late carve masks.
 - Meso should become a constrained local-accent layer inside those already-classified regions, not the primary biome owner.
 - Headwaters should naturally emerge near mountain spines, passes, upland divides, and basin outlets rather than appearing as isolated wet pockets.
