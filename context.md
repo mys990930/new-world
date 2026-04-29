@@ -75,7 +75,7 @@
 - 새 world generation 방향은 사각 atlas cell이나 chunk를 terrain identity의 기준으로 쓰지 않고, Voronoi graph의 site/corner/edge 구조를 macro semantic graph로 사용한다
 - 큰 산맥, 바다/대륙 gradient, 배수 방향, 강 후보망 같은 macro guide는 chunk가 즉흥적으로 만들지 않고 world graph와 hydrology 구조를 기반으로 현실화한다
 - polygon 경계와 graph region은 소유/캐시 단위일 뿐이며, 최종 heightfield와 biome/material 표현은 blended continuous field, spline/domain warp, noise synthesis를 거쳐야 한다
-- 이전 atlas-cell 중심 world 구현은 `src/world/legacy`에 보존하며, 새 graph-first scaffold와 런타임 호환 bridge를 분리한다
+- 이전 atlas-cell 중심 world 구현은 `src/world/legacy`에 보존하며, 새 graph-first scaffold는 `src/world/generation` 아래에 둔다
 
 ### ECS 중심의 상태 전이
 - ECS는 게임 의미를 다루는 계층이다
