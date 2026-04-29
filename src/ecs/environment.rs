@@ -87,7 +87,7 @@ mod tests {
         status.refresh_from_world(Some([520.0, 0.0, -12.0]), &world);
 
         let current = status.current().expect("environment snapshot should exist");
-        assert_eq!(current.atlas_coord, AtlasCoord::new(1, -1));
+        assert_eq!(current.atlas_coord, AtlasCoord::new(2, -1));
         assert_eq!(current.calendar, *world.calendar());
     }
 

@@ -93,7 +93,7 @@ move as connected terrain signals and must not be used as per-column speckle mas
 - the realization field should use a control lattice that is finer than atlas cells and coarser than per-block prototype columns
 - initial target resolution:
   - one realization node per `2 x 2` chunks
-  - this yields `8 x 8` realization nodes inside one `16 x 16` chunk atlas cell
+  - this yields `4 x 4` realization nodes inside one `8 x 8` chunk atlas cell
 - each chunk solve should include enough halo nodes that neighboring chunks sample the same solved field along shared boundaries
 - current implementation:
   - `REALIZATION_NODE_CHUNK_SPAN = 2`

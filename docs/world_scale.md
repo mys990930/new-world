@@ -124,9 +124,9 @@ column(x, z)
 ---
 
 ## 3.6 Atlas Cell
-- 1 atlas cell = 2 × 2 regions
-- 1 atlas cell = 16 × 16 chunk columns
-- 물리 크기 = 256m × 256m
+- 1 atlas cell = 1 × 1 region
+- 1 atlas cell = 8 × 8 chunk columns
+- 물리 크기 = 128m × 128m
 
 ### atlas의 역할
 - 대륙/해양 마스크 계산
@@ -139,7 +139,7 @@ column(x, z)
 
 ### 선택 이유
 - 청크보다 충분히 커서 거시 필드를 보기 쉽다
-- region보다 한 단계 커서 atlas와 생태 region 역할을 분리할 수 있다
+- region과 같은 footprint를 사용해 지역 정체성, 기후 변화, terrain-form 변화를 플레이 중 더 자주 체감하게 한다
 - 디버그 지도로 보기에도 촘촘하고, worldgen 상위 해상도로도 적절하다
 
 ---
@@ -149,7 +149,7 @@ column(x, z)
 - 1 block = 0.5m
 - 1 chunk section = 32³ blocks = 16m cube
 - 1 region = 8 × 8 chunk columns = 128m
-- 1 atlas cell = 2 × 2 regions = 256m
+- 1 atlas cell = 1 × 1 region = 128m
 - 1 world column = (x, z) 기준 vertical stack
 
 ---
@@ -162,7 +162,7 @@ column(x, z)
 - chunk_section_size = 32
 - vertical_sections = 32
 - region_size_in_chunks = 8
-- atlas_size_in_regions = 2
+- atlas_size_in_regions = 1
 
 ## 5.2 소프트 스케일
 이후 계속 조정 가능한 값:

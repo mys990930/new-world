@@ -38,9 +38,9 @@ Atlas는 처음부터 최종 biome 이름을 hard label로 저장하지 않는�
 ## 3. Atlas 좌표계
 
 ### 3.1 기본 단위
-- 1 atlas cell = 256m × 256m
-- 1 atlas cell = 16 × 16 chunk columns
-- 1 atlas cell = 2 × 2 regions
+- 1 atlas cell = 128m × 128m
+- 1 atlas cell = 8 × 8 chunk columns
+- 1 atlas cell = 1 × 1 region
 
 ### 3.2 좌표
 - `AtlasCoord { x: i32, z: i32 }`

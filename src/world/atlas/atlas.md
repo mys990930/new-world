@@ -4,7 +4,8 @@
 
 - The current atlas structure pass now performs a first explicit confluence snap solve after trunk and tributary branches are emitted.
 - Chunk generation still owns the final carved river shape, but it can now sample confluence nodes as part of the atlas-owned drainage guide.
-- Atlas remains intentionally macro at the current scale. Local readability now comes from a separate deterministic meso layer instead of shrinking atlas cells.
+- Atlas cells now use a denser `128m / 8 x 8 chunk` footprint so terrain identity, climate, and region classification change often enough to be felt during normal play.
+- Local readability still also comes from a separate deterministic meso layer; meso refines the denser atlas identity rather than replacing it.
 - The meso layer is derived from seed and nearby atlas context, generated on demand, and kept distinct from atlas biome-scale or mountain/drainage-scale ownership.
 - Before meso chooses local accents, atlas should also own a deterministic region-classification layer that resolves biome and terrain-form archetypes from raw fields plus skeleton context.
 - Atlas therefore targets a four-part guide stack: raw scalar fields, directional skeleton, region classification, and meso terrain guides.

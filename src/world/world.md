@@ -270,7 +270,8 @@ NOT:
 - planned time/season ownership also stays world-owned: calendar, active climate drift state, and deferred far-region seasonal patches should remain world truth even when only a small active region is simulated eagerly
 - the first runtime slice now implements that ownership directly in `WorldCore`: calendar/climate/weather state is no longer spec-only, and simulation feeds it through `CalendarAdvance`
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
-- atlas remains intentionally macro at the current scale; local readability and more casual multi-chunk terrain identity should come from a later meso layer rather than from shrinking atlas cells
+- atlas cells now use a denser `128m / 8 x 8 chunk / 1 region` footprint so terrain identity, climate, and region classification change more often during normal play
+- local readability and casual multi-chunk terrain identity still also come from the meso layer, which refines atlas-owned regional identity rather than replacing it
 - atlas-owned region classification now resolves biome and terrain-form archetypes before base heightfield solving
 - generation-side realization-field sampling now sits after region classification so prototype can read continuous control parameters instead of atlas-cell labels directly
 - the current public `resolve_region_classes(...)` surface remains launch-safe by applying launch fallback at the final step, while the internal raw classifier may still emit broader scaffolded archetypes for testing and future downstream work

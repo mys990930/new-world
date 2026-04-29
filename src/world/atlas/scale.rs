@@ -1,9 +1,9 @@
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
-pub const ATLAS_CELL_SIZE_M: u32 = 256;
-pub const ATLAS_CELL_SIZE_IN_CHUNKS: u32 = 16;
-pub const ATLAS_CELL_SIZE_IN_REGIONS: u32 = 2;
+pub const ATLAS_CELL_SIZE_M: u32 = 128;
+pub const ATLAS_CELL_SIZE_IN_CHUNKS: u32 = 8;
+pub const ATLAS_CELL_SIZE_IN_REGIONS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AtlasCoord {
@@ -185,5 +185,12 @@ mod tests {
 
         assert_eq!(index, 6);
         assert_eq!(area.coord_at(index), Some(coord));
+    }
+
+    #[test]
+    fn atlas_hard_scale_matches_region_footprint() {
+        assert_eq!(ATLAS_CELL_SIZE_M, 128);
+        assert_eq!(ATLAS_CELL_SIZE_IN_CHUNKS, 8);
+        assert_eq!(ATLAS_CELL_SIZE_IN_REGIONS, 1);
     }
 }

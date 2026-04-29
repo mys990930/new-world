@@ -61,11 +61,11 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 
 ## Scale Contract
 
-- atlas remains the macro layer
+- atlas remains the regional identity layer, now at a denser `128m / 8 x 8 chunk` footprint
 - the initial meso target is finer than atlas and coarser than chunk-local micro detail
 - the current implementation uses:
   - one meso guide cell spans `2 x 2` chunks
-  - one atlas cell footprint contains `8 x 8` meso guide cells
+  - one atlas cell footprint contains `4 x 4` meso guide cells
   - one `MesoRegion` aligns to one atlas cell footprint for ownership and caching
 - those exact numbers may still change later, but the layering rule should not: meso must remain a multi-chunk layer that is visibly more local than atlas
 - the shared guide grid is only a suitability/source lattice; it must not force every feature to resolve to the same visible footprint

@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn active_region_tracks_player_atlas_cell() {
         let active = active_sim_region_for_translation([600.0, 0.0, -12.0], 0);
-        assert_eq!(active.center_atlas, AtlasCoord::new(1, -1));
-        assert_eq!(active.area.origin(), AtlasCoord::new(1, -1));
+        assert_eq!(active.center_atlas, AtlasCoord::new(2, -1));
+        assert_eq!(active.area.origin(), AtlasCoord::new(2, -1));
     }
 }
