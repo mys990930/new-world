@@ -10,12 +10,13 @@ use rayon::prelude::*;
 
 use new_world::world::{
     BlockId, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
-    ChunkGenerationInputs, HydrologyMode, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta,
-    build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
-    build_chunk_hydrology_solve, build_chunk_mesh, build_chunk_meso_applied_prototype,
-    build_chunk_realization_field_patch, build_chunk_smoothed_prototype,
-    chunk_generation_input_area, generate_chunk_from_generation_inputs,
-    prepare_chunk_generation_inputs,
+    ChunkGenerationInputs, HydrologyMode, MaterialPolicyId, RegionArchetype, WORLD_FLOOR_Y,
+    WorldBlockCoord, WorldCore, WorldMeta, build_chunk_base_heightfield_prototype,
+    build_chunk_corridor_window, build_chunk_hydrology_solve, build_chunk_mesh,
+    build_chunk_meso_applied_prototype, build_chunk_realization_field_patch,
+    build_chunk_smoothed_prototype, chunk_generation_input_area,
+    generate_chunk_from_generation_inputs, prepare_chunk_generation_inputs,
+    resolve_chunk_surface_plan, resolve_material_policy_for_archetype, sample_region_classes,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -42,6 +43,8 @@ enum PreviewStage {
     Full,
     Prototype,
     Hydrology,
+    HardMaterial,
+    SurfaceMaterial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +171,55 @@ struct StageDebugSummary {
     mean_saturation: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MaterialPreviewCell {
+    policy: MaterialPolicyId,
+    owner_archetype: RegionArchetype,
+    top_y: i32,
+}
+
+#[derive(Debug, Clone)]
+struct MaterialPreviewGrid {
+    origin_x: i32,
+    origin_z: i32,
+    width: usize,
+    depth: usize,
+    cells: Vec<MaterialPreviewCell>,
+}
+
+impl MaterialPreviewGrid {
+    fn index_of(&self, world_x: i32, world_z: i32) -> Option<usize> {
+        if world_x < self.origin_x || world_z < self.origin_z {
+            return None;
+        }
+
+        let dx = usize::try_from(world_x - self.origin_x).ok()?;
+        let dz = usize::try_from(world_z - self.origin_z).ok()?;
+        if dx >= self.width || dz >= self.depth {
+            return None;
+        }
+
+        Some(dz * self.width + dx)
+    }
+
+    fn cell(&self, world_x: i32, world_z: i32) -> Option<MaterialPreviewCell> {
+        self.index_of(world_x, world_z)
+            .map(|index| self.cells[index])
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MaterialPolicyCount {
+    policy: MaterialPolicyId,
+    count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MaterialDebugSummary {
+    total_columns: usize,
+    policy_counts: Vec<MaterialPolicyCount>,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
@@ -279,7 +331,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output =
         output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius, stage));
-    let (image, surface_range, debug_summary, mesh_debug, stage_debug) = match stage {
+    let (image, surface_range, debug_summary, mesh_debug, stage_debug, material_debug) = match stage
+    {
         PreviewStage::Full => {
             let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
@@ -345,6 +398,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Some(debug_summary),
                 Some(mesh_debug),
                 None,
+                None,
             )
         }
         PreviewStage::Prototype | PreviewStage::Hydrology => {
@@ -353,7 +407,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 build_stage_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
             let (image, surface_range, stage_debug) =
                 render_stage_topdown_preview(&grid, center_x, center_z, radius, pixels_per_block)?;
-            (image, surface_range, None, None, Some(stage_debug))
+            (image, surface_range, None, None, Some(stage_debug), None)
+        }
+        PreviewStage::HardMaterial | PreviewStage::SurfaceMaterial => {
+            let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
+            let grid =
+                build_material_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
+            let (image, surface_range, material_debug) = render_material_topdown_preview(
+                &grid,
+                center_x,
+                center_z,
+                radius,
+                pixels_per_block,
+            )?;
+            (image, surface_range, None, None, None, Some(material_debug))
         }
     };
     if let Some(parent) = output.parent() {
@@ -394,6 +461,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     if let Some(stage_debug) = stage_debug {
         print_stage_debug_summary(stage_debug);
+    }
+    if let Some(material_debug) = material_debug.as_ref() {
+        print_material_debug_summary(material_debug);
     }
     println!("output: {}", output.display());
     println!("image: {}x{}", image.width(), image.height());
@@ -580,6 +650,9 @@ fn build_stage_preview_grid(
                 PreviewStage::Full => unreachable!(
                     "stage preview grids are only used for prototype and hydrology previews"
                 ),
+                PreviewStage::HardMaterial | PreviewStage::SurfaceMaterial => {
+                    unreachable!("material preview stages use the material preview grid")
+                }
             };
 
             StagePreviewChunk {
@@ -705,6 +778,207 @@ fn render_stage_topdown_preview(
     Ok((image, surface_range, stage_debug))
 }
 
+fn build_material_preview_grid(
+    meta: &WorldMeta,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+    stage: PreviewStage,
+) -> Result<MaterialPreviewGrid, Box<dyn Error>> {
+    let min_chunk_x = center_x - generation_radius;
+    let max_chunk_x = center_x + generation_radius;
+    let min_chunk_z = center_z - generation_radius;
+    let max_chunk_z = center_z + generation_radius;
+    let width_chunks = usize::try_from(max_chunk_x - min_chunk_x + 1)
+        .map_err(|_| cli_error("invalid material preview width"))?;
+    let depth_chunks = usize::try_from(max_chunk_z - min_chunk_z + 1)
+        .map_err(|_| cli_error("invalid material preview depth"))?;
+    let width = width_chunks * CHUNK_EDGE;
+    let depth = depth_chunks * CHUNK_EDGE;
+    let origin_x = min_chunk_x * CHUNK_EDGE_I32;
+    let origin_z = min_chunk_z * CHUNK_EDGE_I32;
+    let mut cells = vec![
+        MaterialPreviewCell {
+            policy: MaterialPolicyId::TemperateGrassland,
+            owner_archetype: RegionArchetype::TemperatePlain,
+            top_y: WORLD_FLOOR_Y,
+        };
+        width * depth
+    ];
+    let input_cache =
+        PreviewInputCache::for_preview_window(meta, center_x, center_z, generation_radius);
+    let chunks = preview_chunk_xz_coords(center_x, center_z, generation_radius)
+        .into_par_iter()
+        .map(|(chunk_x, chunk_z)| {
+            let chunk = ChunkCoord(chunk_x, 0, chunk_z);
+            let inputs = input_cache.inputs_for_chunk(chunk);
+            let columns = match stage {
+                PreviewStage::HardMaterial => build_hard_material_preview_chunk(chunk, &inputs),
+                PreviewStage::SurfaceMaterial => {
+                    build_surface_material_preview_chunk(chunk, &inputs)
+                }
+                _ => unreachable!("material preview grid only supports material stages"),
+            };
+
+            (chunk, columns)
+        })
+        .collect::<Vec<_>>();
+
+    for (chunk, preview_cells) in chunks {
+        let chunk_row = usize::try_from(chunk.2 - min_chunk_z)
+            .map_err(|_| cli_error("invalid material preview chunk row"))?;
+        let chunk_col = usize::try_from(chunk.0 - min_chunk_x)
+            .map_err(|_| cli_error("invalid material preview chunk column"))?;
+
+        for local_z in 0..CHUNK_EDGE_I32 {
+            let global_z = chunk_row * CHUNK_EDGE
+                + usize::try_from(local_z).map_err(|_| cli_error("invalid local z"))?;
+            let row_offset = global_z * width;
+            for local_x in 0..CHUNK_EDGE_I32 {
+                let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
+                    .map_err(|_| cli_error("invalid material column index"))?;
+                let global_x = chunk_col * CHUNK_EDGE
+                    + usize::try_from(local_x).map_err(|_| cli_error("invalid local x"))?;
+                cells[row_offset + global_x] = preview_cells[column_index];
+            }
+        }
+    }
+
+    Ok(MaterialPreviewGrid {
+        origin_x,
+        origin_z,
+        width,
+        depth,
+        cells,
+    })
+}
+
+fn build_hard_material_preview_chunk(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationInputs,
+) -> Vec<MaterialPreviewCell> {
+    let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
+    let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
+    let mut cells = Vec::with_capacity(CHUNK_EDGE * CHUNK_EDGE);
+
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            let world_x = chunk_origin_x + local_x;
+            let world_z = chunk_origin_z + local_z;
+            let region = sample_region_classes(&inputs.region_classes, world_x, world_z);
+            cells.push(MaterialPreviewCell {
+                policy: resolve_material_policy_for_archetype(region.archetype),
+                owner_archetype: region.archetype,
+                top_y: WORLD_FLOOR_Y,
+            });
+        }
+    }
+
+    cells
+}
+
+fn build_surface_material_preview_chunk(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationInputs,
+) -> Vec<MaterialPreviewCell> {
+    let realization = build_chunk_realization_field_patch(chunk, inputs);
+    let corridors = build_chunk_corridor_window(chunk, inputs);
+    let prototype = build_chunk_base_heightfield_prototype(chunk, inputs, &realization, &corridors);
+    let meso = build_chunk_meso_applied_prototype(chunk, inputs, &corridors, &prototype);
+    let smoothed = build_chunk_smoothed_prototype(chunk, &corridors, &meso);
+    let hydrology = build_chunk_hydrology_solve(chunk, inputs, &corridors, &smoothed);
+    let surface = resolve_chunk_surface_plan(chunk, inputs, &smoothed, &hydrology);
+
+    surface
+        .columns
+        .into_iter()
+        .map(|column| MaterialPreviewCell {
+            policy: column.material_policy,
+            owner_archetype: column.owner_archetype,
+            top_y: column.terrain_top_y,
+        })
+        .collect()
+}
+
+fn render_material_topdown_preview(
+    grid: &MaterialPreviewGrid,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    pixels_per_block: u32,
+) -> Result<(RgbImage, SurfaceRange, MaterialDebugSummary), Box<dyn Error>> {
+    let chunk_span = u32::try_from(radius.saturating_mul(2).saturating_add(1))
+        .map_err(|_| cli_error("radius produced an invalid chunk span"))?;
+    let blocks_per_axis = chunk_span
+        .checked_mul(CHUNK_EDGE_I32 as u32)
+        .ok_or_else(|| cli_error("preview block width overflowed"))?;
+    let width = blocks_per_axis
+        .checked_mul(pixels_per_block)
+        .ok_or_else(|| cli_error("preview image width overflowed"))?;
+    let height = blocks_per_axis
+        .checked_mul(pixels_per_block)
+        .ok_or_else(|| cli_error("preview image height overflowed"))?;
+    let grid_width =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid width overflowed"))?;
+    let grid_height =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid height overflowed"))?;
+    let min_world_x = (center_x - radius) * CHUNK_EDGE_I32;
+    let min_world_z = (center_z - radius) * CHUNK_EDGE_I32;
+    let mut cells = Vec::with_capacity(grid_width * grid_height);
+
+    for z_offset in 0..grid_height {
+        let world_z =
+            min_world_z + i32::try_from(z_offset).expect("grid z index should fit in i32");
+        for x_offset in 0..grid_width {
+            let world_x =
+                min_world_x + i32::try_from(x_offset).expect("grid x index should fit in i32");
+            cells.push(
+                grid.cell(world_x, world_z).ok_or_else(|| {
+                    cli_error("material grid did not cover requested render area")
+                })?,
+            );
+        }
+    }
+
+    let surface_range = surface_range_for_material_cells(&cells)
+        .ok_or_else(|| cli_error("material preview did not produce any cells"))?;
+    let material_debug = summarize_material_cells(&cells);
+    let mut image = RgbImage::new(width, height);
+
+    for z in 0..grid_height {
+        for x in 0..grid_width {
+            let cell = cells[z * grid_width + x];
+            let base = color_for_material_policy(cell.policy);
+            let pixel_origin_x =
+                u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
+            let pixel_origin_y =
+                u32::try_from(z).expect("grid z index should fit in u32") * pixels_per_block;
+
+            for local_y in 0..pixels_per_block {
+                for local_x in 0..pixels_per_block {
+                    let outline = material_outline_strength(
+                        &cells,
+                        grid_width,
+                        grid_height,
+                        x,
+                        z,
+                        local_x,
+                        local_y,
+                        pixels_per_block,
+                    );
+                    image.put_pixel(
+                        pixel_origin_x + local_x,
+                        pixel_origin_y + local_y,
+                        Rgb(darken(base, outline)),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok((image, surface_range, material_debug))
+}
+
 fn sample_column_scan(
     world: &WorldCore,
     registry: &BlockRegistry,
@@ -788,6 +1062,20 @@ fn surface_range_for_stage_cells(cells: &[StagePreviewCell]) -> Option<SurfaceRa
     Some(SurfaceRange { min_y, max_y })
 }
 
+fn surface_range_for_material_cells(cells: &[MaterialPreviewCell]) -> Option<SurfaceRange> {
+    let mut heights = cells.iter().map(|cell| cell.top_y);
+    let first = heights.next()?;
+    let mut min_y = first;
+    let mut max_y = first;
+
+    for top_y in heights {
+        min_y = min_y.min(top_y);
+        max_y = max_y.max(top_y);
+    }
+
+    Some(SurfaceRange { min_y, max_y })
+}
+
 fn summarize_column_scans(cells: &[ColumnScan], registry: &BlockRegistry) -> PreviewDebugSummary {
     let mut columns_with_any_water = 0_usize;
     let mut columns_with_top_water = 0_usize;
@@ -838,6 +1126,35 @@ fn summarize_column_scans(cells: &[ColumnScan], registry: &BlockRegistry) -> Pre
         max_water_depth,
         top_visible_blocks: top_visible,
         top_solid_blocks: top_solid,
+    }
+}
+
+fn summarize_material_cells(cells: &[MaterialPreviewCell]) -> MaterialDebugSummary {
+    let mut policy_counts = Vec::<MaterialPolicyCount>::new();
+
+    for cell in cells {
+        if let Some(existing) = policy_counts
+            .iter_mut()
+            .find(|count| count.policy == cell.policy)
+        {
+            existing.count += 1;
+        } else {
+            policy_counts.push(MaterialPolicyCount {
+                policy: cell.policy,
+                count: 1,
+            });
+        }
+    }
+
+    policy_counts.sort_by(|left, right| {
+        right.count.cmp(&left.count).then_with(|| {
+            material_policy_label(left.policy).cmp(material_policy_label(right.policy))
+        })
+    });
+
+    MaterialDebugSummary {
+        total_columns: cells.len(),
+        policy_counts,
     }
 }
 
@@ -1004,6 +1321,24 @@ fn color_for_stage_cell(cell: StagePreviewCell, surface_range: SurfaceRange) -> 
     brighten(color, 0.92)
 }
 
+fn color_for_material_policy(policy: MaterialPolicyId) -> [u8; 3] {
+    match policy {
+        MaterialPolicyId::OceanicShelf => [54, 92, 154],
+        MaterialPolicyId::SandyBeach => [204, 184, 112],
+        MaterialPolicyId::CoastalCliff => [116, 112, 106],
+        MaterialPolicyId::TemperateGrassland => [92, 150, 78],
+        MaterialPolicyId::TemperatePlateau => [120, 142, 86],
+        MaterialPolicyId::SteppeGrassland => [156, 138, 76],
+        MaterialPolicyId::SavannaGrassland => [174, 146, 72],
+        MaterialPolicyId::TropicalLowland => [58, 136, 82],
+        MaterialPolicyId::TropicalHills => [54, 118, 78],
+        MaterialPolicyId::DesertSurface => [194, 154, 84],
+        MaterialPolicyId::ColdWetland => [112, 78, 54],
+        MaterialPolicyId::AlpineExposed => [142, 150, 158],
+        MaterialPolicyId::TundraExposure => [132, 148, 132],
+    }
+}
+
 fn block_base_color(def: &new_world::world::BlockDef) -> [u8; 3] {
     match def.key.as_str() {
         // Snow keeps a dedicated override so preview diagnostics do not read as gray stone.
@@ -1134,6 +1469,65 @@ fn stage_edge_strength(cell: StagePreviewCell, neighbor: Option<StagePreviewCell
     }
 }
 
+fn material_outline_strength(
+    cells: &[MaterialPreviewCell],
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    local_x: u32,
+    local_y: u32,
+    pixels_per_block: u32,
+) -> f32 {
+    if pixels_per_block <= 1 {
+        return 0.0;
+    }
+
+    let index = z * width + x;
+    let cell = cells[index];
+    let mut strength = 0.0_f32;
+
+    if local_x == 0 {
+        strength = strength.max(material_edge_strength(
+            cell,
+            x.checked_sub(1).map(|nx| cells[z * width + nx]),
+        ));
+    }
+    if local_y == 0 {
+        strength = strength.max(material_edge_strength(
+            cell,
+            z.checked_sub(1).map(|nz| cells[nz * width + x]),
+        ));
+    }
+    if local_x + 1 == pixels_per_block {
+        let right = if x + 1 < width {
+            Some(cells[z * width + (x + 1)])
+        } else {
+            None
+        };
+        strength = strength.max(material_edge_strength(cell, right));
+    }
+    if local_y + 1 == pixels_per_block {
+        let bottom = if z + 1 < height {
+            Some(cells[(z + 1) * width + x])
+        } else {
+            None
+        };
+        strength = strength.max(material_edge_strength(cell, bottom));
+    }
+
+    strength
+}
+
+fn material_edge_strength(cell: MaterialPreviewCell, neighbor: Option<MaterialPreviewCell>) -> f32 {
+    match neighbor {
+        None => 0.24,
+        Some(other) if other.policy != cell.policy => 0.28,
+        Some(other) if other.owner_archetype != cell.owner_archetype => 0.18,
+        Some(_) => 0.06,
+    }
+}
+
 fn edge_strength(cell: TopdownCell, neighbor: Option<TopdownCell>) -> f32 {
     match neighbor {
         None => 0.24,
@@ -1244,10 +1638,42 @@ fn print_stage_debug_summary(summary: StageDebugSummary) {
     );
 }
 
+fn print_material_debug_summary(summary: &MaterialDebugSummary) {
+    println!("material debug:");
+    println!("  total columns: {}", summary.total_columns);
+    println!("  material policies:");
+    for count in summary.policy_counts.iter().take(12) {
+        println!(
+            "    {}: {} ({:.1}%)",
+            material_policy_label(count.policy),
+            count.count,
+            percent(count.count, summary.total_columns)
+        );
+    }
+}
+
 fn print_block_counts(label: &str, counts: &[BlockCount]) {
     println!("{label}");
     for count in counts.iter().take(8) {
         println!("    {}: {}", count.key, count.count);
+    }
+}
+
+fn material_policy_label(policy: MaterialPolicyId) -> &'static str {
+    match policy {
+        MaterialPolicyId::OceanicShelf => "oceanic_shelf",
+        MaterialPolicyId::SandyBeach => "sandy_beach",
+        MaterialPolicyId::CoastalCliff => "coastal_cliff",
+        MaterialPolicyId::TemperateGrassland => "temperate_grassland",
+        MaterialPolicyId::TemperatePlateau => "temperate_plateau",
+        MaterialPolicyId::SteppeGrassland => "steppe_grassland",
+        MaterialPolicyId::SavannaGrassland => "savanna_grassland",
+        MaterialPolicyId::TropicalLowland => "tropical_lowland",
+        MaterialPolicyId::TropicalHills => "tropical_hills",
+        MaterialPolicyId::DesertSurface => "desert_surface",
+        MaterialPolicyId::ColdWetland => "cold_wetland",
+        MaterialPolicyId::AlpineExposed => "alpine_exposed",
+        MaterialPolicyId::TundraExposure => "tundra_exposure",
     }
 }
 
@@ -1433,6 +1859,8 @@ fn default_output_path(
                 PreviewStage::Full => String::new(),
                 PreviewStage::Prototype => String::from("_prototype"),
                 PreviewStage::Hydrology => String::from("_hydrology"),
+                PreviewStage::HardMaterial => String::from("_hard_material"),
+                PreviewStage::SurfaceMaterial => String::from("_surface_material"),
             };
             PathBuf::from(format!(
                 "target/chunk-topdown-preview/seed_{seed}{stage_suffix}_cx{center_x}_cz{center_z}_r{radius}.png"
@@ -1565,8 +1993,10 @@ fn parse_preview_stage(value: String) -> Result<PreviewStage, Box<dyn Error>> {
         "full" | "default" => Ok(PreviewStage::Full),
         "prototype" => Ok(PreviewStage::Prototype),
         "hydrology" => Ok(PreviewStage::Hydrology),
+        "hard-material" | "hard_material" => Ok(PreviewStage::HardMaterial),
+        "surface-material" | "surface_material" | "material" => Ok(PreviewStage::SurfaceMaterial),
         other => Err(cli_error(format!(
-            "unknown stage '{other}'; expected 'full', 'prototype', or 'hydrology'"
+            "unknown stage '{other}'; expected 'full', 'prototype', 'hydrology', 'hard-material', or 'surface-material'"
         ))),
     }
 }
@@ -1576,15 +2006,23 @@ fn preview_stage_label(stage: PreviewStage) -> &'static str {
         PreviewStage::Full => "full",
         PreviewStage::Prototype => "prototype",
         PreviewStage::Hydrology => "hydrology",
+        PreviewStage::HardMaterial => "hard-material",
+        PreviewStage::SurfaceMaterial => "surface-material",
     }
 }
 
 fn created_world_stage_requested(stage: PreviewStage) -> bool {
-    matches!(stage, PreviewStage::Prototype | PreviewStage::Hydrology)
+    matches!(
+        stage,
+        PreviewStage::Prototype
+            | PreviewStage::Hydrology
+            | PreviewStage::HardMaterial
+            | PreviewStage::SurfaceMaterial
+    )
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--stage <full|prototype|hydrology>] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--stage full] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
+    "usage: cargo run --bin chunk_topdown_preview -- <seed> [--stage <full|prototype|hydrology|hard-material|surface-material>] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]\n       cargo run --bin chunk_topdown_preview -- --world-dir <path> [--stage full] [--center-x <i32> | --chunk-x <i32>] [--center-z <i32> | --chunk-z <i32>] [--radius <i32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--pixels-per-block <u32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1674,7 +2112,15 @@ mod tests {
             parse_preview_stage("hydrology".to_string()).unwrap(),
             PreviewStage::Hydrology
         );
-        assert!(parse_preview_stage("material".to_string()).is_err());
+        assert_eq!(
+            parse_preview_stage("hard-material".to_string()).unwrap(),
+            PreviewStage::HardMaterial
+        );
+        assert_eq!(
+            parse_preview_stage("material".to_string()).unwrap(),
+            PreviewStage::SurfaceMaterial
+        );
+        assert!(parse_preview_stage("nonsense".to_string()).is_err());
     }
 
     #[test]

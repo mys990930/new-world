@@ -94,7 +94,8 @@
 ## Notes
 
 - the current color rules intentionally match the diagnostic style used by `chunk_topdown_preview` rather than final live renderer shading
-- `chunk_topdown_preview --stage prototype|hydrology` mirrors the stage selection exposed by
+- `chunk_topdown_preview --stage prototype|hydrology|hard-material|surface-material` mirrors and
+  extends the stage selection exposed by
   `chunk_preview`, but keeps the camera as an exact top-down raster so large-scale grid artifacts
   can be compared against the final material view.
 - the current minimap overlay uses these helpers with atlas-backed UI sprites instead of a separate UI texture path
