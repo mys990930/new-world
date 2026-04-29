@@ -126,15 +126,18 @@ struct LocalDomainCandidate {
 
 pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainSample {
     let hard_domain = material_domain_kind_for_region(input.hard_owner);
-    let hard_owner_weight = influence_weight_for_domain(input.influence, hard_domain);
-    let same_domain_visible = strongest_same_domain_owner(input.influence, hard_domain);
-    let local_candidate = best_local_supported_domain(input, hard_domain);
+    let visible_anchor = input.influence.dominant.class;
+    let anchor_domain = material_domain_kind_for_region(visible_anchor);
+    let anchor_weight = influence_weight_for_domain(input.influence, anchor_domain);
+    let same_domain_visible = strongest_same_domain_owner(input.influence, anchor_domain);
+    let local_candidate = best_local_supported_domain(input, visible_anchor, anchor_domain);
     if let Some(candidate) = local_candidate {
-        return local_supported_sample(input, hard_domain, candidate);
+        return local_supported_sample(input, visible_anchor, hard_domain, candidate);
     }
-    let Some(candidate) = best_visible_domain_candidate(input, hard_domain, hard_owner_weight)
+    let Some(candidate) =
+        best_visible_domain_candidate(input, visible_anchor, anchor_domain, anchor_weight)
     else {
-        let visible_owner = same_domain_visible.unwrap_or(input.hard_owner);
+        let visible_owner = same_domain_visible.unwrap_or(visible_anchor);
         return MaterialDomainSample {
             hard_owner: input.hard_owner,
             hard_domain,
@@ -156,8 +159,8 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     };
 
     let support = material_domain_support(
-        input.hard_owner,
-        hard_domain,
+        visible_anchor,
+        anchor_domain,
         candidate.owner,
         candidate.domain,
         input.smoothed,
@@ -167,7 +170,7 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     let boundary_displacement = material_domain_boundary_displacement(
         input.world_x,
         input.world_z,
-        hard_domain,
+        anchor_domain,
         candidate.domain,
     );
     let transition_phase =
@@ -179,7 +182,9 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     if support.total < FOREIGN_SUPPORT_MIN {
         return rejected_sample(
             input,
+            visible_anchor,
             hard_domain,
+            anchor_domain,
             candidate,
             transition_strength,
             transition_phase,
@@ -192,7 +197,9 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     if support.barrier >= HARD_BARRIER_LIMIT && support.total < STRONG_SUPPORT {
         return rejected_sample(
             input,
+            visible_anchor,
             hard_domain,
+            anchor_domain,
             candidate,
             transition_strength,
             transition_phase,
@@ -205,7 +212,9 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     if transition_phase < 0.0 {
         return rejected_sample(
             input,
+            visible_anchor,
             hard_domain,
+            anchor_domain,
             candidate,
             transition_strength,
             transition_phase,
@@ -409,6 +418,7 @@ pub fn material_domain_kind_for_region(region: RegionClassCell) -> MaterialDomai
 
 fn local_supported_sample(
     input: MaterialDomainInput<'_>,
+    visible_anchor: RegionClassCell,
     hard_domain: MaterialDomainKind,
     candidate: LocalDomainCandidate,
 ) -> MaterialDomainSample {
@@ -419,7 +429,7 @@ fn local_supported_sample(
     let visible_owner = if influence_weight_for_domain(input.influence, candidate.domain) > 0.0 {
         strongest_owner_for_domain(input.influence, candidate.domain)
     } else {
-        input.hard_owner
+        visible_anchor
     };
 
     MaterialDomainSample {
@@ -434,13 +444,15 @@ fn local_supported_sample(
         boundary_displacement: 0.0,
         support: candidate.support,
         reason: MaterialDomainTransitionReason::LocalSupportInterior,
-        accepted_foreign_owner: visible_owner.archetype != input.hard_owner.archetype,
+        accepted_foreign_owner: visible_owner.archetype != visible_anchor.archetype,
     }
 }
 
 fn rejected_sample(
     input: MaterialDomainInput<'_>,
+    visible_anchor: RegionClassCell,
     hard_domain: MaterialDomainKind,
+    anchor_domain: MaterialDomainKind,
     candidate: DomainCandidate,
     transition_strength: f32,
     transition_phase: f32,
@@ -451,8 +463,8 @@ fn rejected_sample(
     MaterialDomainSample {
         hard_owner: input.hard_owner,
         hard_domain,
-        visible_owner: input.hard_owner,
-        visible_domain: hard_domain,
+        visible_owner: visible_anchor,
+        visible_domain: anchor_domain,
         candidate_owner: Some(candidate.owner),
         candidate_domain: Some(candidate.domain),
         transition_strength,
@@ -487,14 +499,15 @@ fn strongest_same_domain_owner(
 
 fn best_local_supported_domain(
     input: MaterialDomainInput<'_>,
-    hard_domain: MaterialDomainKind,
+    visible_anchor: RegionClassCell,
+    anchor_domain: MaterialDomainKind,
 ) -> Option<LocalDomainCandidate> {
-    let hard_support = material_support_for_domain(hard_domain, input.smoothed, input.hydrology);
+    let hard_support = material_support_for_domain(anchor_domain, input.smoothed, input.hydrology);
     let mut best = None;
     let mut best_score = f32::NEG_INFINITY;
 
     for domain in LOCAL_OVERRIDE_DOMAINS {
-        if domain == hard_domain {
+        if domain == anchor_domain {
             continue;
         }
 
@@ -505,9 +518,9 @@ fn best_local_supported_domain(
         }
 
         let support = material_domain_support(
-            input.hard_owner,
-            hard_domain,
-            input.hard_owner,
+            visible_anchor,
+            anchor_domain,
+            visible_anchor,
             domain,
             input.smoothed,
             input.hydrology,
@@ -535,7 +548,8 @@ fn best_local_supported_domain(
 
 fn best_visible_domain_candidate(
     input: MaterialDomainInput<'_>,
-    hard_domain: MaterialDomainKind,
+    visible_anchor: RegionClassCell,
+    anchor_domain: MaterialDomainKind,
     owner_weight: f32,
 ) -> Option<DomainCandidate> {
     let mut best = None;
@@ -544,7 +558,7 @@ fn best_visible_domain_candidate(
     for sample in std::iter::once(&input.influence.dominant).chain(input.influence.neighbors.iter())
     {
         let domain = material_domain_kind_for_region(sample.class);
-        if domain == hard_domain {
+        if domain == anchor_domain {
             continue;
         }
 
@@ -554,10 +568,10 @@ fn best_visible_domain_candidate(
             domain,
             weight,
             owner_weight,
-            input.hard_owner,
+            visible_anchor,
             owner,
             input,
-            hard_domain,
+            anchor_domain,
         );
 
         if score > best_score + 0.0001
@@ -1344,7 +1358,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_warp_only_foreign_owner_is_rejected() {
+    fn visible_anchor_does_not_restore_rectangular_hard_owner() {
         let owner = temperate_region(RegionArchetype::TemperatePlain);
         let candidate = desert_region();
         let influence = mixed_influence(owner, candidate, 0.62);
@@ -1358,17 +1372,12 @@ mod tests {
             world_z: -128,
         });
 
-        assert_eq!(
-            sample.visible_owner.archetype,
-            RegionArchetype::TemperatePlain
+        assert_eq!(sample.visible_owner.archetype, RegionArchetype::DesertPlain);
+        assert_ne!(
+            sample.visible_domain,
+            MaterialDomainKind::TemperateGreen,
+            "visible material domain must not fall back to the rectangular hard-owner domain"
         );
-        assert_eq!(sample.visible_domain, MaterialDomainKind::TemperateGreen);
-        assert_eq!(sample.candidate_domain, Some(MaterialDomainKind::DesertDry));
-        assert_eq!(
-            sample.reason,
-            MaterialDomainTransitionReason::UnsupportedWarpOnly
-        );
-        assert!(!sample.accepted_foreign_owner);
     }
 
     #[test]
@@ -1386,10 +1395,7 @@ mod tests {
             world_z: -128,
         });
 
-        assert_eq!(
-            sample.visible_owner.archetype,
-            RegionArchetype::TemperatePlain
-        );
+        assert_eq!(sample.visible_owner.archetype, RegionArchetype::DesertPlain);
         assert_eq!(sample.visible_domain, MaterialDomainKind::Wetland);
         assert!(!sample.accepted_foreign_owner);
         assert_eq!(

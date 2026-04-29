@@ -45,6 +45,9 @@
 - explicit runtime seasonal context remains the future integration point for `WorldCore` calendar ownership
 - surface resolve consumes the shared atlas `sample_region_class_influences(...)` output instead of deriving its own atlas-grid fractional sampler
 - surface resolve still samples hard owner separately for storage/query, while visible material policy is selected from the resolved material domain before final transition breakup
+- the visible material domain starts from the influence-dominant semantic region, not the
+  rectangular hard owner; when a supported candidate is rejected, fallback must return to that
+  influence anchor so atlas-cell edges do not reappear as material policy borders
 - visible material policy may be selected from the resolved material domain, not only from the
   visible owner's archetype, so local terrain-supported domain overrides are not discarded before
   block-stack selection

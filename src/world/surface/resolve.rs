@@ -1740,9 +1740,9 @@ mod tests {
 
         assert_ne!(dry_plan.top_block_key, "grass");
         assert_eq!(wet_plan.owner_archetype, RegionArchetype::TemperatePlain);
-        assert_eq!(wet_plan.top_block_key, "mud");
-        assert_eq!(wet_plan.filler_block_key, "clay");
-        assert_eq!(wet_plan.core_block_key, "stone");
+        assert_eq!(wet_plan.top_block_key, "peat");
+        assert_eq!(wet_plan.filler_block_key, "mud");
+        assert_eq!(wet_plan.core_block_key, "dirt");
         assert_eq!(wet_plan.water_block_key, Some("water"));
     }
 
