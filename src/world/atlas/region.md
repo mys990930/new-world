@@ -70,23 +70,21 @@ region_archetype_prototype_hint(
 
 - `sample_region_classes(...)` remains the hard semantic owner sample for stable query surfaces and legacy callers that need one class.
 - generation stages that affect visible height, meso allowance, hydrology style, or material expression should prefer a weighted influence sample.
-- influence sampling must read neighboring atlas cells through edge-local low-frequency boundary
-  displacement so an atlas edge is not also a visible terrain or material edge.
-- boundary displacement should be low-frequency and bounded. It should bend an atlas edge into a
-  smooth terrain-scale wave, not create spikes, angular bites, salt-and-pepper patches, or large
+- influence sampling must not treat atlas-cell edges as visible transition primitives. Atlas cells
+  are ownership, cache, and source-classification units, not rectangular masks for final terrain or
+  material boundaries.
+- influence sampling should read nearby atlas cells as jittered semantic seeds and derive weighted
+  dominant/secondary classes from bounded distance competition between those seeds.
+- seed jitter must be deterministic and bounded. It should move the visible competition line away
+  from raw atlas-cell borders without creating salt-and-pepper interiors or large disconnected
   incursions from one region into another.
-- edge waves should use smooth deterministic carriers and modest amplitude. A single broad
-  domain-warp curve is not sufficient; the edge should read as a connected wavy boundary without
-  forming large guide-like arcs.
-- edge influence near atlas-cell corners should taper unless the neighbor region continues through
-  the matching diagonal cell, preventing perpendicular atlas edges from meeting as visible points or
-  angular bites.
-- corner influence may include a weaker diagonal neighbor sample only inside the same bounded
-  transition band. This rounds L-shaped atlas ownership corners without turning region interiors into
-  mottled multi-way blends.
-- the influence set should carry the hard sampled dominant plus secondary weights, transition
-  strength, and barrier strength; downstream material/domain policy decides whether a supported
-  neighbor becomes visible.
+- secondary influence should only appear near seed competition zones. A region interior should stay
+  owned by its nearest semantic seed unless downstream local support has a stronger reason to express
+  another material domain.
+- the influence set should carry the nearest visible semantic seed as dominant plus secondary
+  weights, transition strength, and barrier strength; downstream material/domain policy decides
+  whether a supported neighbor becomes visible while hard ownership remains available from
+  `sample_region_classes(...)`.
 - callers that need storage/query ownership must still use `sample_region_classes(...)`; influence
   weights may cross the raw atlas cell edge specifically so visible materials do not inherit straight
   atlas borders.

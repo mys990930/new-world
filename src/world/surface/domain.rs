@@ -16,7 +16,8 @@ const LOCAL_SUPPORT_MIN: f32 = 0.42;
 const LOCAL_SUPPORT_MARGIN: f32 = 0.14;
 const LOCAL_SUPPORT_SCORE_MIN: f32 = 0.46;
 
-const LOCAL_OVERRIDE_DOMAINS: [MaterialDomainKind; 7] = [
+const LOCAL_OVERRIDE_DOMAINS: [MaterialDomainKind; 8] = [
+    MaterialDomainKind::Wetland,
     MaterialDomainKind::TemperateGreen,
     MaterialDomainKind::DryGrassland,
     MaterialDomainKind::SavannaGrassland,
@@ -128,12 +129,11 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     let hard_owner_weight = influence_weight_for_domain(input.influence, hard_domain);
     let same_domain_visible = strongest_same_domain_owner(input.influence, hard_domain);
     let local_candidate = best_local_supported_domain(input, hard_domain);
+    if let Some(candidate) = local_candidate {
+        return local_supported_sample(input, hard_domain, candidate);
+    }
     let Some(candidate) = best_visible_domain_candidate(input, hard_domain, hard_owner_weight)
     else {
-        if let Some(candidate) = local_candidate {
-            return local_supported_sample(input, hard_domain, candidate);
-        }
-
         let visible_owner = same_domain_visible.unwrap_or(input.hard_owner);
         return MaterialDomainSample {
             hard_owner: input.hard_owner,
@@ -177,10 +177,6 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
             .clamp(0.0, 1.0);
 
     if support.total < FOREIGN_SUPPORT_MIN {
-        if let Some(candidate) = local_candidate {
-            return local_supported_sample(input, hard_domain, candidate);
-        }
-
         return rejected_sample(
             input,
             hard_domain,
@@ -194,10 +190,6 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     }
 
     if support.barrier >= HARD_BARRIER_LIMIT && support.total < STRONG_SUPPORT {
-        if let Some(candidate) = local_candidate {
-            return local_supported_sample(input, hard_domain, candidate);
-        }
-
         return rejected_sample(
             input,
             hard_domain,
@@ -211,10 +203,6 @@ pub fn sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainS
     }
 
     if transition_phase < 0.0 {
-        if let Some(candidate) = local_candidate {
-            return local_supported_sample(input, hard_domain, candidate);
-        }
-
         return rejected_sample(
             input,
             hard_domain,
@@ -428,11 +416,16 @@ fn local_supported_sample(
     let transition_strength = (smoothstep_range(LOCAL_SUPPORT_MARGIN, 0.42, support_delta)
         * (0.42 + candidate.support.total * 0.58))
         .clamp(0.0, 1.0);
+    let visible_owner = if influence_weight_for_domain(input.influence, candidate.domain) > 0.0 {
+        strongest_owner_for_domain(input.influence, candidate.domain)
+    } else {
+        input.hard_owner
+    };
 
     MaterialDomainSample {
         hard_owner: input.hard_owner,
         hard_domain,
-        visible_owner: input.hard_owner,
+        visible_owner,
         visible_domain: candidate.domain,
         candidate_owner: None,
         candidate_domain: Some(candidate.domain),
@@ -441,7 +434,7 @@ fn local_supported_sample(
         boundary_displacement: 0.0,
         support: candidate.support,
         reason: MaterialDomainTransitionReason::LocalSupportInterior,
-        accepted_foreign_owner: false,
+        accepted_foreign_owner: visible_owner.archetype != input.hard_owner.archetype,
     }
 }
 
@@ -1379,7 +1372,7 @@ mod tests {
     }
 
     #[test]
-    fn hydrology_and_slope_supported_foreign_owner_can_be_accepted() {
+    fn hydrology_local_support_can_override_atlas_foreign_owner() {
         let owner = temperate_region(RegionArchetype::TemperatePlain);
         let candidate = desert_region();
         let influence = mixed_influence(owner, candidate, 0.58);
@@ -1393,15 +1386,16 @@ mod tests {
             world_z: -128,
         });
 
-        assert_eq!(sample.visible_owner.archetype, RegionArchetype::DesertPlain);
-        assert_eq!(sample.visible_domain, MaterialDomainKind::DesertDry);
-        assert!(sample.accepted_foreign_owner);
-        assert!(sample.support.total >= FOREIGN_SUPPORT_MIN);
-        assert!(matches!(
+        assert_eq!(
+            sample.visible_owner.archetype,
+            RegionArchetype::TemperatePlain
+        );
+        assert_eq!(sample.visible_domain, MaterialDomainKind::Wetland);
+        assert!(!sample.accepted_foreign_owner);
+        assert_eq!(
             sample.reason,
-            MaterialDomainTransitionReason::HydrologySupportedBoundary
-                | MaterialDomainTransitionReason::TerrainSupportedBoundary
-        ));
+            MaterialDomainTransitionReason::LocalSupportInterior
+        );
     }
 
     #[test]

@@ -17,15 +17,13 @@ use super::atlas_fields::{AtlasCell, AtlasFieldMap};
 use super::scale::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, AtlasGrid};
 use super::structure::AtlasStructureMap;
 
-const REGION_INFLUENCE_TRANSITION_WIDTH_CELLS: f32 = 0.28;
 const REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT: f32 = 1.00;
 const REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT: f32 = 0.50;
 const REGION_INFLUENCE_MIN_WEIGHT: f32 = 0.0001;
-const REGION_EDGE_WAVE_AMPLITUDE_CELLS: f32 = 0.050;
-const REGION_EDGE_WAVE_BROAD_PERIOD_CELLS: f32 = 0.46;
-const REGION_EDGE_WAVE_SECONDARY_PERIOD_CELLS: f32 = 0.27;
-const REGION_EDGE_CORNER_TAPER_WIDTH_CELLS: f32 = 0.26;
-const REGION_EDGE_WAVE_SALT: u64 = 0xA19C_3D2E_5170_0001;
+const REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS: i32 = 2;
+const REGION_INFLUENCE_VORONOI_JITTER_CELLS: f32 = 0.36;
+const REGION_INFLUENCE_VORONOI_TRANSITION_WIDTH_CELLS: f32 = 0.16;
+const REGION_VORONOI_JITTER_SALT: u64 = 0xA19C_3D2E_5170_0002;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TemperatureBand {
@@ -371,144 +369,78 @@ pub fn sample_region_class_influences(
     );
 
     let atlas_span_blocks = atlas_cell_span_blocks_f32();
-    let hard_owner_coord = atlas_coord_for_world_position(world_x, world_z, atlas_span_blocks);
-    let hard_owner_class = *classes
-        .get(hard_owner_coord)
-        .expect("region classification influence owner must exist");
     let atlas_x = world_x / atlas_span_blocks;
     let atlas_z = world_z / atlas_span_blocks;
-    let owner_coord = hard_owner_coord;
-    let owner_class = hard_owner_class;
-    let local_x = (atlas_x - owner_coord.x as f32).clamp(0.0, 1.0);
-    let local_z = (atlas_z - owner_coord.z as f32).clamp(0.0, 1.0);
+    let base_coord = atlas_coord_for_world_position(world_x, world_z, atlas_span_blocks);
+    let mut candidates = Vec::new();
 
-    let edge_candidates = [
-        (
-            AtlasCoord::new(owner_coord.x - 1, owner_coord.z),
-            edge_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x - 1, owner_coord.z),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x + 1, owner_coord.z),
-            edge_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x + 1, owner_coord.z),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x, owner_coord.z - 1),
-            edge_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x, owner_coord.z - 1),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x, owner_coord.z + 1),
-            edge_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x, owner_coord.z + 1),
-                local_x,
-                local_z,
-            ),
-        ),
-    ];
-    let diagonal_candidates = [
-        (
-            AtlasCoord::new(owner_coord.x - 1, owner_coord.z - 1),
-            corner_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x - 1, owner_coord.z - 1),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x + 1, owner_coord.z - 1),
-            corner_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x + 1, owner_coord.z - 1),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x - 1, owner_coord.z + 1),
-            corner_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x - 1, owner_coord.z + 1),
-                local_x,
-                local_z,
-            ),
-        ),
-        (
-            AtlasCoord::new(owner_coord.x + 1, owner_coord.z + 1),
-            corner_transition_weight_for_neighbor(
-                classes,
-                owner_coord,
-                AtlasCoord::new(owner_coord.x + 1, owner_coord.z + 1),
-                local_x,
-                local_z,
-            ),
-        ),
-    ];
+    for dz in
+        -REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS..=REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
+    {
+        for dx in -REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
+            ..=REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
+        {
+            let coord = AtlasCoord::new(base_coord.x + dx, base_coord.z + dz);
+            let Some(class) = classes.get(coord).copied() else {
+                continue;
+            };
+            let (center_x, center_z) = jittered_region_influence_center(coord);
+            let distance = ((atlas_x - center_x).powi(2) + (atlas_z - center_z).powi(2)).sqrt();
+            candidates.push((coord, class, distance));
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        a.2.total_cmp(&b.2)
+            .then_with(|| a.0.z.cmp(&b.0.z))
+            .then_with(|| a.0.x.cmp(&b.0.x))
+    });
+
+    let Some((owner_coord, owner_class, owner_distance)) = candidates.first().copied() else {
+        let fallback = RegionClassCell::default();
+        return RegionClassInfluenceSet {
+            dominant: RegionClassInfluence {
+                coord: base_coord,
+                class: fallback,
+                weight: 1.0,
+            },
+            neighbors: Vec::new(),
+            transition_strength: 0.0,
+            barrier_strength: 0.0,
+        };
+    };
 
     let mut raw_neighbors = Vec::new();
     let mut barrier_sum = 0.0_f32;
     let mut barrier_weight_sum = 0.0_f32;
 
-    for (coord, edge_strength) in edge_candidates {
-        if edge_strength <= REGION_INFLUENCE_MIN_WEIGHT {
+    for (coord, class, distance) in candidates.into_iter().skip(1) {
+        if class == owner_class {
             continue;
         }
 
-        let Some(class) = classes.get(coord).copied() else {
+        let distance_edge = distance - owner_distance;
+        let transition =
+            (1.0 - distance_edge / REGION_INFLUENCE_VORONOI_TRANSITION_WIDTH_CELLS).clamp(0.0, 1.0);
+        let influence_strength = smoothstep01(transition);
+        if influence_strength <= REGION_INFLUENCE_MIN_WEIGHT {
             continue;
-        };
+        }
 
         let barrier = region_class_barrier_strength(owner_class, class);
         let permeability = (1.0 - barrier * 0.78).clamp(0.12, 1.0);
-        let raw_weight = edge_strength * REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT * permeability;
-
-        barrier_sum += barrier * edge_strength;
-        barrier_weight_sum += edge_strength;
-
-        if raw_weight <= REGION_INFLUENCE_MIN_WEIGHT {
-            continue;
-        }
-
-        raw_neighbors.push((coord, class, raw_weight));
-    }
-
-    for (coord, corner_strength) in diagonal_candidates {
-        if corner_strength <= REGION_INFLUENCE_MIN_WEIGHT {
-            continue;
-        }
-
-        let Some(class) = classes.get(coord).copied() else {
-            continue;
+        let diagonal_penalty = if coord.x != owner_coord.x && coord.z != owner_coord.z {
+            REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT
+        } else {
+            REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT
         };
+        let raw_weight = influence_strength
+            * REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT
+            * diagonal_penalty
+            * permeability;
 
-        let barrier = region_class_barrier_strength(owner_class, class);
-        let permeability = (1.0 - barrier * 0.82).clamp(0.10, 1.0);
-        let raw_weight = corner_strength * REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT * permeability;
-
-        barrier_sum += barrier * corner_strength;
-        barrier_weight_sum += corner_strength;
+        barrier_sum += barrier * influence_strength;
+        barrier_weight_sum += influence_strength;
 
         if raw_weight <= REGION_INFLUENCE_MIN_WEIGHT {
             continue;
@@ -577,210 +509,19 @@ fn atlas_coord_for_world_position(
     )
 }
 
-fn edge_transition_weight(distance_to_edge_cells: f32) -> f32 {
-    let t =
-        (1.0 - distance_to_edge_cells / REGION_INFLUENCE_TRANSITION_WIDTH_CELLS).clamp(0.0, 1.0);
-    smoothstep01(t)
-}
+fn jittered_region_influence_center(coord: AtlasCoord) -> (f32, f32) {
+    let salt = REGION_VORONOI_JITTER_SALT
+        ^ (coord.x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (coord.z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    let jitter_x =
+        hash_to_signed_unit(mix_u64(salt.rotate_left(11))) * REGION_INFLUENCE_VORONOI_JITTER_CELLS;
+    let jitter_z =
+        hash_to_signed_unit(mix_u64(salt.rotate_left(37))) * REGION_INFLUENCE_VORONOI_JITTER_CELLS;
 
-fn edge_transition_weight_for_neighbor(
-    classes: &RegionClassMap,
-    owner_coord: AtlasCoord,
-    neighbor_coord: AtlasCoord,
-    local_x: f32,
-    local_z: f32,
-) -> f32 {
-    let Some(_) = classes.get(neighbor_coord) else {
-        return 0.0;
-    };
-    let (base_distance, along_atlas, positive_neighbor, corner_axis) =
-        if neighbor_coord.x < owner_coord.x {
-            (local_x, owner_coord.z as f32 + local_z, false, local_z)
-        } else if neighbor_coord.x > owner_coord.x {
-            (1.0 - local_x, owner_coord.z as f32 + local_z, true, local_z)
-        } else if neighbor_coord.z < owner_coord.z {
-            (local_z, owner_coord.x as f32 + local_x, false, local_x)
-        } else if neighbor_coord.z > owner_coord.z {
-            (1.0 - local_z, owner_coord.x as f32 + local_x, true, local_x)
-        } else {
-            return 0.0;
-        };
-    let offset =
-        region_edge_boundary_offset_cells(classes, owner_coord, neighbor_coord, along_atlas);
-    let directional_offset = if positive_neighbor { offset } else { -offset };
-
-    edge_transition_weight(base_distance - directional_offset)
-        * region_edge_corner_taper(classes, owner_coord, neighbor_coord, corner_axis)
-}
-
-fn corner_transition_weight_for_neighbor(
-    classes: &RegionClassMap,
-    owner_coord: AtlasCoord,
-    neighbor_coord: AtlasCoord,
-    local_x: f32,
-    local_z: f32,
-) -> f32 {
-    let Some(neighbor_class) = classes.get(neighbor_coord).copied() else {
-        return 0.0;
-    };
-    let Some(owner_class) = classes.get(owner_coord).copied() else {
-        return 0.0;
-    };
-    if neighbor_class == owner_class {
-        return 0.0;
-    }
-
-    let distance_x = if neighbor_coord.x < owner_coord.x {
-        local_x
-    } else if neighbor_coord.x > owner_coord.x {
-        1.0 - local_x
-    } else {
-        return 0.0;
-    };
-    let distance_z = if neighbor_coord.z < owner_coord.z {
-        local_z
-    } else if neighbor_coord.z > owner_coord.z {
-        1.0 - local_z
-    } else {
-        return 0.0;
-    };
-    let edge_x_coord = AtlasCoord::new(neighbor_coord.x, owner_coord.z);
-    let edge_z_coord = AtlasCoord::new(owner_coord.x, neighbor_coord.z);
-    let edge_x_continues = diagonal_continues_neighbor(classes, neighbor_coord, edge_x_coord);
-    let edge_z_continues = diagonal_continues_neighbor(classes, neighbor_coord, edge_z_coord);
-    let continuity = match (edge_x_continues, edge_z_continues) {
-        (true, true) => 1.0,
-        (true, false) | (false, true) => 0.72,
-        (false, false) => 0.42,
-    };
-    let corner_distance = distance_x.max(distance_z);
-    let corner_weight = edge_transition_weight(corner_distance);
-    let diagonal_rounding = (edge_transition_weight(distance_x)
-        * edge_transition_weight(distance_z))
-    .sqrt()
-    .clamp(0.0, 1.0);
-
-    corner_weight * diagonal_rounding * continuity
-}
-
-fn region_edge_boundary_offset_cells(
-    classes: &RegionClassMap,
-    owner_coord: AtlasCoord,
-    neighbor_coord: AtlasCoord,
-    along_atlas: f32,
-) -> f32 {
-    let owner_class = classes.get(owner_coord).copied().unwrap_or_default();
-    let neighbor_class = classes.get(neighbor_coord).copied().unwrap_or_default();
-    let barrier = region_class_barrier_strength(owner_class, neighbor_class);
-    let amplitude = (REGION_EDGE_WAVE_AMPLITUDE_CELLS * (1.0 - barrier * 0.55))
-        .clamp(0.035, REGION_EDGE_WAVE_AMPLITUDE_CELLS);
-    let low_x = owner_coord.x.min(neighbor_coord.x);
-    let low_z = owner_coord.z.min(neighbor_coord.z);
-    let high_x = owner_coord.x.max(neighbor_coord.x);
-    let high_z = owner_coord.z.max(neighbor_coord.z);
-    let owner_hash = region_class_fingerprint(owner_class);
-    let neighbor_hash = region_class_fingerprint(neighbor_class);
-    let salt = mix_u64(
-        REGION_EDGE_WAVE_SALT
-            ^ (low_x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
-            ^ (low_z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9)
-            ^ (high_x as i64 as u64).wrapping_mul(0x94d0_49bb_1331_11eb)
-            ^ (high_z as i64 as u64).wrapping_mul(0xdbe6_d5d5_fe4c_ce2f)
-            ^ owner_hash.rotate_left(11)
-            ^ neighbor_hash.rotate_left(37),
-    );
-    let broad = edge_sine_wave_1d(
-        along_atlas + 13.17,
-        REGION_EDGE_WAVE_BROAD_PERIOD_CELLS,
-        salt.rotate_left(7),
-    );
-    let secondary = edge_sine_wave_1d(
-        along_atlas - 5.43,
-        REGION_EDGE_WAVE_SECONDARY_PERIOD_CELLS,
-        salt.rotate_left(29),
-    );
-    (broad * 0.56 + secondary * 0.44).clamp(-1.0, 1.0) * amplitude
-}
-
-fn region_edge_corner_taper(
-    classes: &RegionClassMap,
-    owner_coord: AtlasCoord,
-    neighbor_coord: AtlasCoord,
-    corner_axis: f32,
-) -> f32 {
-    let near_min =
-        1.0 - smoothstep01((corner_axis / REGION_EDGE_CORNER_TAPER_WIDTH_CELLS).clamp(0.0, 1.0));
-    let near_max = 1.0
-        - smoothstep01(
-            ((1.0 - corner_axis) / REGION_EDGE_CORNER_TAPER_WIDTH_CELLS).clamp(0.0, 1.0),
-        );
-    let mut taper = 1.0_f32;
-
-    if near_min > 0.0 {
-        let diagonal_coord = if neighbor_coord.x != owner_coord.x {
-            AtlasCoord::new(neighbor_coord.x, owner_coord.z - 1)
-        } else {
-            AtlasCoord::new(owner_coord.x - 1, neighbor_coord.z)
-        };
-        if !diagonal_continues_neighbor(classes, neighbor_coord, diagonal_coord) {
-            taper *= 1.0 - near_min * 0.42;
-        }
-    }
-
-    if near_max > 0.0 {
-        let diagonal_coord = if neighbor_coord.x != owner_coord.x {
-            AtlasCoord::new(neighbor_coord.x, owner_coord.z + 1)
-        } else {
-            AtlasCoord::new(owner_coord.x + 1, neighbor_coord.z)
-        };
-        if !diagonal_continues_neighbor(classes, neighbor_coord, diagonal_coord) {
-            taper *= 1.0 - near_max * 0.42;
-        }
-    }
-
-    taper.clamp(0.34, 1.0)
-}
-
-fn diagonal_continues_neighbor(
-    classes: &RegionClassMap,
-    neighbor_coord: AtlasCoord,
-    diagonal_coord: AtlasCoord,
-) -> bool {
-    let Some(neighbor) = classes.get(neighbor_coord).copied() else {
-        return false;
-    };
-    let Some(diagonal) = classes.get(diagonal_coord).copied() else {
-        return false;
-    };
-
-    neighbor.archetype == diagonal.archetype
-        || (neighbor.biome_family == diagonal.biome_family
-            && neighbor.hydrology_context == diagonal.hydrology_context
-            && neighbor.elevation_band == diagonal.elevation_band)
-}
-
-fn edge_sine_wave_1d(position: f32, period: f32, salt: u64) -> f32 {
-    let phase =
-        (hash_to_signed_unit(edge_lattice_hash(0, salt)) * 0.5 + 0.5) * std::f32::consts::TAU;
-    ((position / period.max(0.01)) * std::f32::consts::TAU + phase).sin()
-}
-
-fn edge_lattice_hash(index: i32, salt: u64) -> u64 {
-    mix_u64(salt ^ (index as i64 as u64).wrapping_mul(0xc2b2_ae3d_27d4_eb4f))
-}
-
-fn region_class_fingerprint(cell: RegionClassCell) -> u64 {
-    let mut hash = 0x94d0_49bb_1331_11eb;
-    hash = mix_u64(hash ^ cell.temperature_band as u64);
-    hash = mix_u64(hash ^ ((cell.moisture_band as u64) << 8));
-    hash = mix_u64(hash ^ ((cell.elevation_band as u64) << 16));
-    hash = mix_u64(hash ^ ((cell.relief_class as u64) << 24));
-    hash = mix_u64(hash ^ ((cell.hydrology_context as u64) << 32));
-    hash = mix_u64(hash ^ ((cell.coastal_context as u64) << 40));
-    hash = mix_u64(hash ^ ((cell.climate_regime as u64) << 48));
-    hash = mix_u64(hash ^ cell.biome_family as u64);
-    hash = mix_u64(hash ^ ((cell.terrain_form_family as u64) << 16));
-    mix_u64(hash ^ ((cell.archetype as u64) << 32))
+    (
+        coord.x as f32 + 0.5 + jitter_x,
+        coord.z as f32 + 0.5 + jitter_z,
+    )
 }
 
 fn region_class_barrier_strength(a: RegionClassCell, b: RegionClassCell) -> f32 {

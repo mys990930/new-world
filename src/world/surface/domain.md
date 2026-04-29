@@ -43,6 +43,15 @@ sample_material_domain(input: MaterialDomainInput<'_>) -> MaterialDomainSample
 
 - `hard_owner` remains the gameplay/query owner even when `visible_owner` is accepted for material expression.
 - `visible_owner` may cross the hard owner only when the foreign domain is supported by broad generation material axes, hydrology, or coastal evidence.
+- local support is evaluated before atlas-neighborhood foreign-owner competition, so final material
+  can follow the continuous generation support field instead of using atlas influence as the
+  primary boundary generator.
+- local support may select a visible material domain even when the atlas influence neighborhood
+  does not expose that domain as a foreign owner; wetland/exposed/cover support should then come
+  from the continuous generation support field rather than from a direct atlas-cell boundary.
+- if a local support domain wins without a matching foreign atlas owner, the hard owner remains the
+  visible owner for identity while the visible material domain changes; this keeps ownership stable
+  without forcing block material to remain on atlas-owner lines.
 - among foreign domains present in the influence neighborhood, the resolver should consider the best supported candidate rather than blindly favoring whichever foreign domain has the highest raw influence weight.
 - the support test compares whether the candidate visible domain is better supported than the hard
   domain by the generation material-support axes and final hydrology.

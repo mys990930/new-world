@@ -731,8 +731,8 @@ fn material_support_for_region(
     } else {
         0.0
     };
-    let exposure = alpine_semantic.max(exposure_field).clamp(0.0, 1.0);
-    let wetness = wet_semantic.max(wet_field).clamp(0.0, 1.0);
+    let exposure = (exposure_field * 0.78 + alpine_semantic * 0.22).clamp(0.0, 1.0);
+    let wetness = (wet_field * 0.78 + wet_semantic * 0.22).clamp(0.0, 1.0);
     let sediment = coastal_sediment
         .max(dry_sediment)
         .max(sediment_field)

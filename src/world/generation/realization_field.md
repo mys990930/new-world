@@ -144,6 +144,9 @@ Permeability should decrease when the macro context says a boundary should remai
   - source construction now reads the full displaced `RegionClassInfluenceSet` neighborhood instead of an axis-aligned four-corner atlas bilerp, so the solved control field inherits the same low-frequency boundary breakup already used by region/material sampling
   - permeability already considers distance, semantic compatibility, scalar-context similarity, marine/inland transitions, and basin-wall pressure
   - ecotone-heavy source nodes keep less direct anchor pull than true coast/ridge/basin barriers so compatible control values can cross atlas-cell edges without flattening real macro breaks
+  - material support source values are primarily continuous atlas-field signals with only weak
+    semantic wet/exposed bias, so downstream material boundaries are not forced to remain on
+    atlas-owner edges
 
 The solve target is not "blur everything"; it is "carry compatible landform intent across atlas-cell boundaries without losing macro barriers".
 
