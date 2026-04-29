@@ -18,12 +18,16 @@ use super::scale::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, AtlasGrid};
 use super::structure::AtlasStructureMap;
 
 const REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT: f32 = 1.00;
-const REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT: f32 = 0.50;
 const REGION_INFLUENCE_MIN_WEIGHT: f32 = 0.0001;
-const REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS: i32 = 2;
-const REGION_INFLUENCE_VORONOI_JITTER_CELLS: f32 = 0.36;
-const REGION_INFLUENCE_VORONOI_TRANSITION_WIDTH_CELLS: f32 = 0.16;
-const REGION_VORONOI_JITTER_SALT: u64 = 0xA19C_3D2E_5170_0002;
+const REGION_INFLUENCE_FIELD_SEARCH_RADIUS_CELLS: i32 = 3;
+const REGION_INFLUENCE_FIELD_RADIUS_CELLS: f32 = 1.72;
+const REGION_INFLUENCE_FIELD_CELL_JITTER_CELLS: f32 = 0.24;
+const REGION_INFLUENCE_FIELD_WARP_CELLS: f32 = 0.46;
+const REGION_INFLUENCE_FIELD_WARP_SCALE_CELLS: f32 = 2.75;
+const REGION_INFLUENCE_FIELD_NEIGHBOR_RATIO_FLOOR: f32 = 0.34;
+const REGION_INFLUENCE_FIELD_SALT: u64 = 0xA19C_3D2E_5170_0003;
+const REGION_INFLUENCE_FIELD_WARP_X_SALT: u64 = 0xA19C_3D2E_5170_0004;
+const REGION_INFLUENCE_FIELD_WARP_Z_SALT: u64 = 0xA19C_3D2E_5170_0005;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TemperatureBand {
@@ -372,31 +376,21 @@ pub fn sample_region_class_influences(
     let atlas_x = world_x / atlas_span_blocks;
     let atlas_z = world_z / atlas_span_blocks;
     let base_coord = atlas_coord_for_world_position(world_x, world_z, atlas_span_blocks);
-    let mut candidates = Vec::new();
+    let (field_x, field_z) = region_influence_field_position(atlas_x, atlas_z);
 
-    for dz in
-        -REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS..=REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
-    {
-        for dx in -REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
-            ..=REGION_INFLUENCE_VORONOI_SEARCH_RADIUS_CELLS
-        {
-            let coord = AtlasCoord::new(base_coord.x + dx, base_coord.z + dz);
-            let Some(class) = classes.get(coord).copied() else {
-                continue;
-            };
-            let (center_x, center_z) = jittered_region_influence_center(coord);
-            let distance = ((atlas_x - center_x).powi(2) + (atlas_z - center_z).powi(2)).sqrt();
-            candidates.push((coord, class, distance));
-        }
-    }
-
+    let mut candidates = region_influence_field_candidates(classes, field_x, field_z, base_coord);
     candidates.sort_by(|a, b| {
-        a.2.total_cmp(&b.2)
-            .then_with(|| a.0.z.cmp(&b.0.z))
-            .then_with(|| a.0.x.cmp(&b.0.x))
+        b.support
+            .total_cmp(&a.support)
+            .then_with(|| {
+                b.representative_support
+                    .total_cmp(&a.representative_support)
+            })
+            .then_with(|| a.coord.z.cmp(&b.coord.z))
+            .then_with(|| a.coord.x.cmp(&b.coord.x))
     });
 
-    let Some((owner_coord, owner_class, owner_distance)) = candidates.first().copied() else {
+    let Some(owner) = candidates.first().copied() else {
         let fallback = RegionClassCell::default();
         return RegionClassInfluenceSet {
             dominant: RegionClassInfluence {
@@ -409,35 +403,26 @@ pub fn sample_region_class_influences(
             barrier_strength: 0.0,
         };
     };
+    let owner_coord = owner.coord;
+    let owner_class = owner.class;
 
     let mut raw_neighbors = Vec::new();
     let mut barrier_sum = 0.0_f32;
     let mut barrier_weight_sum = 0.0_f32;
 
-    for (coord, class, distance) in candidates.into_iter().skip(1) {
-        if class == owner_class {
-            continue;
-        }
-
-        let distance_edge = distance - owner_distance;
-        let transition =
-            (1.0 - distance_edge / REGION_INFLUENCE_VORONOI_TRANSITION_WIDTH_CELLS).clamp(0.0, 1.0);
+    for candidate in candidates.into_iter().skip(1) {
+        let competition = candidate.support / (owner.support + candidate.support).max(f32::EPSILON);
+        let transition = ((competition - REGION_INFLUENCE_FIELD_NEIGHBOR_RATIO_FLOOR)
+            / (0.5 - REGION_INFLUENCE_FIELD_NEIGHBOR_RATIO_FLOOR))
+            .clamp(0.0, 1.0);
         let influence_strength = smoothstep01(transition);
         if influence_strength <= REGION_INFLUENCE_MIN_WEIGHT {
             continue;
         }
 
-        let barrier = region_class_barrier_strength(owner_class, class);
+        let barrier = region_class_barrier_strength(owner_class, candidate.class);
         let permeability = (1.0 - barrier * 0.78).clamp(0.12, 1.0);
-        let diagonal_penalty = if coord.x != owner_coord.x && coord.z != owner_coord.z {
-            REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT
-        } else {
-            REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT
-        };
-        let raw_weight = influence_strength
-            * REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT
-            * diagonal_penalty
-            * permeability;
+        let raw_weight = influence_strength * REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT * permeability;
 
         barrier_sum += barrier * influence_strength;
         barrier_weight_sum += influence_strength;
@@ -446,7 +431,7 @@ pub fn sample_region_class_influences(
             continue;
         }
 
-        raw_neighbors.push((coord, class, raw_weight));
+        raw_neighbors.push((candidate.coord, candidate.class, raw_weight));
     }
 
     let total_raw = 1.0
@@ -509,19 +494,123 @@ fn atlas_coord_for_world_position(
     )
 }
 
-fn jittered_region_influence_center(coord: AtlasCoord) -> (f32, f32) {
-    let salt = REGION_VORONOI_JITTER_SALT
+#[derive(Debug, Clone, Copy)]
+struct RegionInfluenceFieldCandidate {
+    coord: AtlasCoord,
+    class: RegionClassCell,
+    support: f32,
+    representative_support: f32,
+}
+
+fn region_influence_field_candidates(
+    classes: &RegionClassMap,
+    field_x: f32,
+    field_z: f32,
+    base_coord: AtlasCoord,
+) -> Vec<RegionInfluenceFieldCandidate> {
+    let mut candidates: Vec<RegionInfluenceFieldCandidate> = Vec::new();
+
+    for dz in
+        -REGION_INFLUENCE_FIELD_SEARCH_RADIUS_CELLS..=REGION_INFLUENCE_FIELD_SEARCH_RADIUS_CELLS
+    {
+        for dx in
+            -REGION_INFLUENCE_FIELD_SEARCH_RADIUS_CELLS..=REGION_INFLUENCE_FIELD_SEARCH_RADIUS_CELLS
+        {
+            let coord = AtlasCoord::new(base_coord.x + dx, base_coord.z + dz);
+            let Some(class) = classes.get(coord).copied() else {
+                continue;
+            };
+            let support = region_influence_cell_support(coord, field_x, field_z);
+            if support <= REGION_INFLUENCE_MIN_WEIGHT {
+                continue;
+            }
+
+            if let Some(candidate) = candidates
+                .iter_mut()
+                .find(|candidate| candidate.class == class)
+            {
+                candidate.support += support;
+                if support > candidate.representative_support {
+                    candidate.coord = coord;
+                    candidate.representative_support = support;
+                }
+            } else {
+                candidates.push(RegionInfluenceFieldCandidate {
+                    coord,
+                    class,
+                    support,
+                    representative_support: support,
+                });
+            }
+        }
+    }
+
+    candidates
+}
+
+fn region_influence_field_position(atlas_x: f32, atlas_z: f32) -> (f32, f32) {
+    let sample_x = atlas_x / REGION_INFLUENCE_FIELD_WARP_SCALE_CELLS;
+    let sample_z = atlas_z / REGION_INFLUENCE_FIELD_WARP_SCALE_CELLS;
+    let warp_x = value_noise_2d(REGION_INFLUENCE_FIELD_WARP_X_SALT, sample_x, sample_z)
+        * REGION_INFLUENCE_FIELD_WARP_CELLS;
+    let warp_z = value_noise_2d(
+        REGION_INFLUENCE_FIELD_WARP_Z_SALT,
+        sample_x + 17.31,
+        sample_z - 9.73,
+    ) * REGION_INFLUENCE_FIELD_WARP_CELLS;
+
+    (atlas_x + warp_x, atlas_z + warp_z)
+}
+
+fn region_influence_cell_support(coord: AtlasCoord, field_x: f32, field_z: f32) -> f32 {
+    let (center_x, center_z) = region_influence_cell_center(coord);
+    let dx = field_x - center_x;
+    let dz = field_z - center_z;
+    let distance = (dx * dx + dz * dz).sqrt();
+    let t = (1.0 - distance / REGION_INFLUENCE_FIELD_RADIUS_CELLS).clamp(0.0, 1.0);
+
+    smootherstep01(t)
+}
+
+fn region_influence_cell_center(coord: AtlasCoord) -> (f32, f32) {
+    let salt = REGION_INFLUENCE_FIELD_SALT
         ^ (coord.x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
         ^ (coord.z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    let jitter_x =
-        hash_to_signed_unit(mix_u64(salt.rotate_left(11))) * REGION_INFLUENCE_VORONOI_JITTER_CELLS;
-    let jitter_z =
-        hash_to_signed_unit(mix_u64(salt.rotate_left(37))) * REGION_INFLUENCE_VORONOI_JITTER_CELLS;
+    let jitter_x = hash_to_signed_unit(mix_u64(salt.rotate_left(11)))
+        * REGION_INFLUENCE_FIELD_CELL_JITTER_CELLS;
+    let jitter_z = hash_to_signed_unit(mix_u64(salt.rotate_left(37)))
+        * REGION_INFLUENCE_FIELD_CELL_JITTER_CELLS;
 
     (
         coord.x as f32 + 0.5 + jitter_x,
         coord.z as f32 + 0.5 + jitter_z,
     )
+}
+
+fn value_noise_2d(salt: u64, x: f32, z: f32) -> f32 {
+    let cell_x = x.floor() as i32;
+    let cell_z = z.floor() as i32;
+    let local_x = x - cell_x as f32;
+    let local_z = z - cell_z as f32;
+    let tx = smootherstep01(local_x);
+    let tz = smootherstep01(local_z);
+
+    let southwest = lattice_noise_2d(salt, cell_x, cell_z);
+    let southeast = lattice_noise_2d(salt, cell_x + 1, cell_z);
+    let northwest = lattice_noise_2d(salt, cell_x, cell_z + 1);
+    let northeast = lattice_noise_2d(salt, cell_x + 1, cell_z + 1);
+    let south = lerp_f32(southwest, southeast, tx);
+    let north = lerp_f32(northwest, northeast, tx);
+
+    lerp_f32(south, north, tz)
+}
+
+fn lattice_noise_2d(salt: u64, x: i32, z: i32) -> f32 {
+    let hash = mix_u64(
+        salt ^ (x as i64 as u64).wrapping_mul(0x94d0_49bb_1331_11eb)
+            ^ (z as i64 as u64).wrapping_mul(0xd6e8_feb8_6659_fd93),
+    );
+    hash_to_signed_unit(hash)
 }
 
 fn region_class_barrier_strength(a: RegionClassCell, b: RegionClassCell) -> f32 {
@@ -736,6 +825,15 @@ fn hydrology_rank(hydrology: HydrologyContext) -> u32 {
 fn smoothstep01(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn smootherstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
 }
 
 fn hash_to_signed_unit(hash: u64) -> f32 {
@@ -1463,6 +1561,23 @@ mod tests {
         RegionClassMap { area, cells }
     }
 
+    fn influence_split_map(
+        west: RegionClassCell,
+        east: RegionClassCell,
+        split_x: i32,
+    ) -> RegionClassMap {
+        let area = AtlasArea::new(AtlasCoord::new(-3, -3), 7, 7).unwrap();
+        let mut cells = AtlasGrid::filled(area, west);
+
+        for coord in area.coords() {
+            if coord.x >= split_x {
+                *cells.get_mut(coord).expect("test coord must exist") = east;
+            }
+        }
+
+        RegionClassMap { area, cells }
+    }
+
     fn temperate_plain_cell() -> RegionClassCell {
         RegionClassCell {
             temperature_band: TemperatureBand::Temperate,
@@ -1510,20 +1625,18 @@ mod tests {
 
     #[test]
     fn region_influence_sampling_warps_visible_owner_and_blends_neighbors() {
-        let classes = influence_test_map(
-            temperate_plain_cell(),
-            &[(AtlasCoord::new(1, 0), steppe_plain_cell())],
-        );
+        let classes = influence_split_map(temperate_plain_cell(), steppe_plain_cell(), 1);
         let span = atlas_cell_span_blocks_f32();
-        let influences = sample_region_class_influences(&classes, span * 0.98, span * 0.50);
-        let east_influence = if influences.dominant.coord == AtlasCoord::new(1, 0) {
+        let influences = sample_region_class_influences(&classes, span * 0.88, span * 0.50);
+        let east_influence = if influences.dominant.class.archetype == RegionArchetype::SteppePlain
+        {
             influences.dominant
         } else {
             *influences
                 .neighbors
                 .iter()
-                .find(|neighbor| neighbor.coord == AtlasCoord::new(1, 0))
-                .expect("east cell should influence near the warped east edge")
+                .find(|neighbor| neighbor.class.archetype == RegionArchetype::SteppePlain)
+                .expect("east field should influence near the warped transition zone")
         };
 
         assert_eq!(east_influence.class.archetype, RegionArchetype::SteppePlain);
@@ -1536,18 +1649,12 @@ mod tests {
     #[test]
     fn region_influence_barrier_rises_for_marine_to_inland_breaks() {
         let span = atlas_cell_span_blocks_f32();
-        let compatible = influence_test_map(
-            temperate_plain_cell(),
-            &[(AtlasCoord::new(1, 0), steppe_plain_cell())],
-        );
-        let marine = influence_test_map(
-            temperate_plain_cell(),
-            &[(AtlasCoord::new(1, 0), oceanic_shelf_cell())],
-        );
+        let compatible = influence_split_map(temperate_plain_cell(), steppe_plain_cell(), 1);
+        let marine = influence_split_map(temperate_plain_cell(), oceanic_shelf_cell(), 1);
 
         let compatible_influences =
-            sample_region_class_influences(&compatible, span * 0.98, span * 0.50);
-        let marine_influences = sample_region_class_influences(&marine, span * 0.98, span * 0.50);
+            sample_region_class_influences(&compatible, span * 0.88, span * 0.50);
+        let marine_influences = sample_region_class_influences(&marine, span * 0.88, span * 0.50);
 
         assert!(compatible_influences.barrier_strength < 0.35);
         assert!(marine_influences.barrier_strength > 0.70);
@@ -1579,6 +1686,37 @@ mod tests {
             assert_eq!(left.class, right.class);
             assert!((left.weight - right.weight).abs() < f32::EPSILON);
         }
+    }
+
+    #[test]
+    fn region_influence_field_boundary_is_not_a_straight_atlas_edge() {
+        let classes = influence_split_map(temperate_plain_cell(), steppe_plain_cell(), 1);
+        let span = atlas_cell_span_blocks_f32();
+        let crossings = [0.10, 0.30, 0.50, 0.70, 0.90]
+            .into_iter()
+            .map(|z| {
+                (0..80)
+                    .map(|step| 0.20 + step as f32 * 0.02)
+                    .find(|x| {
+                        let influences =
+                            sample_region_class_influences(&classes, span * *x, span * z);
+                        influences.dominant.class.archetype == RegionArchetype::SteppePlain
+                    })
+                    .expect("split map should cross into the east field")
+            })
+            .collect::<Vec<_>>();
+        let min = crossings.iter().copied().fold(f32::INFINITY, f32::min);
+        let max = crossings.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(
+            max - min > 0.08,
+            "visible region field boundary should bend across a macro split, got {:?}",
+            crossings
+        );
+        assert!(
+            crossings.iter().any(|x| (x - 1.0).abs() > 0.08),
+            "visible region boundary should not stay on the raw atlas edge"
+        );
     }
 
     #[test]

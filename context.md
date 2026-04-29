@@ -11,7 +11,7 @@
 
 이 프로젝트는 다음 성격을 가진다.
 
-- 블록/청크 기반의 절차적 지형 생성을 사용한 복셀 월드
+- 블록/청크 기반 저장과 Voronoi graph 기반 macro 지형 생성을 사용하는 복셀 월드
 - 건축, 생존, 생활, 생태계가 있는 샌드박스 플레이
 - WASD 이동, 좌클릭 상호작용, 우클릭 블럭 설치 중심의 조작
 - Rust 기반, bevy ecs, winit, wgpu 사용
@@ -71,8 +71,11 @@
 - 블록 원본 데이터의 source of truth는 world다
 - 외부는 내부 배열을 직접 건드리지 않고, 명시적 API/command/결과를 통해 수정한다
 - 렌더러는 world의 원본 데이터 소유자가 아니다
-- chunk generation이 참조하는 거시 지형 구조도 world 하위 atlas가 소유한다
-- 큰 산맥의 spine, 배수 방향, 강 경로 같은 macro guide는 chunk가 즉흥적으로 만들지 않고 atlas 구조를 기반으로 현실화한다
+- chunk generation이 참조하는 거시 지형 구조도 world가 소유한다
+- 새 world generation 방향은 사각 atlas cell이나 chunk를 terrain identity의 기준으로 쓰지 않고, Voronoi graph의 site/corner/edge 구조를 macro semantic graph로 사용한다
+- 큰 산맥, 바다/대륙 gradient, 배수 방향, 강 후보망 같은 macro guide는 chunk가 즉흥적으로 만들지 않고 world graph와 hydrology 구조를 기반으로 현실화한다
+- polygon 경계와 graph region은 소유/캐시 단위일 뿐이며, 최종 heightfield와 biome/material 표현은 blended continuous field, spline/domain warp, noise synthesis를 거쳐야 한다
+- 이전 atlas-cell 중심 world 구현은 `src/world/legacy`에 보존하며, 새 graph-first scaffold와 런타임 호환 bridge를 분리한다
 
 ### ECS 중심의 상태 전이
 - ECS는 게임 의미를 다루는 계층이다

@@ -73,16 +73,18 @@ region_archetype_prototype_hint(
 - influence sampling must not treat atlas-cell edges as visible transition primitives. Atlas cells
   are ownership, cache, and source-classification units, not rectangular masks for final terrain or
   material boundaries.
-- influence sampling should read nearby atlas cells as jittered semantic seeds and derive weighted
-  dominant/secondary classes from bounded distance competition between those seeds.
-- seed jitter must be deterministic and bounded. It should move the visible competition line away
-  from raw atlas-cell borders without creating salt-and-pepper interiors or large disconnected
-  incursions from one region into another.
-- secondary influence should only appear near seed competition zones. A region interior should stay
-  owned by its nearest semantic seed unless downstream local support has a stronger reason to express
-  another material domain.
-- the influence set should carry the nearest visible semantic seed as dominant plus secondary
-  weights, transition strength, and barrier strength; downstream material/domain policy decides
+- influence sampling should derive visible ownership from deterministic spline-bent boundaries
+  between cardinally adjacent atlas cells. The raw atlas lattice may decide which cells exist and
+  what they mean, but each visible edge is displaced by connected low-frequency curve segments
+  rather than by straight `x = n` or `z = n` cuts.
+- spline displacement must be deterministic, bounded, and continuous at segment endpoints. It should
+  move the visible boundary away from raw atlas-cell borders without creating salt-and-pepper
+  interiors, diagonal-only islands, or large disconnected incursions from one region into another.
+- secondary influence should only appear near those curved cardinal boundaries. A region interior
+  should stay owned by the spline-contained semantic region unless downstream local support has a
+  stronger reason to express another material domain.
+- the influence set should carry the spline-visible owner as dominant plus secondary cardinal
+  neighbor weights, transition strength, and barrier strength; downstream material/domain policy decides
   whether a supported neighbor becomes visible while hard ownership remains available from
   `sample_region_classes(...)`.
 - callers that need storage/query ownership must still use `sample_region_classes(...)`; influence

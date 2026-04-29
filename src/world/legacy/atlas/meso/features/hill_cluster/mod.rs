@@ -148,7 +148,7 @@ pub const DEF: MesoFeatureDef = MesoFeatureDef {
     ],
 };
 
-pub(in crate::world::atlas::meso) fn build_instance(
+pub(in crate::world::legacy::atlas::meso) fn build_instance(
     seed: u64,
     cell_coord: AtlasCoord,
     sample_point: (f32, f32),
@@ -201,7 +201,7 @@ pub(in crate::world::atlas::meso) fn build_instance(
     }
 }
 
-pub(in crate::world::atlas::meso) fn rasterize(
+pub(in crate::world::legacy::atlas::meso) fn rasterize(
     instance: FeatureInstance,
     cell: &mut MesoGuideCell,
     along: f32,
