@@ -68,6 +68,25 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
   - one atlas cell footprint contains `8 x 8` meso guide cells
   - one `MesoRegion` aligns to one atlas cell footprint for ownership and caching
 - those exact numbers may still change later, but the layering rule should not: meso must remain a multi-chunk layer that is visibly more local than atlas
+- the shared guide grid is only a suitability/source lattice; it must not force every feature to resolve to the same visible footprint
+- feature-owned runtime resolvers must declare their own size class, source spacing, owner padding, resolve neighborhood, and per-region density cap
+
+### Feature Size Classes
+
+- `small meso`
+  - target footprint: about `1..2` chunks
+  - examples: minor gullies, small hollows, local knobs
+  - expected use: local readability accents that should not dominate a normal play view
+- `medium meso`
+  - target footprint: about `3..8` chunks
+  - examples: ravines, hill clusters, crater bowls, short dune groups
+  - expected use: named local landforms that can cross chunk boundaries and stay recognizable while walking through them
+- `large meso`
+  - target footprint: about `8..16+` chunks
+  - examples: broad valley reaches, cliff-band runs, dune belts, coastal shelves
+  - expected use: regional substructure that still remains below atlas-scale biome or terrain-form identity
+
+The current `2 x 2` chunk guide cell may seed all three classes, but the final object size must come from the feature resolver. A large meso feature should read a wider guide neighborhood and apply stronger source pruning, while a small meso feature may stay close to one guide peak. This avoids making every meso feature feel locked to the same window size.
 
 ## Relationship To Other Atlas Layers
 
@@ -156,7 +175,11 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 
 - Wave 1A is implemented as deterministic atlas-owned guide generation
 - the full per-feature taxonomy is now scaffolded in `meso/catalog.md` and `meso/features/*` with `launch`, `extended`, and `deferred` labels
-- current generated candidates are still only `hill clusters`, `basins`, `escarpment bands`, and `terraces`
+- atlas-owned generated guide channels are still only the broad Wave 1A set:
+  - `hill clusters`
+  - `basins`
+  - `escarpment bands`
+  - `terraces`
 - current implemented selection still follows an atlas/structure-constrained deterministic lottery model
 - runtime-wired feature-specific realization details should live in the matching `meso/features/<feature>/` folder, while `atlas/meso.rs` stays responsible for shared selection, sampling, and dispatch
 - current `hill_cluster` runtime emission now has two layers:
@@ -165,11 +188,22 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 - the current hill-cluster runtime helper keeps a broader low-amplitude shoulder/support zone than the inner hill cores so plains transition into hill country more naturally at launch scale
 - the current hill-cluster runtime helper must also read a wide enough neighboring guide neighborhood that those broad hill masses stay continuous across chunk and meso-cell seams
 - feature-owned chunk-side resolved windows must be deterministic from stable guide ownership alone; neighboring chunks sampling the same hill mass should not re-roll a different object graph at the seam
+- feature-owned chunk-side resolved windows should no longer assume one shared visual size: small, medium, and large meso features may use different source spacing and owner padding while still reading the same atlas-owned guide map
 - generation now samples these guides per block column in the explicit post-prototype meso stage before later smoothing, but target architecture is feature-owned surface resolution rather than one shared additive deformation formula
+- the current runtime-backed launch subset in that chunk-side stage is now:
+  - `hill_cluster`
+  - `shallow_basin`
+  - `escarpment_band`
+  - `upland_terrace`
+  - `ravine`
+  - `coastal_cliff_band`
+  - `dune_field`
+  - `crater`
+- `ravine`, `coastal_cliff_band`, `dune_field`, and `crater` currently borrow the existing Wave 1A guide channels as provisional launch inputs until atlas publishes dedicated feature channels for those landforms
 - preview and debugging tooling may clone a `MesoGuideMap`, zero non-target channels through `cells_mut()`, and run the same feature-owned runtime on a flat baseline to inspect meso shape in isolation before blending it back onto the real prototype
 - preview and debugging tooling may also query `debug_hill_cluster_peak_candidates(...)` from the same filtered guide map to visualize which local hill-guide peaks are even entering hill-cluster resolve before owner-region sparsening and per-hill resolve
 - hill-cluster runtime resolve should keep low-amplitude support and direct blob-core height as separate signals so transition fill cannot silently become a synthetic peak far away from the actual guide sources
-- the current chunk-side launch pass applies only the Wave 1A subset and uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
+- the current chunk-side launch pass uses each archetype's current `allowed_meso_keys` stub as a temporary runtime gate until the authoritative per-archetype matrix is locked
 - candidate-family grouping notes and wave-order notes still live in `meso_candidates.md`
 - target architecture update: future meso selection should become region/archetype constrained first, with raw scalar context used only as bounded secondary input
 
@@ -177,3 +211,4 @@ meso_regions_covering_area(area: AtlasArea) -> Vec<MesoRegionCoord>
 
 - `catalog.md`
 - `features/features.md`
+- `workflow.md`

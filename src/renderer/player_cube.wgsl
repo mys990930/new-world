@@ -120,7 +120,7 @@ fn apply_color_grade(color: vec3<f32>, world_position: vec3<f32>, material_kind:
     );
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     let saturated = mix(vec3<f32>(luminance), color, 1.0 + environment.readability.w * 0.35);
-    let strength = select(0.05, 0.08, material_kind == MATERIAL_HIGHLIGHT);
+    let strength = select(0.03, 0.05, material_kind == MATERIAL_HIGHLIGHT);
     return mix(saturated, saturated * warm_grade, strength);
 }
 
@@ -134,9 +134,9 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
     let height_term = exp(-max(world_position.y, 0.0) * environment.horizon_color_height_falloff.w);
     let fog_amount =
         1.0 -
-        exp(-focal_distance * environment.fog_color_density.w * (0.27 + height_term * 0.09));
+        exp(-focal_distance * environment.fog_color_density.w * (0.16 + height_term * 0.05));
     let resisted = select(fog_amount, fog_amount * 0.45, material_kind == MATERIAL_ACTOR);
-    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.32));
+    return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.20));
 }
 
 @fragment

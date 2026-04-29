@@ -1,5 +1,5 @@
-﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
+use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::FjordCoast,
@@ -14,7 +14,7 @@ pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
         "Biome family and terrain-form family are locked for this candidate.",
         "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["coastal_cliff_band", "ravine",],
+    allowed_meso_keys: &["coastal_cliff_band", "ravine"],
     seasonal_profile: SeasonalSurfaceProfile::CoastalTemperate,
     water_response: WaterResponseHint::CoastalSprayExposed,
     ecology_density: EcologyDensityHint::Barren,

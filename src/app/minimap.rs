@@ -18,6 +18,13 @@ pub struct AppMinimapViewport {
     pub surface_range: Option<TopdownSurfaceRange>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AppMinimapDiagnosticSnapshot {
+    pub cached_columns: usize,
+    pub pending_columns: usize,
+    pub dirty_columns: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct AppMinimapCache {
     columns: HashMap<TopdownChunkColumnCoord, TopdownChunkColumnPatch>,
@@ -46,6 +53,14 @@ impl AppMinimapCache {
         self.cancel_pending_column(coord);
     }
 
+    pub fn diagnostic_snapshot(&self) -> AppMinimapDiagnosticSnapshot {
+        AppMinimapDiagnosticSnapshot {
+            cached_columns: self.columns.len(),
+            pending_columns: self.pending_columns.len(),
+            dirty_columns: self.dirty_columns.len(),
+        }
+    }
+
     pub fn apply_built_patch(
         &mut self,
         coord: TopdownChunkColumnCoord,
@@ -56,11 +71,7 @@ impl AppMinimapCache {
         self.dirty_columns.remove(&coord)
     }
 
-    pub fn compose_viewport(
-        &self,
-        player_world_x: f32,
-        player_world_z: f32,
-    ) -> AppMinimapViewport {
+    pub fn compose_viewport(&self, player_world_x: f32, player_world_z: f32) -> AppMinimapViewport {
         let player_block_x = player_world_x.floor() as i32;
         let player_block_z = player_world_z.floor() as i32;
         let half_span = MINIMAP_BLOCK_SPAN as i32 / 2;
@@ -250,7 +261,7 @@ fn loaded_world_column_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{BlockId, TopdownCell, CHUNK_EDGE};
+    use crate::world::{BlockId, CHUNK_EDGE, TopdownCell};
 
     #[test]
     fn cache_marks_second_change_as_dirty_while_pending() {
@@ -276,8 +287,10 @@ mod tests {
             chunk_x: 0,
             chunk_z: 0,
         };
-        let mut patch =
-            TopdownChunkColumnPatch::new(coord, vec![TopdownColumnScan::AIR; CHUNK_EDGE * CHUNK_EDGE]);
+        let mut patch = TopdownChunkColumnPatch::new(
+            coord,
+            vec![TopdownColumnScan::AIR; CHUNK_EDGE * CHUNK_EDGE],
+        );
         patch.set(
             0,
             0,
@@ -295,6 +308,11 @@ mod tests {
 
         let viewport = cache.compose_viewport(16.0, 16.0);
         assert_eq!(viewport.columns.len(), CHUNK_EDGE * CHUNK_EDGE);
-        assert!(viewport.columns.iter().any(|scan| scan.visible.block == BlockId::STONE));
+        assert!(
+            viewport
+                .columns
+                .iter()
+                .any(|scan| scan.visible.block == BlockId::STONE)
+        );
     }
 }

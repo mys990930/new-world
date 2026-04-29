@@ -211,8 +211,7 @@ impl BlockRegistry {
                 .material
                 .map(BlockMaterialKind::from_manifest)
                 .unwrap_or_else(|| infer_block_material_kind(&block.key, render_kind));
-            let surface_height =
-                resolve_surface_height(block.surface_height, block.key.as_str())?;
+            let surface_height = resolve_surface_height(block.surface_height, block.key.as_str())?;
 
             let tint = block.tint.unwrap_or([255, 255, 255, 255]);
             let def = BlockDef {
@@ -295,14 +294,13 @@ fn load_block_defs(
 
     for block_file in block_files {
         let path = base_dir.join(block_file);
-        let text = fs::read_to_string(&path).map_err(|source| BlockRegistryError::ReadBlockDef {
-            path: path.clone(),
-            source,
-        })?;
-        let block = toml::from_str(&text).map_err(|source| BlockRegistryError::ParseBlockDef {
-            path,
-            source,
-        })?;
+        let text =
+            fs::read_to_string(&path).map_err(|source| BlockRegistryError::ReadBlockDef {
+                path: path.clone(),
+                source,
+            })?;
+        let block = toml::from_str(&text)
+            .map_err(|source| BlockRegistryError::ParseBlockDef { path, source })?;
         blocks.push(block);
     }
 
@@ -327,17 +325,33 @@ fn infer_block_material_kind(key: &str, render_kind: BlockRenderKind) -> BlockMa
     let key = key.to_ascii_lowercase();
     if key.contains("grass") || key.contains("moss") {
         BlockMaterialKind::Grass
-    } else if key.contains("dirt") || key.contains("soil") || key.contains("mud") || key.contains("clay") {
+    } else if key.contains("dirt")
+        || key.contains("soil")
+        || key.contains("mud")
+        || key.contains("clay")
+    {
         BlockMaterialKind::Soil
-    } else if key.contains("stone") || key.contains("rock") || key.contains("ore") || key.contains("slate") {
+    } else if key.contains("stone")
+        || key.contains("rock")
+        || key.contains("ore")
+        || key.contains("slate")
+    {
         BlockMaterialKind::Stone
     } else if key.contains("sand") {
         BlockMaterialKind::Sand
-    } else if key.contains("leaf") || key.contains("leaves") || key.contains("foliage") || key.contains("vine") {
+    } else if key.contains("leaf")
+        || key.contains("leaves")
+        || key.contains("foliage")
+        || key.contains("vine")
+    {
         BlockMaterialKind::Foliage
     } else if key.contains("water") || key.contains("ice") {
         BlockMaterialKind::Water
-    } else if key.contains("lava") || key.contains("lamp") || key.contains("lantern") || key.contains("glow") {
+    } else if key.contains("lava")
+        || key.contains("lamp")
+        || key.contains("lantern")
+        || key.contains("glow")
+    {
         BlockMaterialKind::Emissive
     } else {
         BlockMaterialKind::GenericOpaque
@@ -349,7 +363,9 @@ fn resolve_surface_height(
     block_key: &str,
 ) -> Result<f32, BlockRegistryError> {
     let surface_height = surface_height.unwrap_or(1.0);
-    if !surface_height.is_finite() || !(0.0..=1.0).contains(&surface_height) || surface_height <= 0.0
+    if !surface_height.is_finite()
+        || !(0.0..=1.0).contains(&surface_height)
+        || surface_height <= 0.0
     {
         return Err(BlockRegistryError::InvalidSurfaceHeight {
             block_key: block_key.to_string(),
@@ -477,8 +493,22 @@ mod tests {
         assert_eq!(registry.texture_tiles()[0].key, "__white");
         assert_eq!(registry.block_id("grass"), Some(BlockId::GRASS));
         assert_eq!(
-            registry.block_or_missing(BlockId::GRASS).texture_for_face(BlockFace::PosY),
+            registry
+                .block_or_missing(BlockId::GRASS)
+                .texture_for_face(BlockFace::PosY),
             registry.texture_id("grass_top").unwrap()
+        );
+        assert!(registry.block_id("jungle_grass").is_some());
+        assert_eq!(
+            registry
+                .block(
+                    registry
+                        .block_id("jungle_grass")
+                        .expect("jungle grass block should exist")
+                )
+                .expect("jungle grass definition should exist")
+                .texture_for_face(BlockFace::PosY),
+            registry.texture_id("jungle_grass_top").unwrap()
         );
         assert_eq!(
             registry.block_or_missing(BlockId::GRASS).material,
@@ -499,7 +529,11 @@ mod tests {
         assert!(registry.block_id("water").is_some());
         assert_eq!(
             registry
-                .block(registry.block_id("water").expect("water block should exist"))
+                .block(
+                    registry
+                        .block_id("water")
+                        .expect("water block should exist")
+                )
                 .expect("water definition should exist")
                 .surface_height(),
             0.9

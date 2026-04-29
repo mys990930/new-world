@@ -12,6 +12,8 @@
 - worker thread execution and shutdown coordination
 - request routing into world operations
 - deterministic completed-result draining
+- bounded completed-result draining for interactive frame budgets
+- diagnostic snapshots and slow worker timing logs
 - safe request coalescing
 
 ### Non-Responsibilities
@@ -36,6 +38,8 @@ JobSystem::new(config: JobConfig) -> JobSystem
 JobSystem::submit(request: JobRequest) -> Result<JobEnqueueOutcome, JobSubmitError>
 JobSystem::submit_all(requests: impl IntoIterator<Item = JobRequest>) -> Result<(), JobSubmitError>
 JobSystem::drain_completed() -> Vec<JobResult>
+JobSystem::drain_completed_limit(max_results: usize) -> Vec<JobResult>
+JobSystem::diagnostic_snapshot() -> JobSystemSnapshot
 JobSystem::shutdown()
 ```
 
@@ -59,6 +63,10 @@ NOT:
 3. results are explicit and immutable until drained
 4. the current runtime supports both created-world chunk load and procedural generation as acquisition paths
 5. minimap chunk-column derivation is also treated as heavy background work and should not require live-world scanning on the main thread every frame
+6. runtime region-classification resolves are background work so environment/HUD refresh does not generate atlas structure on the frame thread
+7. progress results are intermediate status events and must not clear running/coalescing state for their request
+8. limited drains preserve deterministic result order and keep undrained results buffered
+9. diagnostics classify minimap and region-classification work separately from load/generate/mesh work
 
 ### Submodules
 
@@ -73,5 +81,11 @@ NOT:
 ### Current Implementation Notes
 
 - the current worker pool still uses `std::thread + std::sync::mpsc`
-- the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, `BuildChunkMesh`, and `BuildMinimapChunkColumn`
+- default runtime config uses up to two workers from available CPU parallelism so independent chunk load/mesh/minimap jobs can make progress while leaving CPU headroom for input and rendering
+- job system startup and shutdown are logged with worker/queue configuration so hangs can be separated from missing window/surface startup
+- the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, `BuildChunkMesh`, `BuildMinimapChunkColumn`, and `ResolveRegionClassArea`
+- `CreateWorld` can emit lightweight `CreateWorldProgress` snapshots before its final `WorldCreated`/`JobFailed` result; routing throttles those snapshots so UI feedback does not spam the main thread
+- gameplay can use limited result draining so bursty mesh completions do not force all renderer uploads into one frame
+- slow worker jobs are logged by default; `NEW_WORLD_TRACE_JOBS=1` enables full worker start/finish tracing
+- focused runtime region classification is queued through `ResolveRegionClassArea` and applied as a `WorldCore` cache update after the result is drained
 - app and ECS still own result interpretation and runtime-world insertion after workers finish

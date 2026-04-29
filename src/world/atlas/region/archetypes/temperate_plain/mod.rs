@@ -1,8 +1,8 @@
+use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 use super::{
     EcologyDensityHint, PrototypeArchetypeHint, RegionArchetypeDef, SeasonalSurfaceProfile,
     WaterResponseHint,
 };
-use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const PROTOTYPE_HINT: PrototypeArchetypeHint = PrototypeArchetypeHint {
     macro_height_bonus_delta: -2.0,
@@ -32,7 +32,7 @@ pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
         "Biome family and terrain-form family are locked for this candidate.",
         "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["hill_cluster", "shallow_basin", "ravine"],
+    allowed_meso_keys: &["hill_cluster", "shallow_basin"],
     seasonal_profile: SeasonalSurfaceProfile::TemperateSnowCapable,
     water_response: WaterResponseHint::AllowsWetMargins,
     ecology_density: EcologyDensityHint::Open,

@@ -9,8 +9,8 @@ mod worker;
 #[allow(unused_imports)]
 pub use config::JobConfig;
 #[allow(unused_imports)]
-pub use request::JobRequest;
+pub use request::{JobRequest, JobRequestCounts};
 #[allow(unused_imports)]
 pub use result::{JobError, JobResult};
 #[allow(unused_imports)]
-pub use runtime::JobSystem;
+pub use runtime::{JobSystem, JobSystemSnapshot};

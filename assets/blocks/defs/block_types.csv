@@ -30,3 +30,4 @@ id,key,solid,opaque,render,material,surface_height,top,bottom,side,tint,descript
 28,alpine_soil,true,true,cube,soil,,alpine_soil,alpine_soil,alpine_soil,,고산대의 얇은 토양.
 29,moraine,true,true,cube,stone,,moraine,moraine,moraine,,빙하 퇴적물.
 30,laterite,true,true,cube,soil,,laterite,laterite,laterite,,열대 풍화토.
+31,jungle_grass,true,true,cube,grass,,jungle_grass_top,dirt,jungle_grass_side,,짙고 습한 열대 초지 표면.

@@ -1,7 +1,7 @@
-use super::profile::TerrainProfile;
 use super::super::atlas::AtlasCoord;
 use super::super::coord::ChunkCoord;
 use super::super::meta::WorldMeta;
+use super::profile::TerrainProfile;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ColumnAtlasSample {
@@ -92,11 +92,13 @@ pub fn probe_column(
     _local_z: u8,
     _meta: &WorldMeta,
 ) -> ColumnGenerationProbe {
-    todo!("V2 column probe is not implemented yet; see src/world/generation/status.md")
+    todo!(
+        "current generation column probe is not implemented yet; see src/world/generation/status.md"
+    )
 }
 
 pub fn probe_chunk(_coord: ChunkCoord, _meta: &WorldMeta) -> ChunkGenerationProbe {
-    todo!("V2 chunk probe is not implemented yet; see src/world/generation/status.md")
+    todo!("generation chunk probe is not implemented yet; see src/world/generation/status.md")
 }
 
 pub fn sample_chunk_surface_lod(
@@ -104,5 +106,7 @@ pub fn sample_chunk_surface_lod(
     _step_blocks: u8,
     _meta: &WorldMeta,
 ) -> ChunkSurfaceLodGrid {
-    todo!("V2 surface LOD sampling is not implemented yet; see src/world/generation/status.md")
+    todo!(
+        "generation surface LOD sampling is not implemented yet; see src/world/generation/status.md"
+    )
 }

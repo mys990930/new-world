@@ -46,9 +46,18 @@ pub(crate) struct GpuBlockTextureResources {
 pub enum RenderTextureError {
     InvalidTileSize(u32),
     EmptyTextureList,
-    MissingLayer { expected: u32, found: Option<u32> },
-    Io { path: PathBuf, source: std::io::Error },
-    Decode { path: PathBuf, source: image::ImageError },
+    MissingLayer {
+        expected: u32,
+        found: Option<u32>,
+    },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Decode {
+        path: PathBuf,
+        source: image::ImageError,
+    },
     WrongImageSize {
         path: PathBuf,
         expected: (u32, u32),
@@ -74,7 +83,9 @@ impl BlockTextureSet {
         }
     }
 
-    pub(crate) fn from_source(source: &RenderTextureArraySource) -> Result<Self, RenderTextureError> {
+    pub(crate) fn from_source(
+        source: &RenderTextureArraySource,
+    ) -> Result<Self, RenderTextureError> {
         if source.tile_size == 0 {
             return Err(RenderTextureError::InvalidTileSize(0));
         }
@@ -126,7 +137,10 @@ impl BlockTextureSet {
                 }
             };
 
-            layers.push(BlockTextureLayer { key: tile.key, rgba });
+            layers.push(BlockTextureLayer {
+                key: tile.key,
+                rgba,
+            });
         }
 
         Ok(Self {
@@ -187,7 +201,9 @@ pub(crate) fn create_gpu_block_texture_resources(
     layout: &wgpu::BindGroupLayout,
     textures: &BlockTextureSet,
 ) -> GpuBlockTextureResources {
-    let layer_count = u32::try_from(textures.layers.len()).unwrap_or(u32::MAX).max(1);
+    let layer_count = u32::try_from(textures.layers.len())
+        .unwrap_or(u32::MAX)
+        .max(1);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("renderer_block_texture_array"),
         size: wgpu::Extent3d {

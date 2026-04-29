@@ -18,7 +18,9 @@ pub struct FixedStepConfig {
 
 impl Default for FixedStepConfig {
     fn default() -> Self {
-        Self { ticks_per_second: 20 }
+        Self {
+            ticks_per_second: 20,
+        }
     }
 }
 
@@ -105,11 +107,22 @@ impl SimulationResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimEvent {
-    FixedTickAdvanced { tick: u64 },
-    CalendarMinuteElapsed { absolute_minutes: u64 },
-    DayAdvanced { day: u64 },
-    WeatherUpdated { coord: AtlasCoord, kind: LocalWeatherKind },
-    DeferredSeasonPatchesQueued { count: usize },
+    FixedTickAdvanced {
+        tick: u64,
+    },
+    CalendarMinuteElapsed {
+        absolute_minutes: u64,
+    },
+    DayAdvanced {
+        day: u64,
+    },
+    WeatherUpdated {
+        coord: AtlasCoord,
+        kind: LocalWeatherKind,
+    },
+    DeferredSeasonPatchesQueued {
+        count: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

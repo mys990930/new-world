@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+﻿#![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::env;
@@ -12,9 +12,9 @@ use image::{Rgb, RgbImage};
 use new_world::world::atlas::region_archetype_prototype_hint;
 use new_world::world::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, BiomeFamily, CHUNK_EDGE_I32, ChunkCoord,
-    ChunkGenerationV2Scaffold, CoastalContext, ElevationBand, HydrologyContext, RegionArchetype,
-    RegionClassCell, RegionClassMap, RegionClassSample, RealizationSample, ReliefClass,
-    RiverPathKind, TerrainFormFamily, WorldMeta, build_chunk_v2_scaffold,
+    ChunkGenerationScaffold, CoastalContext, ElevationBand, HydrologyContext, RealizationSample,
+    RegionArchetype, RegionClassCell, RegionClassMap, RegionClassSample, ReliefClass,
+    RiverPathKind, TerrainFormFamily, WorldMeta, build_chunk_generation_scaffold,
     sample_chunk_realization_field, sample_region_classes,
 };
 
@@ -376,7 +376,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ))
                 })?;
             }
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -495,7 +499,7 @@ fn render_preview(
 }
 
 fn build_preview_patch(chunk: ChunkCoord, meta: &WorldMeta, blocks_per_pixel: u32) -> PreviewPatch {
-    let scaffold = build_chunk_v2_scaffold(chunk, meta);
+    let scaffold = build_chunk_generation_scaffold(chunk, meta);
     let pixels_per_chunk = CHUNK_EDGE_I32 as u32 / blocks_per_pixel;
     let chunk_origin_x = chunk.0 * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk.2 * CHUNK_EDGE_I32;
@@ -503,11 +507,17 @@ fn build_preview_patch(chunk: ChunkCoord, meta: &WorldMeta, blocks_per_pixel: u3
 
     for local_pixel_z in 0..pixels_per_chunk {
         for local_pixel_x in 0..pixels_per_chunk {
-            let world_x =
-                chunk_origin_x + local_pixel_x as i32 * blocks_per_pixel as i32 + blocks_per_pixel as i32 / 2;
-            let world_z =
-                chunk_origin_z + local_pixel_z as i32 * blocks_per_pixel as i32 + blocks_per_pixel as i32 / 2;
-            samples.push(sample_preview_field(&scaffold, world_x as f32, world_z as f32));
+            let world_x = chunk_origin_x
+                + local_pixel_x as i32 * blocks_per_pixel as i32
+                + blocks_per_pixel as i32 / 2;
+            let world_z = chunk_origin_z
+                + local_pixel_z as i32 * blocks_per_pixel as i32
+                + blocks_per_pixel as i32 / 2;
+            samples.push(sample_preview_field(
+                &scaffold,
+                world_x as f32,
+                world_z as f32,
+            ));
         }
     }
 
@@ -518,7 +528,7 @@ fn build_preview_patch(chunk: ChunkCoord, meta: &WorldMeta, blocks_per_pixel: u3
 }
 
 fn sample_preview_field(
-    scaffold: &ChunkGenerationV2Scaffold,
+    scaffold: &ChunkGenerationScaffold,
     world_x: f32,
     world_z: f32,
 ) -> PreviewSample {
@@ -588,15 +598,21 @@ fn realization_uplift_signal(sample: RealizationSample) -> f32 {
 fn realization_flatness_signal(sample: RealizationSample) -> f32 {
     let wet_flatten = normalize_range(sample.wet_flatten, 0.0, 8.0);
     let relief_mass = normalize_range(sample.relief_base + sample.relief_gain * 2.2, 4.0, 30.0);
-    let carrier =
-        normalize_range(sample.low_freq_amp + sample.mid_freq_amp + sample.dune_amp, 0.0, 12.0);
+    let carrier = normalize_range(
+        sample.low_freq_amp + sample.mid_freq_amp + sample.dune_amp,
+        0.0,
+        12.0,
+    );
     clamp01(wet_flatten * 0.55 + (1.0 - relief_mass) * 0.35 + (1.0 - carrier) * 0.10)
 }
 
 fn realization_relief_signal(sample: RealizationSample) -> f32 {
     let broad = normalize_range(sample.relief_base + sample.relief_gain * 2.0, 4.0, 30.0);
-    let carrier =
-        normalize_range(sample.low_freq_amp + sample.mid_freq_amp + sample.dune_amp, 0.0, 12.0);
+    let carrier = normalize_range(
+        sample.low_freq_amp + sample.mid_freq_amp + sample.dune_amp,
+        0.0,
+        12.0,
+    );
     let reserve = normalize_range(sample.meso_relief_reserve, 0.0, 12.0);
     clamp01(broad * 0.55 + carrier * 0.30 + reserve * 0.15)
 }
@@ -724,12 +740,9 @@ fn color_for_sample(sample: PreviewSample, mode: PreviewMode) -> [u8; 3] {
             [110, 150, 148],
             [80, 126, 196],
         ),
-        PreviewMode::Ridge => ramp_color(
-            sample.ridge,
-            [76, 84, 90],
-            [146, 126, 116],
-            [220, 96, 86],
-        ),
+        PreviewMode::Ridge => {
+            ramp_color(sample.ridge, [76, 84, 90], [146, 126, 116], [220, 96, 86])
+        }
         PreviewMode::Terrace => ramp_color(
             sample.terrace,
             [76, 82, 94],
@@ -1054,8 +1067,14 @@ fn sample_region_weights(
     world_z: f32,
 ) -> [RegionSampleWeight; 4] {
     let (atlas_x, atlas_z) = atlas_sample_position(world_x, world_z);
-    let (base_x, base_z, east_x, south_z, frac_x, frac_z) =
-        fractional_sample_window(classes.area().origin().x, classes.area().origin().z, classes.area().width(), classes.area().height(), atlas_x, atlas_z);
+    let (base_x, base_z, east_x, south_z, frac_x, frac_z) = fractional_sample_window(
+        classes.area().origin().x,
+        classes.area().origin().z,
+        classes.area().width(),
+        classes.area().height(),
+        atlas_x,
+        atlas_z,
+    );
     let c00 = *classes
         .get(AtlasCoord::new(base_x, base_z))
         .expect("fractional region sample must exist");
@@ -1090,7 +1109,11 @@ fn sample_region_weights(
     ]
 }
 
-fn sample_scalar_fields(fields: &new_world::world::AtlasFieldMap, world_x: f32, world_z: f32) -> ScalarFieldSample {
+fn sample_scalar_fields(
+    fields: &new_world::world::AtlasFieldMap,
+    world_x: f32,
+    world_z: f32,
+) -> ScalarFieldSample {
     let (atlas_x, atlas_z) = atlas_sample_position(world_x, world_z);
     let area = fields.area();
     let (base_x, base_z, east_x, south_z, frac_x, frac_z) = fractional_sample_window(
@@ -1196,8 +1219,22 @@ fn sample_scalar_fields(fields: &new_world::world::AtlasFieldMap, world_x: f32, 
             frac_x,
             frac_z,
         ),
-        aridity: bilerp(c00.aridity, c10.aridity, c01.aridity, c11.aridity, frac_x, frac_z),
-        wetness: bilerp(c00.wetness, c10.wetness, c01.wetness, c11.wetness, frac_x, frac_z),
+        aridity: bilerp(
+            c00.aridity,
+            c10.aridity,
+            c01.aridity,
+            c11.aridity,
+            frac_x,
+            frac_z,
+        ),
+        wetness: bilerp(
+            c00.wetness,
+            c10.wetness,
+            c01.wetness,
+            c11.wetness,
+            frac_x,
+            frac_z,
+        ),
         alpine_factor: bilerp(
             c00.alpine_factor,
             c10.alpine_factor,
@@ -1420,16 +1457,18 @@ fn region_relief_signal(region: RegionClassCell) -> f32 {
         | TerrainFormFamily::Floodplain
         | TerrainFormFamily::WetLowland
         | TerrainFormFamily::AlluvialLowland => 0.14,
-        TerrainFormFamily::Plain | TerrainFormFamily::RollingPlain | TerrainFormFamily::Basin => 0.24,
+        TerrainFormFamily::Plain | TerrainFormFamily::RollingPlain | TerrainFormFamily::Basin => {
+            0.24
+        }
         TerrainFormFamily::BroadValley
         | TerrainFormFamily::NarrowValley
         | TerrainFormFamily::AlluvialFan
         | TerrainFormFamily::Plateau
         | TerrainFormFamily::Pediment
         | TerrainFormFamily::Karst => 0.42,
-        TerrainFormFamily::DuneField | TerrainFormFamily::MesaCountry | TerrainFormFamily::HillCountry => {
-            0.58
-        }
+        TerrainFormFamily::DuneField
+        | TerrainFormFamily::MesaCountry
+        | TerrainFormFamily::HillCountry => 0.58,
         TerrainFormFamily::HillCluster
         | TerrainFormFamily::Escarpment
         | TerrainFormFamily::MountainFront
@@ -1474,7 +1513,9 @@ fn region_wetness_signal(region: RegionClassCell) -> f32 {
         | TerrainFormFamily::Basin => 0.82,
         TerrainFormFamily::MarineShelf | TerrainFormFamily::BeachPlain => 0.60,
         TerrainFormFamily::BroadValley | TerrainFormFamily::NarrowValley => 0.56,
-        TerrainFormFamily::Plain | TerrainFormFamily::RollingPlain | TerrainFormFamily::HillCountry => 0.34,
+        TerrainFormFamily::Plain
+        | TerrainFormFamily::RollingPlain
+        | TerrainFormFamily::HillCountry => 0.34,
         _ => 0.20,
     };
 
@@ -1499,8 +1540,12 @@ fn region_ridge_signal(region: RegionClassCell) -> f32 {
         | TerrainFormFamily::GlacialValley
         | TerrainFormFamily::Icefield
         | TerrainFormFamily::CrevassedIcefield => 0.90,
-        TerrainFormFamily::Plateau | TerrainFormFamily::HillCountry | TerrainFormFamily::HillCluster => 0.54,
-        TerrainFormFamily::MesaCountry | TerrainFormFamily::Pediment | TerrainFormFamily::Canyon => 0.68,
+        TerrainFormFamily::Plateau
+        | TerrainFormFamily::HillCountry
+        | TerrainFormFamily::HillCluster => 0.54,
+        TerrainFormFamily::MesaCountry
+        | TerrainFormFamily::Pediment
+        | TerrainFormFamily::Canyon => 0.68,
         _ => 0.14,
     };
 
@@ -1519,7 +1564,9 @@ fn region_terrace_signal(region: RegionClassCell) -> f32 {
         | TerrainFormFamily::BroadValley
         | TerrainFormFamily::NarrowValley => 0.62,
         TerrainFormFamily::Basin | TerrainFormFamily::Karst | TerrainFormFamily::Canyon => 0.54,
-        TerrainFormFamily::DuneField | TerrainFormFamily::Plain | TerrainFormFamily::RollingPlain => 0.24,
+        TerrainFormFamily::DuneField
+        | TerrainFormFamily::Plain
+        | TerrainFormFamily::RollingPlain => 0.24,
         _ => 0.14,
     };
     let elevation = match region.elevation_band {
@@ -1555,7 +1602,7 @@ fn region_corridor_signal(region: RegionClassCell) -> f32 {
     clamp01(hydrology * 0.68 + terrain * 0.32)
 }
 
-fn corridor_influence(scaffold: &ChunkGenerationV2Scaffold, local_x: f32, local_z: f32) -> f32 {
+fn corridor_influence(scaffold: &ChunkGenerationScaffold, local_x: f32, local_z: f32) -> f32 {
     let mut strongest = 0.0_f32;
 
     for corridor in &scaffold.corridor_window.corridors {
@@ -1626,7 +1673,14 @@ fn fractional_sample_window(
     let frac_x = (sample_x - clamped_base_x as f32).clamp(0.0, 1.0);
     let frac_z = (sample_z - clamped_base_z as f32).clamp(0.0, 1.0);
 
-    (clamped_base_x, clamped_base_z, east_x, south_z, frac_x, frac_z)
+    (
+        clamped_base_x,
+        clamped_base_z,
+        east_x,
+        south_z,
+        frac_x,
+        frac_z,
+    )
 }
 
 fn bilerp(a00: f32, a10: f32, a01: f32, a11: f32, tx: f32, tz: f32) -> f32 {
@@ -1783,7 +1837,9 @@ fn canonical_key(value: &str) -> String {
                 if !out.ends_with('_')
                     && ((previous.is_ascii_lowercase() || previous.is_ascii_digit())
                         || (previous.is_ascii_uppercase()
-                            && next.map(|value| value.is_ascii_lowercase()).unwrap_or(false)))
+                            && next
+                                .map(|value| value.is_ascii_lowercase())
+                                .unwrap_or(false)))
                 {
                     out.push('_');
                 }
@@ -1857,7 +1913,9 @@ mod tests {
 
         assert_eq!(window.pixels_per_chunk(), 4);
         assert_eq!(
-            window.image_dimensions().expect("image dimensions should resolve"),
+            window
+                .image_dimensions()
+                .expect("image dimensions should resolve"),
             (20, 20)
         );
     }
@@ -1865,7 +1923,10 @@ mod tests {
     #[test]
     fn mode_parser_accepts_named_channels() {
         assert_eq!(PreviewMode::parse("biome"), Some(PreviewMode::Biome));
-        assert_eq!(PreviewMode::parse("archetype"), Some(PreviewMode::Archetype));
+        assert_eq!(
+            PreviewMode::parse("archetype"),
+            Some(PreviewMode::Archetype)
+        );
         assert_eq!(PreviewMode::parse("flatness"), Some(PreviewMode::Flatness));
         assert_eq!(PreviewMode::parse("wetness"), Some(PreviewMode::Wetness));
         assert_eq!(PreviewMode::parse("ridge"), Some(PreviewMode::Ridge));

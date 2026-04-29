@@ -58,6 +58,7 @@
   - one-block automatic step-up
   - two-block obstacle rejection
   - gravity and falling
+- created-world load can temporarily stage the local player at the requested spawn x/z and a safe loading height before enough chunk data exists for surface placement
 
 ## Invariants
 
@@ -66,6 +67,7 @@
 - `MoveWorldIntent` is the continuous world-space movement channel
 - discrete actions stay in `PlayerCommandBuffer`
 - missing world chunks are treated as blocking in the current collision helper so the player does not walk into unloaded space
+- pending created-world spawn placement should be retried by app after streamed chunk jobs mutate `WorldCore`, not by ECS polling disk or jobs directly
 
 ## Non-Responsibilities
 
@@ -84,6 +86,6 @@
 ## Notes
 
 - the current minimal implementation spawns one local player during bootstrap
-- bootstrap now preloads a spawn neighborhood and then snaps the local player onto a safe loaded surface so the body does not start underground
+- bootstrap and created-world reload now stage a spawn anchor first; app snaps the local player onto a safe loaded surface once jobs have streamed enough nearby chunk data into `WorldCore`
 - the current default horizontal move speed is `8.0` world units per second
 - the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet

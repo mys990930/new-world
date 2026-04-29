@@ -33,3 +33,4 @@
   - hydrology sediment fallback
 - the palettes are still launch-oriented and intentionally simple
 - exact per-archetype ownership still starts from `RegionArchetype`, then resolves through one policy id instead of letting material thresholds redefine the region
+- the tropical launch defaults now start from `jungle_grass` over `humus`/soil support instead of using `leaf_litter` as the generic exposed top block

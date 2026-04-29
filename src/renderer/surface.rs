@@ -5,17 +5,16 @@ use pollster::block_on;
 use winit::window::Window;
 
 use super::{
+    CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig, RenderStats,
+    RenderWorld, Renderer,
     state::{RenderEnvironmentState, RendererBackend},
     texture::{
-        BlockTextureSet, create_block_texture_bind_group_layout,
-        create_gpu_block_texture_resources,
+        BlockTextureSet, create_block_texture_bind_group_layout, create_gpu_block_texture_resources,
     },
     ui::{
         UiTextureSet, UiVertex, create_gpu_ui_texture_resources,
         create_ui_texture_bind_group_layout,
     },
-    CameraGpuState, PipelineSet, RenderConfig, RenderEnvironment, RenderQualityConfig, RenderStats,
-    RenderWorld, Renderer,
 };
 
 pub trait RenderSurfaceTarget {
@@ -272,9 +271,7 @@ pub(crate) fn default_environment_uniform() -> EnvironmentUniform {
     )
 }
 
-pub(crate) fn create_environment_bind_group_layout(
-    device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
+pub(crate) fn create_environment_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("renderer_environment_bind_group_layout"),
         entries: &[wgpu::BindGroupLayoutEntry {
@@ -290,9 +287,7 @@ pub(crate) fn create_environment_bind_group_layout(
     })
 }
 
-pub(crate) fn create_shadow_pass_bind_group_layout(
-    device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
+pub(crate) fn create_shadow_pass_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("renderer_shadow_pass_bind_group_layout"),
         entries: &[wgpu::BindGroupLayoutEntry {
@@ -353,12 +348,11 @@ impl Renderer {
 
         let surface = SurfaceState::from_target(target);
         let pipelines = PipelineSet::new(&config, &surface);
-        let camera = CameraGpuState::new(
-            &config.camera_projection,
-            surface.width(),
-            surface.height(),
-        )
-        .map_err(|_| RenderInitError::InvalidConfig("camera projection config is invalid"))?;
+        let camera =
+            CameraGpuState::new(&config.camera_projection, surface.width(), surface.height())
+                .map_err(|_| {
+                    RenderInitError::InvalidConfig("camera projection config is invalid")
+                })?;
         let block_textures = BlockTextureSet::default();
         let ui_texture = UiTextureSet::default();
         let environment = RenderEnvironmentState::from_config(&config);
@@ -407,8 +401,9 @@ impl Renderer {
             &self.ui_texture,
             self.environment.current(),
         ))?);
-        self.rebuild_chunk_mesh_buffers()
-            .map_err(|error| RenderInitError::Backend(format!("chunk mesh rebuild failed: {error:?}")))?;
+        self.rebuild_chunk_mesh_buffers().map_err(|error| {
+            RenderInitError::Backend(format!("chunk mesh rebuild failed: {error:?}"))
+        })?;
         Ok(())
     }
 
@@ -599,12 +594,8 @@ async fn create_backend(
         block_textures,
     );
     let ui_texture_bind_group_layout = create_ui_texture_bind_group_layout(&device);
-    let ui_texture = create_gpu_ui_texture_resources(
-        &device,
-        &queue,
-        &ui_texture_bind_group_layout,
-        ui_texture,
-    );
+    let ui_texture =
+        create_gpu_ui_texture_resources(&device, &queue, &ui_texture_bind_group_layout, ui_texture);
     let main_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_main_pipeline_layout"),
         bind_group_layouts: &[
@@ -620,11 +611,12 @@ async fn create_backend(
         bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
         immediate_size: 0,
     });
-    let sun_overlay_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("renderer_sun_overlay_pipeline_layout"),
-        bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
-        immediate_size: 0,
-    });
+    let sun_overlay_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("renderer_sun_overlay_pipeline_layout"),
+            bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
+            immediate_size: 0,
+        });
     let sun_overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("renderer_sun_overlay_pipeline"),
         layout: Some(&sun_overlay_pipeline_layout),
@@ -874,7 +866,10 @@ fn choose_surface_format(
         ),
         super::SurfaceFormatPolicy::PreferredLinear => preferred_format_or_first(
             supported_formats,
-            &[wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm],
+            &[
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureFormat::Bgra8Unorm,
+            ],
             wgpu::TextureFormat::Rgba8Unorm,
             |format| !format.is_srgb(),
         ),
@@ -891,7 +886,12 @@ fn preferred_format_or_first(
         .iter()
         .copied()
         .find(|preferred| supported_formats.contains(preferred))
-        .or_else(|| supported_formats.iter().copied().find(|format| predicate(*format)))
+        .or_else(|| {
+            supported_formats
+                .iter()
+                .copied()
+                .find(|format| predicate(*format))
+        })
         .or_else(|| supported_formats.first().copied())
         .unwrap_or(fallback)
 }
@@ -914,18 +914,16 @@ fn choose_present_mode(
         .unwrap_or(wgpu::PresentMode::Fifo)
 }
 
-pub(crate) fn reconfigure_surface_backend(
-    backend: &mut RendererBackend,
-    width: u32,
-    height: u32,
-) {
+pub(crate) fn reconfigure_surface_backend(backend: &mut RendererBackend, width: u32, height: u32) {
     if width == 0 || height == 0 {
         return;
     }
 
     backend.surface_config.width = width;
     backend.surface_config.height = height;
-    backend.surface.configure(&backend.device, &backend.surface_config);
+    backend
+        .surface
+        .configure(&backend.device, &backend.surface_config);
     let (depth_texture, depth_view) =
         create_depth_texture(&backend.device, width, height, backend.depth_format);
     backend.depth_texture = depth_texture;

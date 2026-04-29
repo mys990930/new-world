@@ -1,4 +1,4 @@
-# features
+﻿# features
 
 ## Role
 
@@ -96,4 +96,4 @@
 - the full scaffolded pool is broader than the currently emitted runtime guide subset
 - current guide generation still only emits the Wave 1A subset: `hill_cluster`, `shallow_basin`, `escarpment_band`, and `upland_terrace`
 - `atlas/meso.rs` should stay focused on shared lottery, sampling, and raster dispatch, while feature-specific realization details for runtime-wired launch features should live under the matching `features/<name>/` folder
-- `world/generation/v2/meso_apply.rs` should stay focused on feature orchestration, gating, and compositing rather than owning every concrete terrain-shape formula itself
+- `world/generation/meso_apply.rs` should stay focused on feature orchestration, gating, and compositing rather than owning every concrete terrain-shape formula itself

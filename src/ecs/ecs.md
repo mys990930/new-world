@@ -108,6 +108,7 @@
   - ECS fixed-phase logic selects the active simulation region around the player
   - ECS can request or consume local weather / seasonal state for gameplay, HUD, audio, and renderer bridge output
   - ECS also keeps one player-centered `LocalEnvironmentStatus` snapshot so app HUD code does not need to resample world state directly
+  - local environment refresh reads cached region classification only; uncached atlas cells remain an app/jobs warmup concern
   - nearby changes may appear as immediate gameplay/environment feedback, while far-away seasonal changes may remain deferred until their chunks become interesting
 - moving entity render-facing state
   - gameplay-facing movement / yaw may stay continuous in ECS
@@ -153,6 +154,7 @@ EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
+EcsRuntime::stage_local_player_for_chunk_loading(anchor_xz: [f32; 2], max_chunk_y: i32) -> bool
 EcsRuntime::update_local_environment_from_world(world: &WorldCore)
 EcsRuntime::local_environment_status() -> Option<LocalEnvironmentSnapshot>
 EcsRuntime::update_selection_from_world(
@@ -207,9 +209,11 @@ EcsRuntime::plan_chunk_lifecycle(
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
+- created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
 - the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
 - time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries
 - the current frame slice now also refreshes one player-local environment snapshot after world-aware motion and job result application so minimap HUD status can read biome/terrain, date/time, weather, temperature, and humidity without giving `app` new world-query ownership
+- player-local environment refresh no longer forces region classification generation on the frame thread; it uses cached samples and waits for app-owned region resolve jobs to populate missing atlas cells

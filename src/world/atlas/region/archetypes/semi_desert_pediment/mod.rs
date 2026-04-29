@@ -1,5 +1,5 @@
-﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
+use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::SemiDesertPediment,
@@ -14,7 +14,7 @@ pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
         "Biome family and terrain-form family are locked for this candidate.",
         "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["dune_field", "ravine",],
+    allowed_meso_keys: &["dune_field", "ravine"],
     seasonal_profile: SeasonalSurfaceProfile::AridSparse,
     water_response: WaterResponseHint::AvoidsStandingWater,
     ecology_density: EcologyDensityHint::Barren,

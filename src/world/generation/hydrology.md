@@ -1,0 +1,228 @@
+﻿# hydrology
+
+## Role
+
+- own the post-smoothing hydrology stage that turns pre-defined drainage intent into final carved channels, basins, wet margins, and connected water surfaces
+- consume already-shaped terrain rather than rediscovering branch topology from raw atlas fields
+
+## Responsibilities
+
+- consume `SmoothedPrototype` plus carried corridor constraints as the last terrain-shaping stage before voxelization
+- solve connected river, lake, floodplain, wet-basin, and outlet water behavior from the already-owned branch model
+- resolve branch-owned water-profile anchors before carve, then derive a carve-supported water surface from the target bed/depth relation while keeping visible water emission after carve
+- keep connected water rules explicit: still water is flat within one level, and flowing water may stay level or descend downstream but must not rise locally, even at local boundaries
+- carve final hydrology-driven terrain shape such as channel beds, floodplain benches, spill paths, lake bowls, and wet lowland depressions into the post-smoothing surface
+- preserve downstream continuity, basin outlets, coastal exits, and branch identity across chunk boundaries
+- expose voxelization-facing per-column hydrology state so later material and block fill do not need to rediscover water placement
+- decide where standing water, shallow saturation, or dry carved channels belong at launch scope
+
+## Non-Responsibilities
+
+- discovering long-range river topology from raw atlas fields alone
+- replacing `RegionArchetype`, `HydrologyContext`, or atlas-owned drainage structure
+- meso feature placement or smoothing ownership
+- final material selection, block ids, or seasonal cover overrides
+- vegetation, ecology, or weather simulation
+
+## Inputs
+
+- `ChunkCoord`
+- `ChunkGenerationInputs`
+- `ChunkCorridorWindow`
+- `SmoothedPrototype`
+
+## Outputs
+
+- `HydrologySolve`
+
+## Current Interface
+
+```rust
+build_chunk_hydrology_solve(
+    chunk: ChunkCoord,
+    inputs: &ChunkGenerationInputs,
+    corridor_window: &ChunkCorridorWindow,
+    smoothed: &SmoothedPrototype,
+) -> HydrologySolve
+```
+
+The current Rust implementation now exposes `build_chunk_hydrology_solve(...)` plus `empty_hydrology_solve(...)`.
+
+## Internal Submodules
+
+- `hydrology.rs`
+  - public hydrology types and chunk-level orchestration
+  - selects the strongest corridor response per column, applies basin fallback, sanitizes output, relaxes weak near-water shoreline columns, constrains connected water components, and counts connected waterlines
+- `hydrology/context.rs`
+  - internal DTOs shared across hydrology passes, including branch keys, region style signals, and corridor responses
+- `hydrology/water_profile.rs`
+  - resolves the local longitudinal water-profile anchor before terrain shaping
+  - produces the common water-surface baseline and reach-style-adjusted core floor target used by downstream carve/deposition passes
+- `hydrology/channel_carve.rs`
+  - computes active-channel incision layers and the base carved terrain height against the pre-resolved water profile
+  - keeps core, bank, floodplain, and outer cut deltas explicit for later deposition/bench passes
+- `hydrology/floodplain_bench.rs`
+  - computes channel-adjacent shelf and floodplain bench adjustments that soften the carved transition
+  - returns inside-bend alignment for later bar/point-bar decisions
+- `hydrology/bars.rs`
+  - owns gravel bar / point-bar strength and near-water bar terrain adjustment
+  - creates explicit bank-side depositional flats against the expected visible-water reference rather than only painting a material mask
+  - scales depositional bands by reach style so meandering/slowing reaches favor stronger bars while shallow source or straight reaches suppress overbuilt flats
+  - keeps same-height depositional bands continuous across weak-curvature reaches, while allowing stronger bends to shift or concentrate the bar side
+- `hydrology/water_surface.rs`
+  - decides whether the final shaped column can hold visible standing water after carve and deposition
+  - derives the carve-supported surface used by channel carve and final water visibility from the profile anchor plus target bed depth
+  - remains downstream of terrain shaping so water does not appear on unsupported shoulders
+- `hydrology/masks.rs`
+  - derives basin, saturation, water-presence, and final hydrology-mode masks for voxel/material policy
+
+## Current Types
+
+- `HydrologyMode`
+- `HydrologyColumn`
+- `HydrologySolve`
+
+### `HydrologyMode`
+
+- coarse late-stage hydrology classification for one chunk column
+- current cases:
+  - `Dry`
+  - `Channel`
+  - `Floodplain`
+  - `Lake`
+  - `Wetland`
+
+### `HydrologyColumn`
+
+- one chunk-local post-hydrology column result
+- currently stores:
+  - final carved `terrain_height`
+  - optional `water_surface_height`
+  - optional `channel_floor_height`
+  - `saturation`
+  - `gravel_bar_strength`
+  - `mode`
+
+## Type Semantics
+
+### `HydrologySolve`
+
+- owns the full chunk-local post-smoothing hydrology result
+- must be deterministic for the same `(seed, generator_version, chunk, inputs, corridor_window, smoothed)`
+- should remain chunk-local in storage shape, but its waterline decisions must be derived from world-space branch continuity
+- currently stores one `HydrologyColumn` per chunk column plus `connected_waterlines`
+
+### Per-column hydrology result
+
+- the target per-column solve should describe the final terrain surface handed to voxelization after hydrology carve
+- if water is present, the solve should also describe the connected water surface for that column
+- if a column is merely saturated or flood-prone without standing water, the solve should still preserve that distinction so material policy can react later
+- hydrology carve may spend the remaining late-stage relief budget, but it should do so only where water structure justifies the terrain change
+- every numeric field handed to downstream consumers must stay finite; non-finite intermediate corridor responses should be rejected or sanitized before they reach preview, voxelization, or tests
+
+## Relationship To Earlier Stages
+
+- `corridors` owns branch continuity, downstream intent, and broad valley-envelope guidance
+- `prototype` owns the broad landform that makes rivers, basins, and outlets readable at long range
+- `meso` adds local accents but should not erase primary corridor intent
+- `smoothing` regularizes the pre-hydrology surface while preserving corridor and ridge intent
+- `hydrology` is the first stage allowed to perform the final water-driven carve that commits the exact late terrain depression needed for channels, floodplains, basins, and shore-connected spill paths
+
+## Relationship To Voxelization
+
+- voxelization should consume hydrology output, not recalculate channels or lake depths from scratch
+- hydrology must hand off enough information that voxelization can place water blocks, bed materials, banks, saturated soil, and dry exposed surfaces without a second terrain carve pass
+- voxelization may quantize the carved result into actual block ids, but it must not invent a different downstream path or seal a hydrology-open outlet
+
+## Processing Direction
+
+1. read the smoothed post-meso surface for the target chunk
+2. gather the relevant carried corridor branches, outlet context, and region hydrology modulation already assembled in `inputs`
+3. resolve shared branch context and region hydrology style signals
+4. solve water-profile anchors from branch identity plus downstream grade, not from isolated local puddle heuristics or local terrain caps; this is an upper profile reference, not a visible-water fill
+5. resolve reach-carve style from lower-reach/source, curvature, slope, flow, and region signals, then derive a carve-supported water surface from the shared profile, target floor, and desired visible depth
+6. apply floodplain / bank bench shaping to blend the carve into surrounding terrain
+7. apply gravel bar / point-bar shaping outside the wetted ribbon where deposition is likely
+8. relax weak dry or fallback shoreline columns that sit within a few blocks of visible water but lack channel-floor support, so a narrowly missed corridor edge becomes a low bank rather than a one-block pillar
+9. constrain connected water components to dry-bank support; if an edge would put water above adjacent dry terrain, lower the component and deepen its water columns rather than letting water rise at the border
+10. decide whether the already-resolved supported water surface remains visible only after terrain can physically support it; do not raise the water to clear local terrain
+11. derive hydrology masks and final mode per column such as active channel, floodplain bench, lake bowl, wet basin margin, saturated lowland, or unaffected terrain
+12. emit a chunk-local `HydrologySolve` for voxelization
+
+## Current Minimal Implementation
+
+- evaluates the nearest carried corridor response per column after smoothing
+- now splits the monolithic corridor solve into internal pass modules for context, water profile, channel carve, floodplain bench, bars, visible water surface, and hydrology masks while preserving the public `build_chunk_hydrology_solve(...)` contract
+- blends biome, terrain-form, relief, and hydrology-context signals into late-stage river style knobs such as incision strength, transition softness, width variation, depth variation, meander support, outer spread, and confinement
+- those region hydrology style signals are now sampled through the displaced region-influence neighborhood used by realization/material transitions, rather than from an axis-aligned four-corner atlas bilerp, so broad wet/dry/coastal transitions no longer reintroduce straight atlas boundaries here
+- derives a late-stage carved terrain height plus optional visible standing water from corridor geometry, downstream anchor tendencies, wetness, basinness, and region hydrology context
+- treats `water_surface_height` as a resolved water level/profile: visible-water checks may reject a column, but must not rewrite the level from local depth noise or terrain headroom
+- keeps the original stage order: water profile is resolved before carve as a geometric reference, terrain is carved/benched/deposited next, connected water components are lowered to bank support if needed, and visible water is emitted only after the shaped terrain can support the result
+- derives a reach-carve style per corridor sample so shallow upper/source reaches request narrower, higher beds; lower broad reaches request wider floodplain carve and deeper water; meanders request stronger incision and gravel-bar expression; and straight reaches damp excessive carve/deposition
+- consumes the shared `corridors::sample_corridor_axis(...)` distance field, then adds finer branch-progress meander before lateral distance falloff is evaluated
+- phases centerline meander by carried downstream progress instead of per-segment `t`, so repeated S-curves do not reset at every atlas segment boundary
+- uses world-space domain-warped noise to vary channel width, wetted width, bank asymmetry, bed depth, floodplain reach, and outer transition distance continuously along the branch
+- composes the carve from nested outer-spread, floodplain, bank, and core incision layers plus noisy bank-shelf / bench lifting instead of applying one flat y-delta inside one fixed mask, so the river influence can fade into the surrounding terrain rather than ending at a hard edge
+- adds extra world-space carve breakup so channel-adjacent cut depth, bench height, and floodplain transitions do not resolve into one perfectly uniform band
+- relaxes very high near-water bank and floodplain columns toward a supported shoreline freeboard before visible-water selection, removes dry one-column local peaks near visible water or saturated chunk-edge shoreline context by clamping them to their immediate neighbor support, and lowers weak dry/basin fallback shoreline columns that narrowly missed the corridor floor into a low bank collar
+- treats atlas corridor width as a broad valley-envelope hint, not as the final wetted width; visible water now appears only when the carried branch segment actually approaches the chunk
+- only keeps standing water when the local carved trough and bank support can actually contain it; hydrology should not leave deep visible water perched on an uncarved shoulder
+- uses corridor ownership to detect local parent-child confluences and raises deposition strength near inside bends, widenings, slow reaches, and junctions
+- now emits `gravel_bar_strength` from an actual near-water bench pass so later voxel/material policy can recognize adjacent depositional benches without rediscovering them from scratch
+- includes a small basin fallback for standing-water bowls and wetland marking when no corridor dominates
+- keeps the result deterministic and chunk-local while preserving shared-edge water continuity for neighboring chunks that see the same carried branch
+- now normalizes late-stage saturation / height outputs to finite ranges before handoff so preview tinting and later consumers do not inherit `NaN` artifacts from rejected intermediate responses
+- remains responsible for hiding the raw corridor segment underneath the final water expression: meander, width variation, asymmetric banks, floodplain benches, gravel bars, and outer transition masks should prevent long straight or repeated capsule-shaped river cuts from surviving into voxelization
+
+## Carve Rules
+
+- active channels
+  - carve a bed that stays connected to the carried branch and respects downstream falloff
+  - allow the final local carve to meander within the carried corridor envelope as long as endpoints and downstream continuity remain stable across chunk seams
+  - derive wetted width, bank width, floodplain reach, outer influence reach, and bed depth separately so a wide macro corridor can still resolve to a narrower incised channel
+  - vary width, depth, bank asymmetry, and direction continuously with world-space hydrology noise rather than keeping one uniform cross-section
+  - widen and soften banks according to corridor role rather than forcing every branch into the same cross-section
+  - use the pre-resolved water profile as the target relation between water surface, core floor, and floodplain freeboard, but still perform the actual water fill after terrain shaping
+  - when the profile anchor and supported carve diverge, use the lower carve-supported surface for terrain shaping and final visible water so bars/banks and fill share one effective water line
+  - upper/source or steep tributary reaches should keep water shallower, beds higher, and cross-sections narrower
+  - lower broad reaches should widen the wetted ribbon/floodplain and place a deeper core floor below the branch profile
+  - meandering reaches should allow stronger core matching and depositional bar bands; straighter reaches should keep carve and bars comparatively restrained
+- floodplains and wet lowlands
+  - may lower or flatten terrain around active channels where region and corridor context support a broad wet opening
+  - should remain shallower and wider than the main channel
+  - may project a softer outer transition beyond the visible wetted ribbon so the carve can blend into adjacent terrain instead of terminating like a step cut
+  - near visible water, unsupported one-column bank spikes should be relaxed toward water-adjacent freeboard and then clamped to immediate neighbor support if they remain dry local peaks, including saturated edge-band peaks whose visible water may sit in the neighboring chunk
+  - dry or basin-fallback columns within the immediate shoreline collar should not stay as high posts just because their sampled corridor influence fell below the active carve threshold; if they have no channel-floor support, relax them down to a water-relative bank freeboard
+- gravel bars and depositional benches
+  - flatten terrain immediately beside water toward a near-water freeboard where inside bends, local widenings, parent-child confluences, or slowing reaches imply lower transport energy
+  - should stay outside the core wetted ribbon and read as a bank-adjacent gravel flat before the valley wall or hillside climbs away, not as a mid-channel blockage or generic rocky exposure
+  - should be close enough to the local water surface to read as a depositional bar / creekside gravel beach rather than a high terrace
+  - should continue along matching depositional height bands unless branch curvature changes enough to move deposition to the opposite bank or concentrate it into a point bar
+  - should remain deterministic and continuous with the owning branch across chunk seams
+- lake basins and ponded outlets
+  - may carve or preserve closed bowls only when the broader basin and outlet context supports standing water
+  - should not trap water uphill from a valid basin spill path or coastal exit
+- coastal and basin outlets
+  - must stay open if earlier stages intentionally preserved them
+  - hydrology may lower the outlet threshold, but it must not build a blocking lip
+
+## Invariants
+
+1. the same `(seed, generator_version, chunk)` must always produce the same connected hydrology result
+2. neighboring chunks that see the same branch must agree on water-surface continuity and compatible carve depth at the shared edge
+3. hydrology may lower or widen terrain where water structure requires it, but it must not replace unrelated ridge, plateau, or dune identity far from hydrology influence
+4. connected water surfaces and channel floors must not step uphill along a single carried downstream branch
+5. connected still-water bodies must expose a flat water level; local terrain can remove visible water from a column, but cannot raise or tilt that level
+6. water component borders must not stand above adjacent dry terrain; if a component would spill over a dry bank, hydrology lowers that component and carves its water columns to the lowered supported surface
+7. hydrology must preserve the carve-then-fill contract: profile anchors may be known before carve, but visible `water_surface_height` is emitted only after terrain shaping and water-component support constraints
+8. hydrology must remain downstream of smoothing and upstream of voxelization
+9. final block materials and water voxels should derive from hydrology output plus surface policy, not from raw atlas wetness thresholds alone
+10. `terrain_height`, `water_surface_height`, `channel_floor_height`, and `saturation` exposed through `HydrologyColumn` must always be finite when present
+11. `gravel_bar_strength` exposed through `HydrologyColumn` must always stay finite and normalized to `0..1`
+12. visible channels, floodplains, benches, and wet margins must not expose raw corridor segment chords, endpoint caps, or repeated uniform S-curves as large-scale artifacts
+
+## Notes
+
+- connected waterlines belong here, not in raw region classification
+- final river, lake, floodplain, and wet-basin carve also belongs here, not in `corridors`, `prototype`, or `voxelize`
+- a chunk that only sees a distant macro corridor envelope should stay carved-dry; hydrology should not paint standing water there just because prototype preserved a broad valley tendency

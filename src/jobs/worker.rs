@@ -1,9 +1,12 @@
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use super::request::{JobCoalesceKey, JobRequest};
 use super::result::JobResult;
 use super::routing;
+
+const SLOW_JOB_LOG_THRESHOLD: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone)]
 pub(crate) struct AssignedJob {
@@ -13,11 +16,16 @@ pub(crate) struct AssignedJob {
 }
 
 #[derive(Debug)]
-pub(crate) struct WorkerReport {
-    pub worker_id: usize,
-    pub sequence: u64,
-    pub key: JobCoalesceKey,
-    pub result: JobResult,
+pub(crate) enum WorkerReport {
+    Progress {
+        result: JobResult,
+    },
+    Finished {
+        worker_id: usize,
+        sequence: u64,
+        key: JobCoalesceKey,
+        result: JobResult,
+    },
 }
 
 #[derive(Debug)]
@@ -105,9 +113,32 @@ fn worker_loop(
     while let Ok(command) = command_receiver.recv() {
         match command {
             WorkerCommand::Execute(job) => {
-                let result = routing::execute(job.request);
+                let trace_jobs = trace_jobs_enabled();
+                let request_label = job.request.diagnostic_label();
+                if trace_jobs {
+                    println!(
+                        "[perf] job start: worker={} seq={} request={}",
+                        worker_id, job.sequence, request_label
+                    );
+                }
+                let started = Instant::now();
+                let mut emit_progress = |result| {
+                    let _ = result_sender.send(WorkerReport::Progress { result });
+                };
+                let result = routing::execute(job.request, &mut emit_progress);
+                let elapsed = started.elapsed();
+                if trace_jobs || elapsed >= SLOW_JOB_LOG_THRESHOLD {
+                    println!(
+                        "[perf] job finish: worker={} seq={} request={} result={} elapsed_ms={:.2}",
+                        worker_id,
+                        job.sequence,
+                        request_label,
+                        result.diagnostic_label(),
+                        duration_ms(elapsed)
+                    );
+                }
                 if result_sender
-                    .send(WorkerReport {
+                    .send(WorkerReport::Finished {
                         worker_id,
                         sequence: job.sequence,
                         key: job.key,
@@ -121,4 +152,12 @@ fn worker_loop(
             WorkerCommand::Shutdown => break,
         }
     }
+}
+
+fn trace_jobs_enabled() -> bool {
+    std::env::var_os("NEW_WORLD_TRACE_JOBS").is_some()
+}
+
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1_000.0
 }

@@ -5,8 +5,8 @@ use bevy_ecs::prelude::Resource;
 use crate::jobs::JobRequest;
 use crate::world::ChunkCoord;
 
-pub const HORIZONTAL_INTEREST_CHUNK_RADIUS: i32 = 2;
-pub const HORIZONTAL_RETAIN_CHUNK_RADIUS: i32 = 3;
+pub const HORIZONTAL_INTEREST_CHUNK_RADIUS: i32 = 3;
+pub const HORIZONTAL_RETAIN_CHUNK_RADIUS: i32 = 4;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChunkLifecyclePlan {
@@ -29,17 +29,11 @@ pub struct ChunkStates {
 }
 
 impl ChunkStates {
-    pub fn set_interest(
-        &mut self,
-        coords: impl IntoIterator<Item = ChunkCoord>,
-    ) {
+    pub fn set_interest(&mut self, coords: impl IntoIterator<Item = ChunkCoord>) {
         self.interest = coords.into_iter().collect();
     }
 
-    pub fn set_retain(
-        &mut self,
-        coords: impl IntoIterator<Item = ChunkCoord>,
-    ) {
+    pub fn set_retain(&mut self, coords: impl IntoIterator<Item = ChunkCoord>) {
         self.retain = coords.into_iter().collect();
     }
 

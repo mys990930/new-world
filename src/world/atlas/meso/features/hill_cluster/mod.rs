@@ -2,23 +2,21 @@ mod resolved;
 
 use std::f32::consts::{PI, TAU};
 
-use crate::world::atlas::{
-    AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap,
-};
-#[cfg(test)]
-use crate::world::coord::ChunkCoord;
 #[cfg(test)]
 use crate::world::CHUNK_EDGE_I32;
 #[cfg(test)]
 use crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS;
+use crate::world::atlas::{AtlasCell, AtlasCoord, MesoGuideCell, MesoGuideMap};
+#[cfg(test)]
+use crate::world::coord::ChunkCoord;
 
-use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 use super::super::{
     FeatureInstance, MesoFeatureKind, cell_center_jitter, ellipse_footprint, hash01, lerp_f32,
 };
-pub(crate) use resolved::{build_window, sample_surface_from_window};
+use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 #[cfg(test)]
 pub(crate) use resolved::sample_apply_signal_from_window;
+pub(crate) use resolved::{build_window, sample_surface_from_window};
 
 const STRENGTH_MIN_BLOCKS: f32 = 6.4;
 const STRENGTH_MAX_BLOCKS: f32 = 17.6;
@@ -220,11 +218,12 @@ pub(in crate::world::atlas::meso) fn rasterize(
     }
 
     let masses = cluster_mass_footprints(instance, along, across);
-    let strongest_mass = masses
-        .into_iter()
-        .fold(0.0_f32, f32::max);
-    let weighted_mass_sum =
-        masses[0] * 0.82 + masses[1] * 1.00 + masses[2] * 0.90 + masses[3] * 0.74 + masses[4] * 0.66;
+    let strongest_mass = masses.into_iter().fold(0.0_f32, f32::max);
+    let weighted_mass_sum = masses[0] * 0.82
+        + masses[1] * 1.00
+        + masses[2] * 0.90
+        + masses[3] * 0.74
+        + masses[4] * 0.66;
     let mass_blend = (weighted_mass_sum / 3.30).clamp(0.0, 1.0);
     let saddle_fill = ellipse_footprint(
         along,
@@ -233,29 +232,31 @@ pub(in crate::world::atlas::meso) fn rasterize(
         instance.radius_z_cells * 0.46,
     ) * 0.22;
     let shoulder_fill = smoothstep_range(1.00, 0.18, envelope) * 0.24;
-    let hilliness = (
-        envelope * 0.24
-            + strongest_mass * 0.24
-            + mass_blend * 0.36
-            + saddle_fill * 0.16
-            + shoulder_fill * 0.10
-    )
+    let hilliness = (envelope * 0.24
+        + strongest_mass * 0.24
+        + mass_blend * 0.36
+        + saddle_fill * 0.16
+        + shoulder_fill * 0.10)
         .clamp(0.0, 1.0);
-    let height_scale = (
-        envelope * 0.18
-            + strongest_mass * 0.34
-            + mass_blend * 0.34
-            + saddle_fill * 0.08
-            + shoulder_fill * 0.10
-    )
+    let height_scale = (envelope * 0.18
+        + strongest_mass * 0.34
+        + mass_blend * 0.34
+        + saddle_fill * 0.08
+        + shoulder_fill * 0.10)
         .clamp(0.0, 1.28);
 
     cell.hilliness = (cell.hilliness + hilliness * 0.88).clamp(0.0, 1.0);
-    cell.hill_height = cell.hill_height.max(instance.strength_blocks * height_scale);
+    cell.hill_height = cell
+        .hill_height
+        .max(instance.strength_blocks * height_scale);
 }
 
 #[cfg(test)]
-pub(crate) fn sample_apply_signal(guides: &MesoGuideMap, world_x: i32, world_z: i32) -> HillClusterApplySample {
+pub(crate) fn sample_apply_signal(
+    guides: &MesoGuideMap,
+    world_x: i32,
+    world_z: i32,
+) -> HillClusterApplySample {
     let window = build_window(guides, chunk_coord_for_world_xz(world_x, world_z));
     sample_apply_signal_from_window(&window, world_x, world_z)
 }
@@ -269,7 +270,14 @@ pub(crate) fn sample_surface(
     relief_budget: f32,
 ) -> HillClusterSurfaceSample {
     let window = build_window(guides, chunk_coord_for_world_xz(world_x, world_z));
-    sample_surface_from_window(&window, guides, world_x, world_z, base_surface_y, relief_budget)
+    sample_surface_from_window(
+        &window,
+        guides,
+        world_x,
+        world_z,
+        base_surface_y,
+        relief_budget,
+    )
 }
 
 #[cfg(test)]
@@ -316,7 +324,11 @@ fn cluster_mass_footprints(instance: FeatureInstance, along: f32, across: f32) -
     ]
 }
 
-fn guide_source(coord: AtlasCoord, cell: MesoGuideCell, meso_span_blocks: f32) -> Option<GuideSource> {
+fn guide_source(
+    coord: AtlasCoord,
+    cell: MesoGuideCell,
+    meso_span_blocks: f32,
+) -> Option<GuideSource> {
     if cell.hilliness < 0.30 || cell.hill_height < 3.8 {
         return None;
     }
@@ -376,8 +388,8 @@ fn collect_peak_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<Gui
 }
 
 pub fn debug_peak_candidates(guides: &MesoGuideMap) -> Vec<HillClusterPeakCandidate> {
-    let meso_span_blocks = (crate::world::CHUNK_EDGE_I32
-        * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
+    let meso_span_blocks =
+        (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
     collect_peak_sources(guides, meso_span_blocks)
         .into_iter()
         .map(|source| HillClusterPeakCandidate {
@@ -470,7 +482,12 @@ fn macro_lobe_descriptor(
     let along_jitter = lerp_f32(
         -chain_spacing * 0.16,
         chain_spacing * 0.16,
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_ALONG_JITTER_SALT),
+        indexed_lobe_hash01(
+            source.coord,
+            source.cell,
+            lobe_index,
+            SOURCE_ALONG_JITTER_SALT,
+        ),
     );
     let patterned_side = match lobe_index {
         0 => -0.22,
@@ -480,7 +497,12 @@ fn macro_lobe_descriptor(
     let side_jitter = lerp_f32(
         -base_minor * 0.30,
         base_minor * 0.30,
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SIDE_JITTER_SALT),
+        indexed_lobe_hash01(
+            source.coord,
+            source.cell,
+            lobe_index,
+            SOURCE_SIDE_JITTER_SALT,
+        ),
     );
     let offset_along = (progress - 0.5) * chain_span + along_jitter;
     let offset_across = base_minor * patterned_side + side_jitter;
@@ -489,14 +511,24 @@ fn macro_lobe_descriptor(
         * lerp_f32(
             1.00,
             1.22,
-            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MAJOR_RADIUS_SALT),
+            indexed_lobe_hash01(
+                source.coord,
+                source.cell,
+                lobe_index,
+                SOURCE_MAJOR_RADIUS_SALT,
+            ),
         );
     let radius_z = base_minor
         * (1.04 + center_bias * 0.14 + source.cell.hilliness * 0.08)
         * lerp_f32(
             1.12,
             1.36,
-            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_MINOR_RADIUS_SALT),
+            indexed_lobe_hash01(
+                source.coord,
+                source.cell,
+                lobe_index,
+                SOURCE_MINOR_RADIUS_SALT,
+            ),
         );
     let height_blocks = source.cell.hill_height
         * (1.26 + source.cell.hilliness * 0.38 + center_bias * 0.24)
@@ -528,7 +560,11 @@ fn is_local_source_peak(guides: &MesoGuideMap, coord: AtlasCoord, cell: MesoGuid
                 continue;
             }
 
-            let Some(neighbor) = guides.cells().get(AtlasCoord::new(neighbor_x, neighbor_z)).copied() else {
+            let Some(neighbor) = guides
+                .cells()
+                .get(AtlasCoord::new(neighbor_x, neighbor_z))
+                .copied()
+            else {
                 continue;
             };
             if neighbor.hilliness < 0.24 || neighbor.hill_height < 3.2 {
@@ -592,17 +628,30 @@ fn irregular_lobe_footprint(
     let delta_z = sample_z - lobe.center_z;
     let along = delta_x * lobe.heading_x + delta_z * lobe.heading_z;
     let across = delta_x * -lobe.heading_z + delta_z * lobe.heading_x;
-    let along_phase =
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ALONG_SALT) * TAU;
-    let across_phase =
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ACROSS_SALT) * TAU;
+    let along_phase = indexed_lobe_hash01(
+        source.coord,
+        source.cell,
+        lobe_index,
+        SOURCE_WARP_ALONG_SALT,
+    ) * TAU;
+    let across_phase = indexed_lobe_hash01(
+        source.coord,
+        source.cell,
+        lobe_index,
+        SOURCE_WARP_ACROSS_SALT,
+    ) * TAU;
     let warped_along = along
         + (((across / lobe.radius_z_blocks.max(1.0)) * 1.55) + along_phase).sin()
             * lobe.radius_x_blocks
             * lerp_f32(
                 0.04,
                 0.10,
-                indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ALONG_SALT),
+                indexed_lobe_hash01(
+                    source.coord,
+                    source.cell,
+                    lobe_index,
+                    SOURCE_WARP_ALONG_SALT,
+                ),
             );
     let warped_across = across
         + (((along / lobe.radius_x_blocks.max(1.0)) * 1.85) + across_phase).sin()
@@ -610,23 +659,41 @@ fn irregular_lobe_footprint(
             * lerp_f32(
                 0.06,
                 0.14,
-                indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_WARP_ACROSS_SALT),
+                indexed_lobe_hash01(
+                    source.coord,
+                    source.cell,
+                    lobe_index,
+                    SOURCE_WARP_ACROSS_SALT,
+                ),
             );
-    let outline_primary =
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_PRIMARY_SALT);
-    let outline_secondary =
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_SECONDARY_SALT);
-    let outline_tertiary =
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_OUTLINE_TERTIARY_SALT);
+    let outline_primary = indexed_lobe_hash01(
+        source.coord,
+        source.cell,
+        lobe_index,
+        SOURCE_OUTLINE_PRIMARY_SALT,
+    );
+    let outline_secondary = indexed_lobe_hash01(
+        source.coord,
+        source.cell,
+        lobe_index,
+        SOURCE_OUTLINE_SECONDARY_SALT,
+    );
+    let outline_tertiary = indexed_lobe_hash01(
+        source.coord,
+        source.cell,
+        lobe_index,
+        SOURCE_OUTLINE_TERTIARY_SALT,
+    );
     let irregular_radial_footprint =
         |shape_along: f32, shape_across: f32, radius_x: f32, radius_z: f32, edge_bias: f32| {
             let normalized_along = shape_along / radius_x.max(f32::EPSILON);
             let normalized_across = shape_across / radius_z.max(f32::EPSILON);
             let contour_angle = normalized_across.atan2(normalized_along);
-            let radial_span =
-                (normalized_along * normalized_along + normalized_across * normalized_across).sqrt();
-            let ripple_phase = (normalized_along * 1.22 - normalized_across * 1.46) * PI
-                + outline_secondary * TAU;
+            let radial_span = (normalized_along * normalized_along
+                + normalized_across * normalized_across)
+                .sqrt();
+            let ripple_phase =
+                (normalized_along * 1.22 - normalized_across * 1.46) * PI + outline_secondary * TAU;
             let contour_scale = 1.0
                 + (contour_angle * 2.0 + outline_primary * TAU + ripple_phase * 0.44).sin()
                     * lerp_f32(0.10, 0.18, outline_primary)
@@ -634,10 +701,10 @@ fn irregular_lobe_footprint(
                     * lerp_f32(0.06, 0.12, outline_secondary)
                 + (contour_angle * 5.0 + outline_tertiary * TAU + ripple_phase * 0.58).cos()
                     * lerp_f32(0.04, 0.08, outline_tertiary);
-            let contour_push =
-                (contour_angle * 4.0 + ripple_phase * 0.86 + outline_primary * TAU).sin() * 0.05
-                    + (contour_angle * 7.0 - ripple_phase * 0.52 + outline_tertiary * TAU).cos()
-                        * 0.03;
+            let contour_push = (contour_angle * 4.0 + ripple_phase * 0.86 + outline_primary * TAU)
+                .sin()
+                * 0.05
+                + (contour_angle * 7.0 - ripple_phase * 0.52 + outline_tertiary * TAU).cos() * 0.03;
             let radial = (radial_span + contour_push + edge_bias) / contour_scale.max(0.76);
             smoothstep_range(1.10, 0.0, radial)
         };
@@ -657,12 +724,22 @@ fn irregular_lobe_footprint(
     let shoulder_offset = lerp_f32(
         -0.10,
         0.18,
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SHOULDER_OFFSET_SALT),
+        indexed_lobe_hash01(
+            source.coord,
+            source.cell,
+            lobe_index,
+            SOURCE_SHOULDER_OFFSET_SALT,
+        ),
     );
     let shoulder_side = lerp_f32(
         -0.16,
         0.20,
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SHOULDER_SIDE_SALT),
+        indexed_lobe_hash01(
+            source.coord,
+            source.cell,
+            lobe_index,
+            SOURCE_SHOULDER_SIDE_SALT,
+        ),
     );
     let shoulder = irregular_radial_footprint(
         warped_along - lobe.radius_x_blocks * shoulder_offset,
@@ -684,21 +761,36 @@ fn irregular_lobe_footprint(
                 * lerp_f32(
                     -0.06,
                     0.14,
-                    indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_OFFSET_SALT),
+                    indexed_lobe_hash01(
+                        source.coord,
+                        source.cell,
+                        lobe_index,
+                        SOURCE_NOTCH_OFFSET_SALT,
+                    ),
                 ),
         warped_across
             + lobe.radius_z_blocks
                 * lerp_f32(
                     -0.18,
                     0.18,
-                    indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_SIDE_SALT),
+                    indexed_lobe_hash01(
+                        source.coord,
+                        source.cell,
+                        lobe_index,
+                        SOURCE_NOTCH_SIDE_SALT,
+                    ),
                 ),
         lobe.radius_x_blocks * 0.22,
         lobe.radius_z_blocks * 0.20,
     ) * lerp_f32(
         0.06,
         0.16,
-        indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_NOTCH_STRENGTH_SALT),
+        indexed_lobe_hash01(
+            source.coord,
+            source.cell,
+            lobe_index,
+            SOURCE_NOTCH_STRENGTH_SALT,
+        ),
     );
 
     (core * 0.46 + rounded_core * 0.34 + shoulder * 0.20 + backfill * 0.16 - notch * 0.55)
@@ -724,11 +816,15 @@ fn insert_top3(value: f32, strongest: &mut f32, second: &mut f32, third: &mut f3
     }
 }
 
-fn indexed_lobe_hash01(coord: AtlasCoord, cell: MesoGuideCell, lobe_index: usize, salt: u64) -> f32 {
+fn indexed_lobe_hash01(
+    coord: AtlasCoord,
+    cell: MesoGuideCell,
+    lobe_index: usize,
+    salt: u64,
+) -> f32 {
     let hill_bits = ((cell.hilliness.to_bits() as u64) << 32) ^ cell.hill_height.to_bits() as u64;
     let bits = splitmix64(
-        salt
-            ^ hill_bits
+        salt ^ hill_bits
             ^ (coord.x as i64 as u64).wrapping_mul(LOBE_HASH_K1)
             ^ (coord.z as i64 as u64).wrapping_mul(LOBE_HASH_K2)
             ^ (lobe_index as u64).wrapping_mul(LOBE_HASH_K3)
@@ -788,8 +884,7 @@ fn vertical_alignment_ratio(heading: (f32, f32)) -> f32 {
 fn lobe_hash01(coord: AtlasCoord, cell: MesoGuideCell, salt: u64) -> f32 {
     let hill_bits = ((cell.hilliness.to_bits() as u64) << 32) ^ cell.hill_height.to_bits() as u64;
     let bits = splitmix64(
-        salt
-            ^ hill_bits
+        salt ^ hill_bits
             ^ (coord.x as i64 as u64).wrapping_mul(LOBE_HASH_K1)
             ^ (coord.z as i64 as u64).wrapping_mul(LOBE_HASH_K2)
             ^ LOBE_HASH_K3,
@@ -830,8 +925,8 @@ fn soft_cap_positive(value: f32, cap: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::MesoGuideMap;
+    use super::*;
 
     #[test]
     fn hill_cluster_rasterization_forms_an_extended_cluster() {
@@ -933,35 +1028,35 @@ mod tests {
         let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
         let sources = vec![
             guide_source(
-            AtlasCoord::new(1, 1),
-            MesoGuideCell {
-                hilliness: 0.90,
-                hill_height: 10.0,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(1, 1),
+                MesoGuideCell {
+                    hilliness: 0.90,
+                    hill_height: 10.0,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
             guide_source(
-            AtlasCoord::new(2, 1),
-            MesoGuideCell {
-                hilliness: 0.84,
-                hill_height: 8.9,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(2, 1),
+                MesoGuideCell {
+                    hilliness: 0.84,
+                    hill_height: 8.9,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
             guide_source(
-            AtlasCoord::new(3, 1),
-            MesoGuideCell {
-                hilliness: 0.78,
-                hill_height: 8.0,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(3, 1),
+                MesoGuideCell {
+                    hilliness: 0.78,
+                    hill_height: 8.0,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
         ];
 
         let heading = dominant_apply_axis(&sources);
@@ -980,35 +1075,35 @@ mod tests {
         let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
         let sources = vec![
             guide_source(
-            AtlasCoord::new(2, 1),
-            MesoGuideCell {
-                hilliness: 0.88,
-                hill_height: 9.2,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(2, 1),
+                MesoGuideCell {
+                    hilliness: 0.88,
+                    hill_height: 9.2,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
             guide_source(
-            AtlasCoord::new(2, 2),
-            MesoGuideCell {
-                hilliness: 0.86,
-                hill_height: 8.8,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(2, 2),
+                MesoGuideCell {
+                    hilliness: 0.86,
+                    hill_height: 8.8,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
             guide_source(
-            AtlasCoord::new(2, 3),
-            MesoGuideCell {
-                hilliness: 0.82,
-                hill_height: 8.1,
-                ..MesoGuideCell::default()
-            },
-            meso_span_blocks,
-        )
-        .unwrap(),
+                AtlasCoord::new(2, 3),
+                MesoGuideCell {
+                    hilliness: 0.82,
+                    hill_height: 8.1,
+                    ..MesoGuideCell::default()
+                },
+                meso_span_blocks,
+            )
+            .unwrap(),
         ];
 
         let heading = dominant_apply_axis(&sources);
@@ -1143,12 +1238,14 @@ mod tests {
         let heading_z = 0.0;
         let normal_x = 0.0;
         let normal_z = 1.0;
-        let major_scale =
-            (0.88 + source.cell.hilliness * 0.18 + (source.cell.hill_height / 18.0).clamp(0.0, 0.28))
-                .clamp(0.88, 1.34);
-        let minor_scale =
-            (0.78 + source.cell.hilliness * 0.16 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16))
-                .clamp(0.78, 1.12);
+        let major_scale = (0.88
+            + source.cell.hilliness * 0.18
+            + (source.cell.hill_height / 18.0).clamp(0.0, 0.28))
+        .clamp(0.88, 1.34);
+        let minor_scale = (0.78
+            + source.cell.hilliness * 0.16
+            + (source.cell.hill_height / 22.0).clamp(0.0, 0.16))
+        .clamp(0.78, 1.12);
         let base_major = lerp_f32(
             52.0,
             86.0,
@@ -1250,18 +1347,7 @@ mod tests {
         )
         .expect("strong source should build");
         let lobe = macro_lobe_descriptor(
-            source,
-            1.0,
-            0.0,
-            0.0,
-            1.0,
-            72.0,
-            48.0,
-            28.0,
-            28.0,
-            0,
-            0.0,
-            0.0,
+            source, 1.0, 0.0, 0.0, 1.0, 72.0, 48.0, 28.0, 28.0, 0, 0.0, 0.0,
         );
         let a =
             irregular_lobe_footprint(lobe, source, 0, lobe.center_x + 34.0, lobe.center_z + 18.0);
@@ -1298,15 +1384,21 @@ mod tests {
         let candidates = debug_peak_candidates(&guides);
 
         assert!(
-            candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(1, 1)),
+            candidates
+                .iter()
+                .any(|candidate| candidate.coord == AtlasCoord::new(1, 1)),
             "expected strongest local hill cell to appear as a peak candidate, got {candidates:?}"
         );
         assert!(
-            candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(3, 3)),
+            candidates
+                .iter()
+                .any(|candidate| candidate.coord == AtlasCoord::new(3, 3)),
             "expected separated strong hill cell to appear as a peak candidate, got {candidates:?}"
         );
         assert!(
-            !candidates.iter().any(|candidate| candidate.coord == AtlasCoord::new(2, 1)),
+            !candidates
+                .iter()
+                .any(|candidate| candidate.coord == AtlasCoord::new(2, 1)),
             "expected weaker adjacent hill cell to be filtered out as a non-peak, got {candidates:?}"
         );
     }
@@ -1325,18 +1417,7 @@ mod tests {
         )
         .expect("strong source should build");
         let lobe = macro_lobe_descriptor(
-            source,
-            1.0,
-            0.0,
-            0.0,
-            1.0,
-            74.0,
-            50.0,
-            28.0,
-            28.0,
-            1,
-            0.5,
-            1.0,
+            source, 1.0, 0.0, 0.0, 1.0, 74.0, 50.0, 28.0, 28.0, 1, 0.5, 1.0,
         );
         let sample_at_angle = |angle: f32| {
             irregular_lobe_footprint(
@@ -1374,8 +1455,10 @@ mod tests {
         *cells.get_mut(AtlasCoord::new(2, 1)).unwrap() = source_cell;
         let guides = MesoGuideMap { area, cells };
         let meso_span_blocks = (CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;
-        let left_source = guide_source(AtlasCoord::new(1, 1), source_cell, meso_span_blocks).unwrap();
-        let right_source = guide_source(AtlasCoord::new(2, 1), source_cell, meso_span_blocks).unwrap();
+        let left_source =
+            guide_source(AtlasCoord::new(1, 1), source_cell, meso_span_blocks).unwrap();
+        let right_source =
+            guide_source(AtlasCoord::new(2, 1), source_cell, meso_span_blocks).unwrap();
         let left_peak = sample_apply_signal(
             &guides,
             left_source.center_x.floor() as i32,
@@ -1397,13 +1480,15 @@ mod tests {
             "expected neighboring hills to keep meaningful shared support through the midfield, got {midpoint:?}"
         );
         assert!(
-            midpoint.support_height_blocks
-                >= 0.0,
+            midpoint.support_height_blocks >= 0.0,
             "expected neighboring hills to keep meaningful shared support through the midfield even away from direct cores, left={left_peak:?}, midpoint={midpoint:?}, right={right_peak:?}"
         );
         assert!(
             midpoint.lobe_height_blocks
-                >= left_peak.lobe_height_blocks.min(right_peak.lobe_height_blocks) * 0.22,
+                >= left_peak
+                    .lobe_height_blocks
+                    .min(right_peak.lobe_height_blocks)
+                    * 0.22,
             "expected neighboring hills to avoid an unnaturally hollow xz-plan midpoint, left={left_peak:?}, midpoint={midpoint:?}, right={right_peak:?}"
         );
     }
@@ -1502,5 +1587,4 @@ mod tests {
             strongest
         );
     }
-
 }

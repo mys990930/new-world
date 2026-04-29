@@ -12,7 +12,9 @@
 - `GenerateChunk` -> procedural generation
 - `BuildChunkMesh` -> meshing
 - `BuildMinimapChunkColumn` -> snapshot-based top-down chunk-column derivation
+- `ResolveRegionClassArea` -> atlas fields/structure generation plus region classification
 - map operation success/failure into `JobResult`
+- throttle long-running operation progress into lightweight `JobResult` snapshots
 
 ## Non-Responsibilities
 
@@ -28,19 +30,22 @@
 
 ## Outputs
 
-- `JobResult`
+- intermediate progress `JobResult`
+- final success/failure `JobResult`
 
 ## Process
 
 1. match the request variant
 2. call the corresponding world API
-3. convert the outcome into the matching `JobResult`
+3. forward progress snapshots when the world API reports them
+4. convert the outcome into the matching final `JobResult`
 
 ## Invariants
 
 - routing does not manage queue state directly
 - routing only uses immutable payloads carried by the request
 - routing stays on documented shared world APIs, not runtime internals
+- routing progress reports must not imply request completion
 
 ## Related Modules
 
@@ -51,5 +56,7 @@
 
 ## Notes
 
-- the current routing surface now covers create-world directory creation, created-world chunk load, procedural generation, meshing, and snapshot-based minimap chunk-column derivation
+- the current routing surface now covers create-world directory creation, created-world chunk load, procedural generation, meshing, snapshot-based minimap chunk-column derivation, and background region-classification resolves
 - create-world and created-world load routes are intentionally fallible worker paths in the current runtime
+- create-world progress is throttled by completed chunk count before being forwarded to the worker report channel
+- create-world routing logs start and finish metadata, including root, seed, radius, vertical range, chunk count, and stack count

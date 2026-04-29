@@ -6,21 +6,22 @@ use super::camera::{
 };
 use super::chunk::ChunkStates;
 use super::command::{
-    clear_player_command_buffer_system, MoveWorldIntent, PlayerCommand, PlayerCommandBuffer,
+    MoveWorldIntent, PlayerCommand, PlayerCommandBuffer, clear_player_command_buffer_system,
 };
 use super::environment::{LocalEnvironmentSnapshot, LocalEnvironmentStatus};
 use super::fixed::{
     ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,
     advance_sim_clock_system, update_active_sim_region_system,
 };
+use super::input::{EcsInputSnapshot, interpret_input_system};
 use super::inventory::{
     PlayerInventory, ToolCatalog, apply_inventory_commands_system, local_player_inventory,
 };
-use super::input::{interpret_input_system, EcsInputSnapshot};
 use super::player::{
-    place_local_player_on_surface, simulate_local_player_motion, spawn_default_player,
-    sync_local_player_velocity_system, update_move_world_intent_system, FrameDeltaSeconds,
-    LocalPlayerEntity, PlayerBody, PlayerMovementConfig, PlayerPhysicsState, Transform,
+    FrameDeltaSeconds, LocalPlayerEntity, PlayerBody, PlayerMovementConfig, PlayerPhysicsState,
+    Transform, place_local_player_on_surface, simulate_local_player_motion, spawn_default_player,
+    stage_local_player_for_chunk_loading, sync_local_player_velocity_system,
+    update_move_world_intent_system,
 };
 use super::selection::{SelectionState, update_selection_from_world};
 use crate::simulation::SimulationResult;
@@ -54,7 +55,10 @@ impl EcsRuntime {
         world.insert_resource(PendingSimulationResults::default());
 
         let mut pre_update = Schedule::default();
-        pre_update.add_systems((clear_player_command_buffer_system, clear_camera_impulses_system));
+        pre_update.add_systems((
+            clear_player_command_buffer_system,
+            clear_camera_impulses_system,
+        ));
 
         let mut update = Schedule::default();
         update.add_systems(
@@ -71,13 +75,8 @@ impl EcsRuntime {
         let mut post_update = Schedule::default();
         post_update.add_systems(update_camera_follow_system);
         let mut fixed_update = Schedule::default();
-        fixed_update.add_systems(
-            (
-                advance_sim_clock_system,
-                update_active_sim_region_system,
-            )
-                .chain(),
-        );
+        fixed_update
+            .add_systems((advance_sim_clock_system, update_active_sim_region_system).chain());
 
         Self {
             world,
@@ -192,6 +191,14 @@ impl EcsRuntime {
         place_local_player_on_surface(&mut self.world, world, anchor_xz)
     }
 
+    pub fn stage_local_player_for_chunk_loading(
+        &mut self,
+        anchor_xz: [f32; 2],
+        max_chunk_y: i32,
+    ) -> bool {
+        stage_local_player_for_chunk_loading(&mut self.world, anchor_xz, max_chunk_y)
+    }
+
     pub fn update_selection_from_world(
         &mut self,
         world: &WorldCore,
@@ -222,7 +229,9 @@ impl EcsRuntime {
     }
 
     pub fn update_local_environment_from_world(&mut self, world: &WorldCore) {
-        let player_translation = self.local_player_transform().map(|transform| transform.translation);
+        let player_translation = self
+            .local_player_transform()
+            .map(|transform| transform.translation);
         self.world
             .resource_mut::<LocalEnvironmentStatus>()
             .refresh_from_world(player_translation, world);

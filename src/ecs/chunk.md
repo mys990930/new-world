@@ -42,9 +42,9 @@
 ## State Transition Rules
 
 - player movement determines the center interest chunk
-- the current minimal implementation expands horizontal interest to a `5x5` neighborhood around the player chunk
-- the steady-state retain envelope expands horizontal retention to a `7x7` neighborhood around the player chunk
-- when a created world is active, interest expands that `5x5` neighborhood across the created-world vertical chunk range so collision has loaded columns to work with
+- the current minimal implementation expands horizontal interest to a `7x7` neighborhood around the player chunk
+- the steady-state retain envelope expands horizontal retention to a `9x9` neighborhood around the player chunk
+- when a created world is active, interest expands that `7x7` neighborhood across the created-world vertical chunk range so collision has loaded columns to work with
 - when a created world is active, retain expands that broader horizontal neighborhood across the created-world vertical chunk range too
 - if an interesting chunk is missing and the created-world manifest contains it, ECS requests `LoadChunk`
 - otherwise ECS falls back to `GenerateChunk`
@@ -83,4 +83,4 @@
 - the current interest logic is intentionally broader than the first prototype because player collision now treats missing chunks as blocking
 - bootstrap uses the same horizontal chunk radius so the first rendered frame already matches the steady-state acquisition envelope
 - when a chunk finishes loading or generation, already-loaded adjacent chunks are marked for remesh so contour/visibility at chunk seams can refresh against the new neighbor snapshot
-- the current hysteresis plan uses `interest radius = 2` and `retain radius = 3`, giving a one-ring buffer before unload starts
+- the current hysteresis plan uses `interest radius = 3` and `retain radius = 4`, giving a one-ring buffer before unload starts while showing a broader active chunk neighborhood

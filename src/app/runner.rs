@@ -9,16 +9,20 @@ use super::GameApp;
 
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        println!("[app] event loop resumed; creating or reusing window");
         self.platform.resumed(event_loop);
 
         if let Some(window) = self.platform.window_handle() {
             if let Err(error) = self.renderer.attach_window_surface(window) {
                 eprintln!("[app] renderer surface attach failed: {:?}", error);
+            } else {
+                println!("[app] renderer surface attached");
             }
         }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        println!("[app] event loop suspended");
         self.platform.suspended();
     }
 
@@ -37,6 +41,7 @@ impl ApplicationHandler for GameApp {
         if self.platform.window_state().close_requested
             || self.platform.lifecycle_state().quit_requested
         {
+            println!("[app] exit requested from window event");
             event_loop.exit();
         }
 
@@ -49,6 +54,7 @@ impl ApplicationHandler for GameApp {
         if self.platform.window_state().close_requested
             || self.platform.lifecycle_state().quit_requested
         {
+            println!("[app] exit requested before frame");
             event_loop.exit();
             return;
         }

@@ -78,7 +78,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(cli_error("radius-cells must be positive"));
     }
     if min_length_cells == 0 || min_length_cells > max_length_cells {
-        return Err(cli_error("min-length-cells must be > 0 and <= max-length-cells"));
+        return Err(cli_error(
+            "min-length-cells must be > 0 and <= max-length-cells",
+        ));
     }
 
     let meta = WorldMeta::new(seed);
@@ -89,16 +91,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     )
     .expect("corridor atlas area should be valid");
     let atlas = generate_atlas_fields(&meta, area);
-    let candidate = find_best_corridor(&atlas, min_length_cells, max_length_cells)
-        .ok_or_else(|| cli_error("no sea-to-mountain corridor was found in the requested atlas search area"))?;
+    let candidate =
+        find_best_corridor(&atlas, min_length_cells, max_length_cells).ok_or_else(|| {
+            cli_error("no sea-to-mountain corridor was found in the requested atlas search area")
+        })?;
     let samples = sample_corridor_chunks(candidate, &meta);
     let chart_path = output.join(format!(
         "seed_{seed}_corridor_{:?}_{},{}_to_{},{}.png",
-        candidate.axis,
-        candidate.start.x,
-        candidate.start.z,
-        candidate.end.x,
-        candidate.end.z
+        candidate.axis, candidate.start.x, candidate.start.z, candidate.end.x, candidate.end.z
     ));
     std::fs::create_dir_all(&output)?;
     write_corridor_chart(&chart_path, &samples)?;
@@ -146,7 +146,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         first.probe.surface_mean_y * BLOCK_SIZE_M,
         last.probe.surface_mean_y,
         last.probe.surface_mean_y * BLOCK_SIZE_M,
-        samples.iter().map(|sample| sample.probe.surface_max_y).max().unwrap_or(0),
+        samples
+            .iter()
+            .map(|sample| sample.probe.surface_max_y)
+            .max()
+            .unwrap_or(0),
         samples
             .iter()
             .map(|sample| sample.probe.surface_max_y)
@@ -179,8 +183,13 @@ fn find_best_corridor(
             for x in area.origin().x..=(area.origin().x + area.width() as i32 - 1 - span) {
                 let start = AtlasCoord::new(x, z);
                 let end = AtlasCoord::new(x + span, z);
-                if let Some(candidate) = evaluate_corridor(atlas, start, end, CorridorAxis::EastWest) {
-                    if best.map(|current| candidate.score > current.score).unwrap_or(true) {
+                if let Some(candidate) =
+                    evaluate_corridor(atlas, start, end, CorridorAxis::EastWest)
+                {
+                    if best
+                        .map(|current| candidate.score > current.score)
+                        .unwrap_or(true)
+                    {
                         best = Some(candidate);
                     }
                 }
@@ -191,8 +200,13 @@ fn find_best_corridor(
             for z in area.origin().z..=(area.origin().z + area.height() as i32 - 1 - span) {
                 let start = AtlasCoord::new(x, z);
                 let end = AtlasCoord::new(x, z + span);
-                if let Some(candidate) = evaluate_corridor(atlas, start, end, CorridorAxis::NorthSouth) {
-                    if best.map(|current| candidate.score > current.score).unwrap_or(true) {
+                if let Some(candidate) =
+                    evaluate_corridor(atlas, start, end, CorridorAxis::NorthSouth)
+                {
+                    if best
+                        .map(|current| candidate.score > current.score)
+                        .unwrap_or(true)
+                    {
                         best = Some(candidate);
                     }
                 }
@@ -216,8 +230,7 @@ fn evaluate_corridor(
         cells
     };
 
-    corridor_score(a, b, axis, &forward)
-        .or_else(|| corridor_score(b, a, axis, &reverse))
+    corridor_score(a, b, axis, &forward).or_else(|| corridor_score(b, a, axis, &reverse))
 }
 
 fn corridor_score(
@@ -303,17 +316,16 @@ fn ocean_like(cell: AtlasCell) -> f32 {
 }
 
 fn mountain_like(cell: AtlasCell) -> f32 {
-    (cell.mountain_mass * 0.55 + cell.alpine_factor * 0.25 + cell.form.mountain * 0.20).clamp(0.0, 1.0)
+    (cell.mountain_mass * 0.55 + cell.alpine_factor * 0.25 + cell.form.mountain * 0.20)
+        .clamp(0.0, 1.0)
 }
 
-fn sample_corridor_chunks(
-    corridor: CorridorCandidate,
-    meta: &WorldMeta,
-) -> Vec<ChunkSample> {
+fn sample_corridor_chunks(corridor: CorridorCandidate, meta: &WorldMeta) -> Vec<ChunkSample> {
     let mut samples = Vec::new();
     match corridor.axis {
         CorridorAxis::EastWest => {
-            let z = corridor.start.z * ATLAS_CELL_SIZE_IN_CHUNKS as i32 + ATLAS_CELL_SIZE_IN_CHUNKS as i32 / 2;
+            let z = corridor.start.z * ATLAS_CELL_SIZE_IN_CHUNKS as i32
+                + ATLAS_CELL_SIZE_IN_CHUNKS as i32 / 2;
             let start_x = corridor.start.x * ATLAS_CELL_SIZE_IN_CHUNKS as i32;
             let end_x = if corridor.end.x >= corridor.start.x {
                 (corridor.end.x + 1) * ATLAS_CELL_SIZE_IN_CHUNKS as i32 - 1
@@ -335,7 +347,8 @@ fn sample_corridor_chunks(
             }
         }
         CorridorAxis::NorthSouth => {
-            let x = corridor.start.x * ATLAS_CELL_SIZE_IN_CHUNKS as i32 + ATLAS_CELL_SIZE_IN_CHUNKS as i32 / 2;
+            let x = corridor.start.x * ATLAS_CELL_SIZE_IN_CHUNKS as i32
+                + ATLAS_CELL_SIZE_IN_CHUNKS as i32 / 2;
             let start_z = corridor.start.z * ATLAS_CELL_SIZE_IN_CHUNKS as i32;
             let end_z = if corridor.end.z >= corridor.start.z {
                 (corridor.end.z + 1) * ATLAS_CELL_SIZE_IN_CHUNKS as i32 - 1
@@ -360,7 +373,10 @@ fn sample_corridor_chunks(
     samples
 }
 
-fn write_corridor_chart(path: &std::path::Path, samples: &[ChunkSample]) -> Result<(), Box<dyn Error>> {
+fn write_corridor_chart(
+    path: &std::path::Path,
+    samples: &[ChunkSample],
+) -> Result<(), Box<dyn Error>> {
     let width = (samples.len() as u32 * SAMPLE_PIXELS_PER_CHUNK).max(1) + CHART_MARGIN * 2;
     let height = CHART_HEIGHT;
     let mut image = ImageBuffer::from_pixel(width, height, SKY_COLOR);
@@ -383,7 +399,11 @@ fn write_corridor_chart(path: &std::path::Path, samples: &[ChunkSample]) -> Resu
     for world_y in [0, min_y, max_y] {
         let y = map_y(world_y as f32, min_y, max_y, chart_top, chart_bottom);
         if y >= chart_top && y <= chart_bottom {
-            let color = if world_y == 0 { SEA_LEVEL_COLOR } else { GRID_COLOR };
+            let color = if world_y == 0 {
+                SEA_LEVEL_COLOR
+            } else {
+                GRID_COLOR
+            };
             for x in CHART_MARGIN..(width - CHART_MARGIN) {
                 image.put_pixel(x, y, color);
             }
@@ -396,8 +416,20 @@ fn write_corridor_chart(path: &std::path::Path, samples: &[ChunkSample]) -> Resu
         let tint = profile_color(sample.probe.dominant_profile);
         let mean_y = sample.probe.surface_mean_y;
         let top = map_y(mean_y, min_y, max_y, chart_top, chart_bottom);
-        let min_sample_y = map_y(sample.probe.surface_min_y as f32, min_y, max_y, chart_top, chart_bottom);
-        let max_sample_y = map_y(sample.probe.surface_max_y as f32, min_y, max_y, chart_top, chart_bottom);
+        let min_sample_y = map_y(
+            sample.probe.surface_min_y as f32,
+            min_y,
+            max_y,
+            chart_top,
+            chart_bottom,
+        );
+        let max_sample_y = map_y(
+            sample.probe.surface_max_y as f32,
+            min_y,
+            max_y,
+            chart_top,
+            chart_bottom,
+        );
 
         for x in x0..x1 {
             for y in top..=chart_bottom {

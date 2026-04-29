@@ -26,7 +26,6 @@
 ## Initial Meso Allowance Stub
 - `hill_cluster`
 - `shallow_basin`
-- `ravine`
 
 ## Follow-up
 

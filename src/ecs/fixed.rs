@@ -62,10 +62,8 @@ pub(crate) fn update_active_sim_region_system(
         return;
     };
 
-    *active_region = active_sim_region_for_translation(
-        transform.translation,
-        control.eager_atlas_radius,
-    );
+    *active_region =
+        active_sim_region_for_translation(transform.translation, control.eager_atlas_radius);
 }
 
 fn atlas_coord_for_translation(translation: [f32; 3]) -> AtlasCoord {
@@ -86,8 +84,7 @@ fn active_sim_region_for_translation(
     let edge = (radius * 2 + 1).max(1) as u32;
     ActiveSimRegion {
         center_atlas,
-        area: AtlasArea::new(origin, edge, edge)
-            .expect("active simulation area must stay valid"),
+        area: AtlasArea::new(origin, edge, edge).expect("active simulation area must stay valid"),
     }
 }
 

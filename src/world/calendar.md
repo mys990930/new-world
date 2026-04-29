@@ -80,3 +80,4 @@ WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResu
 - this layer is meant to keep long-lived environmental truth in world even when only a small active region is simulated eagerly
 - nearby chunks may receive direct `WorldEdit` application, while distant chunks may receive deferred patches that are realized later
 - the current first slice stores runtime climate/weather state per atlas cell and appends deferred seasonal patches, but it does not yet mutate nearby realized blocks for seasonal visuals
+- the current default bootstrap calendar now starts at `11:00` on spring day `0` so daytime lighting and HUD state begin from a neutral midday-ish slice instead of early evening

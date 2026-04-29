@@ -79,7 +79,7 @@
 - Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.
 - Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
-- Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing a controlled amount of distance haze.
+- Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing only a subtle amount of distance haze.
 - the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames
 - dynamic cube previews may use alpha-blended shading so ECS build previews can appear translucent without changing UI sprite ownership
 - dynamic cubes no longer assume a single white texture layer; bridge-selected preview cubes may now sample real block top/bottom/side layers while still applying tint/alpha in shader

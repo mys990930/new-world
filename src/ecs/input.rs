@@ -36,9 +36,7 @@ pub(crate) fn interpret_input_system(
     }
 
     if input.toggle_manipulation_mode {
-        command_buffer
-            .0
-            .push(PlayerCommand::ToggleManipulationMode);
+        command_buffer.0.push(PlayerCommand::ToggleManipulationMode);
     }
 
     if input.toggle_inventory {

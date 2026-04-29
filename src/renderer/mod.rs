@@ -16,9 +16,8 @@ pub use camera::{
 };
 #[allow(unused_imports)]
 pub use config::{
-    CameraProjectionConfig, ClearColor, DebugRenderConfig, DepthFormat, PresentMode,
-    RenderConfig, RenderEnvironment, RenderQualityConfig, RenderQualityTier, ShadowQuality,
-    SurfaceFormatPolicy,
+    CameraProjectionConfig, ClearColor, DebugRenderConfig, DepthFormat, PresentMode, RenderConfig,
+    RenderEnvironment, RenderQualityConfig, RenderQualityTier, ShadowQuality, SurfaceFormatPolicy,
 };
 #[allow(unused_imports)]
 pub use frame::{RenderCubeInstance, RenderError, RenderFrameInput, RenderStats};

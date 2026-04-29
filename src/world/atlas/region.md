@@ -12,6 +12,7 @@
 - resolve continuous atlas inputs into stable class bands rather than overlapping fuzzy weight bundles
 - define biome-family, terrain-form-family, and combined region-archetype contracts
 - expose sampleable region classification for generation, meso selection, and material policy
+- allow runtime callers to reconstruct cached `RegionClassMap`s from already-resolved samples without recomputing atlas structure/classification on the frame thread
 - expose archetype-owned runtime hint data when later generation stages need concrete per-archetype tuning without giving up shared solver ownership
 - keep classification deterministic, generation-order-independent, and on-demand
 
@@ -55,10 +56,43 @@ sample_region_classes(
     world_x: i32,
     world_z: i32,
 ) -> RegionClassSample
+sample_region_class_influences(
+    classes: &RegionClassMap,
+    world_x: f32,
+    world_z: f32,
+) -> RegionClassInfluenceSet
 region_archetype_prototype_hint(
     id: RegionArchetype,
 ) -> Option<&'static PrototypeArchetypeHint>
 ```
+
+## Transition Sampling Contract
+
+- `sample_region_classes(...)` remains the hard semantic owner sample for stable query surfaces and legacy callers that need one class.
+- generation stages that affect visible height, meso allowance, hydrology style, or material expression should prefer a weighted influence sample.
+- influence sampling must read neighboring atlas cells through edge-local low-frequency boundary
+  displacement so an atlas edge is not also a visible terrain or material edge.
+- boundary displacement should be low-frequency and bounded. It should bend an atlas edge into a
+  smooth terrain-scale wave, not create spikes, angular bites, salt-and-pepper patches, or large
+  incursions from one region into another.
+- edge waves should use smooth deterministic carriers and modest amplitude. A single broad
+  domain-warp curve is not sufficient; the edge should read as a connected wavy boundary without
+  forming large guide-like arcs.
+- edge influence near atlas-cell corners should taper unless the neighbor region continues through
+  the matching diagonal cell, preventing perpendicular atlas edges from meeting as visible points or
+  angular bites.
+- corner influence may include a weaker diagonal neighbor sample only inside the same bounded
+  transition band. This rounds L-shaped atlas ownership corners without turning region interiors into
+  mottled multi-way blends.
+- the influence set should carry the hard sampled dominant plus secondary weights, transition
+  strength, and barrier strength; downstream material/domain policy decides whether a supported
+  neighbor becomes visible.
+- callers that need storage/query ownership must still use `sample_region_classes(...)`; influence
+  weights may cross the raw atlas cell edge specifically so visible materials do not inherit straight
+  atlas borders.
+- barrier strength should rise at true macro breaks such as marine-to-inland transitions, strong ridge divides, basin walls, and hard coastal cliffs; it should stay low across compatible plains, hills, drylands, or lowlands.
+- downstream stages may keep one owner for gameplay and storage, but visual material and continuous generation parameters should use these weights to displace coherent boundaries instead of switching directly at the atlas-cell boundary or dithering materials through a region interior.
+- runtime HUD/environment consumers may use cached hard samples while a background resolve catches up; missing cache is a loading state, not permission to synchronously regenerate atlas structure from the frame loop.
 
 ## Input Model
 
@@ -157,6 +191,8 @@ region_archetype_prototype_hint(
 3. region classification must not depend on whole-world precomputation
 4. meso should refine region identity, not replace it
 5. final block materials should be derived from region classification plus local hydrology/material policy, not from raw scalar thresholds alone
+6. hard atlas-cell ownership must not be used as a visible material or height mask; any visible transition must pass through weighted influence sampling plus downstream transition policy
+7. cached runtime samples must preserve the same deterministic output as `resolve_region_classes(...)`; caching changes scheduling only, not classification meaning
 
 ## Current Status
 
@@ -172,6 +208,7 @@ region_archetype_prototype_hint(
 - current generation still resolves final profile families directly from atlas-derived samples, so this region layer is not active gameplay authority yet
 - future work should promote this layer into the primary owner of biome and terrain-form identity before further meso or material expansion
 - the next generation-side step after classification is now a separate realization-field stage that turns those discrete semantic classes into continuous prototype-control parameters without exposing atlas-cell rectangles directly in the final terrain
+- runtime `WorldCore` may cache resolved region samples and rebuild a `RegionClassMap` for fully cached areas, allowing app/ECS environment refreshes to stay non-blocking while worker jobs resolve uncached areas
 
 ## Submodules
 

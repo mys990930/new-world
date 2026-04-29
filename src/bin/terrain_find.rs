@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::fmt::Debug;
@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use new_world::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, CHUNK_EDGE_I32, MesoGuideSample,
-    RegionArchetype, RegionCatalogStatus, RegionClassSample, WorldMeta, generate_atlas_fields,
-    generate_atlas_structure, generate_meso_guides, meso_feature_defs, region_archetype_def,
-    region_catalog_entries, resolve_region_classes, sample_meso_guides, sample_region_classes,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, CHUNK_EDGE_I32, ChunkCoord,
+    ChunkGenerationInputs, MesoGuideSample, RegionArchetype, RegionCatalogStatus,
+    RegionClassSample, WorldMeta, chunk_generation_input_area, meso_feature_defs,
+    prepare_chunk_generation_inputs, region_archetype_def, region_catalog_entries,
+    sample_meso_guides, sample_region_classes,
 };
 
 const DEFAULT_ORIGIN_CELL_X: i32 = 0;
@@ -72,6 +73,25 @@ struct Candidate {
     requested_meso: Vec<RequestedMesoMatch>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct InputAreaKey {
+    origin_x: i32,
+    origin_z: i32,
+    width: u32,
+    height: u32,
+}
+
+impl InputAreaKey {
+    fn from_area(area: AtlasArea) -> Self {
+        Self {
+            origin_x: area.origin().x,
+            origin_z: area.origin().z,
+            width: area.width(),
+            height: area.height(),
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {
@@ -116,17 +136,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "--chunk-step" => chunk_step = parse_required::<u32>(&mut args, "chunk-step")?,
             "--top" => top = parse_required::<usize>(&mut args, "top")?,
-            "--archetype" => archetype_tokens.push(parse_required::<String>(&mut args, "archetype")?),
+            "--archetype" => {
+                archetype_tokens.push(parse_required::<String>(&mut args, "archetype")?)
+            }
             "--meso" => meso_tokens.push(parse_required::<String>(&mut args, "meso")?),
             "--preview-rank" => preview_rank = parse_required::<usize>(&mut args, "preview-rank")?,
-            "--preview-radius" => preview_radius = parse_required::<i32>(&mut args, "preview-radius")?,
+            "--preview-radius" => {
+                preview_radius = parse_required::<i32>(&mut args, "preview-radius")?
+            }
             "--preview-width" => preview_width = parse_required::<u32>(&mut args, "preview-width")?,
-            "--preview-height" => preview_height = parse_required::<u32>(&mut args, "preview-height")?,
+            "--preview-height" => {
+                preview_height = parse_required::<u32>(&mut args, "preview-height")?
+            }
             "--preview-quarter-turns" => {
                 preview_quarter_turns = parse_required::<u8>(&mut args, "preview-quarter-turns")?
             }
             "--preview-output" => {
-                preview_output = Some(PathBuf::from(parse_required::<String>(&mut args, "preview-output")?))
+                preview_output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args,
+                    "preview-output",
+                )?))
             }
             "--render-preview" => render_preview = true,
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
@@ -163,21 +192,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         (search_radius_cells * 2 + 1) as u32,
         (search_radius_cells * 2 + 1) as u32,
     )?;
-    // Region and meso samplers read neighboring cells on the positive axes, so
-    // the generated lookup area needs one-cell padding around the requested search window.
-    let generation_area = AtlasArea::new(
-        AtlasCoord::new(
-            requested_search_area.origin().x - 1,
-            requested_search_area.origin().z - 1,
-        ),
-        requested_search_area.width() + 2,
-        requested_search_area.height() + 2,
-    )?;
     let meta = WorldMeta::new(seed);
-    let fields = generate_atlas_fields(&meta, generation_area);
-    let structure = generate_atlas_structure(&meta, generation_area);
-    let regions = resolve_region_classes(&meta, generation_area, &fields, &structure);
-    let meso = generate_meso_guides(&meta, generation_area, &fields, &structure);
 
     let min_chunk_x = requested_search_area.origin().x * ATLAS_CELL_SIZE_IN_CHUNKS as i32;
     let min_chunk_z = requested_search_area.origin().z * ATLAS_CELL_SIZE_IN_CHUNKS as i32;
@@ -188,6 +203,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         * ATLAS_CELL_SIZE_IN_CHUNKS as i32
         - 1;
     let retain_count = top.max(preview_rank);
+    let mut input_cache = HashMap::<InputAreaKey, ChunkGenerationInputs>::new();
 
     let mut scanned = 0_usize;
     let mut matched = 0_usize;
@@ -196,7 +212,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     for chunk_z in (min_chunk_z..=max_chunk_z).step_by(chunk_step as usize) {
         for chunk_x in (min_chunk_x..=max_chunk_x).step_by(chunk_step as usize) {
             scanned += 1;
-            if let Some(candidate) = build_candidate(chunk_x, chunk_z, &regions, &meso, &requested_archetypes, &requested_meso) {
+            if let Some(candidate) = build_candidate(
+                chunk_x,
+                chunk_z,
+                &meta,
+                &mut input_cache,
+                &requested_archetypes,
+                &requested_meso,
+            ) {
                 matched += 1;
                 push_top_candidate(&mut candidates, candidate, retain_count);
             }
@@ -297,13 +320,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let preview_candidate = candidates
-        .get(preview_rank - 1)
-        .ok_or_else(|| cli_error(format!("preview-rank {} exceeds {} results", preview_rank, candidates.len())))?;
+    let preview_candidate = candidates.get(preview_rank - 1).ok_or_else(|| {
+        cli_error(format!(
+            "preview-rank {} exceeds {} results",
+            preview_rank,
+            candidates.len()
+        ))
+    })?;
     if render_preview {
-        let output = preview_output
-            .clone()
-            .unwrap_or_else(|| default_preview_output(seed, preview_candidate, &requested_archetypes, &requested_meso));
+        let output = preview_output.clone().unwrap_or_else(|| {
+            default_preview_output(
+                seed,
+                preview_candidate,
+                &requested_archetypes,
+                &requested_meso,
+            )
+        });
         render_preview_for_candidate(
             seed,
             preview_candidate,
@@ -322,19 +354,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn build_candidate(
     chunk_x: i32,
     chunk_z: i32,
-    regions: &new_world::world::RegionClassMap,
-    meso_guides: &new_world::world::MesoGuideMap,
+    meta: &WorldMeta,
+    input_cache: &mut HashMap<InputAreaKey, ChunkGenerationInputs>,
     requested_archetypes: &[RegionArchetype],
     requested_meso: &[RequestedMeso],
 ) -> Option<Candidate> {
+    let chunk = ChunkCoord(chunk_x, 0, chunk_z);
+    let area_key = InputAreaKey::from_area(chunk_generation_input_area(chunk));
+    let inputs = input_cache
+        .entry(area_key)
+        .or_insert_with(|| prepare_chunk_generation_inputs(chunk, meta));
     let world_x = chunk_center_world(chunk_x);
     let world_z = chunk_center_world(chunk_z);
-    let region = sample_region_classes(regions, world_x, world_z);
+    let region = sample_region_classes(&inputs.region_classes, world_x, world_z);
     if !requested_archetypes.is_empty() && !requested_archetypes.contains(&region.archetype) {
         return None;
     }
 
-    let meso = sample_meso_guides(meso_guides, world_x, world_z);
+    let meso = sample_meso_guides(&inputs.meso_guides, world_x, world_z);
     let archetype_def = region_archetype_def(region.archetype)?;
     let allowed_keys = archetype_def
         .allowed_meso_keys
@@ -388,7 +425,11 @@ fn build_candidate(
         + allowed_fraction * 3.0
         + runtime_average * 2.5
         + runtime_peak * 1.5
-        + if requested_archetypes.is_empty() { 0.0 } else { 2.0 };
+        + if requested_archetypes.is_empty() {
+            0.0
+        } else {
+            2.0
+        };
     let atlas_span_blocks = atlas_cell_span_blocks();
 
     Some(Candidate {
@@ -648,7 +689,9 @@ fn print_meso_catalog() {
         };
         println!("  - {:<24} {:<14} {}", def.key, mode, def.summary);
     }
-    println!("note: current runtime-backed guide search keys are hill_cluster, shallow_basin, escarpment_band, upland_terrace.");
+    println!(
+        "note: current runtime-backed guide search keys are hill_cluster, shallow_basin, escarpment_band, upland_terrace."
+    );
 }
 
 fn format_requested_meso_matches(matches: &[RequestedMesoMatch]) -> String {
@@ -742,11 +785,7 @@ fn atlas_cell_span_blocks() -> i32 {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
-    }
+    if value { "yes" } else { "no" }
 }
 
 fn shell_word(path: &Path) -> String {
@@ -797,8 +836,14 @@ mod tests {
 
     #[test]
     fn runtime_backing_marks_wave_one_keys() {
-        assert_eq!(runtime_backing("hill_cluster"), Some(RuntimeMesoChannel::HillCluster));
-        assert_eq!(runtime_backing("shallow_basin"), Some(RuntimeMesoChannel::ShallowBasin));
+        assert_eq!(
+            runtime_backing("hill_cluster"),
+            Some(RuntimeMesoChannel::HillCluster)
+        );
+        assert_eq!(
+            runtime_backing("shallow_basin"),
+            Some(RuntimeMesoChannel::ShallowBasin)
+        );
         assert_eq!(runtime_backing("ravine"), None);
     }
 

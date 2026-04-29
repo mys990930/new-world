@@ -1,9 +1,9 @@
-# realization_field_preview
+﻿# realization_field_preview
 
 ## Role
 
 - render a seed-driven top-down PNG for the generation-side realization / prototype-control field
-- sit between `region_topdown_preview` and later exact realized chunk previews while V2 realization is still landing
+- sit between `region_topdown_preview` and later exact realized chunk previews while generation realization is still landing
 - keep the CLI and summary style close to the other debug preview binaries under `src/bin`
 
 ## Inputs
@@ -27,7 +27,7 @@
 
 ## Current Flow
 
-1. For each chunk in the requested preview window, build the public V2 scaffold via `build_chunk_v2_scaffold(...)`.
+1. For each chunk in the requested preview window, build the public generation scaffold via `build_chunk_generation_scaffold(...)`.
 2. Sample one control point per preview pixel inside that chunk footprint.
 3. Sample the chunk's public `ChunkRealizationFieldPatch` in world space to obtain the continuous prototype-control vector actually used by prototype.
 4. Normalize each preview channel against the current window's sampled range so subtle intra-window variation stays visible even inside large single-archetype regions.

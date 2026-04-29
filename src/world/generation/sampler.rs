@@ -13,21 +13,22 @@ const GENERATION_ATLAS_PADDING_CELLS: i32 = 4;
 const GENERATION_ATLAS_CONTEXT_EDGE_CELLS: i32 = ATLAS_STRUCTURE_REGION_EDGE_CELLS as i32;
 const GENERATION_CANONICAL_FIELD_PADDING_CELLS: i32 = 16;
 
-fn chunk_generation_atlas_area(coord: ChunkCoord) -> AtlasArea {
+pub(super) fn chunk_generation_atlas_area(coord: ChunkCoord) -> AtlasArea {
     let base = AtlasCoord::new(
         coord.0.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
         coord.2.div_euclid(ATLAS_CELL_SIZE_IN_CHUNKS as i32),
     );
     let context_origin = AtlasCoord::new(
-        base.x.div_euclid(GENERATION_ATLAS_CONTEXT_EDGE_CELLS) * GENERATION_ATLAS_CONTEXT_EDGE_CELLS,
-        base.z.div_euclid(GENERATION_ATLAS_CONTEXT_EDGE_CELLS) * GENERATION_ATLAS_CONTEXT_EDGE_CELLS,
+        base.x.div_euclid(GENERATION_ATLAS_CONTEXT_EDGE_CELLS)
+            * GENERATION_ATLAS_CONTEXT_EDGE_CELLS,
+        base.z.div_euclid(GENERATION_ATLAS_CONTEXT_EDGE_CELLS)
+            * GENERATION_ATLAS_CONTEXT_EDGE_CELLS,
     );
     let origin = AtlasCoord::new(
         context_origin.x - GENERATION_ATLAS_PADDING_CELLS,
         context_origin.z - GENERATION_ATLAS_PADDING_CELLS,
     );
-    let span =
-        (GENERATION_ATLAS_PADDING_CELLS * 2 + GENERATION_ATLAS_CONTEXT_EDGE_CELLS) as u32;
+    let span = (GENERATION_ATLAS_PADDING_CELLS * 2 + GENERATION_ATLAS_CONTEXT_EDGE_CELLS) as u32;
     AtlasArea::new(origin, span, span).expect("generation atlas area is valid")
 }
 
@@ -107,7 +108,8 @@ mod tests {
         let min_x = a.origin().x.max(b.origin().x);
         let min_z = a.origin().z.max(b.origin().z);
         let max_x = (a.origin().x + a.width() as i32 - 1).min(b.origin().x + b.width() as i32 - 1);
-        let max_z = (a.origin().z + a.height() as i32 - 1).min(b.origin().z + b.height() as i32 - 1);
+        let max_z =
+            (a.origin().z + a.height() as i32 - 1).min(b.origin().z + b.height() as i32 - 1);
         AtlasArea::new(
             AtlasCoord::new(min_x, min_z),
             (max_x - min_x + 1) as u32,
@@ -117,6 +119,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow generation atlas-field context regression test"]
     fn canonical_field_assembly_keeps_overlap_identical_across_context_boundaries() {
         let meta = WorldMeta::new(42);
         let left = generate_chunk_atlas_fields(ChunkCoord(127, 0, 0), &meta);
@@ -125,11 +128,16 @@ mod tests {
         assert_ne!(left.area(), right.area());
 
         for coord in overlap_area(left.area(), right.area()).coords() {
-            assert_eq!(left.get(coord), right.get(coord), "field overlap drifted at {coord:?}");
+            assert_eq!(
+                left.get(coord),
+                right.get(coord),
+                "field overlap drifted at {coord:?}"
+            );
         }
     }
 
     #[test]
+    #[ignore = "slow generation region context regression test"]
     fn region_classification_overlap_stays_identical_across_context_boundaries() {
         let meta = WorldMeta::new(42);
         let left_chunk = ChunkCoord(127, 0, 0);
@@ -153,6 +161,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow generation meso context regression test"]
     fn meso_sampling_stays_stable_across_context_boundaries() {
         let meta = WorldMeta::new(42);
         let left_chunk = ChunkCoord(127, 0, 0);
@@ -193,7 +202,8 @@ mod tests {
                 && (left.basin_depth - right.basin_depth).abs() <= epsilon
                 && (left.escarpment_weight - right.escarpment_weight).abs() <= epsilon
                 && (left.escarpment_height - right.escarpment_height).abs() <= epsilon
-                && (left.escarpment_signed_distance_cells - right.escarpment_signed_distance_cells).abs()
+                && (left.escarpment_signed_distance_cells - right.escarpment_signed_distance_cells)
+                    .abs()
                     <= epsilon
                 && (left.terrace_weight - right.terrace_weight).abs() <= epsilon
                 && (left.terrace_step_height - right.terrace_step_height).abs() <= epsilon

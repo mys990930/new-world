@@ -36,8 +36,14 @@ pub(crate) struct GpuUiTextureResources {
 
 #[derive(Debug)]
 pub enum RenderUiTextureError {
-    Io { path: PathBuf, source: std::io::Error },
-    Decode { path: PathBuf, source: image::ImageError },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Decode {
+        path: PathBuf,
+        source: image::ImageError,
+    },
 }
 
 impl Default for UiTextureSet {
@@ -72,7 +78,9 @@ impl UiVertex {
 }
 
 impl UiTextureSet {
-    pub(crate) fn from_source(source: &RenderUiTextureSource) -> Result<Self, RenderUiTextureError> {
+    pub(crate) fn from_source(
+        source: &RenderUiTextureSource,
+    ) -> Result<Self, RenderUiTextureError> {
         match source {
             RenderUiTextureSource::BuiltinWhite => Ok(Self::default()),
             RenderUiTextureSource::File(path) => {
@@ -117,9 +125,7 @@ impl Renderer {
     }
 }
 
-pub(crate) fn create_ui_texture_bind_group_layout(
-    device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
+pub(crate) fn create_ui_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("renderer_ui_texture_bind_group_layout"),
         entries: &[

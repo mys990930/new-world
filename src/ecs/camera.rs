@@ -1,8 +1,8 @@
 use bevy_ecs::prelude::{Query, Res, ResMut, Resource, With};
 
 use super::command::PlayerCommand;
-use super::inventory::PlayerInventory;
 use super::input::EcsInputSnapshot;
+use super::inventory::PlayerInventory;
 use super::player::{FrameDeltaSeconds, LocalPlayerEntity, Player, Transform};
 use super::{MoveWorldIntent, PlayerCommandBuffer};
 
@@ -39,7 +39,7 @@ pub struct QuarterViewCameraPose {
 // Larger values show more world around the focus plane and make the camera feel farther away.
 pub const QUARTER_VIEW_VERTICAL_WORLD_SIZE: f32 = 20.0;
 pub const QUARTER_VIEW_MIN_VERTICAL_WORLD_SIZE: f32 = 8.0;
-pub const QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE: f32 = 48.0;
+pub const QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE: f32 = 96.0;
 // The gameplay slice now uses a weak perspective projection tuned for better slope readability.
 // This fixed FOV must stay aligned with the renderer config wired up by app bootstrap.
 pub const QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS: f32 = 0.42;
@@ -111,8 +111,7 @@ pub(crate) fn apply_camera_zoom_input_system(
     }
 
     let next_vertical_world_size = clamp_vertical_world_size(
-        camera.desired_vertical_world_size
-            - scroll_lines * CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE,
+        camera.desired_vertical_world_size - scroll_lines * CAMERA_ZOOM_WORLD_UNITS_PER_SCROLL_LINE,
     );
     camera.desired_vertical_world_size = next_vertical_world_size;
 
@@ -303,10 +302,7 @@ pub fn quarter_view_perspective_distance(vertical_world_size: f32) -> f32 {
 
 pub fn quarter_view_eye(target: [f32; 3], quarter_turns: u8) -> [f32; 3] {
     let basis = quarter_view_basis(quarter_turns);
-    add3(
-        target,
-        scale3(basis.forward, -QUARTER_VIEW_CAMERA_DISTANCE),
-    )
+    add3(target, scale3(basis.forward, -QUARTER_VIEW_CAMERA_DISTANCE))
 }
 
 fn quarter_view_perspective_eye_from_yaw(
@@ -450,14 +446,8 @@ fn movement_bias_offset(
         * QUARTER_VIEW_CARDINAL_HALF_SPAN_MULTIPLIER
         * CAMERA_FORWARD_BIAS_FROM_CENTER_RATIO;
     add3(
-        scale3(
-            basis.right,
-            screen_right * inv_length * bias_distance,
-        ),
-        scale3(
-            basis.up,
-            screen_up * inv_length * bias_distance,
-        ),
+        scale3(basis.right, screen_right * inv_length * bias_distance),
+        scale3(basis.up, screen_up * inv_length * bias_distance),
     )
 }
 
@@ -573,10 +563,7 @@ mod tests {
     fn movement_bias_uses_camera_screen_plane() {
         let basis = quarter_view_basis(0);
         let bias = movement_bias_offset(
-            MoveWorldIntent {
-                east: 1,
-                north: 0,
-            },
+            MoveWorldIntent { east: 1, north: 0 },
             basis,
             QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         );
@@ -589,18 +576,17 @@ mod tests {
     fn movement_bias_targets_forward_heavy_composition() {
         let basis = quarter_view_basis(0);
         let bias = movement_bias_offset(
-            MoveWorldIntent {
-                east: 1,
-                north: 0,
-            },
+            MoveWorldIntent { east: 1, north: 0 },
             basis,
             QUARTER_VIEW_VERTICAL_WORLD_SIZE,
         );
         let screen_bias = [dot3(bias, basis.right), dot3(bias, basis.up)];
-        let forward_screen = [dot3([1.0, 0.0, 0.0], basis.right), dot3([1.0, 0.0, 0.0], basis.up)];
-        let forward_length = (forward_screen[0] * forward_screen[0]
-            + forward_screen[1] * forward_screen[1])
-            .sqrt();
+        let forward_screen = [
+            dot3([1.0, 0.0, 0.0], basis.right),
+            dot3([1.0, 0.0, 0.0], basis.up),
+        ];
+        let forward_length =
+            (forward_screen[0] * forward_screen[0] + forward_screen[1] * forward_screen[1]).sqrt();
         let normalized_forward = [
             forward_screen[0] / forward_length,
             forward_screen[1] / forward_length,
@@ -742,6 +728,33 @@ mod tests {
     }
 
     #[test]
+    fn scroll_zoom_clamps_to_expanded_zoom_out_range() {
+        let mut world = World::new();
+        world.insert_resource(EcsInputSnapshot {
+            zoom_scroll_delta: -1200.0,
+            focused: true,
+            active: true,
+            ..EcsInputSnapshot::default()
+        });
+        world.insert_resource(CameraState {
+            desired_vertical_world_size: QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE - 0.5,
+            vertical_world_size: QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE - 0.5,
+            ..CameraState::default()
+        });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(apply_camera_zoom_input_system);
+        schedule.run(&mut world);
+
+        let camera = *world.resource::<CameraState>();
+        assert_eq!(QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE, 96.0);
+        assert_eq!(
+            camera.desired_vertical_world_size,
+            QUARTER_VIEW_MAX_VERTICAL_WORLD_SIZE
+        );
+    }
+
+    #[test]
     fn render_rotation_lerps_after_logical_quarter_turn_snap() {
         let mut world = World::new();
         world.insert_resource(PlayerCommandBuffer(vec![PlayerCommand::RotateCamera {
@@ -776,10 +789,10 @@ mod tests {
         let camera_after_command = *world.resource::<CameraState>();
         assert_eq!(camera_after_command.quarter_turns, 1);
         assert_eq!(camera_after_command.render_yaw_radians, 0.0);
-        assert!((camera_after_command.desired_render_yaw_radians
-            - std::f32::consts::FRAC_PI_2)
-            .abs()
-            < 1e-5);
+        assert!(
+            (camera_after_command.desired_render_yaw_radians - std::f32::consts::FRAC_PI_2).abs()
+                < 1e-5
+        );
 
         let mut post_update_schedule = Schedule::default();
         post_update_schedule.add_systems(update_camera_follow_system);
@@ -814,10 +827,7 @@ mod tests {
         schedule.run(&mut world);
 
         let camera = *world.resource::<CameraState>();
-        assert!(
-            camera.render_yaw_radians
-                > std::f32::consts::FRAC_PI_2 * 0.94
-        );
+        assert!(camera.render_yaw_radians > std::f32::consts::FRAC_PI_2 * 0.94);
         assert!(camera.render_yaw_radians < std::f32::consts::FRAC_PI_2);
     }
 }

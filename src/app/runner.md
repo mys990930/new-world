@@ -12,6 +12,7 @@
 - frame cap 적용
 - redraw 요청
 - `RedrawRequested`에서 renderer 호출
+- lifecycle logging for resume, surface attach, suspend, and explicit exit requests
 
 ## 비책임
 
@@ -52,3 +53,4 @@
 
 - 기본 정책은 `60 FPS` cap이다.
 - renderer는 bootstrap에서 stub로 시작하고, `resumed()`에서 real `wgpu` surface/backend를 붙인다.
+- current diagnostics log whether the event loop reached `resumed()`, whether the renderer surface attached, and whether exit was requested by a window/lifecycle event.

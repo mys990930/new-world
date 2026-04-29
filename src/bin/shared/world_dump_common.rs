@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use new_world::world::{
-    CHUNK_EDGE_I32, ChunkCoord, ChunkData, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, load_chunk,
-    save_chunk,
+    CHUNK_EDGE_I32, ChunkCoord, ChunkData, VoxelizationColumnPlan, VoxelizationPlan, WORLD_FLOOR_Y,
+    WorldBlockCoord, WorldCore, load_chunk, save_chunk,
 };
 
 pub const WORLD_CREATE_MANIFEST_FILE: &str = "manifest.toml";
@@ -57,7 +57,11 @@ impl CreatedWorldManifest {
     }
 
     pub fn default_preview_chunk(&self) -> ChunkCoord {
-        ChunkCoord(self.default_preview_center[0], 0, self.default_preview_center[1])
+        ChunkCoord(
+            self.default_preview_center[0],
+            0,
+            self.default_preview_center[1],
+        )
     }
 }
 
@@ -72,7 +76,10 @@ pub struct CreatedWorldStackSummary {
     pub score: i64,
 }
 
-pub fn write_manifest(root: &Path, manifest: &CreatedWorldManifest) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write_manifest(
+    root: &Path,
+    manifest: &CreatedWorldManifest,
+) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(root)?;
     let text = toml::to_string_pretty(manifest)?;
     fs::write(manifest_path(root), text)?;
@@ -132,7 +139,13 @@ pub fn manifest_path(root: &Path) -> PathBuf {
     root.join(WORLD_CREATE_MANIFEST_FILE)
 }
 
-pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> CreatedWorldStackSummary {
+pub fn summarize_stack(
+    world: &WorldCore,
+    center_x: i32,
+    center_z: i32,
+    min_chunk_y: i32,
+    max_chunk_y: i32,
+) -> CreatedWorldStackSummary {
     let min_world_y = min_chunk_y * CHUNK_EDGE_I32;
     let max_world_y = (max_chunk_y + 1) * CHUNK_EDGE_I32 - 1;
 
@@ -147,7 +160,8 @@ pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chun
 
             let mut top_solid_y = None;
             for world_y in (min_world_y.max(WORLD_FLOOR_Y)..=max_world_y).rev() {
-                let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z)) else {
+                let Some(block) = world.get_block(WorldBlockCoord(world_x, world_y, world_z))
+                else {
                     continue;
                 };
                 if block.is_air() {
@@ -184,4 +198,61 @@ pub fn summarize_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chun
         solid_columns,
         score,
     }
+}
+
+pub fn summarize_stack_from_voxelization_plan(
+    plan: &VoxelizationPlan,
+    center_x: i32,
+    center_z: i32,
+    min_chunk_y: i32,
+    max_chunk_y: i32,
+) -> CreatedWorldStackSummary {
+    let min_world_y = min_chunk_y * CHUNK_EDGE_I32;
+    let max_world_y = (max_chunk_y + 1) * CHUNK_EDGE_I32 - 1;
+    let scan_min_y = min_world_y.max(WORLD_FLOOR_Y);
+
+    let mut relief_min_y = i32::MAX;
+    let mut relief_max_y = i32::MIN;
+    let mut solid_columns = 0_u32;
+
+    if scan_min_y <= max_world_y {
+        for column in &plan.columns {
+            let top_y = column_top_non_air_y(*column);
+            if top_y < scan_min_y {
+                continue;
+            }
+
+            let relief_y = top_y.min(max_world_y);
+            solid_columns = solid_columns.saturating_add(1);
+            relief_min_y = relief_min_y.min(relief_y);
+            relief_max_y = relief_max_y.max(relief_y);
+        }
+    }
+
+    let relief_min_y = (solid_columns > 0).then_some(relief_min_y);
+    let relief_max_y = (solid_columns > 0).then_some(relief_max_y);
+    let relief_range = match (relief_min_y, relief_max_y) {
+        (Some(min_y), Some(max_y)) => max_y - min_y,
+        _ => 0,
+    };
+    let score = i64::from(solid_columns) * 100_000
+        + i64::from(relief_range) * 1_000
+        + i64::from(relief_max_y.unwrap_or(min_world_y));
+
+    CreatedWorldStackSummary {
+        center_x,
+        center_z,
+        relief_min_y,
+        relief_max_y,
+        relief_range,
+        solid_columns,
+        score,
+    }
+}
+
+fn column_top_non_air_y(column: VoxelizationColumnPlan) -> i32 {
+    column
+        .water_top_y
+        .unwrap_or(i32::MIN)
+        .max(column.terrain_top_y)
 }

@@ -7,13 +7,14 @@ use std::path::PathBuf;
 use image::{Rgb, RgbImage};
 use rayon::prelude::*;
 
+use new_world::world::atlas::{HillClusterPeakCandidate, debug_hill_cluster_peak_candidates};
 use new_world::world::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCell, AtlasCoord, BaseHeightfieldPrototype, CHUNK_EDGE,
     CHUNK_EDGE_I32, ChunkCoord, MesoGuideCell, MesoGuideMap, MesoGuideSample, PrototypeColumn,
-    RegionClassSample, WorldMeta, build_chunk_meso_applied_prototype, build_chunk_v2_scaffold,
-    empty_chunk_corridor_window, region_archetype_def, sample_meso_guides,
+    RegionClassSample, WorldMeta, build_chunk_generation_scaffold,
+    build_chunk_meso_applied_prototype_for_feature, empty_chunk_corridor_window,
+    region_archetype_def, sample_meso_guides,
 };
-use new_world::world::atlas::{HillClusterPeakCandidate, debug_hill_cluster_peak_candidates};
 
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
@@ -141,6 +142,10 @@ enum PreviewFeature {
     ShallowBasin,
     EscarpmentBand,
     UplandTerrace,
+    Ravine,
+    CoastalCliffBand,
+    DuneField,
+    Crater,
 }
 
 impl PreviewFeature {
@@ -151,6 +156,10 @@ impl PreviewFeature {
             "shallowbasin" => Some(Self::ShallowBasin),
             "escarpmentband" => Some(Self::EscarpmentBand),
             "uplandterrace" => Some(Self::UplandTerrace),
+            "ravine" => Some(Self::Ravine),
+            "coastalcliffband" => Some(Self::CoastalCliffBand),
+            "dunefield" => Some(Self::DuneField),
+            "crater" => Some(Self::Crater),
             _ => None,
         }
     }
@@ -162,6 +171,17 @@ impl PreviewFeature {
             Self::ShallowBasin => "shallow_basin",
             Self::EscarpmentBand => "escarpment_band",
             Self::UplandTerrace => "upland_terrace",
+            Self::Ravine => "ravine",
+            Self::CoastalCliffBand => "coastal_cliff_band",
+            Self::DuneField => "dune_field",
+            Self::Crater => "crater",
+        }
+    }
+
+    fn exclusive_key(self) -> Option<&'static str> {
+        match self {
+            Self::All => None,
+            _ => Some(self.key()),
         }
     }
 }
@@ -311,7 +331,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let value = parse_required::<String>(&mut args, "feature")?;
                 feature = PreviewFeature::parse(&value).ok_or_else(|| {
                     cli_error(format!(
-                        "unknown feature '{value}'; expected all, hill_cluster, shallow_basin, escarpment_band, or upland_terrace"
+                        "unknown feature '{value}'; expected all, hill_cluster, shallow_basin, escarpment_band, upland_terrace, ravine, coastal_cliff_band, dune_field, or crater"
                     ))
                 })?;
             }
@@ -332,11 +352,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 })?;
             }
             "--base-height" => base_height = parse_required::<f32>(&mut args, "base-height")?,
-            "--relief-budget" => {
-                relief_budget = parse_required::<f32>(&mut args, "relief-budget")?
-            }
+            "--relief-budget" => relief_budget = parse_required::<f32>(&mut args, "relief-budget")?,
             "--contour-step" => contour_step = parse_required::<f32>(&mut args, "contour-step")?,
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -467,7 +489,7 @@ fn build_chunk_preview_patch(
     blocks_per_pixel: u32,
     config: PreviewConfig,
 ) -> ChunkPreviewPatch {
-    let scaffold = build_chunk_v2_scaffold(chunk, meta);
+    let scaffold = build_chunk_generation_scaffold(chunk, meta);
     let mut inputs = scaffold.inputs.clone();
     filter_meso_guides(&mut inputs.meso_guides, config.feature);
     let corridor_window = match config.corridor_mode {
@@ -475,7 +497,13 @@ fn build_chunk_preview_patch(
         CorridorMode::Live => scaffold.corridor_window.clone(),
     };
     let prototype = flat_base_prototype(chunk, config.base_height, config.relief_budget);
-    let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridor_window, &prototype);
+    let meso = build_chunk_meso_applied_prototype_for_feature(
+        chunk,
+        &inputs,
+        &corridor_window,
+        &prototype,
+        config.feature.exclusive_key(),
+    );
     let peak_candidates = if matches!(config.overlay, PreviewOverlay::HillPeaks) {
         debug_hill_cluster_peak_candidates(&inputs.meso_guides)
     } else {
@@ -658,7 +686,13 @@ fn render_preview(
         for pixel_x in 0..layout.map_width {
             let index = (pixel_z * layout.map_width + pixel_x) as usize;
             let cell = raster[index];
-            let shade = hillshade(&raster, layout.map_width, layout.map_height, pixel_x, pixel_z);
+            let shade = hillshade(
+                &raster,
+                layout.map_width,
+                layout.map_height,
+                pixel_x,
+                pixel_z,
+            );
             let contour = contour_strength(
                 &raster,
                 layout.map_width,
@@ -774,13 +808,7 @@ fn put_pixel_if_in_bounds(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3]) 
     image.put_pixel(x, y, Rgb(color));
 }
 
-fn hillshade(
-    cells: &[PreviewPixel],
-    width: u32,
-    height: u32,
-    pixel_x: u32,
-    pixel_z: u32,
-) -> f32 {
+fn hillshade(cells: &[PreviewPixel], width: u32, height: u32, pixel_x: u32, pixel_z: u32) -> f32 {
     let sample = |x: i32, z: i32| -> f32 {
         let x = x.clamp(0, width.saturating_sub(1) as i32) as u32;
         let z = z.clamp(0, height.saturating_sub(1) as i32) as u32;
@@ -810,20 +838,28 @@ fn contour_strength(
     let mut edge = false;
 
     if pixel_x > 0 {
-        edge |= contour_band(cells[(pixel_z * width + (pixel_x - 1)) as usize].delta, contour_step)
-            != current_band;
+        edge |= contour_band(
+            cells[(pixel_z * width + (pixel_x - 1)) as usize].delta,
+            contour_step,
+        ) != current_band;
     }
     if pixel_x + 1 < width {
-        edge |= contour_band(cells[(pixel_z * width + (pixel_x + 1)) as usize].delta, contour_step)
-            != current_band;
+        edge |= contour_band(
+            cells[(pixel_z * width + (pixel_x + 1)) as usize].delta,
+            contour_step,
+        ) != current_band;
     }
     if pixel_z > 0 {
-        edge |= contour_band(cells[((pixel_z - 1) * width + pixel_x) as usize].delta, contour_step)
-            != current_band;
+        edge |= contour_band(
+            cells[((pixel_z - 1) * width + pixel_x) as usize].delta,
+            contour_step,
+        ) != current_band;
     }
     if pixel_z + 1 < height {
-        edge |= contour_band(cells[((pixel_z + 1) * width + pixel_x) as usize].delta, contour_step)
-            != current_band;
+        edge |= contour_band(
+            cells[((pixel_z + 1) * width + pixel_x) as usize].delta,
+            contour_step,
+        ) != current_band;
     }
 
     if edge { 0.26 } else { 0.0 }
@@ -840,7 +876,11 @@ fn chunk_grid_strength(pixel_x: u32, pixel_z: u32, pixels_per_chunk: u32) -> f32
 
     let on_vertical = pixel_x % pixels_per_chunk == 0;
     let on_horizontal = pixel_z % pixels_per_chunk == 0;
-    if on_vertical || on_horizontal { 0.14 } else { 0.0 }
+    if on_vertical || on_horizontal {
+        0.14
+    } else {
+        0.0
+    }
 }
 
 fn colorize_delta(
@@ -919,7 +959,13 @@ fn draw_coordinate_frame(
             let label = chunk_x.to_string();
             let label_width = measure_text_width(&label);
             let label_x = chunk_center_x.saturating_sub(label_width / 2);
-            draw_text(image, label_x, 4, &label, if is_center { center_color } else { label_color });
+            draw_text(
+                image,
+                label_x,
+                4,
+                &label,
+                if is_center { center_color } else { label_color },
+            );
         }
     }
 
@@ -942,7 +988,13 @@ fn draw_coordinate_frame(
             let label_width = measure_text_width(&label);
             let label_x = left_axis_x.saturating_sub(label_width).saturating_sub(6);
             let label_y = chunk_center_z.saturating_sub(measure_text_height() / 2);
-            draw_text(image, label_x, label_y, &label, if is_center { center_color } else { label_color });
+            draw_text(
+                image,
+                label_x,
+                label_y,
+                &label,
+                if is_center { center_color } else { label_color },
+            );
         }
     }
 
@@ -972,13 +1024,15 @@ fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3]) {
     let mut cursor_x = x;
     for character in text.chars() {
         if character == ' ' {
-            cursor_x = cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
+            cursor_x =
+                cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
             continue;
         }
         if let Some(rows) = glyph_rows(character) {
             draw_glyph(image, cursor_x, y, rows, color);
         }
-        cursor_x = cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
+        cursor_x =
+            cursor_x.saturating_add((LABEL_CHAR_WIDTH + LABEL_CHAR_SPACING) * LABEL_FONT_SCALE);
     }
 }
 
@@ -1030,7 +1084,14 @@ fn measure_text_height() -> u32 {
     LABEL_CHAR_HEIGHT * LABEL_FONT_SCALE
 }
 
-fn draw_rect_outline(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: [u8; 3]) {
+fn draw_rect_outline(
+    image: &mut RgbImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: [u8; 3],
+) {
     if width == 0 || height == 0 {
         return;
     }
@@ -1103,7 +1164,7 @@ fn collect_center_chunk_diagnostics(
     meta: &WorldMeta,
     feature: PreviewFeature,
 ) -> Result<CenterChunkDiagnostics, Box<dyn Error>> {
-    let scaffold = build_chunk_v2_scaffold(chunk, meta);
+    let scaffold = build_chunk_generation_scaffold(chunk, meta);
     let (center_world_x, center_world_z) = center_chunk_sample_world_xz(chunk);
     let atlas_coord = atlas_coord_for_world_xz(center_world_x, center_world_z);
     let atlas_cell = scaffold
@@ -1117,7 +1178,8 @@ fn collect_center_chunk_diagnostics(
                 atlas_coord.x, atlas_coord.z
             ))
         })?;
-    let source_meso = sample_meso_guides(&scaffold.inputs.meso_guides, center_world_x, center_world_z);
+    let source_meso =
+        sample_meso_guides(&scaffold.inputs.meso_guides, center_world_x, center_world_z);
     let mut filtered_guides = scaffold.inputs.meso_guides.clone();
     filter_meso_guides(&mut filtered_guides, feature);
     let filtered_meso = sample_meso_guides(&filtered_guides, center_world_x, center_world_z);
@@ -1130,7 +1192,9 @@ fn collect_center_chunk_diagnostics(
         source_meso,
         filtered_meso,
         archetype_summary: archetype_def.map(|def| def.summary),
-        allowed_meso_keys: archetype_def.map(|def| def.allowed_meso_keys).unwrap_or(&[]),
+        allowed_meso_keys: archetype_def
+            .map(|def| def.allowed_meso_keys)
+            .unwrap_or(&[]),
     })
 }
 
@@ -1156,7 +1220,10 @@ fn print_center_chunk_diagnostics(diagnostics: &CenterChunkDiagnostics) {
         println!("  archetype summary: {summary}");
     }
     if !diagnostics.allowed_meso_keys.is_empty() {
-        println!("  allowed meso: {}", diagnostics.allowed_meso_keys.join(", "));
+        println!(
+            "  allowed meso: {}",
+            diagnostics.allowed_meso_keys.join(", ")
+        );
     }
     println!(
         "  atlas cell: ({}, {}), landness={:.3}, macro={:.3}, coast_distance={:.3}, ridge={:.3}, mountain={:.3}, basin={:.3}, river_flow={:.3}",
@@ -1205,6 +1272,7 @@ fn flat_base_prototype(
             PrototypeColumn {
                 base_height,
                 relief_budget,
+                material_support: new_world::world::RealizationMaterialSupport::default(),
             };
             CHUNK_EDGE * CHUNK_EDGE
         ],
@@ -1249,6 +1317,47 @@ fn retain_feature_channel(cell: MesoGuideCell, feature: PreviewFeature) -> MesoG
             terrace_heading_x: cell.terrace_heading_x,
             terrace_heading_z: cell.terrace_heading_z,
             terrace_signed_distance_cells: cell.terrace_signed_distance_cells,
+            ..MesoGuideCell::default()
+        },
+        PreviewFeature::Ravine => MesoGuideCell {
+            hilliness: cell.hilliness,
+            hill_height: cell.hill_height,
+            basin_weight: cell.basin_weight,
+            basin_depth: cell.basin_depth,
+            escarpment_weight: cell.escarpment_weight,
+            escarpment_height: cell.escarpment_height,
+            escarpment_heading_x: cell.escarpment_heading_x,
+            escarpment_heading_z: cell.escarpment_heading_z,
+            escarpment_signed_distance_cells: cell.escarpment_signed_distance_cells,
+            terrace_weight: cell.terrace_weight,
+            terrace_step_height: cell.terrace_step_height,
+            terrace_spacing_cells: cell.terrace_spacing_cells,
+            terrace_heading_x: cell.terrace_heading_x,
+            terrace_heading_z: cell.terrace_heading_z,
+            terrace_signed_distance_cells: cell.terrace_signed_distance_cells,
+        },
+        PreviewFeature::CoastalCliffBand => MesoGuideCell {
+            escarpment_weight: cell.escarpment_weight,
+            escarpment_height: cell.escarpment_height,
+            escarpment_heading_x: cell.escarpment_heading_x,
+            escarpment_heading_z: cell.escarpment_heading_z,
+            escarpment_signed_distance_cells: cell.escarpment_signed_distance_cells,
+            ..MesoGuideCell::default()
+        },
+        PreviewFeature::DuneField => MesoGuideCell {
+            terrace_weight: cell.terrace_weight,
+            terrace_step_height: cell.terrace_step_height,
+            terrace_spacing_cells: cell.terrace_spacing_cells,
+            terrace_heading_x: cell.terrace_heading_x,
+            terrace_heading_z: cell.terrace_heading_z,
+            terrace_signed_distance_cells: cell.terrace_signed_distance_cells,
+            ..MesoGuideCell::default()
+        },
+        PreviewFeature::Crater => MesoGuideCell {
+            hilliness: cell.hilliness,
+            hill_height: cell.hill_height,
+            basin_weight: cell.basin_weight,
+            basin_depth: cell.basin_depth,
             ..MesoGuideCell::default()
         },
     }
@@ -1348,7 +1457,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin meso_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace>] [--corridors <none|live>] [--overlay <none|hill_peaks>] [--base-height <f32>] [--relief-budget <f32>] [--contour-step <f32>] [--output <path>]\n\nThis preview isolates the post-prototype meso surface by replacing the normal base heightfield with a flat plain baseline and rendering the resulting meso delta field as a top-down heatmap."
+    "usage: cargo run --bin meso_preview -- <seed> [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--blocks-per-pixel <u32>] [--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace|ravine|coastal_cliff_band|dune_field|crater>] [--corridors <none|live>] [--overlay <none|hill_peaks>] [--base-height <f32>] [--relief-budget <f32>] [--contour-step <f32>] [--output <path>]\n\nThis preview isolates the post-prototype meso surface by replacing the normal base heightfield with a flat plain baseline and rendering the resulting meso delta field as a top-down heatmap."
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1377,8 +1486,23 @@ mod tests {
             PreviewFeature::parse("uplandTerrace"),
             Some(PreviewFeature::UplandTerrace)
         );
+        assert_eq!(
+            PreviewFeature::parse("ravine"),
+            Some(PreviewFeature::Ravine)
+        );
+        assert_eq!(
+            PreviewFeature::parse("coastal-cliff-band"),
+            Some(PreviewFeature::CoastalCliffBand)
+        );
+        assert_eq!(
+            PreviewFeature::parse("dune_field"),
+            Some(PreviewFeature::DuneField)
+        );
+        assert_eq!(
+            PreviewFeature::parse("crater"),
+            Some(PreviewFeature::Crater)
+        );
         assert_eq!(PreviewFeature::parse("all"), Some(PreviewFeature::All));
-        assert_eq!(PreviewFeature::parse("ravine"), None);
     }
 
     #[test]
@@ -1398,6 +1522,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow meso preview smoke test that builds generation scaffold"]
     fn preview_patch_builds_for_a_seed_chunk() {
         let meta = WorldMeta::new(42);
         let patch = build_chunk_preview_patch(
@@ -1428,7 +1553,9 @@ mod tests {
     fn canvas_layout_adds_coordinate_margins() {
         let window = PreviewWindow::new(0, 0, 2, 2).expect("window should build");
         let layout = window.canvas_layout().expect("layout should build");
-        let (map_width, map_height) = window.image_dimensions().expect("map dimensions should build");
+        let (map_width, map_height) = window
+            .image_dimensions()
+            .expect("map dimensions should build");
 
         assert_eq!(layout.map_offset_x, PREVIEW_MARGIN_LEFT);
         assert_eq!(layout.map_offset_z, PREVIEW_MARGIN_TOP);

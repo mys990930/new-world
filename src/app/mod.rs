@@ -1,14 +1,14 @@
-mod config;
-mod minimap;
-mod state;
 mod bootstrap;
 mod bridge;
 mod bridge_input;
 mod bridge_scene;
 mod bridge_ui;
+mod config;
 mod fixed;
 mod frame;
+mod minimap;
 mod runner;
+mod state;
 mod ui;
 
 pub use config::AppConfig;

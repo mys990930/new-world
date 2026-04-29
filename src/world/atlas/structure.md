@@ -53,8 +53,13 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 
 ## 현재 스캐폴드 계약
 
-- current drainage scaffold now emits initial trunk/tributary river paths from generated mountain chains.
-- current drainage nodes now include a first explicit confluence-solving pass that snaps tributary outlets onto nearby downstream segments inside the requested area.
+- current drainage scaffold now treats each spawned major drainage basin as having one primary trunk rather than emitting mirrored equal-status trunks from both sides of the same mountain chain anchor.
+- current drainage nodes now include an explicit confluence-solving pass that snaps tributary outlets onto nearby downstream segments inside the requested area.
+- after confluence snapping, a non-crossing cleanup pass now truncates subordinate branches at the first detected junction so launch-scale rivers merge instead of crossing through each other.
+- drainage ownership is now solved on the expanded structure sample before the result is cropped back to the requested area, so river segments carry deterministic ownership metadata derived from a wider local tree instead of from the strict visible crop alone.
+- each `RiverPathSegment` now carries `basin_id`, `main_stem_river_id`, and `parent_river_id`.
+- `main_stem_river_id` currently means the first visible trunk ancestor inside the sampled structure window, not a global world-basin polygon id.
+- `parent_river_id` is optional and only guaranteed when the immediate confluence or merge target was visible inside the sampled structure window.
 - pass-outlet and sink solving still remain later steps.
 - river path segments now also carry downstream progress ranges so chunk generation can recover branch progress from the nearest segment projection.
 - this structure graph should stay macro and directional. Smaller multi-chunk terrain identity such as hill groups, cliff bands, or local basins is expected to come from a later meso layer rather than from overloading mountain/drainage segments.
@@ -75,6 +80,13 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 3. 그 결과로 `distance-to-ridge`, `along-ridge`, `distance-to-channel`, `along-channel` 같은 chunk-local guide를 만든다.
 4. ridge, valley, floodplain, wetted channel은 이 guide를 바탕으로 현실화한다.
 5. local noise는 구조를 뒤집지 않고 표면 디테일만 추가한다.
+
+## Visible Guide Suppression
+
+- mountain spine segments and river path segments are structural guides, not final visible polylines.
+- generation may preserve their long-range direction, ownership, and downstream continuity, but the final terrain must not reveal raw segment chords as straight cuts or repeated smooth curves.
+- chunk stages should convert skeleton geometry into broad envelopes first, then use world-space warping, branch-stable variation, confluence-aware blending, shoulders, benches, and material deposition to make the visible form terrain-like.
+- confluence snapping and crossing cleanup are topology constraints. Their snapped points must be softened downstream so they do not become obvious angular artifacts.
 
 ## Structure Region Unit
 
@@ -118,7 +130,7 @@ atlas_structure_regions_covering_area(area: AtlasArea) -> Vec<AtlasStructureRegi
 ## 현재 구현 메모
 
 - 현재 코드는 region-based deterministic mountain chain 위에서 초기 drainage graph까지 함께 생성하는 단계다.
-- drainage는 chain anchor 양옆 또는 결정된 한쪽에서 시작하는 trunk/tributary path를 만들지만, 아직 confluence solving이나 chunk realization 연결은 하지 않는다.
+- drainage는 launch scope에서 basin당 하나의 주 trunk를 우선 만들고, tributary는 그 trunk나 더 강한 기존 branch에 붙도록 정리한다.
 - downstream progress는 이제 generation이 river stage와 water-surface bias에 직접 사용할 수 있도록 segment에 기록된다.
 
-- confluence, pass outlet, sink 같은 더 풍부한 drainage topology는 아직 다음 단계로 남아 있다.
+- distributary/delta exception은 아직 구조 단계에 도입하지 않았다. 현재 inland launch scope에서는 큰 줄기는 합류할 수는 있어도 서로 교차하거나 다시 분기하지 않는 tree-like drainage를 목표로 한다.

@@ -4,8 +4,8 @@ use crate::simulation::{
     LocalClimateDisplay, LocalClimateState, display_local_climate, evaluate_local_climate,
 };
 use crate::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, LocalWeatherState, RegionClassSample, WorldCalendar,
-    WorldCore, CHUNK_EDGE_I32,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCoord, CHUNK_EDGE_I32, LocalWeatherState, RegionClassSample,
+    WorldCalendar, WorldCore,
 };
 
 #[derive(Resource, Debug, Clone, PartialEq, Default)]
@@ -28,14 +28,12 @@ impl LocalEnvironmentStatus {
         self.current
     }
 
-    pub fn refresh_from_world(
-        &mut self,
-        player_translation: Option<[f32; 3]>,
-        world: &WorldCore,
-    ) {
+    pub fn refresh_from_world(&mut self, player_translation: Option<[f32; 3]>, world: &WorldCore) {
         self.current = player_translation.map(|translation| {
             let atlas_coord = atlas_coord_for_translation(translation);
-            let region = world.sample_region_class_atlas(atlas_coord);
+            let region = world
+                .sample_cached_region_class_atlas(atlas_coord)
+                .unwrap_or_else(RegionClassSample::default);
             let calendar = *world.calendar();
             let weather = world.local_weather(atlas_coord).unwrap_or_else(|| {
                 LocalWeatherState::clear(
@@ -76,7 +74,8 @@ mod tests {
     use crate::world::{BlockRegistry, WorldMeta};
 
     fn test_world() -> WorldCore {
-        let registry = Arc::new(BlockRegistry::load_default().expect("default registry should load"));
+        let registry =
+            Arc::new(BlockRegistry::load_default().expect("default registry should load"));
         WorldCore::new(WorldMeta::new(42), registry)
     }
 

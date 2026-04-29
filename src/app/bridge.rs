@@ -1,4 +1,6 @@
-use crate::renderer::{ChunkCoord as RenderChunkCoord, RenderCameraState, RenderCubeInstance, RenderUiSprite};
+use crate::renderer::{
+    ChunkCoord as RenderChunkCoord, RenderCameraState, RenderCubeInstance, RenderUiSprite,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppRenderFrameData {

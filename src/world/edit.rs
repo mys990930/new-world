@@ -3,7 +3,10 @@ use super::coord::{ChunkCoord, LocalBlockCoord, WorldBlockCoord, world_to_chunk_
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorldEdit {
-    SetBlock { pos: WorldBlockCoord, block: BlockId },
+    SetBlock {
+        pos: WorldBlockCoord,
+        block: BlockId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

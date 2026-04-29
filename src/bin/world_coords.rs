@@ -41,8 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     println!(
         "default preview center: ({}, {})",
-        manifest.default_preview_center[0],
-        manifest.default_preview_center[1]
+        manifest.default_preview_center[0], manifest.default_preview_center[1]
     );
     println!("top stack candidates:");
 

@@ -1,17 +1,25 @@
+﻿use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use new_world::world::{
-    ChunkCoord, WorldCore, WorldMeta, BlockRegistry, generate_chunk,
+    BlockRegistry, ChunkCoord, ChunkGenerationInputs, WorldMeta,
+    build_chunk_generation_voxelization_plan, chunk_generation_input_area,
+    generate_chunk_from_voxelization_plan, prepare_chunk_generation_inputs,
 };
 
 #[path = "shared/world_dump_common.rs"]
 mod world_dump_common;
 
-use world_dump_common::{CreatedWorldStackSummary, CreatedWorldManifest, save_chunk_to_dump, summarize_stack, write_manifest};
+use world_dump_common::{
+    CreatedWorldManifest, CreatedWorldStackSummary, save_chunk_to_dump,
+    summarize_stack_from_voxelization_plan, write_manifest,
+};
 
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
@@ -42,7 +50,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--radius" => radius = parse_required::<i32>(&mut args, "radius")?,
             "--min-y-chunk" => min_y_chunk = parse_required::<i32>(&mut args, "min-y-chunk")?,
             "--max-y-chunk" => max_y_chunk = parse_required::<i32>(&mut args, "max-y-chunk")?,
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -68,29 +80,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     let min_chunk = ChunkCoord(center_x - radius, min_y_chunk, center_z - radius);
     let max_chunk = ChunkCoord(center_x + radius, max_y_chunk, center_z + radius);
 
-    let mut stack_summaries = Vec::new();
+    let stack_coords = stack_xz_coords(min_chunk, max_chunk);
+    let input_cache = Arc::new(WorldCreateInputCache::for_stacks(&meta, &stack_coords));
+    let generated_stacks = stack_coords
+        .into_par_iter()
+        .map(|(chunk_x, chunk_z)| {
+            generate_stack(
+                chunk_x,
+                chunk_z,
+                min_chunk.1,
+                max_chunk.1,
+                input_cache.as_ref(),
+                block_registry.as_ref(),
+                output.as_path(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut stack_summaries = Vec::with_capacity(generated_stacks.len());
     let mut best_stack: Option<CreatedWorldStackSummary> = None;
 
-    for chunk_z in min_chunk.2..=max_chunk.2 {
-        for chunk_x in min_chunk.0..=max_chunk.0 {
-            let mut stack_world = WorldCore::new(meta, Arc::clone(&block_registry));
-
-            for chunk_y in min_chunk.1..=max_chunk.1 {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let chunk = generate_chunk(coord, stack_world.meta(), block_registry.as_ref());
-                save_chunk_to_dump(&output, &chunk)?;
-                stack_world.insert_chunk(coord, chunk);
-            }
-
-            let summary = summarize_stack(&stack_world, chunk_x, chunk_z, min_chunk.1, max_chunk.1);
-            if best_stack
-                .map(|current| summary.score > current.score)
-                .unwrap_or(true)
-            {
-                best_stack = Some(summary);
-            }
-            stack_summaries.push(summary);
+    for generated in generated_stacks {
+        let summary = generated.map_err(cli_error)?;
+        if best_stack
+            .map(|current| summary.score > current.score)
+            .unwrap_or(true)
+        {
+            best_stack = Some(summary);
         }
+        stack_summaries.push(summary);
     }
 
     stack_summaries.sort_by(|left, right| {
@@ -141,6 +159,100 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct WorldCreateInputCacheKey {
+    origin_x: i32,
+    origin_z: i32,
+    width: u32,
+    height: u32,
+}
+
+impl WorldCreateInputCacheKey {
+    fn for_chunk(coord: ChunkCoord) -> Self {
+        let area = chunk_generation_input_area(coord);
+
+        Self {
+            origin_x: area.origin().x,
+            origin_z: area.origin().z,
+            width: area.width(),
+            height: area.height(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WorldCreateInputCache {
+    entries: HashMap<WorldCreateInputCacheKey, ChunkGenerationInputs>,
+}
+
+impl WorldCreateInputCache {
+    fn for_stacks(meta: &WorldMeta, stack_coords: &[(i32, i32)]) -> Self {
+        let mut representatives = HashMap::<WorldCreateInputCacheKey, ChunkCoord>::new();
+        for &(chunk_x, chunk_z) in stack_coords {
+            let coord = ChunkCoord(chunk_x, 0, chunk_z);
+            representatives
+                .entry(WorldCreateInputCacheKey::for_chunk(coord))
+                .or_insert(coord);
+        }
+
+        let entries = representatives
+            .into_par_iter()
+            .map(|(key, coord)| (key, prepare_chunk_generation_inputs(coord, meta)))
+            .collect::<HashMap<_, _>>();
+
+        Self { entries }
+    }
+
+    fn inputs_for_chunk(&self, coord: ChunkCoord) -> ChunkGenerationInputs {
+        let key = WorldCreateInputCacheKey::for_chunk(coord);
+        let mut inputs = self
+            .entries
+            .get(&key)
+            .expect("world-create input cache should cover every requested stack")
+            .clone();
+        inputs.chunk = coord;
+        inputs
+    }
+}
+
+fn stack_xz_coords(min_chunk: ChunkCoord, max_chunk: ChunkCoord) -> Vec<(i32, i32)> {
+    let mut coords = Vec::new();
+    for chunk_z in min_chunk.2..=max_chunk.2 {
+        for chunk_x in min_chunk.0..=max_chunk.0 {
+            coords.push((chunk_x, chunk_z));
+        }
+    }
+    coords
+}
+
+fn generate_stack(
+    chunk_x: i32,
+    chunk_z: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+    input_cache: &WorldCreateInputCache,
+    block_registry: &BlockRegistry,
+    output: &std::path::Path,
+) -> Result<CreatedWorldStackSummary, String> {
+    let plan_coord = ChunkCoord(chunk_x, 0, chunk_z);
+    let inputs = input_cache.inputs_for_chunk(plan_coord);
+    let voxelization = build_chunk_generation_voxelization_plan(&inputs);
+
+    for chunk_y in min_y_chunk..=max_y_chunk {
+        let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
+        let chunk = generate_chunk_from_voxelization_plan(coord, &voxelization, block_registry);
+        save_chunk_to_dump(output, &chunk).map_err(|error| error.to_string())?;
+    }
+
+    Ok(summarize_stack_from_voxelization_plan(
+        &voxelization,
+        chunk_x,
+        chunk_z,
+        min_y_chunk,
+        max_y_chunk,
+    ))
 }
 
 fn parse_required<T>(args: &mut Vec<String>, label: &str) -> Result<T, Box<dyn Error>>

@@ -1,4 +1,4 @@
-# region_catalog
+﻿# region_catalog
 
 ## Role
 
@@ -8,7 +8,7 @@
 
 ## Status
 
-- the launch taxonomy and launch `RegionArchetype` set in this file are authoritative for V2 planning
+- the launch taxonomy and launch `RegionArchetype` set in this file are authoritative for current generation planning
 - `src/world/atlas/region/catalog.md` mirrors the same launch pool as the implementation-facing index
 - extended and deferred candidates may still change until their waves are explicitly promoted
 
@@ -229,7 +229,7 @@ Examples:
 ## Locked RegionArchetype Candidate Pool
 
 Region archetypes combine one locked `BiomeFamily` with one locked `TerrainFormFamily` into a playable regional identity. The pool below is now scaffolded in per-type modules and docs.
-The launch set below is now locked for the first V2 implementation wave.
+The launch set below is now locked for the first current generation implementation wave.
 
 ### Launch
 
@@ -394,8 +394,9 @@ Wave 1 Extension stays documented, but each feature must still be explicitly pro
 - every scaffolded archetype now carries an initial meso allowance stub inside its per-type module and markdown file
 - those stub allowances are intentionally provisional until the per-archetype matrix is published
 - launch-now default expectation remains the Wave 1 Core subset unless an archetype document explicitly promotes a later feature
-- the current V2 meso implementation now uses those same `allowed_meso_keys` stubs as a temporary runtime gate for the Wave 1 Core subset until the authoritative matrix is locked
+- the current current generation meso implementation now uses those same `allowed_meso_keys` stubs as a temporary runtime gate for the Wave 1 Core subset until the authoritative matrix is locked
 - `glaciated_alpine` and `desert_dune_field` intentionally keep launch meso empty or nearly empty because prototype solving must own their primary landform identity first
+- `ravine` is a sparse erosion feature rather than a generic lowland accent; broad launch fallback targets such as ordinary plains, saturated lowlands, and rainforest lowlands should not allow it by default
 - the next planning pass should lock:
   - which meso features remain legal per archetype
   - which launch archetypes need stricter or broader meso sets

@@ -1,0 +1,9 @@
+id = 31
+key = "jungle_grass"
+solid = true
+opaque = true
+render = "cube"
+material = "grass"
+top = "jungle_grass_top"
+bottom = "dirt"
+side = "jungle_grass_side"

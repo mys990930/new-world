@@ -2,8 +2,8 @@ use bevy_ecs::prelude::{Component, Entity, Query, Res, ResMut, Resource, With, W
 
 use super::camera::CameraState;
 use super::command::MoveWorldIntent;
-use super::inventory::PlayerInventory;
 use super::input::EcsInputSnapshot;
+use super::inventory::PlayerInventory;
 use crate::world::{CHUNK_EDGE_I32, WorldBlockCoord, WorldCore};
 
 const COLLISION_EPSILON: f32 = 0.001;
@@ -167,16 +167,12 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
     }
 
     let movement = *ecs_world.resource::<PlayerMovementConfig>();
-    let mut query = ecs_world
-        .query_filtered::<
-            (
-                &mut Transform,
-                &mut Velocity,
-                &PlayerBody,
-                &mut PlayerPhysicsState,
-            ),
-            With<Player>,
-        >();
+    let mut query = ecs_world.query_filtered::<(
+        &mut Transform,
+        &mut Velocity,
+        &PlayerBody,
+        &mut PlayerPhysicsState,
+    ), With<Player>>();
     let Ok((mut transform, mut velocity, body, mut physics)) = query.get_mut(ecs_world, entity)
     else {
         return;
@@ -210,7 +206,8 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
             velocity.linear[1] = 0.0;
         }
     } else {
-        velocity.linear[1] = (velocity.linear[1] - movement.gravity_units_per_second_sq * frame_delta)
+        velocity.linear[1] = (velocity.linear[1]
+            - movement.gravity_units_per_second_sq * frame_delta)
             .max(-movement.terminal_fall_speed);
     }
 
@@ -241,24 +238,19 @@ pub(crate) fn place_local_player_on_surface(
         return false;
     };
 
-    let mut query = ecs_world
-        .query_filtered::<
-            (
-                &mut Transform,
-                &mut Velocity,
-                &PlayerBody,
-                &mut PlayerPhysicsState,
-            ),
-            With<Player>,
-        >();
+    let mut query = ecs_world.query_filtered::<(
+        &mut Transform,
+        &mut Velocity,
+        &PlayerBody,
+        &mut PlayerPhysicsState,
+    ), With<Player>>();
     let Ok((mut transform, mut velocity, body, mut physics)) = query.get_mut(ecs_world, entity)
     else {
         return false;
     };
 
     let body = *body;
-    let highest_center_y =
-        ((max_chunk.1 + 1) * CHUNK_EDGE_I32) as f32 + body.half_extents[1] + 2.0;
+    let highest_center_y = ((max_chunk.1 + 1) * CHUNK_EDGE_I32) as f32 + body.half_extents[1] + 2.0;
     let lowest_center_y = (min_chunk.1 * CHUNK_EDGE_I32) as f32 + body.half_extents[1];
 
     let mut center_y = highest_center_y.floor();
@@ -274,6 +266,33 @@ pub(crate) fn place_local_player_on_surface(
     }
 
     false
+}
+
+pub(crate) fn stage_local_player_for_chunk_loading(
+    ecs_world: &mut World,
+    anchor_xz: [f32; 2],
+    max_chunk_y: i32,
+) -> bool {
+    let Some(entity) = ecs_world.resource::<LocalPlayerEntity>().0 else {
+        return false;
+    };
+
+    let mut query = ecs_world.query_filtered::<(
+        &mut Transform,
+        &mut Velocity,
+        &PlayerBody,
+        &mut PlayerPhysicsState,
+    ), With<Player>>();
+    let Ok((mut transform, mut velocity, body, mut physics)) = query.get_mut(ecs_world, entity)
+    else {
+        return false;
+    };
+
+    let loading_y = ((max_chunk_y + 1) * CHUNK_EDGE_I32) as f32 + body.half_extents[1] + 2.0;
+    transform.translation = [anchor_xz[0], loading_y, anchor_xz[1]];
+    velocity.linear = [0.0, 0.0, 0.0];
+    physics.grounded = false;
+    true
 }
 
 fn horizontal_motion_delta(velocity: [f32; 3], speed: f32, frame_delta: f32) -> [f32; 2] {
@@ -298,9 +317,9 @@ fn move_horizontally_with_step_up(
     body: PlayerBody,
     max_step_height: f32,
 ) -> [f32; 3] {
-    let distance =
-        (horizontal_delta[0] * horizontal_delta[0] + horizontal_delta[1] * horizontal_delta[1])
-            .sqrt();
+    let distance = (horizontal_delta[0] * horizontal_delta[0]
+        + horizontal_delta[1] * horizontal_delta[1])
+        .sqrt();
     let steps = sweep_steps(distance);
     let step = [
         horizontal_delta[0] / steps as f32,
@@ -357,12 +376,7 @@ fn try_step_up(
     None
 }
 
-fn settle_down(
-    world: &WorldCore,
-    start: [f32; 3],
-    body: PlayerBody,
-    max_drop: f32,
-) -> [f32; 3] {
+fn settle_down(world: &WorldCore, start: [f32; 3], body: PlayerBody, max_drop: f32) -> [f32; 3] {
     let steps = sweep_steps(max_drop);
     let step = max_drop / steps as f32;
     let mut position = start;
@@ -534,10 +548,36 @@ mod tests {
         let entity = spawn_default_player(&mut ecs_world);
         let world = solid_world();
 
-        assert!(place_local_player_on_surface(&mut ecs_world, &world, [16.0, 16.0]));
+        assert!(place_local_player_on_surface(
+            &mut ecs_world,
+            &world,
+            [16.0, 16.0]
+        ));
 
         let transform = ecs_world.get::<Transform>(entity).copied().unwrap();
         assert!((transform.translation[1] - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn stage_local_player_for_chunk_loading_moves_player_to_anchor() {
+        let mut ecs_world = World::new();
+        ecs_world.insert_resource(LocalPlayerEntity::default());
+        let entity = spawn_default_player(&mut ecs_world);
+
+        assert!(stage_local_player_for_chunk_loading(
+            &mut ecs_world,
+            [80.0, -48.0],
+            3,
+        ));
+
+        let transform = ecs_world.get::<Transform>(entity).copied().unwrap();
+        let physics = ecs_world
+            .get::<PlayerPhysicsState>(entity)
+            .copied()
+            .unwrap();
+
+        assert_eq!(transform.translation, [80.0, 132.0, -48.0]);
+        assert!(!physics.grounded);
     }
 
     #[test]
@@ -574,23 +614,13 @@ mod tests {
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 
         let body = PlayerBody::default();
-        let climbed = move_horizontally_with_step_up(
-            &world,
-            [16.0, 3.0, 16.0],
-            [3.0, 0.0],
-            body,
-            1.0,
-        );
+        let climbed =
+            move_horizontally_with_step_up(&world, [16.0, 3.0, 16.0], [3.0, 0.0], body, 1.0);
         assert!(climbed[0] > 18.0);
         assert!(climbed[1] > 3.0);
 
-        let blocked = move_horizontally_with_step_up(
-            &world,
-            [20.0, 3.0, 20.5],
-            [4.0, 0.0],
-            body,
-            1.0,
-        );
+        let blocked =
+            move_horizontally_with_step_up(&world, [20.0, 3.0, 20.5], [4.0, 0.0], body, 1.0);
         assert!(blocked[0] < 23.0);
     }
 }

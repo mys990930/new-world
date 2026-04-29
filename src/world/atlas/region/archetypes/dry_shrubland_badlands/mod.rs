@@ -1,5 +1,5 @@
+﻿use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
-use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::DryShrublandBadlands,
@@ -7,7 +7,7 @@ pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     terrain_form_family: TerrainFormFamily::Badlands,
     summary: "Dry eroded badlands with sparse scrub pockets and exposed sediment ribs.",
     regional_traits: &[
-        "Planning stub: erosion-driven shape rules still need a dedicated V2 terrain pass.",
+        "Planning stub: erosion-driven shape rules still need a dedicated generation terrain pass.",
         "This archetype should later lock sharper sediment ownership and runoff responses.",
     ],
     ecology_notes: &[

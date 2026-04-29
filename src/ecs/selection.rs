@@ -1,12 +1,10 @@
 use bevy_ecs::prelude::Resource;
 
-use super::camera::{
-    CameraState, quarter_view_camera_pose, quarter_view_vertical_world_size,
-};
+use super::camera::{CameraState, quarter_view_camera_pose, quarter_view_vertical_world_size};
+use super::input::EcsInputSnapshot;
 use super::inventory::{
     BUILD_REACH_BLOCKS, ManipulationMode, PlayerInventory, ToolCatalog, ToolPreviewShape,
 };
-use super::input::EcsInputSnapshot;
 use super::player::Transform;
 use crate::world::{BlockFace, Ray3, WorldBlockCoord, WorldCore};
 
@@ -118,8 +116,10 @@ pub fn update_selection_from_world(
                 }
                 ManipulationMode::Build => {
                     let preview_block = adjacent_block(hit.block, hit.face);
-                    if distance3(player_transform.translation, preview_block_center(preview_block))
-                        <= BUILD_REACH_BLOCKS
+                    if distance3(
+                        player_transform.translation,
+                        preview_block_center(preview_block),
+                    ) <= BUILD_REACH_BLOCKS
                         && world
                             .get_block(preview_block)
                             .is_some_and(|block_id| block_id.is_air())
@@ -182,11 +182,9 @@ fn build_interaction_preview_blocks(
     }
 }
 
-fn preview_if_existing(
-    world: &WorldCore,
-    block: WorldBlockCoord,
-) -> Option<SelectionPreviewBlock> {
-    world.get_block(block)
+fn preview_if_existing(world: &WorldCore, block: WorldBlockCoord) -> Option<SelectionPreviewBlock> {
+    world
+        .get_block(block)
         .filter(|block_id| !block_id.is_air())
         .map(|_| SelectionPreviewBlock { block })
 }
@@ -222,7 +220,11 @@ fn adjacent_block(block: WorldBlockCoord, face: BlockFace) -> WorldBlockCoord {
 }
 
 fn preview_block_center(block: WorldBlockCoord) -> [f32; 3] {
-    [block.0 as f32 + 0.5, block.1 as f32 + 0.5, block.2 as f32 + 0.5]
+    [
+        block.0 as f32 + 0.5,
+        block.1 as f32 + 0.5,
+        block.2 as f32 + 0.5,
+    ]
 }
 
 fn distance3(left: [f32; 3], right: [f32; 3]) -> f32 {
@@ -241,10 +243,15 @@ mod tests {
 
     #[test]
     fn center_cursor_hits_top_face_of_block_under_player() {
-        let registry = Arc::new(BlockRegistry::load_default().expect("default registry should load"));
+        let registry =
+            Arc::new(BlockRegistry::load_default().expect("default registry should load"));
         let mut world = WorldCore::new(WorldMeta::default(), registry);
         let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
-        chunk.set_block(LocalBlockCoord::new(2, 0, 3).unwrap(), crate::world::BlockId::GRASS)
+        chunk
+            .set_block(
+                LocalBlockCoord::new(2, 0, 3).unwrap(),
+                crate::world::BlockId::GRASS,
+            )
             .unwrap();
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 

@@ -61,6 +61,7 @@
 
 ### Tropical / monsoon / weathered ground
 
+- `jungle_grass`
 - `laterite`
 
 ---
@@ -91,7 +92,7 @@
 
 ### Tropical Rainforest / Monsoon
 
-- base: `humus`, `leaf_litter`, `dirt`, `mud`, `clay`
+- base: `jungle_grass`, `humus`, `leaf_litter`, `dirt`, `mud`, `clay`
 - wet ground: `mud`, `clay`, `peat`
 - stream-adjacent: `silt`, `mud`, `water`
 - degraded / exposed spots: `dirt`, `laterite`
@@ -176,10 +177,10 @@
 - `mud`, `clay`, `dirt`, `water`, `snow`, `peat`, `silt`
 
 #### `tropical_rainforest_lowland`
-- `humus`, `leaf_litter`, `dirt`, `mud`, `clay`, `laterite`, `peat`
+- `jungle_grass`, `humus`, `leaf_litter`, `dirt`, `mud`, `clay`, `laterite`, `peat`
 
 #### `tropical_rainforest_hills`
-- `humus`, `leaf_litter`, `dirt`, `mud`, `clay`, `stone`, `laterite`, `exposed_rock`
+- `jungle_grass`, `humus`, `leaf_litter`, `dirt`, `mud`, `clay`, `stone`, `laterite`, `exposed_rock`
 
 #### `glaciated_alpine`
 - `stone`, `gravel`, `scree`, `snow`, `ice`, `moraine`

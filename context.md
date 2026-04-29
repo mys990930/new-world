@@ -1,21 +1,5 @@
 # context.md
 
-## ASCII Addendum
-
-- Atlas remains intentionally macro. One atlas cell is `16 x 16` chunks, which is `512 x 512` blocks or `256m x 256m` at the current block scale.
-- We do not currently plan to shrink atlas just to make local terrain feel more casual.
-- A deterministic region-classification layer should sit between atlas-scale raw fields / skeleton guidance and later meso terrain accents.
-- That region layer should resolve stable biome and terrain-form archetypes from seed-derived atlas inputs before chunk-local heightfield solving.
-- Climate regime should be treated as a derived long-pattern classification built from atlas-scale climate dimensions, not as an unrelated hand-authored biome label.
-- Region archetypes should stay relatively stable across the year, while seasonal biome state such as snow cover, freeze-thaw, wet-season greening, or dry-season browning should derive later from climate regime plus the current world calendar.
-- World should own the source-of-truth calendar, season phase, runtime climate state, and deferred far-region environmental patches.
-- Simulation should advance those values on fixed ticks.
-- ECS should choose the active region around the player and consume local time/season/weather state for gameplay and rendering bridges.
-- Meso should no longer decide the primary local biome identity; it should modulate already-classified regions with several-chunk terrain accents.
-- Current generation-side profiles such as `Coast`, `Plain`, `Upland`, and `Ridge` should be treated as shape operators or realization families, not as the final biome system.
-- The planned terrain stack is now: `atlas raw fields -> atlas skeleton -> region classification -> realization field solve -> river corridor solve -> biome-aware base heightfield -> meso accents -> final hydrology -> material/block fill`.
-- The old V1 chunk generator has been removed; public generation entrypoints now remain only as compile-time TODO stubs until end-to-end V2 chunk realization is implemented.
-
 ## 1. 프로젝트 한줄 개요
 
 이 프로젝트는 **쿼터뷰 복셀 샌드박스 게임**이다.  

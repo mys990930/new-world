@@ -13,6 +13,7 @@
 - `TimingConfig`
 - `preferred_created_world_root: Option<PathBuf>`
 - `created_worlds_dir: Option<PathBuf>`
+- `auto_open_latest_created_world: bool`
 
 ### TimingConfig
 - `target_frame_rate: Option<u32>`
@@ -42,9 +43,10 @@
 - `target_frame_rate = None` means uncapped frame cadence
 - `fixed_tick_rate` must be greater than zero
 - `max_fixed_steps_per_frame` bounds catch-up work
-- `preferred_created_world_root = Some(path)` means bootstrap should try that created world root before scanning the created worlds directory
-- `created_worlds_dir = Some(path)` means bootstrap may scan that directory for the latest created world root
-- `created_worlds_dir = None` disables created-world auto-detection
+- `preferred_created_world_root = Some(path)` means bootstrap should try that created world root before applying any latest-world auto-open policy
+- `created_worlds_dir = Some(path)` means app UI may scan that directory for created-world choices
+- `created_worlds_dir = None` disables created-world menu discovery and latest-world auto-open
+- `auto_open_latest_created_world = true` means bootstrap may scan `created_worlds_dir` and open the latest created world before the menu
 
 ## Non-Responsibilities
 
@@ -63,5 +65,6 @@
 - the current default frame cap is `60 FPS`
 - the current default fixed rate is `20 Hz`
 - the current default `max_fixed_steps_per_frame` is `4`
-- the current default preferred created world is `target/world-create/runtime_seed_42_160_-144`
+- the current default preferred created world is `None`; the main binary should not hardcode a sample created-world root
 - the current default created-world scan directory is `target/world-create`
+- the current default `auto_open_latest_created_world` is `false`, so the main binary starts at the world-select screen even when created worlds already exist

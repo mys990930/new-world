@@ -207,12 +207,7 @@ fn view_from_basis(eye: [f32; 3], basis: RenderViewBasis) -> Result<Matrix4, Cam
         [right[0], up[0], -forward[0], 0.0],
         [right[1], up[1], -forward[1], 0.0],
         [right[2], up[2], -forward[2], 0.0],
-        [
-            -dot3(right, eye),
-            -dot3(up, eye),
-            dot3(forward, eye),
-            1.0,
-        ],
+        [-dot3(right, eye), -dot3(up, eye), dot3(forward, eye), 1.0],
     ])
 }
 
@@ -235,7 +230,12 @@ fn perspective_rh(
         [focal_length / aspect_ratio, 0.0, 0.0, 0.0],
         [0.0, focal_length, 0.0, 0.0],
         [0.0, 0.0, far_plane / (near_plane - far_plane), -1.0],
-        [0.0, 0.0, (near_plane * far_plane) / (near_plane - far_plane), 0.0],
+        [
+            0.0,
+            0.0,
+            (near_plane * far_plane) / (near_plane - far_plane),
+            0.0,
+        ],
     ])
 }
 
@@ -319,13 +319,13 @@ mod tests {
                 vertical_world_size: 5.0,
             },
             basis_override: Some(RenderViewBasis {
-                right: [std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
-                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
-                forward: [
-                    -0.5,
-                    -std::f32::consts::FRAC_1_SQRT_2,
-                    0.5,
+                right: [
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    0.0,
+                    std::f32::consts::FRAC_1_SQRT_2,
                 ],
+                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+                forward: [-0.5, -std::f32::consts::FRAC_1_SQRT_2, 0.5],
             }),
         };
         let projection = CameraProjectionConfig {
@@ -354,7 +354,9 @@ mod tests {
     fn multiply_row_vector(vector: [f32; 4], matrix: Matrix4) -> [f32; 4] {
         let mut result = [0.0; 4];
         for column in 0..4 {
-            result[column] = (0..4).map(|index| vector[index] * matrix[index][column]).sum();
+            result[column] = (0..4)
+                .map(|index| vector[index] * matrix[index][column])
+                .sum();
         }
         result
     }
@@ -372,7 +374,9 @@ mod tests {
         ];
         let mut result = [0.0; 4];
         for row in 0..4 {
-            result[row] = (0..4).map(|index| columns[index][row] * vector[index]).sum();
+            result[row] = (0..4)
+                .map(|index| columns[index][row] * vector[index])
+                .sum();
         }
         result
     }

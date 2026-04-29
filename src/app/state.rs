@@ -21,6 +21,7 @@ pub struct GameApp {
     pub renderer: Renderer,
     pub ui: AppUiState,
     pub minimap: AppMinimapCache,
+    pub pending_player_spawn_anchor: Option<[f32; 2]>,
     pub timing: AppTimingState,
 }
 

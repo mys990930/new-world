@@ -121,10 +121,26 @@ pub(crate) fn domain_warp(
     warp_scale: f64,
     amplitude: f64,
 ) -> (f64, f64) {
-    let dx = (fbm(seed, x * warp_scale, z * warp_scale, 3, 2.0, 0.5, SALT_WARP_X) - 0.5) as f64
+    let dx = (fbm(
+        seed,
+        x * warp_scale,
+        z * warp_scale,
+        3,
+        2.0,
+        0.5,
+        SALT_WARP_X,
+    ) - 0.5) as f64
         * 2.0
         * amplitude;
-    let dz = (fbm(seed, x * warp_scale, z * warp_scale, 3, 2.0, 0.5, SALT_WARP_Z) - 0.5) as f64
+    let dz = (fbm(
+        seed,
+        x * warp_scale,
+        z * warp_scale,
+        3,
+        2.0,
+        0.5,
+        SALT_WARP_Z,
+    ) - 0.5) as f64
         * 2.0
         * amplitude;
     (x + dx, z + dz)

@@ -1,8 +1,8 @@
 use super::chunk::BlockId;
+use super::chunk::ChunkSnapshot;
 use super::coord::{CHUNK_EDGE, CHUNK_EDGE_I32, LocalBlockCoord, WorldBlockCoord};
 use super::core::WorldCore;
 use super::generation::WORLD_FLOOR_Y;
-use super::chunk::ChunkSnapshot;
 use super::registry::{BlockDef, BlockMaterialKind, BlockRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +119,7 @@ pub fn sample_topdown_columns(
         return Vec::new();
     }
 
-    let mut columns =
-        Vec::with_capacity(width_blocks as usize * height_blocks as usize);
+    let mut columns = Vec::with_capacity(width_blocks as usize * height_blocks as usize);
     for z_offset in 0..height_blocks as usize {
         let world_z = min_world_z + z_offset as i32;
         for x_offset in 0..width_blocks as usize {
@@ -179,9 +178,7 @@ pub fn sample_topdown_chunk_column(
     TopdownChunkColumnPatch::new(coord, columns)
 }
 
-pub fn topdown_surface_range(
-    columns: &[TopdownColumnScan],
-) -> Option<TopdownSurfaceRange> {
+pub fn topdown_surface_range(columns: &[TopdownColumnScan]) -> Option<TopdownSurfaceRange> {
     let mut top_cells = columns.iter().filter_map(|cell| cell.visible.top_y);
     let first = top_cells.next()?;
     let mut min_y = first;
@@ -214,8 +211,7 @@ pub fn color_topdown_cell(
     ];
 
     let relief_t = if surface_range.max_y > surface_range.min_y {
-        (top_y - surface_range.min_y) as f32
-            / (surface_range.max_y - surface_range.min_y) as f32
+        (top_y - surface_range.min_y) as f32 / (surface_range.max_y - surface_range.min_y) as f32
     } else {
         0.5
     };
@@ -247,12 +243,14 @@ pub fn topdown_edge_strength_for_cell(
 
     let cell = columns[index].visible;
     match edge {
-        TopdownEdge::Left => {
-            edge_strength(cell, x.checked_sub(1).map(|nx| columns[z * width + nx].visible))
-        }
-        TopdownEdge::Top => {
-            edge_strength(cell, z.checked_sub(1).map(|nz| columns[nz * width + x].visible))
-        }
+        TopdownEdge::Left => edge_strength(
+            cell,
+            x.checked_sub(1).map(|nx| columns[z * width + nx].visible),
+        ),
+        TopdownEdge::Top => edge_strength(
+            cell,
+            z.checked_sub(1).map(|nz| columns[nz * width + x].visible),
+        ),
         TopdownEdge::Right => {
             let right = if x + 1 < width {
                 Some(columns[z * width + (x + 1)].visible)
@@ -485,16 +483,7 @@ mod tests {
             .unwrap();
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 
-        let columns = sample_topdown_columns(
-            &world,
-            registry.as_ref(),
-            0,
-            0,
-            1,
-            1,
-            0,
-            3,
-        );
+        let columns = sample_topdown_columns(&world, registry.as_ref(), 0, 0, 1, 1, 0, 3);
 
         assert_eq!(columns.len(), 1);
         assert_eq!(columns[0].visible.block, BlockId::GRASS);
@@ -503,8 +492,7 @@ mod tests {
 
     #[test]
     fn snow_topdown_color_uses_white_override() {
-        let registry =
-            BlockRegistry::load_default().expect("default registry should load");
+        let registry = BlockRegistry::load_default().expect("default registry should load");
         let snow = registry
             .block(registry.block_id("snow").expect("snow block should exist"))
             .expect("snow definition should exist");

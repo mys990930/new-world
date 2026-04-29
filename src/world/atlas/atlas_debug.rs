@@ -95,8 +95,14 @@ pub fn write_debug_images_with_options_and_tuning(
         ("01_elevation.png", render_elevation(fields, options)),
         ("02_ridge.png", render_ridge(fields, options)),
         ("03_hydrology.png", render_hydrology(fields, options)),
-        ("04_temperature.png", render_temperature(fields, resolved, options)),
-        ("05_humidity.png", render_humidity(fields, resolved, options)),
+        (
+            "04_temperature.png",
+            render_temperature(fields, resolved, options),
+        ),
+        (
+            "05_humidity.png",
+            render_humidity(fields, resolved, options),
+        ),
         ("06_overlay.png", render_overlay(fields, resolved, options)),
         (
             "07_biome_preview.png",
@@ -166,20 +172,33 @@ fn render_hydrology(fields: &AtlasFieldMap, options: AtlasDebugOptions) -> RgbIm
             return [10, 46, 108];
         }
 
-        let mut color = gradient3(cell.macro_elevation, [84, 126, 74], [146, 162, 102], [182, 170, 136]);
+        let mut color = gradient3(
+            cell.macro_elevation,
+            [84, 126, 74],
+            [146, 162, 102],
+            [182, 170, 136],
+        );
         if cell.wetland_factor > 0.52 {
             color = mix(color, [72, 122, 88], 0.55);
         }
         if cell.lake_potential > 0.62 {
             color = [54, 120, 178];
         } else if cell.river_flow_potential > 0.045 {
-            color = mix(color, [56, 122, 208], (cell.riverine_factor * 0.85).clamp(0.0, 0.85));
+            color = mix(
+                color,
+                [56, 122, 208],
+                (cell.riverine_factor * 0.85).clamp(0.0, 0.85),
+            );
         }
         color
     })
 }
 
-fn render_temperature(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, options: AtlasDebugOptions) -> RgbImage {
+fn render_temperature(
+    fields: &AtlasFieldMap,
+    resolved: &AtlasResolvedMap,
+    options: AtlasDebugOptions,
+) -> RgbImage {
     render_map_with_resolved(fields, resolved, options, |cell, resolved, _, _| {
         let base = gradient5(
             cell.temperature,
@@ -197,7 +216,11 @@ fn render_temperature(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, optio
     })
 }
 
-fn render_humidity(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, options: AtlasDebugOptions) -> RgbImage {
+fn render_humidity(
+    fields: &AtlasFieldMap,
+    resolved: &AtlasResolvedMap,
+    options: AtlasDebugOptions,
+) -> RgbImage {
     render_map_with_resolved(fields, resolved, options, |cell, resolved, _, _| {
         let base = gradient5(
             cell.humidity,
@@ -215,21 +238,30 @@ fn render_humidity(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, options:
     })
 }
 
-fn render_overlay(fields: &AtlasFieldMap, resolved: &AtlasResolvedMap, options: AtlasDebugOptions) -> RgbImage {
-    render_map_with_resolved(fields, resolved, options, |cell, resolved, _, _| match resolved.overlay {
-        OverlayClass::Ocean => [16, 70, 152],
-        OverlayClass::Coast => [220, 204, 138],
-        OverlayClass::Riverine => mix([116, 154, 102], [52, 114, 192], cell.riverine_factor),
-        OverlayClass::Wetland => [74, 118, 84],
-        OverlayClass::Alpine => [188, 190, 194],
-        OverlayClass::None => {
-            if cell.form.mountain > 0.50 {
-                [118, 96, 86]
-            } else {
-                [116, 156, 98]
+fn render_overlay(
+    fields: &AtlasFieldMap,
+    resolved: &AtlasResolvedMap,
+    options: AtlasDebugOptions,
+) -> RgbImage {
+    render_map_with_resolved(
+        fields,
+        resolved,
+        options,
+        |cell, resolved, _, _| match resolved.overlay {
+            OverlayClass::Ocean => [16, 70, 152],
+            OverlayClass::Coast => [220, 204, 138],
+            OverlayClass::Riverine => mix([116, 154, 102], [52, 114, 192], cell.riverine_factor),
+            OverlayClass::Wetland => [74, 118, 84],
+            OverlayClass::Alpine => [188, 190, 194],
+            OverlayClass::None => {
+                if cell.form.mountain > 0.50 {
+                    [118, 96, 86]
+                } else {
+                    [116, 156, 98]
+                }
             }
-        }
-    })
+        },
+    )
 }
 
 fn render_biome_preview(
@@ -245,7 +277,14 @@ fn render_biome_preview(
 }
 
 fn render_ecotone(fields: &AtlasFieldMap, options: AtlasDebugOptions) -> RgbImage {
-    render_map(fields, options, |cell, _, _| gradient3(cell.ecotone_strength, [22, 26, 30], [112, 126, 94], [246, 236, 170]))
+    render_map(fields, options, |cell, _, _| {
+        gradient3(
+            cell.ecotone_strength,
+            [22, 26, 30],
+            [112, 126, 94],
+            [246, 236, 170],
+        )
+    })
 }
 
 fn render_map(
@@ -260,7 +299,13 @@ fn render_map(
     for (index, cell) in fields.cells().values().iter().enumerate() {
         let x = index as u32 % area.width();
         let z = index as u32 / area.width();
-        fill_cell(&mut image, area.width(), scale, index, color_for(cell, x, z));
+        fill_cell(
+            &mut image,
+            area.width(),
+            scale,
+            index,
+            color_for(cell, x, z),
+        );
     }
 
     image
@@ -290,7 +335,13 @@ fn render_map_with_resolved(
     {
         let x = index as u32 % area.width();
         let z = index as u32 / area.width();
-        fill_cell(&mut image, area.width(), scale, index, color_for(cell, resolved_cell, x, z));
+        fill_cell(
+            &mut image,
+            area.width(),
+            scale,
+            index,
+            color_for(cell, resolved_cell, x, z),
+        );
     }
 
     image
@@ -387,7 +438,13 @@ fn biome_preview_color(
 
     let color = apply_mountain_range_shading(base_color, cell, biome, signed_height, preview);
 
-    if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::Desert | BiomePreview::PolarTundra) {
+    if matches!(
+        biome,
+        BiomePreview::Ocean
+            | BiomePreview::Coast
+            | BiomePreview::Desert
+            | BiomePreview::PolarTundra
+    ) {
         color
     } else if cell.overlay.riverine > preview.river_tint_threshold {
         mix(
@@ -408,7 +465,10 @@ fn apply_mountain_range_shading(
     signed_height: f32,
     preview: super::tuning::AtlasPreviewDebugTuning,
 ) -> [u8; 3] {
-    if matches!(biome, BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::PolarTundra) {
+    if matches!(
+        biome,
+        BiomePreview::Ocean | BiomePreview::Coast | BiomePreview::PolarTundra
+    ) {
         return color;
     }
 
@@ -439,20 +499,22 @@ fn preview_signed_height(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
             .clamp(0.0, 1.0);
         -depth
     } else {
-        let height = (
-            cell.macro_elevation * preview.land_height_macro_weight
-                + cell.mountain_mass * preview.land_height_mountain_weight
-                + cell.ruggedness * preview.land_height_ruggedness_weight
-                + cell.alpine_factor * preview.land_height_alpine_weight
-                - cell.coast_factor * preview.land_height_coast_penalty
-        )
-        .clamp(0.0, 1.0);
+        let height = (cell.macro_elevation * preview.land_height_macro_weight
+            + cell.mountain_mass * preview.land_height_mountain_weight
+            + cell.ruggedness * preview.land_height_ruggedness_weight
+            + cell.alpine_factor * preview.land_height_alpine_weight
+            - cell.coast_factor * preview.land_height_coast_penalty)
+            .clamp(0.0, 1.0);
         height
     }
 }
 
 fn shade_from_height(light: [u8; 3], dark: [u8; 3], height: f32, strength: f32) -> [u8; 3] {
-    mix(light, dark, (height.clamp(0.0, 1.0) * strength).clamp(0.0, 1.0))
+    mix(
+        light,
+        dark,
+        (height.clamp(0.0, 1.0) * strength).clamp(0.0, 1.0),
+    )
 }
 
 fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
@@ -563,18 +625,9 @@ mod tests {
             ..AtlasCell::default()
         };
 
-        let flat_color = biome_preview_color(
-            &flat,
-            BiomePreview::TemperateForest,
-            0.76,
-            &tuning,
-        );
-        let mountainous_color = biome_preview_color(
-            &mountainous,
-            BiomePreview::TemperateForest,
-            0.76,
-            &tuning,
-        );
+        let flat_color = biome_preview_color(&flat, BiomePreview::TemperateForest, 0.76, &tuning);
+        let mountainous_color =
+            biome_preview_color(&mountainous, BiomePreview::TemperateForest, 0.76, &tuning);
 
         assert!(brightness(mountainous_color) < brightness(flat_color));
     }

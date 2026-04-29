@@ -300,11 +300,17 @@ mod tests {
         let local = LocalBlockCoord::new(1, 2, 3).unwrap();
         let mut chunk = ChunkData::new_empty(coord);
 
-        assert_eq!(chunk.snapshot().storage_encoding(), ChunkStorageEncoding::Uniform);
+        assert_eq!(
+            chunk.snapshot().storage_encoding(),
+            ChunkStorageEncoding::Uniform
+        );
 
         chunk.set_block(local, BlockId::GRASS).unwrap();
 
-        assert_eq!(chunk.snapshot().storage_encoding(), ChunkStorageEncoding::Dense);
+        assert_eq!(
+            chunk.snapshot().storage_encoding(),
+            ChunkStorageEncoding::Dense
+        );
         assert_eq!(chunk.get_block(local), Some(BlockId::GRASS));
         assert_eq!(
             chunk.get_block(LocalBlockCoord::new(0, 0, 0).unwrap()),

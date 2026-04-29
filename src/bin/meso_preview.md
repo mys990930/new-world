@@ -1,4 +1,4 @@
-# meso_preview
+﻿# meso_preview
 
 ## Role
 
@@ -12,7 +12,7 @@
 - optional chunk center via `--center-x <i32>` and `--center-z <i32>`
 - optional footprint via `--radius <i32>`
 - optional sampling density via `--blocks-per-pixel <u32>`
-- optional feature isolation via `--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace>`
+- optional feature isolation via `--feature <all|hill_cluster|shallow_basin|escarpment_band|upland_terrace|ravine|coastal_cliff_band|dune_field|crater>`
 - optional corridor mode via `--corridors <none|live>`
 - optional overlay via `--overlay <none|hill_peaks>`
 - optional flat baseline controls via:
@@ -34,11 +34,11 @@
 
 ## Preview Model
 
-1. Build the normal chunk V2 scaffold for each preview chunk.
+1. Build the normal chunk generation scaffold for each preview chunk.
 2. Clone the chunk's `MesoGuideMap`.
 3. If a single feature was requested, zero the non-target guide channels on that cloned guide map.
 4. Replace the normal base prototype with a flat plain prototype using the requested `base_height` and `relief_budget`.
-5. Run the existing `build_chunk_meso_applied_prototype(...)` path.
+5. Run `build_chunk_meso_applied_prototype_for_feature(...)` with an optional exclusive feature filter.
 6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, chunk grid lines, and explicit chunk-coordinate reference labels.
 7. If `--overlay hill_peaks` is requested, draw the filtered hill-cluster local-peak candidates from the same guide map on top of that heatmap so candidate density can be inspected before owner-region sparsening and per-hill resolve.
 
@@ -61,6 +61,12 @@ cargo run --bin terrain_find -- 42 --meso hill_cluster --top 5
 
 ```bash
 cargo run --bin meso_preview -- 42 --center-x -57 --center-z 93 --radius 10 --feature hill_cluster
+```
+
+Inspect a ravine candidate on the same flat baseline:
+
+```bash
+cargo run --bin meso_preview -- 42 --center-x 40 --center-z -29 --radius 0 --feature ravine
 ```
 
 ## Examples

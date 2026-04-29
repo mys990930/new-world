@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub timing: TimingConfig,
     pub preferred_created_world_root: Option<PathBuf>,
     pub created_worlds_dir: Option<PathBuf>,
+    pub auto_open_latest_created_world: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -37,10 +38,9 @@ impl Default for AppConfig {
             width: 1280,
             height: 720,
             timing: TimingConfig::default(),
-            preferred_created_world_root: Some(PathBuf::from(
-                "target/world-create/runtime_seed_42_160_-144",
-            )),
+            preferred_created_world_root: None,
             created_worlds_dir: Some(PathBuf::from("target/world-create")),
+            auto_open_latest_created_world: false,
         }
     }
 }

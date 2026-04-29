@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use image::{Rgb, RgbImage};
 
 use new_world::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, BiomeFamily, CHUNK_EDGE_I32,
-    CoastalContext, ElevationBand, HydrologyContext, RegionClassMap, RegionClassSample,
-    ReliefClass, TerrainFormFamily, WorldMeta, generate_atlas_fields, generate_atlas_structure,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, BiomeFamily, CHUNK_EDGE_I32, CoastalContext,
+    ElevationBand, HydrologyContext, RegionClassMap, RegionClassSample, ReliefClass,
+    TerrainFormFamily, WorldMeta, generate_atlas_fields, generate_atlas_structure,
     resolve_region_classes, sample_region_classes,
 };
 
@@ -199,7 +199,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--blocks-per-pixel" => {
                 blocks_per_pixel = parse_required::<u32>(&mut args, "blocks-per-pixel")?
             }
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -207,7 +211,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let window = PreviewWindow::new(center_x, center_z, radius, blocks_per_pixel)?;
     let sampled_atlas_bounds = window.sampled_atlas_bounds()?;
     let output = output.unwrap_or_else(|| {
-        default_output_path(seed, window.center_x, window.center_z, window.radius, blocks_per_pixel)
+        default_output_path(
+            seed,
+            window.center_x,
+            window.center_z,
+            window.radius,
+            blocks_per_pixel,
+        )
     });
 
     let meta = WorldMeta::new(seed);
@@ -319,7 +329,11 @@ fn summarize_cells(cells: &[PreviewCell], sampled_atlas_bounds: AtlasBounds) -> 
 
 fn color_for_region(region: RegionClassSample) -> [u8; 3] {
     let mut color = biome_base_color(region.biome_family);
-    color = blend(color, coastal_tint(region.coastal_context), coastal_tint_strength(region.coastal_context));
+    color = blend(
+        color,
+        coastal_tint(region.coastal_context),
+        coastal_tint_strength(region.coastal_context),
+    );
     color = blend(
         color,
         hydrology_tint(region.hydrology_context),
@@ -474,7 +488,10 @@ fn transition_strength(cells: &[PreviewCell], width: usize, x: usize, z: usize) 
         strength = strength.max(region_difference_strength(region, cells[index - 1].region));
     }
     if z > 0 {
-        strength = strength.max(region_difference_strength(region, cells[index - width].region));
+        strength = strength.max(region_difference_strength(
+            region,
+            cells[index - width].region,
+        ));
     }
 
     strength
@@ -616,7 +633,9 @@ fn canonical_key(value: &str) -> String {
                 if !out.ends_with('_')
                     && ((previous.is_ascii_lowercase() || previous.is_ascii_digit())
                         || (previous.is_ascii_uppercase()
-                            && next.map(|value| value.is_ascii_lowercase()).unwrap_or(false)))
+                            && next
+                                .map(|value| value.is_ascii_lowercase())
+                                .unwrap_or(false)))
                 {
                     out.push('_');
                 }
@@ -664,15 +683,16 @@ mod tests {
 
         assert_eq!(window.pixels_per_chunk(), 4);
         assert_eq!(
-            window.image_dimensions().expect("image dimensions should resolve"),
+            window
+                .image_dimensions()
+                .expect("image dimensions should resolve"),
             (20, 20)
         );
     }
 
     #[test]
     fn preview_generation_area_covers_sampled_atlas_bounds() {
-        let window =
-            PreviewWindow::new(0, 0, DEFAULT_RADIUS, DEFAULT_BLOCKS_PER_PIXEL).unwrap();
+        let window = PreviewWindow::new(0, 0, DEFAULT_RADIUS, DEFAULT_BLOCKS_PER_PIXEL).unwrap();
         let sampled = window.sampled_atlas_bounds().unwrap();
         let area = window.generation_area().unwrap();
 

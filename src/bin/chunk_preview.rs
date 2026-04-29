@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
@@ -6,20 +7,22 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use new_world::ecs::{
-    QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye,
-};
+use new_world::ecs::{QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye};
 use new_world::renderer::{
     CpuMesh as RenderCpuMesh, OffscreenRenderRequest, RenderCameraState, RenderEnvironment,
     RenderProjectionMode, RenderTextureArraySource, RenderTextureSource, RenderTextureTile,
     RenderViewBasis, render_offscreen, write_offscreen_png,
 };
 use new_world::world::{
-    BlockFace, BlockMaterialKind, BlockRegistry, CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord,
-    TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
-    build_chunk_base_heightfield_prototype, build_chunk_mesh,
-    build_chunk_meso_applied_prototype, build_chunk_v2_scaffold, generate_chunk,
-    sample_chunk_surface_lod,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasCell, AtlasCoord, BlockFace, BlockMaterialKind, BlockRegistry,
+    CHUNK_EDGE, CHUNK_EDGE_I32, ChunkCoord, ChunkGenerationInputs, HydrologyMode, MesoGuideSample,
+    RegionClassSample, TerrainProfile, TextureTileSource, WORLD_FLOOR_Y, WorldCore, WorldMeta,
+    build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
+    build_chunk_generation_scaffold, build_chunk_hydrology_solve, build_chunk_mesh,
+    build_chunk_meso_applied_prototype, build_chunk_realization_field_patch,
+    build_chunk_smoothed_prototype, chunk_generation_input_area,
+    generate_chunk_from_generation_inputs, prepare_chunk_generation_inputs, region_archetype_def,
+    sample_chunk_surface_lod, sample_meso_guides, sample_topdown_columns,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -47,6 +50,7 @@ enum PreviewSource {
 enum PreviewStage {
     Full,
     Prototype,
+    Hydrology,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -57,7 +61,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let source = if args.first().map(String::as_str) == Some("--world-dir") {
         args.remove(0);
-        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
+        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(
+            &mut args,
+            "world-dir",
+        )?))
     } else {
         PreviewSource::Seed(parse_required::<u64>(&mut args, "seed")?)
     };
@@ -96,7 +103,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--stage" => {
                 stage = parse_preview_stage(parse_required::<String>(&mut args, "stage")?)?;
             }
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -115,9 +126,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "lod-blocks must evenly divide CHUNK_EDGE ({CHUNK_EDGE})"
         )));
     }
-    if stage == PreviewStage::Prototype && lod_blocks > 1 {
+    if matches!(stage, PreviewStage::Prototype | PreviewStage::Hydrology) && lod_blocks > 1 {
         return Err(cli_error(
-            "prototype stage currently supports only the default block resolution; omit --lod-blocks or use --lod-blocks 1",
+            "prototype and hydrology stages currently support only the default block resolution; omit --lod-blocks or use --lod-blocks 1",
         ));
     }
 
@@ -154,23 +165,43 @@ fn main() -> Result<(), Box<dyn Error>> {
         default_output_path(&source, center_x, center_z, radius, lod_blocks, stage)
     });
     let generation_radius = radius + DEFAULT_RENDER_PADDING;
-    if stage == PreviewStage::Prototype {
+    let center_chunk = ChunkCoord(center_x, 0, center_z);
+    let center_generator_diagnostics =
+        collect_center_chunk_generator_diagnostics(center_chunk, &meta)?;
+    if matches!(stage, PreviewStage::Prototype | PreviewStage::Hydrology) {
         if created_world_dir.is_some() {
             return Err(cli_error(
-                "prototype stage is currently supported only for direct seed previews",
+                "prototype and hydrology stages are currently supported only for direct seed previews",
             ));
         }
     }
 
-    let render_meshes = match stage {
-        PreviewStage::Prototype => collect_prototype_render_meshes(
-            &meta,
-            block_registry.as_ref(),
-            center_x,
-            center_z,
-            radius,
-            generation_radius,
-        )?,
+    let (render_meshes, center_surface_summary, hydrology_summary) = match stage {
+        PreviewStage::Prototype => {
+            let grid = build_prototype_preview_grid(&meta, center_x, center_z, generation_radius)?;
+            let surface_summary = summarize_prototype_chunk_surface(&grid, center_x, center_z);
+            let render_meshes = collect_prototype_render_meshes_from_grid(
+                &grid,
+                block_registry.as_ref(),
+                center_x,
+                center_z,
+                radius,
+            );
+            (render_meshes, surface_summary, None)
+        }
+        PreviewStage::Hydrology => {
+            let grid = build_hydrology_preview_grid(&meta, center_x, center_z, generation_radius)?;
+            let surface_summary = summarize_prototype_chunk_surface(&grid, center_x, center_z);
+            let hydrology_summary = summarize_hydrology_chunk(&grid, center_x, center_z);
+            let render_meshes = collect_prototype_render_meshes_from_grid(
+                &grid,
+                block_registry.as_ref(),
+                center_x,
+                center_z,
+                radius,
+            );
+            (render_meshes, surface_summary, hydrology_summary)
+        }
         PreviewStage::Full if lod_blocks > 1 => {
             if created_world_dir.is_some() {
                 return Err(cli_error(
@@ -178,15 +209,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ));
             }
 
-            collect_lod_render_meshes(
-                &meta,
-                block_registry.as_ref(),
-                center_x,
-                center_z,
-                radius,
-                min_y_chunk,
-                lod_blocks,
-            )?
+            (
+                collect_lod_render_meshes(
+                    &meta,
+                    block_registry.as_ref(),
+                    center_x,
+                    center_z,
+                    radius,
+                    min_y_chunk,
+                    lod_blocks,
+                )?,
+                None,
+                None,
+            )
         }
         PreviewStage::Full => {
             let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
@@ -228,7 +263,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ),
             }
 
-            collect_render_meshes(
+            let surface_summary = summarize_realized_chunk_surface(
+                &world,
+                block_registry.as_ref(),
+                center_chunk,
+                min_y_chunk,
+                max_y_chunk,
+            );
+            let render_meshes = collect_render_meshes(
                 &world,
                 block_registry.as_ref(),
                 center_x,
@@ -236,11 +278,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 radius,
                 min_y_chunk,
                 max_y_chunk,
-            )
+            );
+            (render_meshes, surface_summary, None)
         }
     };
     if render_meshes.is_empty() {
-        return Err(cli_error("no visible meshes were produced for the requested preview area"));
+        return Err(cli_error(
+            "no visible meshes were produced for the requested preview area",
+        ));
     }
 
     let bounds = combined_render_bounds(&render_meshes)
@@ -272,6 +317,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 radius
             );
         }
+        PreviewStage::Hydrology => {
+            println!(
+                "render footprint: xz radius={}, post-smoothing hydrology stage, y bounds ignored",
+                radius
+            );
+        }
         PreviewStage::Full => {
             println!(
                 "render footprint: xz radius={}, y={}..{}, lod_blocks={}",
@@ -279,6 +330,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
         }
     }
+    print_center_chunk_diagnostics(
+        &center_generator_diagnostics,
+        center_surface_summary,
+        hydrology_summary,
+    );
     println!("output: {}", output.display());
     println!(
         "image: {}x{}, meshes={}, draw_calls={}",
@@ -304,6 +360,7 @@ fn default_output_path(
             let stage_suffix = match stage {
                 PreviewStage::Full => String::new(),
                 PreviewStage::Prototype => String::from("_prototype"),
+                PreviewStage::Hydrology => String::from("_hydrology"),
             };
             PathBuf::from(format!(
                 "target/chunk-preview/seed_{seed}{stage_suffix}_cx{center_x}_cz{center_z}_r{radius}{}.png",
@@ -381,12 +438,7 @@ fn load_created_world_preview_chunks(
     let load_min_z = (center_z - generation_radius).max(min_chunk.2);
     let load_max_z = (center_z + generation_radius).min(max_chunk.2);
     let loaded_chunks = preview_chunk_coords_for_bounds(
-        load_min_x,
-        load_max_x,
-        load_min_y,
-        load_max_y,
-        load_min_z,
-        load_max_z,
+        load_min_x, load_max_x, load_min_y, load_max_y, load_min_z, load_max_z,
     )
     .into_par_iter()
     .map(|coord| {
@@ -421,8 +473,16 @@ fn choose_created_world_center(
     let max_chunk = manifest.max_chunk_coord();
 
     for summary in &manifest.stacks {
-        let requested_min = ChunkCoord(summary.center_x - radius, min_y_chunk, summary.center_z - radius);
-        let requested_max = ChunkCoord(summary.center_x + radius, max_y_chunk, summary.center_z + radius);
+        let requested_min = ChunkCoord(
+            summary.center_x - radius,
+            min_y_chunk,
+            summary.center_z - radius,
+        );
+        let requested_max = ChunkCoord(
+            summary.center_x + radius,
+            max_y_chunk,
+            summary.center_z + radius,
+        );
         if requested_min.0 >= min_chunk.0
             && requested_min.1 >= min_chunk.1
             && requested_min.2 >= min_chunk.2
@@ -436,13 +496,7 @@ fn choose_created_world_center(
 
     Err(cli_error(format!(
         "no created-world preview center fits radius {} inside created-world bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
-        radius,
-        min_chunk.0,
-        max_chunk.0,
-        min_chunk.1,
-        max_chunk.1,
-        min_chunk.2,
-        max_chunk.2
+        radius, min_chunk.0, max_chunk.0, min_chunk.1, max_chunk.1, min_chunk.2, max_chunk.2
     )))
 }
 
@@ -455,6 +509,9 @@ fn generate_preview_chunks(
     min_y_chunk: i32,
     max_y_chunk: i32,
 ) {
+    let meta = *world.meta();
+    let input_cache =
+        PreviewInputCache::for_preview_window(&meta, center_x, center_z, generation_radius);
     let generated_chunks = preview_chunk_coords(
         center_x,
         center_z,
@@ -463,7 +520,13 @@ fn generate_preview_chunks(
         max_y_chunk,
     )
     .into_par_iter()
-    .map(|coord| (coord, generate_chunk(coord, world.meta(), registry)))
+    .map(|coord| {
+        let inputs = input_cache.inputs_for_chunk(coord);
+        (
+            coord,
+            generate_chunk_from_generation_inputs(&inputs, registry),
+        )
+    })
     .collect::<Vec<_>>();
 
     for (coord, chunk) in generated_chunks {
@@ -517,6 +580,66 @@ fn preview_chunk_coords_for_bounds(
     coords
 }
 
+#[derive(Debug, Clone)]
+struct PreviewInputCache {
+    entries: HashMap<PreviewInputCacheKey, ChunkGenerationInputs>,
+}
+
+impl PreviewInputCache {
+    fn for_preview_window(
+        meta: &WorldMeta,
+        center_x: i32,
+        center_z: i32,
+        generation_radius: i32,
+    ) -> Self {
+        let mut representatives = HashMap::<PreviewInputCacheKey, ChunkCoord>::new();
+        for (chunk_x, chunk_z) in preview_chunk_xz_coords(center_x, center_z, generation_radius) {
+            let coord = ChunkCoord(chunk_x, 0, chunk_z);
+            representatives
+                .entry(PreviewInputCacheKey::for_chunk(coord))
+                .or_insert(coord);
+        }
+
+        let entries = representatives
+            .into_par_iter()
+            .map(|(key, coord)| (key, prepare_chunk_generation_inputs(coord, meta)))
+            .collect::<HashMap<_, _>>();
+
+        Self { entries }
+    }
+
+    fn inputs_for_chunk(&self, coord: ChunkCoord) -> ChunkGenerationInputs {
+        let key = PreviewInputCacheKey::for_chunk(coord);
+        let mut inputs = self
+            .entries
+            .get(&key)
+            .expect("preview input cache should cover every requested chunk")
+            .clone();
+        inputs.chunk = coord;
+        inputs
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PreviewInputCacheKey {
+    origin_x: i32,
+    origin_z: i32,
+    width: u32,
+    height: u32,
+}
+
+impl PreviewInputCacheKey {
+    fn for_chunk(coord: ChunkCoord) -> Self {
+        let area = chunk_generation_input_area(coord);
+        Self {
+            origin_x: area.origin().x,
+            origin_z: area.origin().z,
+            width: area.width(),
+            height: area.height(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PrototypePreviewCell {
     min_x: i32,
@@ -524,6 +647,9 @@ struct PrototypePreviewCell {
     top_y: i32,
     base_height: f32,
     relief_budget: f32,
+    water_surface_height: Option<f32>,
+    hydrology_mode: HydrologyMode,
+    saturation: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -552,12 +678,25 @@ impl PrototypePreviewGrid {
     }
 
     fn cell(&self, world_x: i32, world_z: i32) -> Option<PrototypePreviewCell> {
-        self.index_of(world_x, world_z).map(|index| self.cells[index])
+        self.index_of(world_x, world_z)
+            .map(|index| self.cells[index])
     }
 
     fn top_y_or_base(&self, world_x: i32, world_z: i32) -> i32 {
         self.cell(world_x, world_z)
             .map(|cell| cell.top_y.max(self.base_y))
+            .unwrap_or(self.base_y)
+    }
+
+    fn water_top_y_or_terrain(&self, world_x: i32, world_z: i32) -> i32 {
+        self.cell(world_x, world_z)
+            .map(|cell| {
+                if let Some(water_surface_height) = cell.water_surface_height {
+                    water_surface_preview_top_y(cell, water_surface_height, self.base_y)
+                } else {
+                    cell.top_y.max(self.base_y)
+                }
+            })
             .unwrap_or(self.base_y)
     }
 }
@@ -572,24 +711,52 @@ struct PrototypePreviewChunk {
 struct PrototypePreviewColumn {
     height: f32,
     remaining_relief_budget: f32,
+    water_surface_height: Option<f32>,
+    hydrology_mode: HydrologyMode,
+    saturation: f32,
 }
 
-fn collect_prototype_render_meshes(
-    meta: &WorldMeta,
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ChunkSurfaceSummary {
+    min_y: i32,
+    max_y: i32,
+    mean_y: f32,
+    column_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HydrologyChunkSummary {
+    water_columns: usize,
+    channel_columns: usize,
+    floodplain_columns: usize,
+    lake_columns: usize,
+    wetland_columns: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CenterChunkGeneratorDiagnostics {
+    atlas_coord: AtlasCoord,
+    atlas_cell: AtlasCell,
+    region: RegionClassSample,
+    meso: MesoGuideSample,
+    archetype_summary: Option<&'static str>,
+    allowed_meso_keys: &'static [&'static str],
+}
+
+fn collect_prototype_render_meshes_from_grid(
+    grid: &PrototypePreviewGrid,
     registry: &BlockRegistry,
     center_x: i32,
     center_z: i32,
     radius: i32,
-    generation_radius: i32,
-) -> Result<Vec<RenderCpuMesh>, Box<dyn Error>> {
-    let grid = build_prototype_preview_grid(meta, center_x, center_z, generation_radius)?;
-    Ok(preview_chunk_xz_coords(center_x, center_z, radius)
+) -> Vec<RenderCpuMesh> {
+    preview_chunk_xz_coords(center_x, center_z, radius)
         .into_par_iter()
         .filter_map(|(chunk_x, chunk_z)| {
             let mesh = build_prototype_heightfield_mesh(&grid, chunk_x, chunk_z, registry);
             (!mesh.vertices.is_empty() && !mesh.indices.is_empty()).then_some(mesh)
         })
-        .collect())
+        .collect()
 }
 
 fn build_prototype_preview_grid(
@@ -597,6 +764,37 @@ fn build_prototype_preview_grid(
     center_x: i32,
     center_z: i32,
     generation_radius: i32,
+) -> Result<PrototypePreviewGrid, Box<dyn Error>> {
+    build_stage_preview_grid(
+        meta,
+        center_x,
+        center_z,
+        generation_radius,
+        PreviewStage::Prototype,
+    )
+}
+
+fn build_hydrology_preview_grid(
+    meta: &WorldMeta,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+) -> Result<PrototypePreviewGrid, Box<dyn Error>> {
+    build_stage_preview_grid(
+        meta,
+        center_x,
+        center_z,
+        generation_radius,
+        PreviewStage::Hydrology,
+    )
+}
+
+fn build_stage_preview_grid(
+    meta: &WorldMeta,
+    center_x: i32,
+    center_z: i32,
+    generation_radius: i32,
+    stage: PreviewStage,
 ) -> Result<PrototypePreviewGrid, Box<dyn Error>> {
     let min_chunk_x = center_x - generation_radius;
     let max_chunk_x = center_x + generation_radius;
@@ -617,38 +815,63 @@ fn build_prototype_preview_grid(
             top_y: WORLD_FLOOR_Y,
             base_height: WORLD_FLOOR_Y as f32,
             relief_budget: 0.0,
+            water_surface_height: None,
+            hydrology_mode: HydrologyMode::Dry,
+            saturation: 0.0,
         };
         width * depth
     ];
     let mut base_y = i32::MAX;
+    let input_cache =
+        PreviewInputCache::for_preview_window(meta, center_x, center_z, generation_radius);
     let prototypes = preview_chunk_xz_coords(center_x, center_z, generation_radius)
         .into_par_iter()
         .map(|(chunk_x, chunk_z)| {
             let chunk = ChunkCoord(chunk_x, 0, chunk_z);
-            let scaffold = build_chunk_v2_scaffold(chunk, meta);
-            let prototype = build_chunk_base_heightfield_prototype(
-                scaffold.chunk,
-                &scaffold.inputs,
-                &scaffold.realization_field_patch,
-                &scaffold.corridor_window,
-            );
-            let meso = build_chunk_meso_applied_prototype(
-                scaffold.chunk,
-                &scaffold.inputs,
-                &scaffold.corridor_window,
-                &prototype,
-            );
-
-            PrototypePreviewChunk {
-                coord: chunk,
-                columns: meso
+            let inputs = input_cache.inputs_for_chunk(chunk);
+            let realization = build_chunk_realization_field_patch(chunk, &inputs);
+            let corridors = build_chunk_corridor_window(chunk, &inputs);
+            let prototype =
+                build_chunk_base_heightfield_prototype(chunk, &inputs, &realization, &corridors);
+            let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridors, &prototype);
+            let columns = match stage {
+                PreviewStage::Prototype => meso
                     .columns
                     .into_iter()
                     .map(|column| PrototypePreviewColumn {
                         height: column.height,
                         remaining_relief_budget: column.remaining_relief_budget,
+                        water_surface_height: None,
+                        hydrology_mode: HydrologyMode::Dry,
+                        saturation: 0.0,
                     })
                     .collect(),
+                PreviewStage::Hydrology => {
+                    let smoothed = build_chunk_smoothed_prototype(chunk, &corridors, &meso);
+                    let hydrology =
+                        build_chunk_hydrology_solve(chunk, &inputs, &corridors, &smoothed);
+
+                    hydrology
+                        .columns
+                        .into_iter()
+                        .zip(smoothed.columns.into_iter())
+                        .map(|(column, smoothed)| PrototypePreviewColumn {
+                            height: column.terrain_height,
+                            remaining_relief_budget: smoothed.remaining_relief_budget,
+                            water_surface_height: column.water_surface_height,
+                            hydrology_mode: column.mode,
+                            saturation: column.saturation,
+                        })
+                        .collect()
+                }
+                PreviewStage::Full => unreachable!(
+                    "stage preview grids are only used for prototype and hydrology previews"
+                ),
+            };
+
+            PrototypePreviewChunk {
+                coord: chunk,
+                columns,
             }
         })
         .collect::<Vec<_>>();
@@ -663,14 +886,16 @@ fn build_prototype_preview_grid(
 
         for local_z in 0..CHUNK_EDGE_I32 {
             let global_z = chunk_row * CHUNK_EDGE
-                + usize::try_from(local_z).map_err(|_| cli_error("invalid prototype preview local z"))?;
+                + usize::try_from(local_z)
+                    .map_err(|_| cli_error("invalid prototype preview local z"))?;
             let row_offset = global_z * width;
             for local_x in 0..CHUNK_EDGE_I32 {
                 let column_index = usize::try_from(local_z * CHUNK_EDGE_I32 + local_x)
                     .map_err(|_| cli_error("invalid prototype preview column index"))?;
                 let column = preview_chunk.columns[column_index];
                 let global_x = chunk_col * CHUNK_EDGE
-                    + usize::try_from(local_x).map_err(|_| cli_error("invalid prototype preview local x"))?;
+                    + usize::try_from(local_x)
+                        .map_err(|_| cli_error("invalid prototype preview local x"))?;
                 let index = row_offset + global_x;
                 let top_y = column.height.round() as i32;
                 base_y = base_y.min(top_y);
@@ -680,6 +905,9 @@ fn build_prototype_preview_grid(
                     top_y,
                     base_height: column.height,
                     relief_budget: column.remaining_relief_budget,
+                    water_surface_height: column.water_surface_height,
+                    hydrology_mode: column.hydrology_mode,
+                    saturation: column.saturation,
                 };
             }
         }
@@ -708,6 +936,16 @@ fn build_prototype_heightfield_mesh(
     let block_def = registry.block_or_missing(block_id);
     let texture_layer = u32::from(block_def.texture_for_face(BlockFace::PosY).0);
     let material_kind = render_material_kind_from_world(block_def.material).as_u32();
+    let water_block = registry
+        .block_id("water")
+        .map(|id| registry.block_or_missing(id))
+        .map(|block| {
+            (
+                u32::from(block.texture_for_face(BlockFace::PosY).0),
+                render_material_kind_from_world(block.material).as_u32(),
+                block.tint_as_linear_rgba(),
+            )
+        });
     let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
     let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
 
@@ -815,6 +1053,105 @@ fn build_prototype_heightfield_mesh(
                     DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
                 );
             }
+
+            if let Some(water_surface_height) = cell.water_surface_height {
+                let water_top =
+                    water_surface_preview_top_y(cell, water_surface_height, grid.base_y);
+                if let Some((water_texture_layer, water_material_kind, water_base)) = water_block {
+                    let water_color = water_preview_color(water_base, cell, water_surface_height);
+                    append_box_face(
+                        &mut mesh,
+                        cell.min_x,
+                        top_y,
+                        cell.min_z,
+                        cell.min_x + 1,
+                        water_top,
+                        cell.min_z + 1,
+                        BlockFace::PosY,
+                        water_color,
+                        water_texture_layer,
+                        water_material_kind,
+                        grid.base_y,
+                        DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                    );
+
+                    let left_top = grid.water_top_y_or_terrain(world_x - 1, world_z);
+                    if water_top > left_top {
+                        append_box_face(
+                            &mut mesh,
+                            cell.min_x,
+                            left_top,
+                            cell.min_z,
+                            cell.min_x + 1,
+                            water_top,
+                            cell.min_z + 1,
+                            BlockFace::NegX,
+                            water_color,
+                            water_texture_layer,
+                            water_material_kind,
+                            grid.base_y,
+                            DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                        );
+                    }
+
+                    let right_top = grid.water_top_y_or_terrain(world_x + 1, world_z);
+                    if water_top > right_top {
+                        append_box_face(
+                            &mut mesh,
+                            cell.min_x,
+                            right_top,
+                            cell.min_z,
+                            cell.min_x + 1,
+                            water_top,
+                            cell.min_z + 1,
+                            BlockFace::PosX,
+                            water_color,
+                            water_texture_layer,
+                            water_material_kind,
+                            grid.base_y,
+                            DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                        );
+                    }
+
+                    let back_top = grid.water_top_y_or_terrain(world_x, world_z - 1);
+                    if water_top > back_top {
+                        append_box_face(
+                            &mut mesh,
+                            cell.min_x,
+                            back_top,
+                            cell.min_z,
+                            cell.min_x + 1,
+                            water_top,
+                            cell.min_z + 1,
+                            BlockFace::NegZ,
+                            water_color,
+                            water_texture_layer,
+                            water_material_kind,
+                            grid.base_y,
+                            DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                        );
+                    }
+
+                    let front_top = grid.water_top_y_or_terrain(world_x, world_z + 1);
+                    if water_top > front_top {
+                        append_box_face(
+                            &mut mesh,
+                            cell.min_x,
+                            front_top,
+                            cell.min_z,
+                            cell.min_x + 1,
+                            water_top,
+                            cell.min_z + 1,
+                            BlockFace::PosZ,
+                            water_color,
+                            water_texture_layer,
+                            water_material_kind,
+                            grid.base_y,
+                            DEFAULT_PROTOTYPE_VERTICAL_EXAGGERATION,
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -828,7 +1165,327 @@ fn prototype_column_color(base: [f32; 4], cell: PrototypePreviewCell, base_y: i3
     color[0] = (color[0] * (0.78 + height_ratio * 0.18) + relief_ratio * 0.08).clamp(0.0, 1.0);
     color[1] = (color[1] * (0.82 + height_ratio * 0.10) + relief_ratio * 0.05).clamp(0.0, 1.0);
     color[2] = (color[2] * (0.86 + relief_ratio * 0.08)).clamp(0.0, 1.0);
+
+    match cell.hydrology_mode {
+        HydrologyMode::Dry => {}
+        HydrologyMode::Channel => {
+            color[0] *= 0.88;
+            color[1] *= 0.94;
+            color[2] = (color[2] * 1.08 + 0.04).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Floodplain => {
+            color[0] *= 0.92;
+            color[1] = (color[1] * 0.96 + 0.03).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.02 + 0.02).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Lake | HydrologyMode::Wetland => {
+            color[0] *= 0.86;
+            color[1] = (color[1] * 0.94 + 0.04).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.10 + 0.06).clamp(0.0, 1.0);
+        }
+    }
+    color[1] = (color[1] + cell.saturation * 0.04).clamp(0.0, 1.0);
+    color[2] = (color[2] + cell.saturation * 0.06).clamp(0.0, 1.0);
     color
+}
+
+fn water_preview_color(
+    base: [f32; 4],
+    cell: PrototypePreviewCell,
+    water_surface_height: f32,
+) -> [f32; 4] {
+    let mut color = base;
+    let altitude_ratio = ((water_surface_height - cell.base_height) / 8.0).clamp(0.0, 1.0);
+
+    match cell.hydrology_mode {
+        HydrologyMode::Channel => {
+            color[0] = (color[0] * 0.78).clamp(0.0, 1.0);
+            color[1] = (color[1] * 0.90 + 0.05).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.12 + 0.08).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Floodplain => {
+            color[0] = (color[0] * 0.86).clamp(0.0, 1.0);
+            color[1] = (color[1] * 0.96 + 0.04).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.08 + 0.05).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Lake => {
+            color[0] = (color[0] * 0.72).clamp(0.0, 1.0);
+            color[1] = (color[1] * 0.88 + 0.06).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.15 + 0.10).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Wetland => {
+            color[0] = (color[0] * 0.84).clamp(0.0, 1.0);
+            color[1] = (color[1] * 0.98 + 0.05).clamp(0.0, 1.0);
+            color[2] = (color[2] * 1.04 + 0.04).clamp(0.0, 1.0);
+        }
+        HydrologyMode::Dry => {}
+    }
+
+    color[0] = (color[0] + altitude_ratio * 0.02).clamp(0.0, 1.0);
+    color[1] = (color[1] + altitude_ratio * 0.03).clamp(0.0, 1.0);
+    color[2] = (color[2] + altitude_ratio * 0.05).clamp(0.0, 1.0);
+    color[3] = 0.92;
+    color
+}
+
+fn water_surface_preview_top_y(
+    cell: PrototypePreviewCell,
+    water_surface_height: f32,
+    base_y: i32,
+) -> i32 {
+    let terrain_top = cell.top_y.max(base_y);
+    (water_surface_height.ceil() as i32)
+        .max(terrain_top + 1)
+        .max(base_y + 1)
+}
+
+fn collect_center_chunk_generator_diagnostics(
+    chunk: ChunkCoord,
+    meta: &WorldMeta,
+) -> Result<CenterChunkGeneratorDiagnostics, Box<dyn Error>> {
+    let scaffold = build_chunk_generation_scaffold(chunk, meta);
+    let (center_world_x, center_world_z) = center_chunk_sample_world_xz(chunk);
+    let atlas_coord = atlas_coord_for_world_xz(center_world_x, center_world_z);
+    let atlas_cell = scaffold
+        .inputs
+        .atlas_fields
+        .get(atlas_coord)
+        .copied()
+        .ok_or_else(|| {
+            cli_error(format!(
+                "center atlas coord ({}, {}) fell outside the scaffold atlas field map",
+                atlas_coord.x, atlas_coord.z
+            ))
+        })?;
+    let meso = sample_meso_guides(&scaffold.inputs.meso_guides, center_world_x, center_world_z);
+    let archetype_def = region_archetype_def(scaffold.center_region.archetype);
+
+    Ok(CenterChunkGeneratorDiagnostics {
+        atlas_coord,
+        atlas_cell,
+        region: scaffold.center_region,
+        meso,
+        archetype_summary: archetype_def.map(|def| def.summary),
+        allowed_meso_keys: archetype_def
+            .map(|def| def.allowed_meso_keys)
+            .unwrap_or(&[]),
+    })
+}
+
+fn summarize_prototype_chunk_surface(
+    grid: &PrototypePreviewGrid,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> Option<ChunkSurfaceSummary> {
+    let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
+    let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
+    let mut heights = Vec::with_capacity(CHUNK_EDGE * CHUNK_EDGE);
+
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            let world_x = chunk_origin_x + local_x;
+            let world_z = chunk_origin_z + local_z;
+            heights.push(grid.cell(world_x, world_z)?.top_y);
+        }
+    }
+
+    summarize_surface_heights(heights)
+}
+
+fn summarize_hydrology_chunk(
+    grid: &PrototypePreviewGrid,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> Option<HydrologyChunkSummary> {
+    let chunk_origin_x = chunk_x * CHUNK_EDGE_I32;
+    let chunk_origin_z = chunk_z * CHUNK_EDGE_I32;
+    let mut water_columns = 0usize;
+    let mut channel_columns = 0usize;
+    let mut floodplain_columns = 0usize;
+    let mut lake_columns = 0usize;
+    let mut wetland_columns = 0usize;
+    for local_z in 0..CHUNK_EDGE_I32 {
+        for local_x in 0..CHUNK_EDGE_I32 {
+            let world_x = chunk_origin_x + local_x;
+            let world_z = chunk_origin_z + local_z;
+            let cell = grid.cell(world_x, world_z)?;
+
+            if cell.water_surface_height.is_some() {
+                water_columns += 1;
+            }
+
+            match cell.hydrology_mode {
+                HydrologyMode::Dry => {}
+                HydrologyMode::Channel => channel_columns += 1,
+                HydrologyMode::Floodplain => floodplain_columns += 1,
+                HydrologyMode::Lake => lake_columns += 1,
+                HydrologyMode::Wetland => wetland_columns += 1,
+            }
+        }
+    }
+
+    Some(HydrologyChunkSummary {
+        water_columns,
+        channel_columns,
+        floodplain_columns,
+        lake_columns,
+        wetland_columns,
+    })
+}
+
+fn summarize_realized_chunk_surface(
+    world: &WorldCore,
+    registry: &BlockRegistry,
+    chunk: ChunkCoord,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Option<ChunkSurfaceSummary> {
+    let min_world_x = chunk.0 * CHUNK_EDGE_I32;
+    let min_world_z = chunk.2 * CHUNK_EDGE_I32;
+    let min_world_y = (min_y_chunk * CHUNK_EDGE_I32).max(WORLD_FLOOR_Y);
+    let max_world_y = max_y_chunk
+        .saturating_add(1)
+        .saturating_mul(CHUNK_EDGE_I32)
+        .saturating_sub(1)
+        .max(min_world_y);
+    let columns = sample_topdown_columns(
+        world,
+        registry,
+        min_world_x,
+        min_world_z,
+        CHUNK_EDGE as u32,
+        CHUNK_EDGE as u32,
+        min_world_y,
+        max_world_y,
+    );
+
+    summarize_surface_heights(
+        columns
+            .into_iter()
+            .filter_map(|column| column.visible.top_y),
+    )
+}
+
+fn summarize_surface_heights<I>(heights: I) -> Option<ChunkSurfaceSummary>
+where
+    I: IntoIterator<Item = i32>,
+{
+    let mut heights = heights.into_iter();
+    let first = heights.next()?;
+    let mut min_y = first;
+    let mut max_y = first;
+    let mut sum_y = i64::from(first);
+    let mut column_count = 1_usize;
+
+    for height in heights {
+        min_y = min_y.min(height);
+        max_y = max_y.max(height);
+        sum_y += i64::from(height);
+        column_count += 1;
+    }
+
+    Some(ChunkSurfaceSummary {
+        min_y,
+        max_y,
+        mean_y: sum_y as f32 / column_count as f32,
+        column_count,
+    })
+}
+
+fn center_chunk_sample_world_xz(chunk: ChunkCoord) -> (i32, i32) {
+    (
+        chunk.0 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32.div_euclid(2),
+        chunk.2 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32.div_euclid(2),
+    )
+}
+
+fn atlas_coord_for_world_xz(world_x: i32, world_z: i32) -> AtlasCoord {
+    let atlas_span_blocks = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * CHUNK_EDGE_I32).max(1);
+    AtlasCoord::new(
+        world_x.div_euclid(atlas_span_blocks),
+        world_z.div_euclid(atlas_span_blocks),
+    )
+}
+
+fn print_center_chunk_diagnostics(
+    diagnostics: &CenterChunkGeneratorDiagnostics,
+    surface_summary: Option<ChunkSurfaceSummary>,
+    hydrology_summary: Option<HydrologyChunkSummary>,
+) {
+    println!("center chunk diagnostics:");
+    match surface_summary {
+        Some(surface) => println!(
+            "  surface_y: avg={:.2}, min={}, max={}, sampled_columns={}",
+            surface.mean_y, surface.min_y, surface.max_y, surface.column_count
+        ),
+        None => println!("  surface_y: unavailable for the current preview path"),
+    }
+    if let Some(hydrology) = hydrology_summary {
+        println!(
+            "  hydrology: water_columns={}, channels={}, floodplain={}, lakes={}, wetlands={}",
+            hydrology.water_columns,
+            hydrology.channel_columns,
+            hydrology.floodplain_columns,
+            hydrology.lake_columns,
+            hydrology.wetland_columns,
+        );
+    }
+    println!(
+        "  region: archetype={:?}, biome={:?}, terrain={:?}, climate={:?}, hydrology={:?}, coastal={:?}",
+        diagnostics.region.archetype,
+        diagnostics.region.biome_family,
+        diagnostics.region.terrain_form_family,
+        diagnostics.region.climate_regime,
+        diagnostics.region.hydrology_context,
+        diagnostics.region.coastal_context,
+    );
+    println!(
+        "  region axes: temperature={:?}, moisture={:?}, elevation={:?}, relief={:?}",
+        diagnostics.region.temperature_band,
+        diagnostics.region.moisture_band,
+        diagnostics.region.elevation_band,
+        diagnostics.region.relief_class,
+    );
+    if let Some(summary) = diagnostics.archetype_summary {
+        println!("  archetype summary: {summary}");
+    }
+    if !diagnostics.allowed_meso_keys.is_empty() {
+        println!(
+            "  allowed meso: {}",
+            diagnostics.allowed_meso_keys.join(", ")
+        );
+    }
+    println!(
+        "  atlas cell: ({}, {}), landness={:.3}, macro={:.3}, coast_distance={:.3}, ridge={:.3}, mountain={:.3}, basin={:.3}, river_flow={:.3}",
+        diagnostics.atlas_coord.x,
+        diagnostics.atlas_coord.z,
+        diagnostics.atlas_cell.landness,
+        diagnostics.atlas_cell.macro_elevation,
+        diagnostics.atlas_cell.coast_distance,
+        diagnostics.atlas_cell.ridge_factor,
+        diagnostics.atlas_cell.mountain_mass,
+        diagnostics.atlas_cell.basinness,
+        diagnostics.atlas_cell.river_flow_potential,
+    );
+    println!(
+        "  atlas climate: temperature={:.3}, humidity={:.3}, inlandness={:.3}, aridity={:.3}, wetness={:.3}",
+        diagnostics.atlas_cell.temperature,
+        diagnostics.atlas_cell.humidity,
+        diagnostics.atlas_cell.inlandness,
+        diagnostics.atlas_cell.aridity,
+        diagnostics.atlas_cell.wetness,
+    );
+    println!(
+        "  meso sample: hilliness={:.3}, hill_height={:.2}, basin_weight={:.3}, basin_depth={:.2}, escarpment_weight={:.3}, escarpment_height={:.2}, terrace_weight={:.3}, terrace_step_height={:.2}",
+        diagnostics.meso.hilliness,
+        diagnostics.meso.hill_height,
+        diagnostics.meso.basin_weight,
+        diagnostics.meso.basin_depth,
+        diagnostics.meso.escarpment_weight,
+        diagnostics.meso.escarpment_height,
+        diagnostics.meso.terrace_weight,
+        diagnostics.meso.terrace_step_height,
+    );
 }
 
 fn collect_render_meshes(
@@ -845,7 +1502,8 @@ fn collect_render_meshes(
         .filter_map(|coord| {
             let snapshot = world.snapshot_chunk(coord)?;
             let mesh = build_chunk_mesh(&snapshot, world.query_neighbors(coord), registry);
-            (!mesh.vertices.is_empty() && !mesh.indices.is_empty()).then(|| world_mesh_to_render(mesh))
+            (!mesh.vertices.is_empty() && !mesh.indices.is_empty())
+                .then(|| world_mesh_to_render(mesh))
         })
         .collect()
 }
@@ -877,7 +1535,9 @@ fn collect_lod_render_meshes(
     let mut cells = Vec::with_capacity(grid_width * grid_depth);
     let row_grids = preview_chunk_xz_coords(center_x, center_z, radius)
         .into_par_iter()
-        .map(|(chunk_x, chunk_z)| sample_chunk_surface_lod(ChunkCoord(chunk_x, 0, chunk_z), lod_blocks, meta))
+        .map(|(chunk_x, chunk_z)| {
+            sample_chunk_surface_lod(ChunkCoord(chunk_x, 0, chunk_z), lod_blocks, meta)
+        })
         .collect::<Vec<_>>();
 
     for sample_z in 0..samples_per_chunk {
@@ -1043,8 +1703,9 @@ fn parse_preview_stage(value: String) -> Result<PreviewStage, Box<dyn Error>> {
     match value.to_ascii_lowercase().as_str() {
         "full" | "default" => Ok(PreviewStage::Full),
         "prototype" => Ok(PreviewStage::Prototype),
+        "hydrology" => Ok(PreviewStage::Hydrology),
         other => Err(cli_error(format!(
-            "unknown stage '{other}'; expected 'full' or 'prototype'"
+            "unknown stage '{other}'; expected 'full', 'prototype', or 'hydrology'"
         ))),
     }
 }
@@ -1053,6 +1714,7 @@ fn preview_stage_label(stage: PreviewStage) -> &'static str {
     match stage {
         PreviewStage::Full => "full",
         PreviewStage::Prototype => "prototype",
+        PreviewStage::Hydrology => "hydrology",
     }
 }
 
@@ -1184,7 +1846,6 @@ fn scaled_face_positions(
     }
 }
 
-
 fn face_normal(face: BlockFace) -> [f32; 3] {
     match face {
         BlockFace::NegX => [-1.0, 0.0, 0.0],
@@ -1196,7 +1857,10 @@ fn face_normal(face: BlockFace) -> [f32; 3] {
     }
 }
 
-fn extend_render_bounds(bounds: &mut Option<new_world::renderer::RenderBounds>, positions: &[[f32; 3]; 4]) {
+fn extend_render_bounds(
+    bounds: &mut Option<new_world::renderer::RenderBounds>,
+    positions: &[[f32; 3]; 4],
+) {
     for position in positions {
         match bounds {
             Some(bounds) => {
@@ -1247,8 +1911,8 @@ fn build_preview_camera(
         up_extent = up_extent.max(dot3(delta, basis.up).abs());
     }
 
-    let half_height = (up_extent.max(right_extent / aspect) * 1.15)
-        .max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5);
+    let half_height =
+        (up_extent.max(right_extent / aspect) * 1.15).max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5);
 
     RenderCameraState {
         eye: quarter_view_eye(target, quarter_turns),
@@ -1286,7 +1950,11 @@ fn block_registry_to_render_textures(registry: &BlockRegistry) -> RenderTextureA
 
 fn world_mesh_to_render(mesh: new_world::world::CpuMesh) -> RenderCpuMesh {
     RenderCpuMesh {
-        vertices: mesh.vertices.into_iter().map(world_vertex_to_render).collect(),
+        vertices: mesh
+            .vertices
+            .into_iter()
+            .map(world_vertex_to_render)
+            .collect(),
         indices: mesh.indices,
         bounds: mesh.bounds.map(|bounds| new_world::renderer::RenderBounds {
             min: bounds.min,
@@ -1307,7 +1975,9 @@ fn world_vertex_to_render(vertex: new_world::world::MeshVertex) -> new_world::re
     }
 }
 
-fn render_material_kind_from_world(kind: BlockMaterialKind) -> new_world::renderer::RenderMaterialKind {
+fn render_material_kind_from_world(
+    kind: BlockMaterialKind,
+) -> new_world::renderer::RenderMaterialKind {
     match kind {
         BlockMaterialKind::GenericOpaque => new_world::renderer::RenderMaterialKind::GenericOpaque,
         BlockMaterialKind::Grass => new_world::renderer::RenderMaterialKind::Grass,
@@ -1432,7 +2102,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin chunk_preview -- <seed> [--stage <full|prototype>] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--stage full] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n\nPrototype stage is seed-only and renders the post-prototype meso-applied heightfield instead of realized chunk meshes."
+    "usage: cargo run --bin chunk_preview -- <seed> [--stage <full|prototype|hydrology>] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n   or: cargo run --bin chunk_preview -- --world-dir <path> [--stage full] [--center-x <i32>] [--center-z <i32>] [--radius <i32>] [--quarter-turns <u8>] [--width <u32>] [--height <u32>] [--min-y-chunk <i32>] [--max-y-chunk <i32>] [--lod-blocks <u8>] [--output <path>]\n\nPrototype and hydrology stages are seed-only; prototype renders the post-prototype meso-applied heightfield, while hydrology renders the post-smoothing hydrology carve with water overlays."
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1445,11 +2115,18 @@ mod tests {
     use new_world::world::{BlockRegistry, WorldMeta};
 
     #[test]
-    fn parse_preview_stage_accepts_full_and_prototype() {
-        assert_eq!(parse_preview_stage("full".to_string()).unwrap(), PreviewStage::Full);
+    fn parse_preview_stage_accepts_full_prototype_and_hydrology() {
+        assert_eq!(
+            parse_preview_stage("full".to_string()).unwrap(),
+            PreviewStage::Full
+        );
         assert_eq!(
             parse_preview_stage("prototype".to_string()).unwrap(),
             PreviewStage::Prototype
+        );
+        assert_eq!(
+            parse_preview_stage("hydrology".to_string()).unwrap(),
+            PreviewStage::Hydrology
         );
         assert!(parse_preview_stage("probe".to_string()).is_err());
     }
@@ -1464,26 +2141,40 @@ mod tests {
     }
 
     #[test]
+    fn hydrology_stage_default_output_path_marks_the_stage() {
+        let source = PreviewSource::Seed(42);
+        let output = default_output_path(&source, 3, -2, 5, 1, PreviewStage::Hydrology);
+        let output = output.to_string_lossy();
+
+        assert!(output.contains("seed_42_hydrology_cx3_cz-2_r5.png"));
+    }
+
+    #[test]
+    #[ignore = "slow preview smoke test that builds generation terrain meshes"]
     fn prototype_stage_collects_visible_meshes_from_a_seed() {
         let meta = WorldMeta::new(42);
         let registry = BlockRegistry::load_default().expect("default registry should load");
-        let meshes = collect_prototype_render_meshes(&meta, &registry, 4, -3, 0, 1)
-            .expect("prototype preview should build");
+        let grid = build_prototype_preview_grid(&meta, 4, -3, 1)
+            .expect("prototype preview grid should build");
+        let meshes = collect_prototype_render_meshes_from_grid(&grid, &registry, 4, -3, 0);
 
         assert!(!meshes.is_empty());
-        assert!(meshes
-            .iter()
-            .any(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty()));
+        assert!(
+            meshes
+                .iter()
+                .any(|mesh| !mesh.vertices.is_empty() && !mesh.indices.is_empty())
+        );
         assert!(meshes.iter().all(|mesh| mesh.bounds.is_some()));
     }
 
     #[test]
+    #[ignore = "slow preview smoke test that builds generation terrain grids"]
     fn prototype_stage_grid_matches_meso_applied_heights() {
         let meta = WorldMeta::new(42);
         let chunk = ChunkCoord(3, 0, 24);
-        let grid =
-            build_prototype_preview_grid(&meta, chunk.0, chunk.2, 0).expect("prototype grid should build");
-        let scaffold = build_chunk_v2_scaffold(chunk, &meta);
+        let grid = build_prototype_preview_grid(&meta, chunk.0, chunk.2, 0)
+            .expect("prototype grid should build");
+        let scaffold = build_chunk_generation_scaffold(chunk, &meta);
         let prototype = build_chunk_base_heightfield_prototype(
             scaffold.chunk,
             &scaffold.inputs,
@@ -1529,5 +2220,112 @@ mod tests {
             found_meso_delta,
             "expected the sampled prototype preview chunk to include meso deformation"
         );
+    }
+
+    #[test]
+    #[ignore = "slow preview smoke test that builds generation terrain grids"]
+    fn prototype_surface_summary_matches_grid_cells() {
+        let meta = WorldMeta::new(42);
+        let chunk = ChunkCoord(3, 0, 24);
+        let grid = build_prototype_preview_grid(&meta, chunk.0, chunk.2, 0)
+            .expect("prototype grid should build");
+        let summary = summarize_prototype_chunk_surface(&grid, chunk.0, chunk.2)
+            .expect("chunk should have a surface");
+        let mut heights = Vec::with_capacity(CHUNK_EDGE * CHUNK_EDGE);
+
+        for local_z in 0..CHUNK_EDGE_I32 {
+            for local_x in 0..CHUNK_EDGE_I32 {
+                let world_x = chunk.0 * CHUNK_EDGE_I32 + local_x;
+                let world_z = chunk.2 * CHUNK_EDGE_I32 + local_z;
+                heights.push(
+                    grid.cell(world_x, world_z)
+                        .expect("prototype grid should cover the sampled chunk")
+                        .top_y,
+                );
+            }
+        }
+
+        let expected_min = *heights
+            .iter()
+            .min()
+            .expect("height list should not be empty");
+        let expected_max = *heights
+            .iter()
+            .max()
+            .expect("height list should not be empty");
+        let expected_mean =
+            heights.iter().map(|height| *height as f32).sum::<f32>() / heights.len() as f32;
+
+        assert_eq!(summary.min_y, expected_min);
+        assert_eq!(summary.max_y, expected_max);
+        assert_eq!(summary.column_count, CHUNK_EDGE * CHUNK_EDGE);
+        assert!(
+            (summary.mean_y - expected_mean).abs() <= 0.001,
+            "prototype surface mean drifted from the preview grid"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow preview hydrology search smoke test"]
+    fn hydrology_stage_grid_contains_water_for_a_corridor_chunk() {
+        let meta = WorldMeta::new(42);
+        let seed_chunks = [
+            ChunkCoord(40, 0, -29),
+            ChunkCoord(39, 0, -29),
+            ChunkCoord(40, 0, -30),
+            ChunkCoord(40, 0, -28),
+            ChunkCoord(28, 0, -22),
+            ChunkCoord(29, 0, -22),
+            ChunkCoord(15, 0, 15),
+            ChunkCoord(16, 0, 16),
+            ChunkCoord(0, 0, 0),
+            ChunkCoord(31, 0, -20),
+        ];
+
+        for seed in seed_chunks {
+            for offset_z in -2..=2 {
+                for offset_x in -2..=2 {
+                    let chunk = ChunkCoord(seed.0 + offset_x, 0, seed.2 + offset_z);
+                    let grid = build_hydrology_preview_grid(&meta, chunk.0, chunk.2, 0)
+                        .expect("hydrology grid should build");
+                    let mut water_columns = 0usize;
+
+                    for local_z in 0..CHUNK_EDGE_I32 {
+                        for local_x in 0..CHUNK_EDGE_I32 {
+                            let world_x = chunk.0 * CHUNK_EDGE_I32 + local_x;
+                            let world_z = chunk.2 * CHUNK_EDGE_I32 + local_z;
+                            let cell = grid
+                                .cell(world_x, world_z)
+                                .expect("hydrology grid should cover the sampled chunk");
+                            if cell.water_surface_height.is_some() {
+                                water_columns += 1;
+                            }
+                        }
+                    }
+
+                    if water_columns > 0 {
+                        return;
+                    }
+                }
+            }
+        }
+
+        panic!("expected at least one sampled hydrology preview chunk to contain visible water");
+    }
+
+    #[test]
+    #[ignore = "slow preview diagnostics smoke test that builds generation scaffold"]
+    fn center_chunk_generator_diagnostics_include_atlas_region_and_meso_samples() {
+        let diagnostics =
+            collect_center_chunk_generator_diagnostics(ChunkCoord(0, 0, 0), &WorldMeta::new(42))
+                .expect("center chunk diagnostics should resolve");
+
+        assert_eq!(diagnostics.atlas_coord, AtlasCoord::new(0, 0));
+        assert!(diagnostics.atlas_cell.landness >= 0.0);
+        assert!(diagnostics.atlas_cell.landness <= 1.0);
+        assert!(diagnostics.archetype_summary.is_some());
+        assert!(!diagnostics.allowed_meso_keys.is_empty());
+        assert!(diagnostics.meso.hilliness >= 0.0);
+        assert!(diagnostics.meso.terrace_weight >= 0.0);
     }
 }

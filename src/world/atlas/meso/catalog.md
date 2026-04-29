@@ -1,4 +1,4 @@
-# catalog
+﻿# catalog
 
 ## Role
 
@@ -81,4 +81,4 @@
 ## Notes
 
 - this file is the scaffolded per-feature index, not the final per-archetype allowance matrix
-- current guide generation in `atlas/meso.rs` still emits only the Wave 1A subset until V2 meso application is implemented
+- current guide generation in `atlas/meso.rs` still emits only the Wave 1A subset until current generation meso application is implemented

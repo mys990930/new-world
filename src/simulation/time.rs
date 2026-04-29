@@ -78,9 +78,9 @@ impl TimeSim {
 
     pub fn step(&self, input: TimeSimInput) -> SimulationResult {
         let mut result = SimulationResult::empty(SubSystemId::Time, input.tick);
-        result
-            .events
-            .push(SimEvent::FixedTickAdvanced { tick: input.tick.index });
+        result.events.push(SimEvent::FixedTickAdvanced {
+            tick: input.tick.index,
+        });
 
         let ticks_per_game_minute = u64::from(self.config.ticks_per_game_minute.max(1));
         let minute_boundary = input.tick.index % ticks_per_game_minute == 0;
@@ -153,9 +153,9 @@ impl TimeSim {
         }
 
         if day_boundary {
-            result
-                .events
-                .push(SimEvent::DayAdvanced { day: next_calendar.day });
+            result.events.push(SimEvent::DayAdvanced {
+                day: next_calendar.day,
+            });
         }
 
         if !deferred_patches.is_empty() {
@@ -164,7 +164,9 @@ impl TimeSim {
             });
         }
 
-        result.followups.push(SimFollowupRequest::PersistCalendarState);
+        result
+            .followups
+            .push(SimFollowupRequest::PersistCalendarState);
         result.calendar_advance = Some(CalendarAdvance {
             calendar: next_calendar,
             climate_updates,
@@ -190,10 +192,10 @@ fn update_climate_state(
     let seasonal_temp = seasonal_temperature_bias(calendar.season_phase, region.climate_regime);
     let seasonal_humidity = seasonal_humidity_bias(calendar.season_phase, region.climate_regime);
     let jitter_temp = hash_signed01(world_seed, coord, calendar.absolute_minutes(), 0xA11C_E001);
-    let jitter_humidity = hash_signed01(world_seed, coord, calendar.absolute_minutes(), 0xA11C_E002);
+    let jitter_humidity =
+        hash_signed01(world_seed, coord, calendar.absolute_minutes(), 0xA11C_E002);
 
-    let target_temp =
-        seasonal_temp + diurnal * (0.10 + seasonality * 0.12) + jitter_temp * 0.05;
+    let target_temp = seasonal_temp + diurnal * (0.10 + seasonality * 0.12) + jitter_temp * 0.05;
     let target_humidity = seasonal_humidity + jitter_humidity * 0.07;
 
     AtlasClimateRuntimeState {
@@ -223,8 +225,7 @@ fn derive_local_weather(
     let cloudiness = (effective_humidity * 0.74 + cloud_seed * 0.26).clamp(0.0, 1.0);
     let precipitation_signal = (effective_humidity * 0.68 + precip_seed * 0.32).clamp(0.0, 1.0);
 
-    let (kind, intensity) = if storm_seed > 0.90 && cloudiness > 0.72 && effective_humidity > 0.66
-    {
+    let (kind, intensity) = if storm_seed > 0.90 && cloudiness > 0.72 && effective_humidity > 0.66 {
         (LocalWeatherKind::Storm, (storm_seed * 0.9).clamp(0.0, 1.0))
     } else if precipitation_signal > 0.62 && effective_humidity > 0.54 {
         if effective_temperature < -0.08 {
@@ -264,7 +265,9 @@ pub fn evaluate_local_climate(
     let regime_temperature = temperature_bias_for_regime(region.climate_regime);
 
     LocalClimateState {
-        temperature_signal: base_temperature + regime_temperature + climate_state.temperature_offset,
+        temperature_signal: base_temperature
+            + regime_temperature
+            + climate_state.temperature_offset,
         humidity_factor: (base_humidity + regime_humidity + climate_state.humidity_offset)
             .clamp(0.0, 1.0),
     }

@@ -1,20 +1,19 @@
 use super::{
+    AppMinimapViewport, MINIMAP_BLOCK_SPAN,
     ui::{
         UiRectPx, WorldSelectAction, WorldSelectButtonLayout, WorldSelectFieldLayout,
-        WorldSelectInfoLineLayout, WorldSelectInputField, WorldSelectLayout,
-        WorldSelectListLayout, WorldSelectLoadingPopupLayout, WorldSelectSectionLayout,
-        WorldSelectState, WorldSelectWorldRowLayout,
+        WorldSelectInfoLineLayout, WorldSelectInputField, WorldSelectLayout, WorldSelectListLayout,
+        WorldSelectLoadingPopupLayout, WorldSelectSectionLayout, WorldSelectState,
+        WorldSelectWorldRowLayout,
     },
-    AppMinimapViewport,
-    MINIMAP_BLOCK_SPAN,
 };
 use crate::ecs::{
     InventoryItem, LocalEnvironmentSnapshot, PlayerInventory, QUICKSLOT_COUNT, Transform,
 };
 use crate::renderer::RenderUiSprite;
 use crate::world::{
-    color_topdown_cell, darken_topdown_color, topdown_edge_strength_for_cell, BlockRegistry,
-    TopdownColumnScan, TopdownEdge, TopdownSurfaceRange,
+    BlockRegistry, TopdownColumnScan, TopdownEdge, TopdownSurfaceRange, WorldBlockCoord,
+    color_topdown_cell, darken_topdown_color, topdown_edge_strength_for_cell, world_to_chunk_local,
 };
 
 const UI_TILE_SIZE_PX: f32 = 8.0;
@@ -59,6 +58,8 @@ pub(super) fn build_ingame_ui_sprites(
         );
     }
 
+    push_current_chunk_panel(&mut sprites, viewport, player_transform);
+
     if let Some(inventory) = inventory {
         push_ingame_hud(&mut sprites, viewport, inventory, block_registry);
         if inventory.inventory_open {
@@ -66,6 +67,53 @@ pub(super) fn build_ingame_ui_sprites(
         }
     }
     sprites
+}
+
+fn push_current_chunk_panel(
+    sprites: &mut Vec<RenderUiSprite>,
+    viewport: [f32; 2],
+    player_transform: Option<Transform>,
+) {
+    let panel = UiRectPx {
+        x: 28.0,
+        y: viewport[1] - 164.0,
+        w: 188.0,
+        h: 56.0,
+    };
+    push_panel(
+        sprites,
+        panel,
+        [0.18, 0.15, 0.13, 0.98],
+        [0.70, 0.63, 0.46, 0.98],
+    );
+    push_text(
+        sprites,
+        panel.x + 14.0,
+        panel.y + 10.0,
+        1.0,
+        "CHUNK",
+        [0.95, 0.88, 0.70, 1.0],
+    );
+
+    let label = player_transform
+        .map(|transform| {
+            let (chunk, _) = world_to_chunk_local(WorldBlockCoord(
+                transform.translation[0].floor() as i32,
+                transform.translation[1].floor() as i32,
+                transform.translation[2].floor() as i32,
+            ));
+            format!("X {} Y {} Z {}", chunk.0, chunk.1, chunk.2)
+        })
+        .unwrap_or_else(|| "X -- Y -- Z --".to_string());
+
+    push_text(
+        sprites,
+        panel.x + 14.0,
+        panel.y + 30.0,
+        1.0,
+        &truncate_text_to_width(&label, panel.w - 28.0, 1.0),
+        [0.93, 0.96, 1.0, 1.0],
+    );
 }
 
 pub(super) fn build_world_select_ui_sprites(
@@ -176,7 +224,12 @@ fn push_minimap_overlay(
         h: MINIMAP_BLOCK_SPAN as f32 * MINIMAP_CELL_SIZE_PX,
     };
 
-    push_panel(sprites, panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
+    push_panel(
+        sprites,
+        panel,
+        [0.18, 0.15, 0.13, 0.98],
+        [0.70, 0.63, 0.46, 0.98],
+    );
     push_fill(sprites, inset, TILE_PANEL_INSET, [0.10, 0.16, 0.12, 0.96]);
     push_text(
         sprites,
@@ -331,7 +384,11 @@ fn minimap_status_lines(environment: Option<LocalEnvironmentSnapshot>) -> Vec<St
     } else {
         day.to_string()
     };
-    let humidity_percent = environment.display.humidity_percent.round().clamp(0.0, 100.0) as i32;
+    let humidity_percent = environment
+        .display
+        .humidity_percent
+        .round()
+        .clamp(0.0, 100.0) as i32;
     let temperature_celsius = environment.display.temperature_celsius.round() as i32;
 
     vec![
@@ -420,8 +477,7 @@ fn push_minimap_cell_edges(
         );
     }
 
-    let bottom =
-        topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Bottom);
+    let bottom = topdown_edge_strength_for_cell(columns, width, height, x, z, TopdownEdge::Bottom);
     if bottom > 0.0 {
         push_fill(
             sprites,
@@ -465,7 +521,12 @@ fn push_ingame_hud(
         h: 72.0,
     };
 
-    push_panel(sprites, mode_panel, [0.18, 0.15, 0.13, 0.98], [0.70, 0.63, 0.46, 0.98]);
+    push_panel(
+        sprites,
+        mode_panel,
+        [0.18, 0.15, 0.13, 0.98],
+        [0.70, 0.63, 0.46, 0.98],
+    );
     push_text(
         sprites,
         mode_panel.x + 14.0,
@@ -524,7 +585,12 @@ fn push_inventory_overlay(
         w: 720.0,
         h: 452.0,
     };
-    push_panel(sprites, panel, [0.20, 0.17, 0.14, 0.98], [0.83, 0.70, 0.44, 0.98]);
+    push_panel(
+        sprites,
+        panel,
+        [0.20, 0.17, 0.14, 0.98],
+        [0.83, 0.70, 0.44, 0.98],
+    );
     push_text(
         sprites,
         panel.x + 20.0,
@@ -556,7 +622,13 @@ fn push_inventory_overlay(
                 w: slot_size,
                 h: slot_size,
             };
-            push_inventory_slot(sprites, rect, inventory.general_slots[index], false, registry);
+            push_inventory_slot(
+                sprites,
+                rect,
+                inventory.general_slots[index],
+                false,
+                registry,
+            );
         }
     }
 
@@ -656,7 +728,12 @@ fn push_inventory_slot(
         [0.08, 0.10, 0.12, 0.96]
     };
     push_small_panel(sprites, rect, frame, fill);
-    push_fill(sprites, rect.inset(6.0), TILE_SLOT_FILL, [0.07, 0.09, 0.11, 0.92]);
+    push_fill(
+        sprites,
+        rect.inset(6.0),
+        TILE_SLOT_FILL,
+        [0.07, 0.09, 0.11, 0.92],
+    );
 
     if let Some(slot) = slot {
         let label = inventory_slot_short_label(slot, registry);
@@ -959,6 +1036,25 @@ fn push_world_select_loading_popup(
         &popup.detail,
         [0.80, 0.86, 0.94, 1.0],
     );
+    push_small_panel(
+        sprites,
+        popup.progress_track_rect,
+        [0.34, 0.30, 0.24, 1.0],
+        [0.05, 0.07, 0.09, 0.98],
+    );
+    push_fill(
+        sprites,
+        popup.progress_fill_rect,
+        TILE_PANEL_HEADER,
+        [0.70, 0.86, 0.96, 1.0],
+    );
+    push_text_centered(
+        sprites,
+        popup.progress_label_rect,
+        1.0,
+        &popup.progress_label,
+        [0.98, 0.99, 1.0, 1.0],
+    );
 }
 
 fn push_world_select_info_line(
@@ -1191,12 +1287,7 @@ fn push_divider(sprites: &mut Vec<RenderUiSprite>, rect: UiRectPx, tint: [f32; 4
     push_fill(sprites, rect, TILE_PANEL_DIVIDER, tint);
 }
 
-fn push_fill(
-    sprites: &mut Vec<RenderUiSprite>,
-    rect: UiRectPx,
-    tile: (u32, u32),
-    tint: [f32; 4],
-) {
+fn push_fill(sprites: &mut Vec<RenderUiSprite>, rect: UiRectPx, tile: (u32, u32), tint: [f32; 4]) {
     if rect.w <= 0.0 || rect.h <= 0.0 {
         return;
     }

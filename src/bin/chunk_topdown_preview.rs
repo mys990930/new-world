@@ -1,16 +1,24 @@
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use image::{Rgb, RgbImage};
+use rayon::prelude::*;
 
 use new_world::world::{
-    CreatedWorldManifest, CreatedWorldSource, BlockId, BlockMaterialKind, BlockRegistry,
-    CHUNK_EDGE_I32, ChunkCoord, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta,
-    build_chunk_mesh, generate_chunk,
+    BlockId, BlockMaterialKind, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkGenerationInputs,
+    WORLD_FLOOR_Y, WorldBlockCoord, WorldCore, WorldMeta, build_chunk_mesh,
+    chunk_generation_input_area, generate_chunk_from_generation_inputs,
+    prepare_chunk_generation_inputs,
 };
+
+#[path = "shared/world_dump_common.rs"]
+mod world_dump_common;
+
+use world_dump_common::{CreatedWorldManifest, load_chunk_from_dump, read_manifest};
 
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
@@ -88,7 +96,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let source = if args.first().map(String::as_str) == Some("--world-dir") {
         args.remove(0);
-        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(&mut args, "world-dir")?))
+        PreviewSource::CreatedWorld(PathBuf::from(parse_required::<String>(
+            &mut args,
+            "world-dir",
+        )?))
     } else {
         PreviewSource::Seed(parse_required::<u64>(&mut args, "seed")?)
     };
@@ -129,7 +140,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--pixels-per-block" => {
                 pixels_per_block = parse_required::<u32>(&mut args, "pixels-per-block")?
             }
-            "--output" => output = Some(PathBuf::from(parse_required::<String>(&mut args, "output")?)),
+            "--output" => {
+                output = Some(PathBuf::from(parse_required::<String>(
+                    &mut args, "output",
+                )?))
+            }
             _ => return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage()))),
         }
     }
@@ -149,53 +164,58 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map_err(|error| cli_error(format!("failed to load block registry: {error:?}")))?,
     );
 
-    let (meta, created_world_source) = match &source {
-        PreviewSource::Seed(seed) => (WorldMeta::new(*seed), None),
+    let (meta, created_world_dir, created_world_manifest) = match &source {
+        PreviewSource::Seed(seed) => (WorldMeta::new(*seed), None, None),
         PreviewSource::CreatedWorld(world_dir) => {
-            let created_world_source = CreatedWorldSource::open(world_dir).map_err(|error| {
-                cli_error(format!(
-                    "failed to open created world {}: {error}",
-                    world_dir.display()
-                ))
-            })?;
-            (
-                created_world_source.manifest().world_meta(),
-                Some(created_world_source),
-            )
+            let manifest = read_manifest(world_dir)?;
+            let meta = WorldMeta {
+                seed: manifest.seed,
+                world_version: WorldMeta::CURRENT_WORLD_VERSION,
+                generator_version: manifest.generator_version,
+                save_format_version: manifest.save_format_version,
+            };
+            (meta, Some(world_dir.clone()), Some(manifest))
         }
     };
 
     let requested_center = if center_explicit {
         (center_x, center_z)
-    } else if let Some(created_world_source) = created_world_source.as_ref() {
-        choose_created_world_center(
-            created_world_source.manifest(),
-            radius,
-            min_y_chunk,
-            max_y_chunk,
-        )?
+    } else if let Some(manifest) = created_world_manifest.as_ref() {
+        choose_created_world_center(manifest, radius, min_y_chunk, max_y_chunk)?
     } else {
         (center_x, center_z)
     };
     center_x = requested_center.0;
     center_z = requested_center.1;
 
-    let output =
-        output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius));
+    let output = output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius));
     let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-    match created_world_source.as_ref() {
-        Some(source) => {
+    match created_world_dir.as_deref() {
+        Some(world_dir) => {
+            let manifest = created_world_manifest
+                .as_ref()
+                .expect("created-world preview metadata should exist");
             ensure_created_world_bounds_cover_request(
-                source.manifest().min_chunk_coord(),
-                source.manifest().max_chunk_coord(),
+                manifest.min_chunk_coord(),
+                manifest.max_chunk_coord(),
                 center_x,
                 center_z,
                 radius,
                 min_y_chunk,
                 max_y_chunk,
             )?;
-            load_preview_chunks(&mut world, source, center_x, center_z, radius, min_y_chunk, max_y_chunk)?;
+            load_preview_chunks(
+                &mut world,
+                world_dir,
+                manifest.min_chunk_coord(),
+                manifest.max_chunk_coord(),
+                center_x,
+                center_z,
+                radius,
+                min_y_chunk,
+                max_y_chunk,
+            )?;
         }
         None => generate_preview_chunks(
             &mut world,
@@ -292,14 +312,18 @@ fn render_topdown_preview(
         )));
     }
 
-    let grid_width = usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid width overflowed"))?;
-    let grid_height = usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid height overflowed"))?;
+    let grid_width =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid width overflowed"))?;
+    let grid_height =
+        usize::try_from(blocks_per_axis).map_err(|_| cli_error("grid height overflowed"))?;
     let mut cells = Vec::with_capacity(grid_width * grid_height);
 
     for z_offset in 0..grid_height {
-        let world_z = min_world_z + i32::try_from(z_offset).expect("grid z index should fit in i32");
+        let world_z =
+            min_world_z + i32::try_from(z_offset).expect("grid z index should fit in i32");
         for x_offset in 0..grid_width {
-            let world_x = min_world_x + i32::try_from(x_offset).expect("grid x index should fit in i32");
+            let world_x =
+                min_world_x + i32::try_from(x_offset).expect("grid x index should fit in i32");
             cells.push(sample_column_scan(
                 world,
                 registry,
@@ -525,7 +549,11 @@ fn collect_mesh_debug_summary(
     summary
 }
 
-fn color_for_cell(cell: TopdownCell, registry: &BlockRegistry, surface_range: SurfaceRange) -> [u8; 3] {
+fn color_for_cell(
+    cell: TopdownCell,
+    registry: &BlockRegistry,
+    surface_range: SurfaceRange,
+) -> [u8; 3] {
     let Some(top_y) = cell.top_y else {
         return [18, 22, 28];
     };
@@ -690,7 +718,10 @@ fn print_preview_debug_summary(summary: &PreviewDebugSummary) {
         summary.columns_with_hidden_water,
         percent(summary.columns_with_hidden_water, summary.total_columns)
     );
-    println!("  total water blocks in scanned volume: {}", summary.total_water_blocks);
+    println!(
+        "  total water blocks in scanned volume: {}",
+        summary.total_water_blocks
+    );
     println!(
         "  water depth per wet column: avg {:.2}, max {}",
         summary.average_water_depth, summary.max_water_depth
@@ -727,7 +758,10 @@ fn percent(part: usize, whole: usize) -> f32 {
     }
 }
 
-fn diagnose_water_visibility(summary: &PreviewDebugSummary, mesh_debug: MeshDebugSummary) -> &'static str {
+fn diagnose_water_visibility(
+    summary: &PreviewDebugSummary,
+    mesh_debug: MeshDebugSummary,
+) -> &'static str {
     if summary.columns_with_any_water == 0 {
         "no water blocks were realized in the scanned chunk volume, so this preview points to generation rather than renderer visibility"
     } else if mesh_debug.water_face_count == 0 {
@@ -748,39 +782,63 @@ fn generate_preview_chunks(
     min_y_chunk: i32,
     max_y_chunk: i32,
 ) {
-    for chunk_y in min_y_chunk..=max_y_chunk {
-        for chunk_z in (center_z - radius)..=(center_z + radius) {
-            for chunk_x in (center_x - radius)..=(center_x + radius) {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let chunk = generate_chunk(coord, world.meta(), registry);
-                world.insert_chunk(coord, chunk);
-            }
-        }
+    let meta = *world.meta();
+    let input_cache = PreviewInputCache::for_preview_window(&meta, center_x, center_z, radius);
+    let generated_chunks =
+        preview_chunk_coords(center_x, center_z, radius, min_y_chunk, max_y_chunk)
+            .into_par_iter()
+            .map(|coord| {
+                let inputs = input_cache.inputs_for_chunk(coord);
+                (
+                    coord,
+                    generate_chunk_from_generation_inputs(&inputs, registry),
+                )
+            })
+            .collect::<Vec<_>>();
+
+    for (coord, chunk) in generated_chunks {
+        world.insert_chunk(coord, chunk);
     }
 }
 
 fn load_preview_chunks(
     world: &mut WorldCore,
-    source: &CreatedWorldSource,
+    world_dir: &Path,
+    min_chunk: ChunkCoord,
+    max_chunk: ChunkCoord,
     center_x: i32,
     center_z: i32,
     radius: i32,
     min_y_chunk: i32,
     max_y_chunk: i32,
 ) -> Result<(), Box<dyn Error>> {
-    for chunk_y in min_y_chunk..=max_y_chunk {
-        for chunk_z in (center_z - radius)..=(center_z + radius) {
-            for chunk_x in (center_x - radius)..=(center_x + radius) {
-                let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-                let chunk = source.load_chunk(coord).map_err(|error| {
-                    cli_error(format!(
-                        "failed to load created-world chunk ({}, {}, {}): {error}",
-                        coord.0, coord.1, coord.2
-                    ))
-                })?;
-                world.insert_chunk(coord, chunk);
-            }
-        }
+    let load_min_x = (center_x - radius).max(min_chunk.0);
+    let load_max_x = (center_x + radius).min(max_chunk.0);
+    let load_min_y = min_y_chunk.max(min_chunk.1);
+    let load_max_y = max_y_chunk.min(max_chunk.1);
+    let load_min_z = (center_z - radius).max(min_chunk.2);
+    let load_max_z = (center_z + radius).min(max_chunk.2);
+    let loaded_chunks = preview_chunk_coords_for_bounds(
+        load_min_x, load_max_x, load_min_y, load_max_y, load_min_z, load_max_z,
+    )
+    .into_par_iter()
+    .map(|coord| {
+        load_chunk_from_dump(world_dir, coord)
+            .map(|chunk| (coord, chunk))
+            .map_err(|error| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "failed to load preview chunk {coord:?} from {}: {error}",
+                        world_dir.display()
+                    ),
+                )
+            })
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+
+    for (coord, chunk) in loaded_chunks {
+        world.insert_chunk(coord, chunk);
     }
 
     Ok(())
@@ -834,8 +892,16 @@ fn choose_created_world_center(
     let max_chunk = manifest.max_chunk_coord();
 
     for summary in &manifest.stacks {
-        let requested_min = ChunkCoord(summary.center_x - radius, min_y_chunk, summary.center_z - radius);
-        let requested_max = ChunkCoord(summary.center_x + radius, max_y_chunk, summary.center_z + radius);
+        let requested_min = ChunkCoord(
+            summary.center_x - radius,
+            min_y_chunk,
+            summary.center_z - radius,
+        );
+        let requested_max = ChunkCoord(
+            summary.center_x + radius,
+            max_y_chunk,
+            summary.center_z + radius,
+        );
         if requested_min.0 >= min_chunk.0
             && requested_min.1 >= min_chunk.1
             && requested_min.2 >= min_chunk.2
@@ -849,23 +915,123 @@ fn choose_created_world_center(
 
     Err(cli_error(format!(
         "no created-world preview center fits radius {} inside created-world bounds x={}..{}, y={}..{}, z={}..{}; try a smaller radius or pass --center-x/--center-z",
-        radius,
-        min_chunk.0,
-        max_chunk.0,
-        min_chunk.1,
-        max_chunk.1,
-        min_chunk.2,
-        max_chunk.2
+        radius, min_chunk.0, max_chunk.0, min_chunk.1, max_chunk.1, min_chunk.2, max_chunk.2
     )))
 }
 
-fn default_output_path(source: &PreviewSource, center_x: i32, center_z: i32, radius: i32) -> PathBuf {
+fn default_output_path(
+    source: &PreviewSource,
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+) -> PathBuf {
     match source {
         PreviewSource::Seed(seed) => PathBuf::from(format!(
             "target/chunk-topdown-preview/seed_{seed}_cx{center_x}_cz{center_z}_r{radius}.png"
         )),
         PreviewSource::CreatedWorld(world_dir) => {
             world_dir.join(format!("topdown_cx{center_x}_cz{center_z}_r{radius}.png"))
+        }
+    }
+}
+
+fn preview_chunk_xz_coords(center_x: i32, center_z: i32, radius: i32) -> Vec<(i32, i32)> {
+    let mut coords = Vec::new();
+    for chunk_z in (center_z - radius)..=(center_z + radius) {
+        for chunk_x in (center_x - radius)..=(center_x + radius) {
+            coords.push((chunk_x, chunk_z));
+        }
+    }
+    coords
+}
+
+fn preview_chunk_coords(
+    center_x: i32,
+    center_z: i32,
+    radius: i32,
+    min_y_chunk: i32,
+    max_y_chunk: i32,
+) -> Vec<ChunkCoord> {
+    preview_chunk_coords_for_bounds(
+        center_x - radius,
+        center_x + radius,
+        min_y_chunk,
+        max_y_chunk,
+        center_z - radius,
+        center_z + radius,
+    )
+}
+
+fn preview_chunk_coords_for_bounds(
+    min_chunk_x: i32,
+    max_chunk_x: i32,
+    min_chunk_y: i32,
+    max_chunk_y: i32,
+    min_chunk_z: i32,
+    max_chunk_z: i32,
+) -> Vec<ChunkCoord> {
+    let mut coords = Vec::new();
+    for chunk_y in min_chunk_y..=max_chunk_y {
+        for chunk_z in min_chunk_z..=max_chunk_z {
+            for chunk_x in min_chunk_x..=max_chunk_x {
+                coords.push(ChunkCoord(chunk_x, chunk_y, chunk_z));
+            }
+        }
+    }
+    coords
+}
+
+#[derive(Debug, Clone)]
+struct PreviewInputCache {
+    entries: HashMap<PreviewInputCacheKey, ChunkGenerationInputs>,
+}
+
+impl PreviewInputCache {
+    fn for_preview_window(meta: &WorldMeta, center_x: i32, center_z: i32, radius: i32) -> Self {
+        let mut representatives = HashMap::<PreviewInputCacheKey, ChunkCoord>::new();
+        for (chunk_x, chunk_z) in preview_chunk_xz_coords(center_x, center_z, radius) {
+            let coord = ChunkCoord(chunk_x, 0, chunk_z);
+            representatives
+                .entry(PreviewInputCacheKey::for_chunk(coord))
+                .or_insert(coord);
+        }
+
+        let entries = representatives
+            .into_par_iter()
+            .map(|(key, coord)| (key, prepare_chunk_generation_inputs(coord, meta)))
+            .collect::<HashMap<_, _>>();
+
+        Self { entries }
+    }
+
+    fn inputs_for_chunk(&self, coord: ChunkCoord) -> ChunkGenerationInputs {
+        let key = PreviewInputCacheKey::for_chunk(coord);
+        let mut inputs = self
+            .entries
+            .get(&key)
+            .expect("preview input cache should cover every requested chunk")
+            .clone();
+        inputs.chunk = coord;
+        inputs
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PreviewInputCacheKey {
+    origin_x: i32,
+    origin_z: i32,
+    width: u32,
+    height: u32,
+}
+
+impl PreviewInputCacheKey {
+    fn for_chunk(coord: ChunkCoord) -> Self {
+        let area = chunk_generation_input_area(coord);
+        Self {
+            origin_x: area.origin().x,
+            origin_z: area.origin().z,
+            width: area.width(),
+            height: area.height(),
         }
     }
 }

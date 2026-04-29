@@ -7,18 +7,23 @@
 ## Responsibilities
 
 - build in-game HUD sprite groups
+- build the current player chunk HUD panel from the local player transform
 - build inventory overlay sprites
 - build minimap overlay sprites from cached minimap viewport data
 - build the minimap-adjacent local environment status panel from ECS snapshots
 - build world-select screen sprites from app-owned layout state
+- build the world-select loading popup progress bar and counter label from app-owned layout geometry
 - keep shared pixel-atlas panel / text helper functions in one place
+- emit sprites against `assets/ui/new_world_pixel_ui_atlas.png`, the generated 16x8 pixel UI atlas used by the main menu and overlays
 
 ## Inputs
 
 - `PlayerInventory`
+- local player `Transform`
 - `LocalEnvironmentSnapshot`
 - `AppMinimapViewport`
 - `WorldSelectLayout`
+- world-select popup progress label text prepared by app UI layout
 - current viewport size
 - block registry data needed for minimap colors and inventory labels
 
@@ -37,6 +42,7 @@
 - UI sprite geometry must stay aligned with the app-owned layout data used for interaction
 - minimap rendering must consume app-owned cached viewport data rather than scanning live world state
 - inventory and quickbar presentation may read ECS inventory snapshots, but they must not own or mutate inventory state
+- current chunk presentation may derive a read-only chunk coordinate from the player transform, but it must not drive lifecycle policy
 - local environment status text may read ECS snapshots, but this layer must not query `WorldCore` or simulation directly
 
 ## Related Modules

@@ -104,5 +104,6 @@
 - The main zoom/framing handle lives in `src/ecs/camera.rs` as `QUARTER_VIEW_VERTICAL_WORLD_SIZE`.
 - The main gameplay render + selection path now uses a weak perspective quarter-view camera rather than a fully orthographic one.
 - Runtime zoom is clamped between a minimum and maximum vertical world size and is driven by mouse-wheel input through ECS.
+- The current zoom-out ceiling is `96.0` vertical world units, twice the previous farthest gameplay zoom.
 - Follow/recenter interpolation is intentionally very gentle so quarter-view transitions feel less abrupt.
 - Vertical camera motion should continue to react to player height changes from steps, slopes, jumps, or falls even while horizontal follow remains deadzone-based.

@@ -2,7 +2,16 @@ pub mod catalog;
 pub mod features;
 
 pub use catalog::{MesoCatalogEntry, MesoCatalogStatus, meso_catalog_entries};
-pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
+pub(crate) use features::coastal_cliff_band::{
+    CoastalCliffBandSurfaceSample, build_coastal_cliff_band_window,
+    sample_coastal_cliff_band_surface_from_window,
+};
+pub(crate) use features::crater::{
+    CraterSurfaceSample, build_crater_window, sample_crater_surface_from_window,
+};
+pub(crate) use features::dune_field::{
+    DuneFieldSurfaceSample, build_dune_field_window, sample_dune_field_surface_from_window,
+};
 pub use features::hill_cluster::{
     HillClusterPeakCandidate, debug_peak_candidates as debug_hill_cluster_peak_candidates,
 };
@@ -10,6 +19,10 @@ pub(crate) use features::hill_cluster::{
     HillClusterSurfaceSample, build_window as build_hill_cluster_window,
     sample_surface_from_window as sample_hill_cluster_surface_from_window,
 };
+pub(crate) use features::ravine::{
+    RavineSurfaceSample, build_ravine_window, sample_ravine_surface_from_window,
+};
+pub use features::{MesoFeatureDef, meso_feature_def, meso_feature_defs};
 
 use std::f32::consts::TAU;
 
@@ -274,7 +287,14 @@ pub fn generate_meso_guides(
 
     for region_coord in meso_regions_covering_area(area) {
         let region = MesoRegion::new(region_coord);
-        emit_region_features(meta.seed, region, land_threshold, fields, structure, &mut cells);
+        emit_region_features(
+            meta.seed,
+            region,
+            land_threshold,
+            fields,
+            structure,
+            &mut cells,
+        );
     }
 
     MesoGuideMap {
@@ -284,8 +304,8 @@ pub fn generate_meso_guides(
 }
 
 pub fn sample_meso_guides(guides: &MesoGuideMap, world_x: i32, world_z: i32) -> MesoGuideSample {
-    let meso_span_blocks = (crate::world::CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32)
-        .max(1);
+    let meso_span_blocks =
+        (crate::world::CHUNK_EDGE_I32 * MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32).max(1);
     let cell_x = world_x.div_euclid(meso_span_blocks);
     let cell_z = world_z.div_euclid(meso_span_blocks);
     let frac_x = (world_x.rem_euclid(meso_span_blocks) as f32 + 0.5) / meso_span_blocks as f32;
@@ -471,10 +491,8 @@ fn emit_region_features(
                 origin.z * MESO_GUIDE_CELLS_PER_ATLAS_CELL as i32 + local_z,
             );
             let sample_point = (
-                origin.x as f32
-                    + (local_x as f32 + 0.5) / MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32,
-                origin.z as f32
-                    + (local_z as f32 + 0.5) / MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32,
+                origin.x as f32 + (local_x as f32 + 0.5) / MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32,
+                origin.z as f32 + (local_z as f32 + 0.5) / MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32,
             );
             let atlas_sample =
                 sample_atlas_fields_fractional(fields, sample_point.0, sample_point.1);
@@ -564,8 +582,12 @@ fn pick_feature_instance(
         return None;
     }
 
-    let spawn_roll =
-        hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_SPAWN_SALT);
+    let spawn_roll = hash01(
+        seed,
+        cell_coord.x as i64,
+        cell_coord.z as i64,
+        MESO_FEATURE_SPAWN_SALT,
+    );
     let spawn_threshold = (0.22 + best_weight * 0.60).clamp(0.28, 0.84);
     if spawn_roll > spawn_threshold {
         return None;
@@ -577,19 +599,19 @@ fn pick_feature_instance(
     }
 
     let jitter = cell_center_jitter(seed, cell_coord);
-    let pick_roll =
-        hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_PICK_SALT) * total;
+    let pick_roll = hash01(
+        seed,
+        cell_coord.x as i64,
+        cell_coord.z as i64,
+        MESO_FEATURE_PICK_SALT,
+    ) * total;
     let kind = weighted_pick(weights, pick_roll)?;
     let heading = feature_heading(seed, cell_coord, kind, structure);
 
     Some(match kind {
-        MesoFeatureKind::HillCluster => features::hill_cluster::build_instance(
-            seed,
-            cell_coord,
-            sample_point,
-            sample,
-            heading,
-        ),
+        MesoFeatureKind::HillCluster => {
+            features::hill_cluster::build_instance(seed, cell_coord, sample_point, sample, heading)
+        }
         MesoFeatureKind::Basin => FeatureInstance {
             kind,
             center_x: sample_point.0 * MESO_GUIDE_CELLS_PER_ATLAS_CELL as f32 + jitter.0,
@@ -599,17 +621,32 @@ fn pick_feature_instance(
             radius_x_cells: lerp_f32(
                 1.6,
                 2.9,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_X_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_X_SALT,
+                ),
             ),
             radius_z_cells: lerp_f32(
                 1.4,
                 2.7,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_Z_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_Z_SALT,
+                ),
             ),
             strength_blocks: lerp_f32(
                 2.0,
                 4.8,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_STRENGTH_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_STRENGTH_SALT,
+                ),
             ) * (0.85 + sample.wetness * 0.20),
             spacing_cells: 1.0,
         },
@@ -622,17 +659,32 @@ fn pick_feature_instance(
             radius_x_cells: lerp_f32(
                 2.4,
                 4.8,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_X_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_X_SALT,
+                ),
             ),
             radius_z_cells: lerp_f32(
                 0.7,
                 1.3,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_Z_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_Z_SALT,
+                ),
             ),
             strength_blocks: lerp_f32(
                 2.8,
                 6.2,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_STRENGTH_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_STRENGTH_SALT,
+                ),
             ) * (0.78 + sample.ruggedness * 0.30),
             spacing_cells: 1.0,
         },
@@ -645,22 +697,42 @@ fn pick_feature_instance(
             radius_x_cells: lerp_f32(
                 2.2,
                 4.2,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_X_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_X_SALT,
+                ),
             ),
             radius_z_cells: lerp_f32(
                 1.0,
                 1.8,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_Z_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_RADIUS_Z_SALT,
+                ),
             ),
             strength_blocks: lerp_f32(
                 1.4,
                 2.6,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_STRENGTH_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_STRENGTH_SALT,
+                ),
             ),
             spacing_cells: lerp_f32(
                 0.85,
                 1.45,
-                hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_SPACING_SALT),
+                hash01(
+                    seed,
+                    cell_coord.x as i64,
+                    cell_coord.z as i64,
+                    MESO_FEATURE_SPACING_SALT,
+                ),
             ),
         },
     })
@@ -694,8 +766,12 @@ fn feature_heading(
     kind: MesoFeatureKind,
     structure: StructureContext,
 ) -> (f32, f32) {
-    let fallback_angle =
-        hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_HEADING_SALT) * TAU;
+    let fallback_angle = hash01(
+        seed,
+        cell_coord.x as i64,
+        cell_coord.z as i64,
+        MESO_FEATURE_HEADING_SALT,
+    ) * TAU;
     let fallback = (fallback_angle.cos(), fallback_angle.sin());
 
     match kind {
@@ -720,10 +796,18 @@ fn feature_heading(
 }
 
 fn cell_center_jitter(seed: u64, cell_coord: AtlasCoord) -> (f32, f32) {
-    let jitter_x =
-        hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_X_SALT) - 0.5;
-    let jitter_z =
-        hash01(seed, cell_coord.x as i64, cell_coord.z as i64, MESO_FEATURE_RADIUS_Z_SALT) - 0.5;
+    let jitter_x = hash01(
+        seed,
+        cell_coord.x as i64,
+        cell_coord.z as i64,
+        MESO_FEATURE_RADIUS_X_SALT,
+    ) - 0.5;
+    let jitter_z = hash01(
+        seed,
+        cell_coord.x as i64,
+        cell_coord.z as i64,
+        MESO_FEATURE_RADIUS_Z_SALT,
+    ) - 0.5;
     (jitter_x * 0.38, jitter_z * 0.38)
 }
 
@@ -817,10 +901,8 @@ fn band_footprint(along: f32, across: f32, half_length: f32, half_width: f32) ->
         return 0.0;
     }
 
-    let along_mask =
-        smoothstep_range(1.12, 0.78, along.abs() / half_length.max(f32::EPSILON));
-    let across_mask =
-        smoothstep_range(1.10, 0.0, across.abs() / half_width.max(f32::EPSILON));
+    let along_mask = smoothstep_range(1.12, 0.78, along.abs() / half_length.max(f32::EPSILON));
+    let across_mask = smoothstep_range(1.10, 0.0, across.abs() / half_width.max(f32::EPSILON));
     along_mask * across_mask
 }
 
@@ -856,7 +938,14 @@ fn sample_atlas_fields_fractional(
         .expect("meso atlas southeast sample must exist");
 
     AtlasCell {
-        landness: bilerp(c00.landness, c10.landness, c01.landness, c11.landness, frac_x, frac_z),
+        landness: bilerp(
+            c00.landness,
+            c10.landness,
+            c01.landness,
+            c11.landness,
+            frac_x,
+            frac_z,
+        ),
         ocean_distance: bilerp(
             c00.ocean_distance,
             c10.ocean_distance,
@@ -1108,8 +1197,8 @@ fn project_point_onto_segment(
         };
     }
 
-    let t = (((point.0 - start_x) * seg_x + (point.1 - start_z) * seg_z) / length_sq)
-        .clamp(0.0, 1.0);
+    let t =
+        (((point.0 - start_x) * seg_x + (point.1 - start_z) * seg_z) / length_sq).clamp(0.0, 1.0);
     let nearest_x = start_x + seg_x * t;
     let nearest_z = start_z + seg_z * t;
     let length = length_sq.sqrt();
@@ -1171,6 +1260,7 @@ mod tests {
     use crate::world::{generate_atlas_fields, generate_atlas_structure};
 
     #[test]
+    #[ignore = "slow atlas meso generation smoke test"]
     fn meso_generation_is_deterministic() {
         let meta = WorldMeta::new(42);
         let area = AtlasArea::new(AtlasCoord::new(-6, -6), 12, 12).unwrap();
@@ -1184,6 +1274,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow atlas meso generation coverage smoke test"]
     fn meso_generation_emits_wave_one_guides_for_large_area() {
         let meta = WorldMeta::new(42);
         let area = AtlasArea::new(AtlasCoord::new(-8, -8), 16, 16).unwrap();

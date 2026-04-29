@@ -1,4 +1,4 @@
-# profile
+﻿# profile
 
 ## Role
 
@@ -17,5 +17,5 @@
 
 ## Notes
 
-- the removed V1 surface solver used these values as shape-family categories
-- V2 may eventually keep, replace, or reinterpret them, but they are not currently the biome system and they no longer drive block placement
+- the removed legacy surface solver used these values as shape-family categories
+- current generation may eventually keep, replace, or reinterpret them, but they are not currently the biome system and they no longer drive block placement

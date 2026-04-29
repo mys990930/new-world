@@ -45,15 +45,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let coord = ChunkCoord(chunk_x, 0, chunk_z);
     let chunk_probe = probe_chunk(coord, &meta);
     let column_probe = probe_column(coord, local_x, local_z, &meta);
-    let atlas_area = AtlasArea::new(column_probe.atlas_coord, 2, 2).expect("probe atlas area should be valid");
+    let atlas_area =
+        AtlasArea::new(column_probe.atlas_coord, 2, 2).expect("probe atlas area should be valid");
     let atlas = generate_atlas_fields(&meta, atlas_area);
 
     println!("seed: {seed}");
     println!("chunk: ({chunk_x}, {chunk_z})");
     println!(
         "chunk footprint: {} blocks = {:.1}m per side",
-        CHUNK_EDGE,
-        CHUNK_EDGE_M
+        CHUNK_EDGE, CHUNK_EDGE_M
     );
     println!(
         "atlas cell footprint: {} chunks = {} blocks = {}m per side",
@@ -80,7 +80,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("atlas corners:");
     for dz in 0..2 {
         for dx in 0..2 {
-            let corner = AtlasCoord::new(column_probe.atlas_coord.x + dx, column_probe.atlas_coord.z + dz);
+            let corner = AtlasCoord::new(
+                column_probe.atlas_coord.x + dx,
+                column_probe.atlas_coord.z + dz,
+            );
             let cell = atlas.get(corner).expect("probe atlas corner should exist");
             println!(
                 "  ({:>3}, {:>3}) landness={:.3} ocean={:.3} coast={:.3} macro={:.3} ridge={:.3} mountain={:.3} rugged={:.3} river={:.3} alpine={:.3}",
@@ -131,7 +134,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         chunk_probe.surface_mean_y * BLOCK_SIZE_M,
         chunk_probe.dominant_profile.as_str()
     );
-    println!("profile counts: {}", format_profile_counts(chunk_probe.profile_counts));
+    println!(
+        "profile counts: {}",
+        format_profile_counts(chunk_probe.profile_counts)
+    );
 
     Ok(())
 }
@@ -139,12 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn format_profile_counts(counts: TerrainProfileCounts) -> String {
     format!(
         "deep_ocean={} shelf={} coast={} plain={} upland={} ridge={}",
-        counts.deep_ocean,
-        counts.shelf,
-        counts.coast,
-        counts.plain,
-        counts.upland,
-        counts.ridge
+        counts.deep_ocean, counts.shelf, counts.coast, counts.plain, counts.upland, counts.ridge
     )
 }
 

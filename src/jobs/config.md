@@ -48,5 +48,6 @@
 
 ## 메모
 
-- 현재 구현에서 기본값은 `worker_count = 1`, `max_pending_requests = None`이다.
+- 현재 구현에서 기본값은 `worker_count = min(available_parallelism, 2)`, `max_pending_requests = None`이다.
+- 기본 worker 수는 created-world load, mesh, minimap rebuild가 같은 queue를 공유하되, 초기 chunk streaming 중에도 main thread 입력/렌더 여유를 남기기 위한 interactive 기본값이다.
 - 추후 profiling 결과에 따라 job class별 제한, shutdown policy, completed queue 제한을 추가할 수 있다.

@@ -73,8 +73,8 @@ impl Default for WorldCalendar {
     fn default() -> Self {
         Self {
             absolute_tick: 0,
-            minute: 21,
-            hour: 18,
+            minute: 0,
+            hour: 11,
             day: 0,
             day_of_year: 0,
             season_index: 0,
@@ -244,3 +244,16 @@ pub fn season_phase_for_index(index: u8) -> SeasonalPhase {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_calendar_starts_at_eleven_am() {
+        let calendar = WorldCalendar::default();
+
+        assert_eq!(calendar.hour, 11);
+        assert_eq!(calendar.minute, 0);
+        assert_eq!(calendar.time_of_day_hours(), 11.0);
+    }
+}

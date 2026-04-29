@@ -1,11 +1,11 @@
 use crate::world::atlas::{AtlasCoord, MesoGuideMap, MesoRegionCoord, sample_meso_guides};
 use crate::world::coord::ChunkCoord;
 
+use super::super::super::lerp_f32;
 use super::{
     GuideSource, HillClusterApplySample, HillClusterSurfaceSample, MacroLobeDescriptor,
-    collect_peak_sources, distance_between_points, indexed_lobe_hash01,
-    insert_top3, irregular_lobe_footprint, lobe_hash01, smoothstep01, smoothstep_range,
-    soft_cap_positive,
+    collect_peak_sources, distance_between_points, indexed_lobe_hash01, insert_top3,
+    irregular_lobe_footprint, lobe_hash01, smoothstep_range, smoothstep01, soft_cap_positive,
 };
 use super::{
     SOURCE_CHAIN_SPACING_SALT, SOURCE_COUNT_SALT, SOURCE_ENVELOPE_FILL_SALT,
@@ -13,7 +13,6 @@ use super::{
     SOURCE_MINOR_RADIUS_SALT, SOURCE_SUMMIT_CAP_SALT, SOURCE_SUMMIT_HEIGHT_SALT,
     SOURCE_SUMMIT_PROFILE_SALT,
 };
-use super::super::super::lerp_f32;
 
 const WINDOW_OWNER_PADDING_REGIONS: i32 = 1;
 const REGION_RESOLVE_PADDING_REGIONS: i32 = 1;
@@ -86,7 +85,9 @@ pub(crate) fn build_window(guides: &MesoGuideMap, chunk: ChunkCoord) -> HillClus
         }
     }
 
-    hills.retain(|hill| bounds_overlap(chunk_bounds, hill.min_x, hill.max_x, hill.min_z, hill.max_z));
+    hills.retain(|hill| {
+        bounds_overlap(chunk_bounds, hill.min_x, hill.max_x, hill.min_z, hill.max_z)
+    });
 
     HillClusterWindow { chunk, hills }
 }
@@ -143,12 +144,16 @@ fn resolve_hill(source: GuideSource, nearby_sources: &[GuideSource]) -> Option<R
         56.0,
         88.0,
         lobe_hash01(source.coord, source.cell, SOURCE_MAJOR_RADIUS_SALT),
-    ) * (0.98 + source.cell.hilliness * 0.24 + (source.cell.hill_height / 18.0).clamp(0.0, 0.20));
+    ) * (0.98
+        + source.cell.hilliness * 0.24
+        + (source.cell.hill_height / 18.0).clamp(0.0, 0.20));
     let primary_minor = lerp_f32(
         44.0,
         72.0,
         lobe_hash01(source.coord, source.cell, SOURCE_MINOR_RADIUS_SALT),
-    ) * (1.00 + source.cell.hilliness * 0.22 + (source.cell.hill_height / 22.0).clamp(0.0, 0.16));
+    ) * (1.00
+        + source.cell.hilliness * 0.22
+        + (source.cell.hill_height / 22.0).clamp(0.0, 0.16));
     let primary_height = source.cell.hill_height
         * (1.32 + source.cell.hilliness * 0.36)
         * lerp_f32(
@@ -175,7 +180,13 @@ fn resolve_hill(source: GuideSource, nearby_sources: &[GuideSource]) -> Option<R
         normal_z,
         primary.lobe,
     );
-    let support = resolve_support(source, heading_x, heading_z, primary.lobe, secondary.map(|blob| blob.lobe));
+    let support = resolve_support(
+        source,
+        heading_x,
+        heading_z,
+        primary.lobe,
+        secondary.map(|blob| blob.lobe),
+    );
 
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
@@ -221,7 +232,12 @@ fn resolve_hill(source: GuideSource, nearby_sources: &[GuideSource]) -> Option<R
     let peak_height_hint = primary.lobe.height_blocks.max(secondary_height);
     let raise_cap_blocks = primary
         .raise_cap_blocks
-        .max(secondary.as_ref().map(|blob| blob.raise_cap_blocks).unwrap_or(0.0))
+        .max(
+            secondary
+                .as_ref()
+                .map(|blob| blob.raise_cap_blocks)
+                .unwrap_or(0.0),
+        )
         .max(peak_height_hint * 1.22)
         .clamp(18.0, 42.0);
 
@@ -260,11 +276,14 @@ fn hill_heading(source: GuideSource, nearby_sources: &[GuideSource]) -> (f32, f3
     if let Some(neighbor) = nearest {
         let delta_x = neighbor.center_x - source.center_x;
         let delta_z = neighbor.center_z - source.center_z;
-        let distance = (delta_x * delta_x + delta_z * delta_z).sqrt().max(f32::EPSILON);
+        let distance = (delta_x * delta_x + delta_z * delta_z)
+            .sqrt()
+            .max(f32::EPSILON);
         return (delta_x / distance, delta_z / distance);
     }
 
-    let angle = lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT) * std::f32::consts::TAU;
+    let angle =
+        lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT) * std::f32::consts::TAU;
     (angle.cos(), angle.sin())
 }
 
@@ -298,13 +317,23 @@ fn make_blob(
         peak_exponent: lerp_f32(
             1.10,
             1.56,
-            indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SUMMIT_PROFILE_SALT),
+            indexed_lobe_hash01(
+                source.coord,
+                source.cell,
+                lobe_index,
+                SOURCE_SUMMIT_PROFILE_SALT,
+            ),
         ),
         raise_cap_blocks: (height_blocks
             * lerp_f32(
                 1.14,
                 1.58,
-                indexed_lobe_hash01(source.coord, source.cell, lobe_index, SOURCE_SUMMIT_CAP_SALT),
+                indexed_lobe_hash01(
+                    source.coord,
+                    source.cell,
+                    lobe_index,
+                    SOURCE_SUMMIT_CAP_SALT,
+                ),
             ))
         .clamp(16.0, 42.0),
         half_extent_x,
@@ -333,7 +362,11 @@ fn resolve_secondary_blob(
         * lerp_f32(
             primary.radius_x_blocks * 0.14,
             primary.radius_x_blocks * 0.28,
-            lobe_hash01(source.coord, source.cell, SOURCE_CHAIN_SPACING_SALT ^ 0x55AA),
+            lobe_hash01(
+                source.coord,
+                source.cell,
+                SOURCE_CHAIN_SPACING_SALT ^ 0x55AA,
+            ),
         );
     let offset_across = lerp_f32(
         -primary.radius_z_blocks * 0.18,
@@ -358,7 +391,11 @@ fn resolve_secondary_blob(
         * lerp_f32(
             0.38,
             0.62,
-            lobe_hash01(source.coord, source.cell, SOURCE_SUMMIT_HEIGHT_SALT ^ 0xAA55),
+            lobe_hash01(
+                source.coord,
+                source.cell,
+                SOURCE_SUMMIT_HEIGHT_SALT ^ 0xAA55,
+            ),
         );
 
     Some(make_blob(
@@ -389,15 +426,23 @@ fn resolve_support(
     } else {
         (primary.center_x, primary.center_z)
     };
-    let delta_x = secondary.map(|blob| (blob.center_x - primary.center_x).abs()).unwrap_or(0.0);
-    let delta_z = secondary.map(|blob| (blob.center_z - primary.center_z).abs()).unwrap_or(0.0);
+    let delta_x = secondary
+        .map(|blob| (blob.center_x - primary.center_x).abs())
+        .unwrap_or(0.0);
+    let delta_z = secondary
+        .map(|blob| (blob.center_z - primary.center_z).abs())
+        .unwrap_or(0.0);
     let radius_x_blocks = primary.radius_x_blocks.max(
-        secondary.map(|blob| blob.radius_x_blocks).unwrap_or(primary.radius_x_blocks),
+        secondary
+            .map(|blob| blob.radius_x_blocks)
+            .unwrap_or(primary.radius_x_blocks),
     ) * 1.42
         + delta_x * 0.42
         + 14.0;
     let radius_z_blocks = primary.radius_z_blocks.max(
-        secondary.map(|blob| blob.radius_z_blocks).unwrap_or(primary.radius_z_blocks),
+        secondary
+            .map(|blob| blob.radius_z_blocks)
+            .unwrap_or(primary.radius_z_blocks),
     ) * 1.48
         + delta_z * 0.50
         + 16.0;
@@ -443,7 +488,11 @@ pub(crate) fn sample_apply_signal_from_window(
     let mut raise_cap_weight = 0.0_f32;
 
     for hill in &window.hills {
-        if sample_x < hill.min_x || sample_x > hill.max_x || sample_z < hill.min_z || sample_z > hill.max_z {
+        if sample_x < hill.min_x
+            || sample_x > hill.max_x
+            || sample_z < hill.min_z
+            || sample_z > hill.max_z
+        {
             continue;
         }
 
@@ -461,29 +510,34 @@ pub(crate) fn sample_apply_signal_from_window(
                 continue;
             }
 
-            let footprint =
-                irregular_lobe_footprint(blob.lobe, blob.source, blob.lobe_index, sample_x, sample_z);
+            let footprint = irregular_lobe_footprint(
+                blob.lobe,
+                blob.source,
+                blob.lobe_index,
+                sample_x,
+                sample_z,
+            );
             if footprint <= 0.0 {
                 continue;
             }
 
-            let contribution = blob.lobe.height_blocks * summit_profile(footprint, blob.peak_exponent);
+            let contribution =
+                blob.lobe.height_blocks * summit_profile(footprint, blob.peak_exponent);
             insert_top3(
                 contribution,
                 &mut hill_strongest,
                 &mut hill_second,
                 &mut hill_third,
             );
-            hill_coverage = coverage_union(
-                hill_coverage,
-                (footprint * blob.core_scale).clamp(0.0, 1.0),
-            );
+            hill_coverage =
+                coverage_union(hill_coverage, (footprint * blob.core_scale).clamp(0.0, 1.0));
             let cap_weight = contribution.max(footprint * blob.lobe.height_blocks * 0.12);
             hill_cap_weighted_sum += blob.raise_cap_blocks * cap_weight;
             hill_cap_weight += cap_weight;
         }
 
-        let support_footprint = if (sample_x - hill.support.center_x).abs() <= hill.support.half_extent_x
+        let support_footprint = if (sample_x - hill.support.center_x).abs()
+            <= hill.support.half_extent_x
             && (sample_z - hill.support.center_z).abs() <= hill.support.half_extent_z
         {
             support_footprint(hill.support, sample_x, sample_z)
@@ -498,7 +552,10 @@ pub(crate) fn sample_apply_signal_from_window(
             (support_footprint * 0.58).clamp(0.0, 0.82),
         );
         let hill_core = hill_strongest + hill_second * 0.24 + hill_third * 0.08;
-        if hill_core <= f32::EPSILON && hill_support_height <= f32::EPSILON && hill_shoulder_coverage <= f32::EPSILON {
+        if hill_core <= f32::EPSILON
+            && hill_support_height <= f32::EPSILON
+            && hill_shoulder_coverage <= f32::EPSILON
+        {
             continue;
         }
 
@@ -511,7 +568,8 @@ pub(crate) fn sample_apply_signal_from_window(
 
         if hill_cap_weight > f32::EPSILON {
             let hill_raise_cap = hill_cap_weighted_sum / hill_cap_weight;
-            raise_cap_weighted_sum += hill_raise_cap * hill_core.max(hill_coverage * hill.peak_height_hint * 0.10);
+            raise_cap_weighted_sum +=
+                hill_raise_cap * hill_core.max(hill_coverage * hill.peak_height_hint * 0.10);
             raise_cap_weight += hill_core.max(hill_coverage * hill.peak_height_hint * 0.10);
         } else if hill_core > f32::EPSILON {
             raise_cap_weighted_sum += hill.raise_cap_blocks * hill_core;
@@ -556,13 +614,10 @@ pub(crate) fn sample_surface_from_window(
     let core_presence = smoothstep_range(0.08, 0.84, coverage);
     let support_presence =
         smoothstep_range(0.10, 0.90, shoulder) * (1.0 - smoothstep_range(0.06, 0.52, coverage));
-    let guide_raise = meso.hill_height
-        * (0.10 + meso.hilliness * 0.06)
-        * support_presence;
+    let guide_raise = meso.hill_height * (0.10 + meso.hilliness * 0.06) * support_presence;
     let support_raise = support * (0.94 + meso.hilliness * 0.12) * support_presence;
-    let core_raise = apply.lobe_height_blocks
-        * (1.28 + meso.hilliness * 0.24 + coverage * 0.14)
-        * core_presence;
+    let core_raise =
+        apply.lobe_height_blocks * (1.28 + meso.hilliness * 0.24 + coverage * 0.14) * core_presence;
     let raw_target_raise = guide_raise + support_raise + core_raise;
     let raise_cap = apply
         .peak_raise_cap_blocks
@@ -573,9 +628,8 @@ pub(crate) fn sample_surface_from_window(
         return HillClusterSurfaceSample::flat(base_surface_y);
     }
 
-    let blend_weight = smoothstep01(
-        (coverage * 0.82 + shoulder * 0.14 + core_presence * 0.16).clamp(0.0, 1.0),
-    );
+    let blend_weight =
+        smoothstep01((coverage * 0.82 + shoulder * 0.14 + core_presence * 0.16).clamp(0.0, 1.0));
 
     HillClusterSurfaceSample {
         target_surface_y: base_surface_y + target_raise,
@@ -596,16 +650,23 @@ fn support_footprint(support: ResolvedHillSupport, sample_x: f32, sample_z: f32)
     let contour_angle = normalized_across.atan2(normalized_along);
     let contour_scale = 1.0
         + (contour_angle * 2.0
-            + lobe_hash01(support.source.coord, support.source.cell, SOURCE_ENVELOPE_RADIUS_SALT)
-                * std::f32::consts::TAU)
+            + lobe_hash01(
+                support.source.coord,
+                support.source.cell,
+                SOURCE_ENVELOPE_RADIUS_SALT,
+            ) * std::f32::consts::TAU)
             .sin()
             * 0.07
         + (contour_angle * 3.0
-            + lobe_hash01(support.source.coord, support.source.cell, SOURCE_ENVELOPE_SHOULDER_SALT)
-                * std::f32::consts::TAU)
+            + lobe_hash01(
+                support.source.coord,
+                support.source.cell,
+                SOURCE_ENVELOPE_SHOULDER_SALT,
+            ) * std::f32::consts::TAU)
             .cos()
             * 0.05;
-    let radial = ((normalized_along * normalized_along) + (normalized_across * normalized_across)).sqrt()
+    let radial = ((normalized_along * normalized_along) + (normalized_across * normalized_across))
+        .sqrt()
         / contour_scale.max(0.82);
     let outer = smoothstep_range(1.10, 0.0, radial);
     let inner = smoothstep_range(0.80, 0.0, radial);
@@ -671,11 +732,9 @@ fn chunk_bounds(chunk: ChunkCoord, padding_blocks: f32) -> (f32, f32, f32, f32) 
     (min_x, max_x, min_z, max_z)
 }
 
-fn owner_region_range_for_chunk(
-    chunk: ChunkCoord,
-    padding_regions: i32,
-) -> (i32, i32, i32, i32) {
-    let region_span_blocks = crate::world::CHUNK_EDGE_I32 * crate::world::ATLAS_CELL_SIZE_IN_CHUNKS as i32;
+fn owner_region_range_for_chunk(chunk: ChunkCoord, padding_regions: i32) -> (i32, i32, i32, i32) {
+    let region_span_blocks =
+        crate::world::CHUNK_EDGE_I32 * crate::world::ATLAS_CELL_SIZE_IN_CHUNKS as i32;
     let min_world_x = chunk.0 * crate::world::CHUNK_EDGE_I32;
     let max_world_x = (chunk.0 + 1) * crate::world::CHUNK_EDGE_I32 - 1;
     let min_world_z = chunk.2 * crate::world::CHUNK_EDGE_I32;
@@ -727,9 +786,7 @@ mod tests {
         GuideSource, HillClusterWindow, ResolvedHill, ResolvedHillSupport, coverage_union,
         sample_apply_signal_from_window, sample_surface_from_window, summit_profile,
     };
-    use crate::world::atlas::{
-        AtlasArea, AtlasCoord, AtlasGrid, MesoGuideCell, MesoGuideMap,
-    };
+    use crate::world::atlas::{AtlasArea, AtlasCoord, AtlasGrid, MesoGuideCell, MesoGuideMap};
     use crate::world::coord::ChunkCoord;
 
     #[test]
@@ -798,12 +855,24 @@ mod tests {
         let guides = MesoGuideMap { area, cells };
 
         let apply = sample_apply_signal_from_window(&window, 64, 64);
-        assert!(apply.support_height_blocks > 0.0, "expected support-only hill to emit support, got {apply:?}");
-        assert!(apply.lobe_height_blocks <= f32::EPSILON, "expected support-only hill to avoid core height, got {apply:?}");
+        assert!(
+            apply.support_height_blocks > 0.0,
+            "expected support-only hill to emit support, got {apply:?}"
+        );
+        assert!(
+            apply.lobe_height_blocks <= f32::EPSILON,
+            "expected support-only hill to avoid core height, got {apply:?}"
+        );
 
         let surface = sample_surface_from_window(&window, &guides, 64, 64, 100.0, 24.0);
-        assert!(surface.target_surface_y > 100.0, "expected support-only hill to still raise foothills, got {surface:?}");
-        assert!(surface.target_surface_y < 105.0, "expected support-only hill to stay below summit-like uplift, got {surface:?}");
+        assert!(
+            surface.target_surface_y > 100.0,
+            "expected support-only hill to still raise foothills, got {surface:?}"
+        );
+        assert!(
+            surface.target_surface_y < 105.0,
+            "expected support-only hill to stay below summit-like uplift, got {surface:?}"
+        );
     }
 
     #[test]

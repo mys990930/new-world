@@ -5,7 +5,7 @@ use crate::world::WorldMeta;
 
 use super::scale::{AtlasArea, AtlasCoord, AtlasGrid};
 use super::seed::{
-    SALT_CONTINENT_PRIMARY, SALT_CONTINENT_SECONDARY, SALT_COAST_ROUGHNESS, SALT_DETAIL,
+    SALT_COAST_ROUGHNESS, SALT_CONTINENT_PRIMARY, SALT_CONTINENT_SECONDARY, SALT_DETAIL,
     SALT_HUMIDITY, SALT_MOUNTAIN_CLUSTER, SALT_RIDGE_PRIMARY, SALT_RIDGE_SECONDARY,
     SALT_TEMPERATURE, domain_warp, fbm, ridged_fbm,
 };
@@ -109,6 +109,12 @@ impl AtlasFieldMap {
     pub fn get(&self, coord: AtlasCoord) -> Option<&AtlasCell> {
         self.cells.get(coord)
     }
+
+    pub(crate) fn from_cells(area: AtlasArea, values: Vec<AtlasCell>) -> Self {
+        Self {
+            cells: AtlasGrid::from_values(area, values),
+        }
+    }
 }
 
 pub fn generate_atlas_fields(meta: &WorldMeta, area: AtlasArea) -> AtlasFieldMap {
@@ -135,7 +141,9 @@ pub fn generate_atlas_fields_with_tuning(
     let mut height_field = vec![0.0_f32; len];
 
     for coord in area.coords() {
-        let index = area.index_of(coord).expect("atlas coord must index into area");
+        let index = area
+            .index_of(coord)
+            .expect("atlas coord must index into area");
         let landness = sample_landness(meta.seed, coord, tuning);
         let is_land = landness >= normalization.land_threshold;
 
@@ -179,7 +187,8 @@ pub fn generate_atlas_fields_with_tuning(
         } else {
             0.0
         };
-        let coast_distance_cells = coast_distance_cells(&land_mask, &ocean_distance_raw, &land_distance_raw, index);
+        let coast_distance_cells =
+            coast_distance_cells(&land_mask, &ocean_distance_raw, &land_distance_raw, index);
         let continent_core = if is_land {
             clamp01(ocean_distance_cells / normalization.continent_core_normalizer)
         } else {
@@ -190,8 +199,14 @@ pub fn generate_atlas_fields_with_tuning(
         } else {
             0.0
         };
-        let mountain_mass =
-            sample_mountain_mass(meta.seed, coord, cells[index].ridge_factor, continent_core, cells[index].landness, tuning);
+        let mountain_mass = sample_mountain_mass(
+            meta.seed,
+            coord,
+            cells[index].ridge_factor,
+            continent_core,
+            cells[index].landness,
+            tuning,
+        );
         let continental_lift = smoothstep(normalization.land_threshold, 1.0, cells[index].landness);
         let macro_elevation = if is_land {
             clamp01(
@@ -240,8 +255,9 @@ pub fn generate_atlas_fields_with_tuning(
                 + cells[index].slope * terrain.rugged_slope_weight
                 + detail * terrain.rugged_detail_weight,
         );
-        cells[index].basinness =
-            clamp01((neighbor_mean - height_field[index] + terrain.basin_offset) * terrain.basin_scale);
+        cells[index].basinness = clamp01(
+            (neighbor_mean - height_field[index] + terrain.basin_offset) * terrain.basin_scale,
+        );
         cells[index].pass_potential = clamp01(
             cells[index].mountain_mass
                 * (1.0 - cells[index].ridge_factor * terrain.pass_ridge_penalty)
@@ -252,7 +268,10 @@ pub fn generate_atlas_fields_with_tuning(
 
     for index in 0..len {
         let coord = area.coord_at(index).expect("index should map to coord");
-        let equator_heat = 1.0 - ((coord.z as f32) / climate.equator_falloff_scale).abs().tanh();
+        let equator_heat = 1.0
+            - ((coord.z as f32) / climate.equator_falloff_scale)
+                .abs()
+                .tanh();
 
         cells[index].inlandness = cells[index].ocean_distance;
         cells[index].temperature = clamp01(
@@ -514,8 +533,8 @@ fn sample_mountain_mass(
         terrain.mountain_cluster_gain,
         SALT_MOUNTAIN_CLUSTER,
     );
-    let base = ridge_factor * terrain.mountain_ridge_weight
-        + cluster * terrain.mountain_cluster_weight;
+    let base =
+        ridge_factor * terrain.mountain_ridge_weight + cluster * terrain.mountain_cluster_weight;
 
     smoothstep(terrain.mountain_base_min, terrain.mountain_base_max, base)
         * smoothstep(
@@ -547,11 +566,8 @@ fn overlay_weights(is_land: bool, cell: &AtlasCell) -> OverlayWeights {
 
 fn thermal_weights(temperature: f32, polar_factor: f32, tuning: &AtlasTuning) -> ThermalWeights {
     let weights = tuning.weights;
-    let mut values = triangular_weights(
-        temperature,
-        weights.thermal_centers,
-        weights.thermal_widths,
-    );
+    let mut values =
+        triangular_weights(temperature, weights.thermal_centers, weights.thermal_widths);
     values[0] = values[0].max(polar_factor);
     normalize_weights(&mut values);
 
@@ -564,7 +580,12 @@ fn thermal_weights(temperature: f32, polar_factor: f32, tuning: &AtlasTuning) ->
     }
 }
 
-fn moisture_weights(humidity: f32, aridity: f32, wetness: f32, tuning: &AtlasTuning) -> MoistureWeights {
+fn moisture_weights(
+    humidity: f32,
+    aridity: f32,
+    wetness: f32,
+    tuning: &AtlasTuning,
+) -> MoistureWeights {
     let weights = tuning.weights;
     let moisture_signal = clamp01(
         humidity * weights.moisture_signal_humidity_weight
@@ -612,7 +633,8 @@ fn form_weights(
     );
     let mut values = [
         clamp01(
-            1.0 - mountain * weights.form_plain_mountain_penalty - hill * weights.form_plain_hill_penalty,
+            1.0 - mountain * weights.form_plain_mountain_penalty
+                - hill * weights.form_plain_hill_penalty,
         ),
         hill,
         mountain,
@@ -676,20 +698,22 @@ fn cover_potentials(is_land: bool, cell: &AtlasCell, tuning: &AtlasTuning) -> Co
 
 fn ecotone_strength(cell: &AtlasCell, tuning: &AtlasTuning) -> f32 {
     let weights = tuning.weights;
-    let thermal_competition = 1.0 - max5([
-        cell.thermal.polar,
-        cell.thermal.cold,
-        cell.thermal.temperate,
-        cell.thermal.warm,
-        cell.thermal.hot,
-    ]);
-    let moisture_competition = 1.0 - max5([
-        cell.moisture.arid,
-        cell.moisture.semi_arid,
-        cell.moisture.subhumid,
-        cell.moisture.humid,
-        cell.moisture.wet,
-    ]);
+    let thermal_competition = 1.0
+        - max5([
+            cell.thermal.polar,
+            cell.thermal.cold,
+            cell.thermal.temperate,
+            cell.thermal.warm,
+            cell.thermal.hot,
+        ]);
+    let moisture_competition = 1.0
+        - max5([
+            cell.moisture.arid,
+            cell.moisture.semi_arid,
+            cell.moisture.subhumid,
+            cell.moisture.humid,
+            cell.moisture.wet,
+        ]);
     let overlay_competition = second_highest([
         cell.overlay.ocean,
         cell.overlay.coast,
@@ -779,7 +803,12 @@ fn assign_continent_ids(mask: &[bool], width: u32, height: u32) -> Vec<u32> {
     ids
 }
 
-fn compute_distance_to_value(mask: &[bool], width: u32, height: u32, source_value: bool) -> Vec<u32> {
+fn compute_distance_to_value(
+    mask: &[bool],
+    width: u32,
+    height: u32,
+    source_value: bool,
+) -> Vec<u32> {
     let len = mask.len();
     let mut distances = vec![u32::MAX / 4; len];
     let mut queue = BinaryHeap::new();
@@ -814,7 +843,11 @@ fn compute_distance_to_value(mask: &[bool], width: u32, height: u32, source_valu
     distances
 }
 
-fn compute_downhill_targets(area: AtlasArea, land_mask: &[bool], field: &[f32]) -> Vec<Option<usize>> {
+fn compute_downhill_targets(
+    area: AtlasArea,
+    land_mask: &[bool],
+    field: &[f32],
+) -> Vec<Option<usize>> {
     let mut downhill = vec![None; field.len()];
 
     for index in 0..field.len() {
@@ -840,7 +873,12 @@ fn compute_downhill_targets(area: AtlasArea, land_mask: &[bool], field: &[f32]) 
     downhill
 }
 
-fn coast_distance_cells(land_mask: &[bool], ocean_distance_raw: &[u32], land_distance_raw: &[u32], index: usize) -> f32 {
+fn coast_distance_cells(
+    land_mask: &[bool],
+    ocean_distance_raw: &[u32],
+    land_distance_raw: &[u32],
+    index: usize,
+) -> f32 {
     let raw = if land_mask[index] {
         ocean_distance_raw[index]
     } else {
@@ -1021,7 +1059,11 @@ mod tests {
     fn distance_without_source_stays_far_instead_of_collapsing_to_zero() {
         let distances = compute_distance_to_value(&[true, true, true, true], 2, 2, false);
 
-        assert!(distances.iter().all(|distance| *distance == NO_SOURCE_DISTANCE));
+        assert!(
+            distances
+                .iter()
+                .all(|distance| *distance == NO_SOURCE_DISTANCE)
+        );
     }
 
     #[test]

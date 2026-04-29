@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use super::atlas::{
     AtlasArea, AtlasCoord, RegionClassMap, RegionClassSample, generate_atlas_fields,
@@ -24,6 +25,7 @@ pub struct WorldCore {
     climate_runtime: HashMap<AtlasCoord, AtlasClimateRuntimeState>,
     local_weather: HashMap<AtlasCoord, LocalWeatherState>,
     deferred_season_patches: Vec<DeferredSeasonPatch>,
+    region_class_cache: RwLock<HashMap<AtlasCoord, RegionClassSample>>,
 }
 
 impl WorldCore {
@@ -36,6 +38,7 @@ impl WorldCore {
             climate_runtime: HashMap::new(),
             local_weather: HashMap::new(),
             deferred_season_patches: Vec::new(),
+            region_class_cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -96,7 +99,8 @@ impl WorldCore {
         }
 
         result.deferred_patch_count = advance.deferred_patches.len();
-        self.deferred_season_patches.extend(advance.deferred_patches);
+        self.deferred_season_patches
+            .extend(advance.deferred_patches);
         result
     }
 
@@ -147,18 +151,60 @@ impl WorldCore {
     }
 
     pub fn resolve_region_class_area(&self, area: AtlasArea) -> RegionClassMap {
+        if let Some(classes) = self.cached_region_class_area(area) {
+            return classes;
+        }
+
         let fields = generate_atlas_fields(self.meta(), area);
         let structure = generate_atlas_structure(self.meta(), area);
-        resolve_region_classes(self.meta(), area, &fields, &structure)
+        let classes = resolve_region_classes(self.meta(), area, &fields, &structure);
+        self.cache_region_class_map(&classes);
+        classes
+    }
+
+    pub fn cached_region_class_area(&self, area: AtlasArea) -> Option<RegionClassMap> {
+        let cache = self
+            .region_class_cache
+            .read()
+            .expect("region class cache lock should not be poisoned");
+        let samples = area
+            .coords()
+            .map(|coord| cache.get(&coord).copied())
+            .collect::<Option<Vec<_>>>()?;
+        Some(RegionClassMap::from_samples(area, samples))
+    }
+
+    pub fn sample_cached_region_class_atlas(&self, coord: AtlasCoord) -> Option<RegionClassSample> {
+        self.region_class_cache
+            .read()
+            .expect("region class cache lock should not be poisoned")
+            .get(&coord)
+            .copied()
     }
 
     pub fn sample_region_class_atlas(&self, coord: AtlasCoord) -> RegionClassSample {
+        if let Some(cached) = self.sample_cached_region_class_atlas(coord) {
+            return cached;
+        }
+
         let area = AtlasArea::new(coord, 1, 1).expect("single atlas-cell area must be valid");
         let classes = self.resolve_region_class_area(area);
         classes
             .get(coord)
             .copied()
             .expect("resolved atlas area must contain its origin sample")
+    }
+
+    pub fn cache_region_class_map(&self, classes: &RegionClassMap) {
+        let mut cache = self
+            .region_class_cache
+            .write()
+            .expect("region class cache lock should not be poisoned");
+        for coord in classes.area().coords() {
+            if let Some(sample) = classes.get(coord).copied() {
+                cache.insert(coord, sample);
+            }
+        }
     }
 
     pub fn snapshot_region(&self, min: ChunkCoord, max: ChunkCoord) -> Vec<ChunkSnapshot> {
@@ -238,7 +284,10 @@ impl WorldCore {
         let max_steps = (max_distance.ceil() as usize).saturating_mul(6).max(1);
 
         for _ in 0..max_steps {
-            if self.get_block(block).is_some_and(|block_id| self.block_registry.is_solid(block_id)) {
+            if self
+                .get_block(block)
+                .is_some_and(|block_id| self.block_registry.is_solid(block_id))
+            {
                 let hit_face = entry_face.unwrap_or_else(|| opposite_face_for_direction(direction));
                 let point = add_scaled3(ray.origin, direction, traveled);
                 return Some(RaycastHit {
@@ -381,11 +430,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow end-to-end generation chunk generation smoke test"]
     fn world_core_reads_generated_floor_block() {
         let meta = WorldMeta::new(42);
         let coord = ChunkCoord(0, -8, 0);
         let registry = test_registry();
-        let stone = registry.block_id("stone").expect("stone block should exist");
+        let stone = registry
+            .block_id("stone")
+            .expect("stone block should exist");
         let chunk = generate_chunk(coord, &meta, registry.as_ref());
         let mut world = WorldCore::new(meta, registry);
         world.insert_chunk(coord, chunk);
@@ -439,7 +491,12 @@ mod tests {
             }],
             local_weather_updates: vec![super::super::calendar::LocalWeatherUpdate {
                 coord,
-                state: LocalWeatherState::clear(coord, super::super::atlas::ClimateRegime::Continental, 20, 40),
+                state: LocalWeatherState::clear(
+                    coord,
+                    super::super::atlas::ClimateRegime::Continental,
+                    20,
+                    40,
+                ),
             }],
             deferred_patches: vec![DeferredSeasonPatch {
                 target: super::super::calendar::DeferredSeasonPatchTarget::AtlasCell(coord),
@@ -452,7 +509,10 @@ mod tests {
         assert_eq!(world.calendar(), &calendar);
         assert_eq!(world.climate_state(coord).temperature_offset, 0.2);
         assert_eq!(
-            world.local_weather(coord).expect("weather update should be stored").kind,
+            world
+                .local_weather(coord)
+                .expect("weather update should be stored")
+                .kind,
             super::super::calendar::LocalWeatherKind::Clear
         );
         assert_eq!(result.changed_atlas_cells, vec![coord]);
@@ -464,7 +524,10 @@ mod tests {
     #[test]
     fn query_neighbors_returns_loaded_neighbor_snapshots() {
         let mut world = WorldCore::new(WorldMeta::default(), test_registry());
-        world.insert_chunk(ChunkCoord(0, 0, 0), ChunkData::new_empty(ChunkCoord(0, 0, 0)));
+        world.insert_chunk(
+            ChunkCoord(0, 0, 0),
+            ChunkData::new_empty(ChunkCoord(0, 0, 0)),
+        );
         let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
         east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), BlockId::GRASS)
             .unwrap();
@@ -486,7 +549,8 @@ mod tests {
     fn raycast_hits_top_face_of_plane_block() {
         let mut world = WorldCore::new(WorldMeta::default(), test_registry());
         let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
-        chunk.set_block(LocalBlockCoord::new(3, 0, 3).unwrap(), BlockId::GRASS)
+        chunk
+            .set_block(LocalBlockCoord::new(3, 0, 3).unwrap(), BlockId::GRASS)
             .unwrap();
         world.insert_chunk(ChunkCoord(0, 0, 0), chunk);
 

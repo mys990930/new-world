@@ -13,8 +13,15 @@ impl JobConfig {
 impl Default for JobConfig {
     fn default() -> Self {
         Self {
-            worker_count: 1,
+            worker_count: default_worker_count(),
             max_pending_requests: None,
         }
     }
+}
+
+fn default_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .clamp(1, 2)
 }

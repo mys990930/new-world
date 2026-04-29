@@ -8,6 +8,7 @@ tile_size = 16
 block_files = [
   "defs/air.toml",
   "defs/grass.toml",
+  "defs/jungle_grass.toml",
   "defs/dirt.toml",
   "defs/stone.toml",
   "defs/sand.toml",
@@ -48,6 +49,14 @@ key = "grass_side"
 path = "textures/grass_side.png"
 
 [[textures]]
+key = "jungle_grass_top"
+path = "textures/jungle_grass_top.png"
+
+[[textures]]
+key = "jungle_grass_side"
+path = "textures/jungle_grass_side.png"
+
+[[textures]]
 key = "dirt"
 path = "textures/dirt.png"
 
@@ -77,84 +86,84 @@ path = "textures/water.png"
 
 [[textures]]
 key = "coarse_dirt"
-path = "textures/dirt.png"
+path = "textures/coarse_dirt.png"
 
 [[textures]]
 key = "clay"
-path = "textures/mud.png"
+path = "textures/clay.png"
 
 [[textures]]
 key = "ice"
-path = "textures/snow.png"
+path = "textures/ice.png"
 
 [[textures]]
 key = "peat"
-path = "textures/mud.png"
+path = "textures/peat.png"
 
 [[textures]]
 key = "silt"
-path = "textures/mud.png"
+path = "textures/silt.png"
 
 [[textures]]
 key = "humus"
-path = "textures/dirt.png"
+path = "textures/humus.png"
 
 [[textures]]
 key = "leaf_litter"
-path = "textures/grass_side.png"
+path = "textures/leaf_litter.png"
 
 [[textures]]
 key = "moss"
-path = "textures/grass_top.png"
+path = "textures/moss.png"
 
 [[textures]]
 key = "podzol"
-path = "textures/dirt.png"
+path = "textures/podzol.png"
 
 [[textures]]
 key = "thin_soil"
-path = "textures/dirt.png"
+path = "textures/thin_soil.png"
 
 [[textures]]
 key = "red_sand"
-path = "textures/sand.png"
+path = "textures/red_sand.png"
 
 [[textures]]
 key = "dry_grass"
-path = "textures/grass_top.png"
+path = "textures/dry_grass.png"
 
 [[textures]]
 key = "wet_sand"
-path = "textures/sand.png"
+path = "textures/wet_sand.png"
 
 [[textures]]
 key = "wet_gravel"
-path = "textures/gravel.png"
+path = "textures/wet_gravel.png"
 
 [[textures]]
 key = "exposed_rock"
-path = "textures/stone.png"
+path = "textures/exposed_rock.png"
 
 [[textures]]
 key = "rock"
-path = "textures/stone.png"
+path = "textures/rock.png"
 
 [[textures]]
 key = "sandstone"
-path = "textures/stone.png"
+path = "textures/sandstone.png"
 
 [[textures]]
 key = "scree"
-path = "textures/gravel.png"
+path = "textures/scree.png"
 
 [[textures]]
 key = "alpine_soil"
-path = "textures/dirt.png"
+path = "textures/alpine_soil.png"
 
 [[textures]]
 key = "moraine"
-path = "textures/gravel.png"
+path = "textures/moraine.png"
 
 [[textures]]
 key = "laterite"
-path = "textures/dirt.png"
+path = "textures/laterite.png"

@@ -16,11 +16,11 @@ use super::texture::{
     BlockTextureSet, RenderTextureArraySource, RenderTextureError,
     create_block_texture_bind_group_layout, create_gpu_block_texture_resources,
 };
+use super::upload::split_chunk_mesh_for_transparency;
 use super::{
     CameraGpuState, ClearColor, CpuMesh, MeshVertex, RenderCameraState, RenderConfig,
     RenderEnvironment,
 };
-use super::upload::split_chunk_mesh_for_transparency;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OffscreenRenderRequest {
@@ -142,8 +142,12 @@ pub fn render_offscreen(
         view_formats: &[],
     });
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let (depth_texture, depth_view) =
-        create_depth_texture(&device, request.width, request.height, wgpu::TextureFormat::Depth32Float);
+    let (depth_texture, depth_view) = create_depth_texture(
+        &device,
+        request.width,
+        request.height,
+        wgpu::TextureFormat::Depth32Float,
+    );
     let _ = depth_texture;
 
     let terrain_shader = device.create_shader_module(wgpu::include_wgsl!("terrain.wgsl"));
@@ -333,9 +337,11 @@ pub fn render_offscreen(
         mapped_at_creation: false,
     });
 
-    let clear_color = request
-        .clear_color_override
-        .unwrap_or_else(|| request.environment.resolved_clear_color(ClearColor::default()));
+    let clear_color = request.clear_color_override.unwrap_or_else(|| {
+        request
+            .environment
+            .resolved_clear_color(ClearColor::default())
+    });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen_encoder"),
     });
@@ -462,9 +468,8 @@ pub fn write_offscreen_png(
             .map_err(|error| OffscreenRenderError::BufferMap(error.to_string()))?;
     }
 
-    let png: RgbaImage =
-        ImageBuffer::from_raw(image.width, image.height, image.rgba.clone())
-            .ok_or(OffscreenRenderError::InvalidImageBuffer)?;
+    let png: RgbaImage = ImageBuffer::from_raw(image.width, image.height, image.rgba.clone())
+        .ok_or(OffscreenRenderError::InvalidImageBuffer)?;
     png.save(path)?;
     Ok(())
 }
@@ -579,12 +584,7 @@ fn create_depth_texture(
     (texture, view)
 }
 
-fn strip_padded_rows(
-    bytes: &[u8],
-    width: u32,
-    height: u32,
-    padded_bytes_per_row: u32,
-) -> Vec<u8> {
+fn strip_padded_rows(bytes: &[u8], width: u32, height: u32, padded_bytes_per_row: u32) -> Vec<u8> {
     let tight_bytes_per_row = width as usize * 4;
     let padded_bytes_per_row = padded_bytes_per_row as usize;
     let mut rgba = Vec::with_capacity(tight_bytes_per_row * height as usize);
@@ -612,7 +612,10 @@ mod tests {
 
         let rgba = strip_padded_rows(&bytes, 2, 2, 16);
 
-        assert_eq!(rgba, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        assert_eq!(
+            rgba,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        );
     }
 
     #[test]

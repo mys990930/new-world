@@ -1,30 +1,40 @@
 use std::path::{Path, PathBuf};
 
 use super::{AppConfig, AppMinimapCache, AppTimingState, AppUiState, GameApp};
-use crate::ecs::{
-    EcsRuntime, HORIZONTAL_INTEREST_CHUNK_RADIUS, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS,
-};
+use crate::ecs::{EcsRuntime, QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS};
 use crate::jobs::{JobConfig, JobRequest, JobSystem};
 use crate::platform::{Platform, PlatformConfig};
 use crate::renderer::{
-    RenderConfig, RenderTextureArraySource, RenderTextureSource, RenderTextureTile, Renderer,
-    RenderUiTextureSource, StubSurfaceTarget,
+    RenderConfig, RenderTextureArraySource, RenderTextureSource, RenderTextureTile,
+    RenderUiTextureSource, Renderer, StubSurfaceTarget,
 };
 use crate::simulation::{SimulationConfig, SimulationCore};
 use crate::world::{
-    CreatedWorldSource, CreateWorldConfig, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord,
-    TextureTileSource, WorldCore, WorldMeta, detect_latest_created_world_root, generate_chunk,
+    BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, CreateWorldConfig, CreatedWorldSource,
+    TextureTileSource, WorldCore, WorldMeta, detect_latest_created_world_root,
 };
 
 impl GameApp {
     pub fn new(config: AppConfig) -> Self {
+        println!(
+            "[app] boot: window={}x{} created_worlds_dir={} auto_open_latest={}",
+            config.width,
+            config.height,
+            config
+                .created_worlds_dir
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            config.auto_open_latest_created_world
+        );
         let platform = Platform::new(PlatformConfig {
             title: config.title.clone(),
             width: config.width,
             height: config.height,
         });
-        let block_registry =
-            std::sync::Arc::new(BlockRegistry::load_default().expect("failed to load block registry"));
+        let block_registry = std::sync::Arc::new(
+            BlockRegistry::load_default().expect("failed to load block registry"),
+        );
         let mut render_config = RenderConfig::default();
         render_config.camera_projection.vertical_fov_radians =
             QUARTER_VIEW_PERSPECTIVE_VERTICAL_FOV_RADIANS;
@@ -41,16 +51,27 @@ impl GameApp {
         }
         let mut ecs = EcsRuntime::new();
         let created_world = open_created_world(&config);
-        let mut world = WorldCore::new(initial_world_meta(created_world.as_ref()), block_registry);
-        let spawn_anchor = preload_spawn_neighborhood(&mut world, created_world.as_ref());
+        let world = WorldCore::new(initial_world_meta(created_world.as_ref()), block_registry);
         ecs.spawn_default_player();
-        if let Some(anchor) = spawn_anchor {
-            if !ecs.place_local_player_on_surface(&world, anchor) {
-                eprintln!(
-                    "[app] failed to place player on loaded surface near [{:.1}, {:.1}]",
-                    anchor[0], anchor[1]
-                );
-            }
+        let pending_player_spawn_anchor =
+            stage_created_world_spawn_anchor(&mut ecs, created_world.as_ref());
+        if let Some(source) = created_world.as_ref() {
+            let min = source.manifest().min_chunk_coord();
+            let max = source.manifest().max_chunk_coord();
+            println!(
+                "[app] boot created world manifest: root={} min=({}, {}, {}) max=({}, {}, {}) chunks={} preview=({}, {}) spawn_anchor={}",
+                source.root().display(),
+                min.0,
+                min.1,
+                min.2,
+                max.0,
+                max.1,
+                max.2,
+                created_world_chunk_count(source),
+                source.manifest().default_preview_center[0],
+                source.manifest().default_preview_center[1],
+                format_spawn_anchor(pending_player_spawn_anchor)
+            );
         }
         let jobs = JobSystem::new(JobConfig::default());
         let simulation = SimulationCore::new(SimulationConfig::with_fixed_ticks_per_second(
@@ -68,8 +89,13 @@ impl GameApp {
             renderer,
             ui: AppUiState::default(),
             minimap: AppMinimapCache::default(),
+            pending_player_spawn_anchor,
             timing,
         };
+        if app.created_world.is_none() {
+            println!("[app] no created world loaded; entering world select startup screen");
+            app.enter_startup_world_select();
+        }
         app.queue_loaded_world_minimap_rebuilds();
         app.sync_renderer_environment_from_world();
         app
@@ -97,6 +123,18 @@ impl GameApp {
             min_y_chunk: -2,
             max_y_chunk: 3,
         };
+        let total_chunks = config.total_chunk_count().unwrap_or(0);
+        println!(
+            "[app] queue create world: root={} seed={} center=({}, {}) radius={} y={}..{} chunks={}",
+            root.display(),
+            seed,
+            center_x,
+            center_z,
+            radius,
+            config.min_y_chunk,
+            config.max_y_chunk,
+            total_chunks
+        );
 
         self.jobs
             .submit(JobRequest::CreateWorld {
@@ -123,21 +161,32 @@ impl GameApp {
             0,
             spawn_chunk_z.clamp(min.2, max.2),
         );
+        println!(
+            "[app] opening created world: root={} requested_spawn=({}, {}) clamped_spawn=({}, {}) min=({}, {}, {}) max=({}, {}, {}) chunks={}",
+            root.display(),
+            spawn_chunk_x,
+            spawn_chunk_z,
+            preview_chunk.0,
+            preview_chunk.2,
+            min.0,
+            min.1,
+            min.2,
+            max.0,
+            max.1,
+            max.2,
+            created_world_chunk_count(&source)
+        );
 
-        let mut world = WorldCore::new(source.manifest().world_meta(), self.world.block_registry_handle());
-        for coord in preload_created_column_coords(&source, preview_chunk) {
-            let chunk = source
-                .load_chunk(coord)
-                .map_err(|error| format!("failed to load {:?}: {}", coord, error))?;
-            world.insert_chunk(coord, chunk);
-        }
-
+        let world = WorldCore::new(
+            source.manifest().world_meta(),
+            self.world.block_registry_handle(),
+        );
         let mut ecs = EcsRuntime::new();
         ecs.spawn_default_player();
         let anchor = chunk_center_anchor(preview_chunk);
-        if !ecs.place_local_player_on_surface(&world, anchor) {
+        if !ecs.stage_local_player_for_chunk_loading(anchor, max.1) {
             return Err(format!(
-                "failed to place player near chunk {} {}",
+                "failed to stage player near chunk {} {}",
                 preview_chunk.0, preview_chunk.2
             ));
         }
@@ -149,10 +198,11 @@ impl GameApp {
         self.created_world = Some(source);
         self.jobs = JobSystem::new(JobConfig::default());
         self.minimap = AppMinimapCache::default();
-        self.queue_loaded_world_minimap_rebuilds();
+        self.pending_player_spawn_anchor = Some(anchor);
         self.sync_renderer_environment_from_world();
+        self.queue_environment_region_resolve_for_focus();
         println!(
-            "[app] loaded created world {} at chunk {} {}",
+            "[app] opened created world {} at chunk {} {}; chunk loads will stream through jobs",
             root.display(),
             preview_chunk.0,
             preview_chunk.2
@@ -184,6 +234,10 @@ fn open_created_world(config: &AppConfig) -> Option<CreatedWorldSource> {
         if let Some(source) = try_open_created_world_root(root, "preferred") {
             return Some(source);
         }
+    }
+
+    if !config.auto_open_latest_created_world {
+        return None;
     }
 
     let Some(base_dir) = config.created_worlds_dir.as_deref() else {
@@ -227,63 +281,36 @@ fn initial_world_meta(created_world: Option<&CreatedWorldSource>) -> WorldMeta {
         .unwrap_or_else(|| WorldMeta::new(7))
 }
 
-fn preload_spawn_neighborhood(
-    world: &mut WorldCore,
+fn stage_created_world_spawn_anchor(
+    ecs: &mut EcsRuntime,
     created_world: Option<&CreatedWorldSource>,
 ) -> Option<[f32; 2]> {
-    if let Some(source) = created_world {
-        let preview = source.default_preview_chunk();
-        for coord in preload_created_column_coords(source, preview) {
-            match source.load_chunk(coord) {
-                Ok(chunk) => world.insert_chunk(coord, chunk),
-                Err(error) => eprintln!("[app] failed to preload created-world chunk {:?}: {}", coord, error),
-            }
-        }
-
-        return Some(chunk_center_anchor(preview));
+    let source = created_world?;
+    let preview = source.default_preview_chunk();
+    let anchor = chunk_center_anchor(preview);
+    if ecs.stage_local_player_for_chunk_loading(anchor, source.manifest().max_chunk_coord().1) {
+        Some(anchor)
+    } else {
+        None
     }
-
-    let preview = ChunkCoord(0, 0, 0);
-    for coord in preload_generated_chunk_coords(preview) {
-        let chunk = generate_chunk(coord, world.meta(), world.block_registry());
-        world.insert_chunk(coord, chunk);
-    }
-
-    Some(chunk_center_anchor(preview))
 }
 
-fn preload_created_column_coords(
-    created_world: &CreatedWorldSource,
-    preview_chunk: ChunkCoord,
-) -> Vec<ChunkCoord> {
-    let min = created_world.manifest().min_chunk_coord();
-    let max = created_world.manifest().max_chunk_coord();
-    let mut coords = Vec::new();
-    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
-
-    for z in (preview_chunk.2 - radius)..=(preview_chunk.2 + radius) {
-        for x in (preview_chunk.0 - radius)..=(preview_chunk.0 + radius) {
-            for y in min.1..=max.1 {
-                let coord = ChunkCoord(x, y, z);
-                if created_world.contains_chunk(coord) {
-                    coords.push(coord);
-                }
-            }
-        }
-    }
-
-    coords
+fn created_world_chunk_count(source: &CreatedWorldSource) -> u32 {
+    let min = source.manifest().min_chunk_coord();
+    let max = source.manifest().max_chunk_coord();
+    let x = i64::from(max.0) - i64::from(min.0) + 1;
+    let y = i64::from(max.1) - i64::from(min.1) + 1;
+    let z = i64::from(max.2) - i64::from(min.2) + 1;
+    x.checked_mul(y)
+        .and_then(|value| value.checked_mul(z))
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0)
 }
 
-fn preload_generated_chunk_coords(preview_chunk: ChunkCoord) -> Vec<ChunkCoord> {
-    let mut coords = Vec::new();
-    let radius = HORIZONTAL_INTEREST_CHUNK_RADIUS;
-    for z in (preview_chunk.2 - radius)..=(preview_chunk.2 + radius) {
-        for x in (preview_chunk.0 - radius)..=(preview_chunk.0 + radius) {
-            coords.push(ChunkCoord(x, preview_chunk.1, z));
-        }
-    }
-    coords
+fn format_spawn_anchor(anchor: Option<[f32; 2]>) -> String {
+    anchor
+        .map(|anchor| format!("[{:.1}, {:.1}]", anchor[0], anchor[1]))
+        .unwrap_or_else(|| "none".to_string())
 }
 
 fn chunk_center_anchor(coord: ChunkCoord) -> [f32; 2] {
@@ -297,7 +324,7 @@ fn ui_atlas_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
         .join("ui")
-        .join("pixel_ui_atlas.png")
+        .join("new_world_pixel_ui_atlas.png")
 }
 
 fn create_world_root_path(

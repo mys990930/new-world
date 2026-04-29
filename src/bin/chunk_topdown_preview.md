@@ -1,4 +1,4 @@
-# chunk_topdown_preview
+﻿# chunk_topdown_preview
 
 ## Role
 
@@ -30,6 +30,8 @@
 
 1. Resolve the preview source.
 2. Load or generate the exact requested chunk window.
+   - Direct-seed generation follows `chunk_preview`: it builds a per-preview generation input cache keyed by generation atlas area, then generates requested chunks in parallel from cached `ChunkGenerationInputs`.
+   - Created-world loading follows `chunk_preview`: it reads persisted chunk payloads through the shared world-dump helper and loads the requested window in parallel before inserting chunks into `WorldCore`.
 3. For each `world (x, z)` column, scan from the requested max `y` down to the min `y`.
 4. Record the topmost non-air block in that column.
 5. Color the cell with a diagnostic material palette plus relief-based brightness.
@@ -40,7 +42,7 @@
 
 ## Exactness Notes
 
-- In direct-seed mode, this tool uses the same `world::generation::generate_chunk(...)` path as `world_create`.
+- In direct-seed mode, this tool uses the same cached `generate_chunk_from_generation_inputs(...)` preview path as `chunk_preview`, preserving the same generated chunks while avoiding repeated atlas / region / meso input assembly for vertical stacks.
 - In created-world mode, it reads the persisted chunk `.bin` payloads and scans the actual loaded chunk contents.
 - The current top-down sampling and diagnostic color rules are mirrored by the shared `world::topdown` helper so app minimap overlays can match this preview style.
 - That means the top-down geometry is exact for the chosen projection rule: the image represents the topmost non-air block found in each `xz` column inside the requested vertical window.

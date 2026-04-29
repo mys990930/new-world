@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use super::{
-    texture::{BlockTextureSet, GpuBlockTextureResources},
-    ui::{GpuUiTextureResources, UiTextureSet},
     CameraGpuState, ChunkCoord, ClearColor, GpuChunkMesh, PipelineSet, RenderConfig,
     RenderEnvironment, RenderStats, SurfaceState,
+    texture::{BlockTextureSet, GpuBlockTextureResources},
+    ui::{GpuUiTextureResources, UiTextureSet},
 };
 
 pub struct Renderer {

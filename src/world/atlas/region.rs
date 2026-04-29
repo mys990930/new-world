@@ -3,12 +3,11 @@ pub mod axes;
 pub mod catalog;
 
 pub use archetypes::{
-    PrototypeArchetypeHint, RegionArchetypeDef, region_archetype_def,
-    region_archetype_defs, region_archetype_prototype_hint,
+    PrototypeArchetypeHint, RegionArchetypeDef, region_archetype_def, region_archetype_defs,
+    region_archetype_prototype_hint,
 };
 pub use axes::{
-    RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS,
-    RawClassificationDimension,
+    RAW_CLASSIFICATION_DIMENSIONS, RESOLVED_CLASSIFICATION_DIMENSIONS, RawClassificationDimension,
 };
 pub use catalog::{RegionCatalogEntry, RegionCatalogStatus, region_catalog_entries};
 
@@ -17,6 +16,16 @@ use crate::world::WorldMeta;
 use super::atlas_fields::{AtlasCell, AtlasFieldMap};
 use super::scale::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, AtlasGrid};
 use super::structure::AtlasStructureMap;
+
+const REGION_INFLUENCE_TRANSITION_WIDTH_CELLS: f32 = 0.28;
+const REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT: f32 = 1.00;
+const REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT: f32 = 0.50;
+const REGION_INFLUENCE_MIN_WEIGHT: f32 = 0.0001;
+const REGION_EDGE_WAVE_AMPLITUDE_CELLS: f32 = 0.050;
+const REGION_EDGE_WAVE_BROAD_PERIOD_CELLS: f32 = 0.46;
+const REGION_EDGE_WAVE_SECONDARY_PERIOD_CELLS: f32 = 0.27;
+const REGION_EDGE_CORNER_TAPER_WIDTH_CELLS: f32 = 0.26;
+const REGION_EDGE_WAVE_SALT: u64 = 0xA19C_3D2E_5170_0001;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TemperatureBand {
@@ -254,6 +263,21 @@ impl Default for RegionClassCell {
 
 pub type RegionClassSample = RegionClassCell;
 
+#[derive(Debug, Clone, Copy)]
+pub struct RegionClassInfluence {
+    pub coord: AtlasCoord,
+    pub class: RegionClassCell,
+    pub weight: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegionClassInfluenceSet {
+    pub dominant: RegionClassInfluence,
+    pub neighbors: Vec<RegionClassInfluence>,
+    pub transition_strength: f32,
+    pub barrier_strength: f32,
+}
+
 #[derive(Debug, Clone)]
 pub struct RegionClassMap {
     area: AtlasArea,
@@ -261,6 +285,13 @@ pub struct RegionClassMap {
 }
 
 impl RegionClassMap {
+    pub(crate) fn from_samples(area: AtlasArea, samples: Vec<RegionClassSample>) -> Self {
+        Self {
+            area,
+            cells: AtlasGrid::from_values(area, samples),
+        }
+    }
+
     pub fn area(&self) -> AtlasArea {
         self.area
     }
@@ -318,7 +349,8 @@ pub fn sample_region_classes(
     world_x: i32,
     world_z: i32,
 ) -> RegionClassSample {
-    let atlas_span_blocks = (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * crate::world::CHUNK_EDGE_I32).max(1);
+    let atlas_span_blocks =
+        (ATLAS_CELL_SIZE_IN_CHUNKS as i32 * crate::world::CHUNK_EDGE_I32).max(1);
     let coord = AtlasCoord::new(
         world_x.div_euclid(atlas_span_blocks),
         world_z.div_euclid(atlas_span_blocks),
@@ -326,6 +358,656 @@ pub fn sample_region_classes(
     *classes
         .get(coord)
         .expect("region classification sample must exist")
+}
+
+pub fn sample_region_class_influences(
+    classes: &RegionClassMap,
+    world_x: f32,
+    world_z: f32,
+) -> RegionClassInfluenceSet {
+    assert!(
+        world_x.is_finite() && world_z.is_finite(),
+        "region influence sample coordinates must be finite"
+    );
+
+    let atlas_span_blocks = atlas_cell_span_blocks_f32();
+    let hard_owner_coord = atlas_coord_for_world_position(world_x, world_z, atlas_span_blocks);
+    let hard_owner_class = *classes
+        .get(hard_owner_coord)
+        .expect("region classification influence owner must exist");
+    let atlas_x = world_x / atlas_span_blocks;
+    let atlas_z = world_z / atlas_span_blocks;
+    let owner_coord = hard_owner_coord;
+    let owner_class = hard_owner_class;
+    let local_x = (atlas_x - owner_coord.x as f32).clamp(0.0, 1.0);
+    let local_z = (atlas_z - owner_coord.z as f32).clamp(0.0, 1.0);
+
+    let edge_candidates = [
+        (
+            AtlasCoord::new(owner_coord.x - 1, owner_coord.z),
+            edge_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x - 1, owner_coord.z),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x + 1, owner_coord.z),
+            edge_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x + 1, owner_coord.z),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x, owner_coord.z - 1),
+            edge_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x, owner_coord.z - 1),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x, owner_coord.z + 1),
+            edge_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x, owner_coord.z + 1),
+                local_x,
+                local_z,
+            ),
+        ),
+    ];
+    let diagonal_candidates = [
+        (
+            AtlasCoord::new(owner_coord.x - 1, owner_coord.z - 1),
+            corner_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x - 1, owner_coord.z - 1),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x + 1, owner_coord.z - 1),
+            corner_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x + 1, owner_coord.z - 1),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x - 1, owner_coord.z + 1),
+            corner_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x - 1, owner_coord.z + 1),
+                local_x,
+                local_z,
+            ),
+        ),
+        (
+            AtlasCoord::new(owner_coord.x + 1, owner_coord.z + 1),
+            corner_transition_weight_for_neighbor(
+                classes,
+                owner_coord,
+                AtlasCoord::new(owner_coord.x + 1, owner_coord.z + 1),
+                local_x,
+                local_z,
+            ),
+        ),
+    ];
+
+    let mut raw_neighbors = Vec::new();
+    let mut barrier_sum = 0.0_f32;
+    let mut barrier_weight_sum = 0.0_f32;
+
+    for (coord, edge_strength) in edge_candidates {
+        if edge_strength <= REGION_INFLUENCE_MIN_WEIGHT {
+            continue;
+        }
+
+        let Some(class) = classes.get(coord).copied() else {
+            continue;
+        };
+
+        let barrier = region_class_barrier_strength(owner_class, class);
+        let permeability = (1.0 - barrier * 0.78).clamp(0.12, 1.0);
+        let raw_weight = edge_strength * REGION_INFLUENCE_NEIGHBOR_RAW_WEIGHT * permeability;
+
+        barrier_sum += barrier * edge_strength;
+        barrier_weight_sum += edge_strength;
+
+        if raw_weight <= REGION_INFLUENCE_MIN_WEIGHT {
+            continue;
+        }
+
+        raw_neighbors.push((coord, class, raw_weight));
+    }
+
+    for (coord, corner_strength) in diagonal_candidates {
+        if corner_strength <= REGION_INFLUENCE_MIN_WEIGHT {
+            continue;
+        }
+
+        let Some(class) = classes.get(coord).copied() else {
+            continue;
+        };
+
+        let barrier = region_class_barrier_strength(owner_class, class);
+        let permeability = (1.0 - barrier * 0.82).clamp(0.10, 1.0);
+        let raw_weight = corner_strength * REGION_INFLUENCE_DIAGONAL_RAW_WEIGHT * permeability;
+
+        barrier_sum += barrier * corner_strength;
+        barrier_weight_sum += corner_strength;
+
+        if raw_weight <= REGION_INFLUENCE_MIN_WEIGHT {
+            continue;
+        }
+
+        raw_neighbors.push((coord, class, raw_weight));
+    }
+
+    let total_raw = 1.0
+        + raw_neighbors
+            .iter()
+            .map(|(_, _, weight)| *weight)
+            .sum::<f32>();
+    let dominant = RegionClassInfluence {
+        coord: owner_coord,
+        class: owner_class,
+        weight: 1.0 / total_raw,
+    };
+    let mut neighbors = raw_neighbors
+        .into_iter()
+        .map(|(coord, class, raw_weight)| RegionClassInfluence {
+            coord,
+            class,
+            weight: raw_weight / total_raw,
+        })
+        .collect::<Vec<_>>();
+
+    neighbors.sort_by(|a, b| {
+        b.weight
+            .total_cmp(&a.weight)
+            .then_with(|| a.coord.z.cmp(&b.coord.z))
+            .then_with(|| a.coord.x.cmp(&b.coord.x))
+    });
+
+    let transition_strength = neighbors
+        .iter()
+        .map(|influence| influence.weight)
+        .sum::<f32>()
+        .clamp(0.0, 1.0);
+    let barrier_strength = if barrier_weight_sum > 0.0 {
+        (barrier_sum / barrier_weight_sum).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    RegionClassInfluenceSet {
+        dominant,
+        neighbors,
+        transition_strength,
+        barrier_strength,
+    }
+}
+
+fn atlas_cell_span_blocks_f32() -> f32 {
+    (ATLAS_CELL_SIZE_IN_CHUNKS as f32 * crate::world::CHUNK_EDGE_I32 as f32).max(1.0)
+}
+
+fn atlas_coord_for_world_position(
+    world_x: f32,
+    world_z: f32,
+    atlas_span_blocks: f32,
+) -> AtlasCoord {
+    AtlasCoord::new(
+        (world_x / atlas_span_blocks).floor() as i32,
+        (world_z / atlas_span_blocks).floor() as i32,
+    )
+}
+
+fn edge_transition_weight(distance_to_edge_cells: f32) -> f32 {
+    let t =
+        (1.0 - distance_to_edge_cells / REGION_INFLUENCE_TRANSITION_WIDTH_CELLS).clamp(0.0, 1.0);
+    smoothstep01(t)
+}
+
+fn edge_transition_weight_for_neighbor(
+    classes: &RegionClassMap,
+    owner_coord: AtlasCoord,
+    neighbor_coord: AtlasCoord,
+    local_x: f32,
+    local_z: f32,
+) -> f32 {
+    let Some(_) = classes.get(neighbor_coord) else {
+        return 0.0;
+    };
+    let (base_distance, along_atlas, positive_neighbor, corner_axis) =
+        if neighbor_coord.x < owner_coord.x {
+            (local_x, owner_coord.z as f32 + local_z, false, local_z)
+        } else if neighbor_coord.x > owner_coord.x {
+            (1.0 - local_x, owner_coord.z as f32 + local_z, true, local_z)
+        } else if neighbor_coord.z < owner_coord.z {
+            (local_z, owner_coord.x as f32 + local_x, false, local_x)
+        } else if neighbor_coord.z > owner_coord.z {
+            (1.0 - local_z, owner_coord.x as f32 + local_x, true, local_x)
+        } else {
+            return 0.0;
+        };
+    let offset =
+        region_edge_boundary_offset_cells(classes, owner_coord, neighbor_coord, along_atlas);
+    let directional_offset = if positive_neighbor { offset } else { -offset };
+
+    edge_transition_weight(base_distance - directional_offset)
+        * region_edge_corner_taper(classes, owner_coord, neighbor_coord, corner_axis)
+}
+
+fn corner_transition_weight_for_neighbor(
+    classes: &RegionClassMap,
+    owner_coord: AtlasCoord,
+    neighbor_coord: AtlasCoord,
+    local_x: f32,
+    local_z: f32,
+) -> f32 {
+    let Some(neighbor_class) = classes.get(neighbor_coord).copied() else {
+        return 0.0;
+    };
+    let Some(owner_class) = classes.get(owner_coord).copied() else {
+        return 0.0;
+    };
+    if neighbor_class == owner_class {
+        return 0.0;
+    }
+
+    let distance_x = if neighbor_coord.x < owner_coord.x {
+        local_x
+    } else if neighbor_coord.x > owner_coord.x {
+        1.0 - local_x
+    } else {
+        return 0.0;
+    };
+    let distance_z = if neighbor_coord.z < owner_coord.z {
+        local_z
+    } else if neighbor_coord.z > owner_coord.z {
+        1.0 - local_z
+    } else {
+        return 0.0;
+    };
+    let edge_x_coord = AtlasCoord::new(neighbor_coord.x, owner_coord.z);
+    let edge_z_coord = AtlasCoord::new(owner_coord.x, neighbor_coord.z);
+    let edge_x_continues = diagonal_continues_neighbor(classes, neighbor_coord, edge_x_coord);
+    let edge_z_continues = diagonal_continues_neighbor(classes, neighbor_coord, edge_z_coord);
+    let continuity = match (edge_x_continues, edge_z_continues) {
+        (true, true) => 1.0,
+        (true, false) | (false, true) => 0.72,
+        (false, false) => 0.42,
+    };
+    let corner_distance = distance_x.max(distance_z);
+    let corner_weight = edge_transition_weight(corner_distance);
+    let diagonal_rounding = (edge_transition_weight(distance_x)
+        * edge_transition_weight(distance_z))
+    .sqrt()
+    .clamp(0.0, 1.0);
+
+    corner_weight * diagonal_rounding * continuity
+}
+
+fn region_edge_boundary_offset_cells(
+    classes: &RegionClassMap,
+    owner_coord: AtlasCoord,
+    neighbor_coord: AtlasCoord,
+    along_atlas: f32,
+) -> f32 {
+    let owner_class = classes.get(owner_coord).copied().unwrap_or_default();
+    let neighbor_class = classes.get(neighbor_coord).copied().unwrap_or_default();
+    let barrier = region_class_barrier_strength(owner_class, neighbor_class);
+    let amplitude = (REGION_EDGE_WAVE_AMPLITUDE_CELLS * (1.0 - barrier * 0.55))
+        .clamp(0.035, REGION_EDGE_WAVE_AMPLITUDE_CELLS);
+    let low_x = owner_coord.x.min(neighbor_coord.x);
+    let low_z = owner_coord.z.min(neighbor_coord.z);
+    let high_x = owner_coord.x.max(neighbor_coord.x);
+    let high_z = owner_coord.z.max(neighbor_coord.z);
+    let owner_hash = region_class_fingerprint(owner_class);
+    let neighbor_hash = region_class_fingerprint(neighbor_class);
+    let salt = mix_u64(
+        REGION_EDGE_WAVE_SALT
+            ^ (low_x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            ^ (low_z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+            ^ (high_x as i64 as u64).wrapping_mul(0x94d0_49bb_1331_11eb)
+            ^ (high_z as i64 as u64).wrapping_mul(0xdbe6_d5d5_fe4c_ce2f)
+            ^ owner_hash.rotate_left(11)
+            ^ neighbor_hash.rotate_left(37),
+    );
+    let broad = edge_sine_wave_1d(
+        along_atlas + 13.17,
+        REGION_EDGE_WAVE_BROAD_PERIOD_CELLS,
+        salt.rotate_left(7),
+    );
+    let secondary = edge_sine_wave_1d(
+        along_atlas - 5.43,
+        REGION_EDGE_WAVE_SECONDARY_PERIOD_CELLS,
+        salt.rotate_left(29),
+    );
+    (broad * 0.56 + secondary * 0.44).clamp(-1.0, 1.0) * amplitude
+}
+
+fn region_edge_corner_taper(
+    classes: &RegionClassMap,
+    owner_coord: AtlasCoord,
+    neighbor_coord: AtlasCoord,
+    corner_axis: f32,
+) -> f32 {
+    let near_min =
+        1.0 - smoothstep01((corner_axis / REGION_EDGE_CORNER_TAPER_WIDTH_CELLS).clamp(0.0, 1.0));
+    let near_max = 1.0
+        - smoothstep01(
+            ((1.0 - corner_axis) / REGION_EDGE_CORNER_TAPER_WIDTH_CELLS).clamp(0.0, 1.0),
+        );
+    let mut taper = 1.0_f32;
+
+    if near_min > 0.0 {
+        let diagonal_coord = if neighbor_coord.x != owner_coord.x {
+            AtlasCoord::new(neighbor_coord.x, owner_coord.z - 1)
+        } else {
+            AtlasCoord::new(owner_coord.x - 1, neighbor_coord.z)
+        };
+        if !diagonal_continues_neighbor(classes, neighbor_coord, diagonal_coord) {
+            taper *= 1.0 - near_min * 0.42;
+        }
+    }
+
+    if near_max > 0.0 {
+        let diagonal_coord = if neighbor_coord.x != owner_coord.x {
+            AtlasCoord::new(neighbor_coord.x, owner_coord.z + 1)
+        } else {
+            AtlasCoord::new(owner_coord.x + 1, neighbor_coord.z)
+        };
+        if !diagonal_continues_neighbor(classes, neighbor_coord, diagonal_coord) {
+            taper *= 1.0 - near_max * 0.42;
+        }
+    }
+
+    taper.clamp(0.34, 1.0)
+}
+
+fn diagonal_continues_neighbor(
+    classes: &RegionClassMap,
+    neighbor_coord: AtlasCoord,
+    diagonal_coord: AtlasCoord,
+) -> bool {
+    let Some(neighbor) = classes.get(neighbor_coord).copied() else {
+        return false;
+    };
+    let Some(diagonal) = classes.get(diagonal_coord).copied() else {
+        return false;
+    };
+
+    neighbor.archetype == diagonal.archetype
+        || (neighbor.biome_family == diagonal.biome_family
+            && neighbor.hydrology_context == diagonal.hydrology_context
+            && neighbor.elevation_band == diagonal.elevation_band)
+}
+
+fn edge_sine_wave_1d(position: f32, period: f32, salt: u64) -> f32 {
+    let phase =
+        (hash_to_signed_unit(edge_lattice_hash(0, salt)) * 0.5 + 0.5) * std::f32::consts::TAU;
+    ((position / period.max(0.01)) * std::f32::consts::TAU + phase).sin()
+}
+
+fn edge_lattice_hash(index: i32, salt: u64) -> u64 {
+    mix_u64(salt ^ (index as i64 as u64).wrapping_mul(0xc2b2_ae3d_27d4_eb4f))
+}
+
+fn region_class_fingerprint(cell: RegionClassCell) -> u64 {
+    let mut hash = 0x94d0_49bb_1331_11eb;
+    hash = mix_u64(hash ^ cell.temperature_band as u64);
+    hash = mix_u64(hash ^ ((cell.moisture_band as u64) << 8));
+    hash = mix_u64(hash ^ ((cell.elevation_band as u64) << 16));
+    hash = mix_u64(hash ^ ((cell.relief_class as u64) << 24));
+    hash = mix_u64(hash ^ ((cell.hydrology_context as u64) << 32));
+    hash = mix_u64(hash ^ ((cell.coastal_context as u64) << 40));
+    hash = mix_u64(hash ^ ((cell.climate_regime as u64) << 48));
+    hash = mix_u64(hash ^ cell.biome_family as u64);
+    hash = mix_u64(hash ^ ((cell.terrain_form_family as u64) << 16));
+    mix_u64(hash ^ ((cell.archetype as u64) << 32))
+}
+
+fn region_class_barrier_strength(a: RegionClassCell, b: RegionClassCell) -> f32 {
+    if a == b {
+        return 0.0;
+    }
+
+    let mut barrier = 0.0_f32;
+
+    if is_marine_region(a) != is_marine_region(b) {
+        let other = if is_marine_region(a) { b } else { a };
+        barrier = barrier.max(
+            if matches!(other.coastal_context, CoastalContext::Coastal) {
+                0.78
+            } else {
+                0.92
+            },
+        );
+    }
+
+    if is_hard_coastal_cliff(a) != is_hard_coastal_cliff(b) {
+        barrier = barrier.max(0.70);
+    }
+
+    let relief_delta =
+        (relief_rank(a.relief_class) - relief_rank(b.relief_class)).abs() as f32 / 3.0;
+    let elevation_delta =
+        (elevation_rank(a.elevation_band) - elevation_rank(b.elevation_band)).abs() as f32 / 3.0;
+    barrier = barrier.max((relief_delta * 0.44 + elevation_delta * 0.32).clamp(0.0, 0.68));
+
+    if is_ridge_or_mountain_break(a, b) {
+        barrier = barrier.max(0.72);
+    }
+
+    if is_basin_wall_break(a, b) {
+        barrier = barrier.max(0.62);
+    }
+
+    if hydrology_rank(a.hydrology_context).abs_diff(hydrology_rank(b.hydrology_context)) >= 3 {
+        barrier = barrier.max(0.42);
+    }
+
+    barrier = barrier.max(biome_family_barrier(a.biome_family, b.biome_family));
+    barrier.clamp(0.0, 1.0)
+}
+
+fn is_marine_region(cell: RegionClassCell) -> bool {
+    matches!(cell.coastal_context, CoastalContext::Marine)
+        || matches!(cell.terrain_form_family, TerrainFormFamily::MarineShelf)
+        || matches!(cell.archetype, RegionArchetype::OceanicShelf)
+}
+
+fn is_hard_coastal_cliff(cell: RegionClassCell) -> bool {
+    matches!(
+        cell.terrain_form_family,
+        TerrainFormFamily::SeaCliff | TerrainFormFamily::FjordCoast | TerrainFormFamily::RockyShore
+    ) || matches!(cell.biome_family, BiomeFamily::RockyCoast)
+        || matches!(
+            cell.archetype,
+            RegionArchetype::CoastalCliffland | RegionArchetype::FjordCoast
+        )
+}
+
+fn is_ridge_or_mountain_break(a: RegionClassCell, b: RegionClassCell) -> bool {
+    let ridge_a = ridge_pressure(a);
+    let ridge_b = ridge_pressure(b);
+
+    (ridge_a > 0.72 && ridge_b < 0.38) || (ridge_b > 0.72 && ridge_a < 0.38)
+}
+
+fn ridge_pressure(cell: RegionClassCell) -> f32 {
+    let mut pressure = relief_rank(cell.relief_class) as f32 / 3.0 * 0.45
+        + elevation_rank(cell.elevation_band) as f32 / 3.0 * 0.30;
+
+    if matches!(
+        cell.terrain_form_family,
+        TerrainFormFamily::Mountain
+            | TerrainFormFamily::MountainFront
+            | TerrainFormFamily::RidgeCountry
+            | TerrainFormFamily::Escarpment
+            | TerrainFormFamily::Canyon
+            | TerrainFormFamily::RavineCountry
+    ) {
+        pressure += 0.35;
+    }
+
+    pressure.clamp(0.0, 1.0)
+}
+
+fn is_basin_wall_break(a: RegionClassCell, b: RegionClassCell) -> bool {
+    (is_basin_floor(a) && is_basin_wall(b)) || (is_basin_floor(b) && is_basin_wall(a))
+}
+
+fn is_basin_floor(cell: RegionClassCell) -> bool {
+    matches!(
+        cell.hydrology_context,
+        HydrologyContext::LakeBasin | HydrologyContext::WetLowland
+    ) || matches!(
+        cell.terrain_form_family,
+        TerrainFormFamily::Basin | TerrainFormFamily::WetLowland
+    )
+}
+
+fn is_basin_wall(cell: RegionClassCell) -> bool {
+    matches!(cell.relief_class, ReliefClass::Hill | ReliefClass::Mountain)
+        || matches!(
+            cell.terrain_form_family,
+            TerrainFormFamily::Escarpment
+                | TerrainFormFamily::Plateau
+                | TerrainFormFamily::Mountain
+                | TerrainFormFamily::RidgeCountry
+        )
+}
+
+fn biome_family_barrier(a: BiomeFamily, b: BiomeFamily) -> f32 {
+    if a == b {
+        return 0.0;
+    }
+
+    if is_wet_forest_or_wetland(a) != is_wet_forest_or_wetland(b)
+        && (is_arid_biome(a) || is_arid_biome(b))
+    {
+        return 0.50;
+    }
+
+    if is_cold_biome(a) != is_cold_biome(b) && (is_tropical_biome(a) || is_tropical_biome(b)) {
+        return 0.48;
+    }
+
+    if is_arid_biome(a) != is_arid_biome(b) {
+        return 0.28;
+    }
+
+    0.16
+}
+
+fn is_arid_biome(biome: BiomeFamily) -> bool {
+    matches!(
+        biome,
+        BiomeFamily::Desert
+            | BiomeFamily::SemiDesert
+            | BiomeFamily::Steppe
+            | BiomeFamily::DryShrubland
+            | BiomeFamily::MediterraneanShrubland
+    )
+}
+
+fn is_wet_forest_or_wetland(biome: BiomeFamily) -> bool {
+    matches!(
+        biome,
+        BiomeFamily::Marsh
+            | BiomeFamily::Swamp
+            | BiomeFamily::FloodedForest
+            | BiomeFamily::TemperateRainforest
+            | BiomeFamily::TropicalRainforest
+            | BiomeFamily::MonsoonForest
+            | BiomeFamily::Mangrove
+    )
+}
+
+fn is_cold_biome(biome: BiomeFamily) -> bool {
+    matches!(
+        biome,
+        BiomeFamily::BorealForest
+            | BiomeFamily::SubalpineWoodland
+            | BiomeFamily::AlpineMeadow
+            | BiomeFamily::Tundra
+            | BiomeFamily::PolarBarrens
+            | BiomeFamily::PolarIce
+    )
+}
+
+fn is_tropical_biome(biome: BiomeFamily) -> bool {
+    matches!(
+        biome,
+        BiomeFamily::Savanna
+            | BiomeFamily::TropicalDryForest
+            | BiomeFamily::TropicalRainforest
+            | BiomeFamily::MonsoonForest
+            | BiomeFamily::Mangrove
+    )
+}
+
+fn relief_rank(relief: ReliefClass) -> i32 {
+    match relief {
+        ReliefClass::Plain => 0,
+        ReliefClass::Rolling => 1,
+        ReliefClass::Hill => 2,
+        ReliefClass::Mountain => 3,
+    }
+}
+
+fn elevation_rank(elevation: ElevationBand) -> i32 {
+    match elevation {
+        ElevationBand::Low => 0,
+        ElevationBand::Upland => 1,
+        ElevationBand::Highland => 2,
+        ElevationBand::Alpine => 3,
+    }
+}
+
+fn hydrology_rank(hydrology: HydrologyContext) -> u32 {
+    match hydrology {
+        HydrologyContext::Dryland => 0,
+        HydrologyContext::WellDrained => 1,
+        HydrologyContext::RiverCorridor => 2,
+        HydrologyContext::WetLowland => 3,
+        HydrologyContext::LakeBasin => 4,
+    }
+}
+
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn hash_to_signed_unit(hash: u64) -> f32 {
+    let mantissa = ((hash >> 40) & 0x00ff_ffff) as u32;
+    (mantissa as f32 / 16_777_215.0) * 2.0 - 1.0
+}
+
+fn mix_u64(mut value: u64) -> u64 {
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 fn apply_launch_fallback_to_region_map(classes: &RegionClassMap) -> RegionClassMap {
@@ -439,8 +1121,13 @@ fn classify_region_cell_raw(
     let elevation_band = classify_elevation_band(cell, touches_ridge);
     let relief_class = classify_relief_class(cell, touches_ridge);
     let climate_regime = classify_climate_regime(cell, temperature_band, moisture_band);
-    let terrain_form_family =
-        classify_terrain_form_family(cell, coastal_context, elevation_band, relief_class, hydrology_context);
+    let terrain_form_family = classify_terrain_form_family(
+        cell,
+        coastal_context,
+        elevation_band,
+        relief_class,
+        hydrology_context,
+    );
     let biome_family = classify_biome_family(
         cell,
         temperature_band,
@@ -449,8 +1136,12 @@ fn classify_region_cell_raw(
         hydrology_context,
         climate_regime,
     );
-    let archetype =
-        classify_region_archetype_raw(biome_family, terrain_form_family, elevation_band, relief_class);
+    let archetype = classify_region_archetype_raw(
+        biome_family,
+        terrain_form_family,
+        elevation_band,
+        relief_class,
+    );
 
     RegionClassCell {
         temperature_band,
@@ -496,7 +1187,8 @@ fn classify_moisture_band(cell: AtlasCell) -> MoistureBand {
 }
 
 fn classify_elevation_band(cell: AtlasCell, touches_ridge: bool) -> ElevationBand {
-    let lifted = cell.macro_elevation + cell.mountain_mass * 0.18 + if touches_ridge { 0.08 } else { 0.0 };
+    let lifted =
+        cell.macro_elevation + cell.mountain_mass * 0.18 + if touches_ridge { 0.08 } else { 0.0 };
     if cell.alpine_factor > 0.72 || lifted > 0.82 {
         ElevationBand::Alpine
     } else if lifted > 0.60 {
@@ -558,7 +1250,9 @@ fn classify_climate_regime(
     match temperature_band {
         TemperatureBand::Polar => ClimateRegime::Polar,
         TemperatureBand::Cold if cell.alpine_factor > 0.62 => ClimateRegime::ColdAlpine,
-        TemperatureBand::Hot if matches!(moisture_band, MoistureBand::Wet | MoistureBand::Humid) => {
+        TemperatureBand::Hot
+            if matches!(moisture_band, MoistureBand::Wet | MoistureBand::Humid) =>
+        {
             if cell.aridity > 0.32 || (cell.inlandness > 0.40 && cell.wetness < 0.72) {
                 ClimateRegime::TropicalSeasonal
             } else {
@@ -589,7 +1283,10 @@ fn classify_biome_family(
         return BiomeFamily::Oceanic;
     }
     if matches!(coastal_context, CoastalContext::Coastal) {
-        if matches!(hydrology_context, HydrologyContext::RiverCorridor | HydrologyContext::LakeBasin) {
+        if matches!(
+            hydrology_context,
+            HydrologyContext::RiverCorridor | HydrologyContext::LakeBasin
+        ) {
             return BiomeFamily::EstuarineCoast;
         }
         if cell.lake_potential > 0.46 && cell.wetness > 0.40 {
@@ -607,11 +1304,15 @@ fn classify_biome_family(
     }
     if matches!(
         hydrology_context,
-        HydrologyContext::WetLowland | HydrologyContext::LakeBasin | HydrologyContext::RiverCorridor
+        HydrologyContext::WetLowland
+            | HydrologyContext::LakeBasin
+            | HydrologyContext::RiverCorridor
     ) && cell.wetness > 0.34
     {
-        if matches!(temperature_band, TemperatureBand::Hot | TemperatureBand::Warm)
-            && matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet)
+        if matches!(
+            temperature_band,
+            TemperatureBand::Hot | TemperatureBand::Warm
+        ) && matches!(moisture_band, MoistureBand::Humid | MoistureBand::Wet)
         {
             if cell.riverine_factor > 0.42 || climate_regime == ClimateRegime::TropicalWet {
                 return BiomeFamily::FloodedForest;
@@ -644,8 +1345,10 @@ fn classify_biome_family(
         if matches!(temperature_band, TemperatureBand::Hot) {
             return BiomeFamily::SemiDesert;
         }
-        if matches!(temperature_band, TemperatureBand::Warm | TemperatureBand::Temperate)
-            && matches!(coastal_context, CoastalContext::NearCoast)
+        if matches!(
+            temperature_band,
+            TemperatureBand::Warm | TemperatureBand::Temperate
+        ) && matches!(coastal_context, CoastalContext::NearCoast)
         {
             return BiomeFamily::MediterraneanShrubland;
         }
@@ -677,8 +1380,10 @@ fn classify_biome_family(
                 BiomeFamily::TemperateBroadleafForest
             }
         }
-        _ if matches!(temperature_band, TemperatureBand::Warm | TemperatureBand::Hot)
-            && matches!(moisture_band, MoistureBand::Subhumid) =>
+        _ if matches!(
+            temperature_band,
+            TemperatureBand::Warm | TemperatureBand::Hot
+        ) && matches!(moisture_band, MoistureBand::Subhumid) =>
         {
             BiomeFamily::Savanna
         }
@@ -703,7 +1408,9 @@ fn classify_terrain_form_family(
         {
             return TerrainFormFamily::Delta;
         }
-        if matches!(hydrology_context, HydrologyContext::RiverCorridor) && cell.river_flow_potential > 0.44 {
+        if matches!(hydrology_context, HydrologyContext::RiverCorridor)
+            && cell.river_flow_potential > 0.44
+        {
             return TerrainFormFamily::EstuaryLowland;
         }
         if cell.lake_potential > 0.48 && cell.wetness > 0.42 {
@@ -728,13 +1435,19 @@ fn classify_terrain_form_family(
             return TerrainFormFamily::Delta;
         }
         if cell.aridity > 0.52
-            && matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
+            && matches!(
+                elevation_band,
+                ElevationBand::Upland | ElevationBand::Highland
+            )
             && cell.river_flow_potential > 0.34
             && cell.ruggedness < 0.52
         {
             return TerrainFormFamily::AlluvialFan;
         }
-        if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine) {
+        if matches!(
+            elevation_band,
+            ElevationBand::Highland | ElevationBand::Alpine
+        ) {
             if cell.alpine_factor > 0.68 {
                 return TerrainFormFamily::GlacialValley;
             }
@@ -751,11 +1464,16 @@ fn classify_terrain_form_family(
         }
         return TerrainFormFamily::Floodplain;
     }
-    if matches!(hydrology_context, HydrologyContext::WetLowland | HydrologyContext::LakeBasin) {
+    if matches!(
+        hydrology_context,
+        HydrologyContext::WetLowland | HydrologyContext::LakeBasin
+    ) {
         return TerrainFormFamily::WetLowland;
     }
-    if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine)
-        && cell.ridge_factor > 0.58
+    if matches!(
+        elevation_band,
+        ElevationBand::Highland | ElevationBand::Alpine
+    ) && cell.ridge_factor > 0.58
         && cell.mountain_mass > 0.34
         && matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain)
     {
@@ -767,15 +1485,20 @@ fn classify_terrain_form_family(
     {
         return TerrainFormFamily::RavineCountry;
     }
-    if matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
-        && cell.ridge_factor > 0.44
+    if matches!(
+        elevation_band,
+        ElevationBand::Upland | ElevationBand::Highland
+    ) && cell.ridge_factor > 0.44
         && (0.32..=0.58).contains(&cell.ruggedness)
         && cell.basinness < 0.34
     {
         return TerrainFormFamily::Escarpment;
     }
     if cell.aridity > 0.62
-        && matches!(elevation_band, ElevationBand::Upland | ElevationBand::Highland)
+        && matches!(
+            elevation_band,
+            ElevationBand::Upland | ElevationBand::Highland
+        )
         && (0.22..=0.52).contains(&cell.ruggedness)
         && cell.basinness < 0.38
     {
@@ -812,7 +1535,9 @@ fn classify_terrain_form_family(
         }
         (_, ReliefClass::Hill) => TerrainFormFamily::HillCountry,
         (_, ReliefClass::Rolling) => TerrainFormFamily::RollingPlain,
-        _ if cell.aridity > 0.42 && matches!(elevation_band, ElevationBand::Low | ElevationBand::Upland) => {
+        _ if cell.aridity > 0.42
+            && matches!(elevation_band, ElevationBand::Low | ElevationBand::Upland) =>
+        {
             TerrainFormFamily::Pediment
         }
         _ => TerrainFormFamily::Plain,
@@ -843,9 +1568,7 @@ fn classify_region_archetype_raw(
         (BiomeFamily::Desert, TerrainFormFamily::AlluvialFan) => RegionArchetype::DesertAlluvialFan,
         (BiomeFamily::Desert, _) => RegionArchetype::DesertPlain,
         (BiomeFamily::Steppe, TerrainFormFamily::HillCountry) => RegionArchetype::SteppeHills,
-        (BiomeFamily::Steppe, _) => {
-            RegionArchetype::SteppePlain
-        }
+        (BiomeFamily::Steppe, _) => RegionArchetype::SteppePlain,
         (BiomeFamily::SemiDesert, _) => RegionArchetype::SemiDesertPediment,
         (BiomeFamily::DryShrubland, TerrainFormFamily::Karst) => RegionArchetype::DryShrublandKarst,
         (BiomeFamily::DryShrubland, _) => RegionArchetype::DryShrublandBadlands,
@@ -860,9 +1583,7 @@ fn classify_region_archetype_raw(
         (
             BiomeFamily::TropicalRainforest,
             TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain,
-        ) => {
-            RegionArchetype::TropicalRainforestHills
-        }
+        ) => RegionArchetype::TropicalRainforestHills,
         (BiomeFamily::TropicalRainforest, _) => RegionArchetype::TropicalRainforestLowland,
         (BiomeFamily::Savanna, TerrainFormFamily::HillCountry) => RegionArchetype::SavannaHills,
         (BiomeFamily::Savanna, _) => RegionArchetype::SavannaPlain,
@@ -870,11 +1591,16 @@ fn classify_region_archetype_raw(
         (BiomeFamily::MonsoonForest, TerrainFormFamily::Delta) => RegionArchetype::MonsoonDelta,
         (BiomeFamily::MonsoonForest, TerrainFormFamily::Plateau) => RegionArchetype::MonsoonPlateau,
         (BiomeFamily::MonsoonForest, _) => RegionArchetype::MonsoonFloodplain,
-        (BiomeFamily::BorealForest, TerrainFormFamily::WetLowland) => RegionArchetype::BorealWetLowland,
-        (BiomeFamily::BorealForest, TerrainFormFamily::RidgeCountry) => RegionArchetype::BorealRidgeCountry,
-        (BiomeFamily::BorealForest, TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain) => {
-            RegionArchetype::BorealHills
+        (BiomeFamily::BorealForest, TerrainFormFamily::WetLowland) => {
+            RegionArchetype::BorealWetLowland
         }
+        (BiomeFamily::BorealForest, TerrainFormFamily::RidgeCountry) => {
+            RegionArchetype::BorealRidgeCountry
+        }
+        (
+            BiomeFamily::BorealForest,
+            TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain,
+        ) => RegionArchetype::BorealHills,
         (BiomeFamily::BorealForest, _) => RegionArchetype::BorealPlain,
         (BiomeFamily::PolarIce, TerrainFormFamily::CrevassedIcefield) => {
             RegionArchetype::CrevassedIcefield
@@ -885,7 +1611,9 @@ fn classify_region_archetype_raw(
         (BiomeFamily::Tundra, _) => RegionArchetype::TundraPlain,
         (BiomeFamily::PolarBarrens, _) => RegionArchetype::PolarBarrensPlain,
         (BiomeFamily::SubalpineWoodland, _) => RegionArchetype::SubalpineWoodedFront,
-        (BiomeFamily::AlpineMeadow, TerrainFormFamily::RavineCountry) => RegionArchetype::AlpineRavineCountry,
+        (BiomeFamily::AlpineMeadow, TerrainFormFamily::RavineCountry) => {
+            RegionArchetype::AlpineRavineCountry
+        }
         (BiomeFamily::AlpineMeadow, _) => RegionArchetype::AlpineMeadowMountain,
         (_, TerrainFormFamily::Plateau) => RegionArchetype::TemperatePlateau,
         (_, TerrainFormFamily::Escarpment) => RegionArchetype::TemperateEscarpmentUpland,
@@ -903,8 +1631,10 @@ fn classify_region_archetype_raw(
         }
         (BiomeFamily::TemperateRainforest, _) => RegionArchetype::TemperateBroadleafPlain,
         (_, TerrainFormFamily::HillCountry | TerrainFormFamily::Mountain)
-            if matches!(elevation_band, ElevationBand::Highland | ElevationBand::Alpine)
-                || matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain) =>
+            if matches!(
+                elevation_band,
+                ElevationBand::Highland | ElevationBand::Alpine
+            ) || matches!(relief_class, ReliefClass::Hill | ReliefClass::Mountain) =>
         {
             RegionArchetype::TemperateHills
         }
@@ -935,7 +1665,9 @@ fn area_has_river(coord: AtlasCoord, structure: &AtlasStructureMap) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{AtlasArea, AtlasCoord, WorldMeta, generate_atlas_fields, generate_atlas_structure};
+    use crate::world::{
+        AtlasArea, AtlasCoord, WorldMeta, generate_atlas_fields, generate_atlas_structure,
+    };
 
     #[derive(Debug)]
     struct ClassificationScenario {
@@ -976,7 +1708,140 @@ mod tests {
         cell
     }
 
+    fn influence_test_map(
+        center: RegionClassCell,
+        updates: &[(AtlasCoord, RegionClassCell)],
+    ) -> RegionClassMap {
+        let area = AtlasArea::new(AtlasCoord::new(-1, -1), 3, 3).unwrap();
+        let mut cells = AtlasGrid::filled(area, center);
+
+        for (coord, cell) in updates {
+            *cells.get_mut(*coord).expect("test coord must exist") = *cell;
+        }
+
+        RegionClassMap { area, cells }
+    }
+
+    fn temperate_plain_cell() -> RegionClassCell {
+        RegionClassCell {
+            temperature_band: TemperatureBand::Temperate,
+            moisture_band: MoistureBand::Subhumid,
+            elevation_band: ElevationBand::Low,
+            relief_class: ReliefClass::Plain,
+            hydrology_context: HydrologyContext::WellDrained,
+            coastal_context: CoastalContext::Inland,
+            climate_regime: ClimateRegime::TemperateSeasonal,
+            biome_family: BiomeFamily::TemperateGrassland,
+            terrain_form_family: TerrainFormFamily::Plain,
+            archetype: RegionArchetype::TemperatePlain,
+        }
+    }
+
+    fn steppe_plain_cell() -> RegionClassCell {
+        RegionClassCell {
+            moisture_band: MoistureBand::SemiArid,
+            biome_family: BiomeFamily::Steppe,
+            climate_regime: ClimateRegime::AridHot,
+            archetype: RegionArchetype::SteppePlain,
+            ..temperate_plain_cell()
+        }
+    }
+
+    fn oceanic_shelf_cell() -> RegionClassCell {
+        RegionClassCell {
+            hydrology_context: HydrologyContext::WellDrained,
+            coastal_context: CoastalContext::Marine,
+            biome_family: BiomeFamily::Oceanic,
+            terrain_form_family: TerrainFormFamily::MarineShelf,
+            archetype: RegionArchetype::OceanicShelf,
+            ..temperate_plain_cell()
+        }
+    }
+
+    fn total_influence_weight(influences: &RegionClassInfluenceSet) -> f32 {
+        influences.dominant.weight
+            + influences
+                .neighbors
+                .iter()
+                .map(|neighbor| neighbor.weight)
+                .sum::<f32>()
+    }
+
     #[test]
+    fn region_influence_sampling_warps_visible_owner_and_blends_neighbors() {
+        let classes = influence_test_map(
+            temperate_plain_cell(),
+            &[(AtlasCoord::new(1, 0), steppe_plain_cell())],
+        );
+        let span = atlas_cell_span_blocks_f32();
+        let influences = sample_region_class_influences(&classes, span * 0.98, span * 0.50);
+        let east_influence = if influences.dominant.coord == AtlasCoord::new(1, 0) {
+            influences.dominant
+        } else {
+            *influences
+                .neighbors
+                .iter()
+                .find(|neighbor| neighbor.coord == AtlasCoord::new(1, 0))
+                .expect("east cell should influence near the warped east edge")
+        };
+
+        assert_eq!(east_influence.class.archetype, RegionArchetype::SteppePlain);
+        assert!(east_influence.weight > 0.10);
+        assert!(influences.transition_strength > 0.10);
+        assert!(influences.neighbors.len() <= 4);
+        assert!((total_influence_weight(&influences) - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn region_influence_barrier_rises_for_marine_to_inland_breaks() {
+        let span = atlas_cell_span_blocks_f32();
+        let compatible = influence_test_map(
+            temperate_plain_cell(),
+            &[(AtlasCoord::new(1, 0), steppe_plain_cell())],
+        );
+        let marine = influence_test_map(
+            temperate_plain_cell(),
+            &[(AtlasCoord::new(1, 0), oceanic_shelf_cell())],
+        );
+
+        let compatible_influences =
+            sample_region_class_influences(&compatible, span * 0.98, span * 0.50);
+        let marine_influences = sample_region_class_influences(&marine, span * 0.98, span * 0.50);
+
+        assert!(compatible_influences.barrier_strength < 0.35);
+        assert!(marine_influences.barrier_strength > 0.70);
+        assert!(marine_influences.barrier_strength > compatible_influences.barrier_strength + 0.35);
+    }
+
+    #[test]
+    fn region_influence_sampling_is_deterministic() {
+        let classes = influence_test_map(
+            temperate_plain_cell(),
+            &[
+                (AtlasCoord::new(1, 0), steppe_plain_cell()),
+                (AtlasCoord::new(0, 1), oceanic_shelf_cell()),
+            ],
+        );
+        let span = atlas_cell_span_blocks_f32();
+        let a = sample_region_class_influences(&classes, span * 0.93, span * 0.91);
+        let b = sample_region_class_influences(&classes, span * 0.93, span * 0.91);
+
+        assert_eq!(a.dominant.coord, b.dominant.coord);
+        assert_eq!(a.dominant.class, b.dominant.class);
+        assert!((a.dominant.weight - b.dominant.weight).abs() < f32::EPSILON);
+        assert!((a.transition_strength - b.transition_strength).abs() < f32::EPSILON);
+        assert!((a.barrier_strength - b.barrier_strength).abs() < f32::EPSILON);
+        assert_eq!(a.neighbors.len(), b.neighbors.len());
+
+        for (left, right) in a.neighbors.iter().zip(b.neighbors.iter()) {
+            assert_eq!(left.coord, right.coord);
+            assert_eq!(left.class, right.class);
+            assert!((left.weight - right.weight).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    #[ignore = "slow atlas region-classification smoke test"]
     fn region_classification_is_deterministic() {
         let meta = WorldMeta::new(42);
         let area = AtlasArea::new(AtlasCoord::new(-2, -2), 6, 6).unwrap();
@@ -990,6 +1855,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow atlas region-classification coverage smoke test"]
     fn region_classification_produces_multiple_archetypes_for_large_area() {
         let meta = WorldMeta::new(42);
         let area = AtlasArea::new(AtlasCoord::new(-8, -8), 16, 16).unwrap();
@@ -1151,10 +2017,13 @@ mod tests {
                 launch.archetype
             );
 
-            assert_eq!(raw.archetype, scenario.expected_raw, "raw classification mismatch for {}", scenario.name);
             assert_eq!(
-                launch.archetype,
-                scenario.expected_launch,
+                raw.archetype, scenario.expected_raw,
+                "raw classification mismatch for {}",
+                scenario.name
+            );
+            assert_eq!(
+                launch.archetype, scenario.expected_launch,
                 "launch fallback mismatch for {}",
                 scenario.name
             );

@@ -26,9 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut origin_x = -(width as i32 / 2);
     let mut origin_z = -(height as i32 / 2);
     let mut pixels_per_cell = 4_u32;
-    let mut output_dir = PathBuf::from(format!(
-        "target/atlas-debug/seed_{seed}_{width}x{height}"
-    ));
+    let mut output_dir = PathBuf::from(format!("target/atlas-debug/seed_{seed}_{width}x{height}"));
 
     while let Some(flag) = args.first().cloned() {
         args.remove(0);
@@ -36,7 +34,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--origin-x" => origin_x = parse_required::<i32>(&mut args, "origin-x")?,
             "--origin-z" => origin_z = parse_required::<i32>(&mut args, "origin-z")?,
             "--pixels" => pixels_per_cell = parse_required::<u32>(&mut args, "pixels")?,
-            "--output" => output_dir = PathBuf::from(parse_required::<String>(&mut args, "output")?),
+            "--output" => {
+                output_dir = PathBuf::from(parse_required::<String>(&mut args, "output")?)
+            }
             _ => {
                 return Err(cli_error(format!("unknown flag: {flag}\n\n{}", usage())));
             }

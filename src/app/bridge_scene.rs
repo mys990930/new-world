@@ -1,15 +1,12 @@
 use super::{
+    AppMode, GameApp,
     bridge::AppRenderFrameData,
     bridge_ui::{build_ingame_ui_sprites, build_world_select_ui_sprites},
     ui::build_world_select_layout,
-    AppMode,
-    GameApp,
-};
-use crate::ecs::{
-    quarter_view_render_camera_pose, CameraState, InventoryItem, PlayerInventory,
 };
 #[cfg(test)]
 use crate::ecs::quarter_view_camera_pose;
+use crate::ecs::{CameraState, InventoryItem, PlayerInventory, quarter_view_render_camera_pose};
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
     RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
@@ -97,8 +94,13 @@ impl GameApp {
                     .as_ref()
                     .and_then(|source| source.root().file_name())
                     .and_then(|name| name.to_str());
-                let layout =
-                    build_world_select_layout(&self.ui.world_select, viewport, current_loaded_label);
+                let layout = build_world_select_layout(
+                    &self.ui.world_select,
+                    viewport,
+                    current_loaded_label,
+                    self.created_world.is_some(),
+                    self.timing.frame_index,
+                );
                 let mouse_position = self.platform.raw_input_state().mouse_position;
                 let hovered_action = layout.action_at(mouse_position);
                 let hovered_input_field = layout.input_field_at(mouse_position);
@@ -205,7 +207,11 @@ fn push_selection_preview_instances(
             })
             .unwrap_or_else(|| default_preview_texture_layers(world.block_registry()));
         cube_instances.push(RenderCubeInstance {
-            center: [block.0 as f32 + 0.5, block.1 as f32 + 0.5, block.2 as f32 + 0.5],
+            center: [
+                block.0 as f32 + 0.5,
+                block.1 as f32 + 0.5,
+                block.2 as f32 + 0.5,
+            ],
             half_extents: [0.49, 0.49, 0.49],
             color: [1.0, 0.95, 0.35, 0.35],
             top_texture_layer: face_textures[0],
@@ -238,7 +244,11 @@ fn world_chunk_to_render(coord: WorldChunkCoord) -> RenderChunkCoord {
 
 fn world_mesh_to_render(mesh: WorldCpuMesh) -> RenderCpuMesh {
     RenderCpuMesh {
-        vertices: mesh.vertices.into_iter().map(world_vertex_to_render).collect(),
+        vertices: mesh
+            .vertices
+            .into_iter()
+            .map(world_vertex_to_render)
+            .collect(),
         indices: mesh.indices,
         bounds: mesh.bounds.map(|bounds| crate::renderer::RenderBounds {
             min: bounds.min,
@@ -293,7 +303,9 @@ mod tests {
             initialized: true,
             ..CameraState::default()
         });
-        let basis = camera.basis_override.expect("quarter-view basis should exist");
+        let basis = camera
+            .basis_override
+            .expect("quarter-view basis should exist");
 
         let east = project_to_screen_axes([1.0, 0.0, 0.0], basis);
         let north = project_to_screen_axes([0.0, 0.0, 1.0], basis);
@@ -320,7 +332,9 @@ mod tests {
             initialized: true,
             ..CameraState::default()
         });
-        let basis = camera.basis_override.expect("quarter-view basis should exist");
+        let basis = camera
+            .basis_override
+            .expect("quarter-view basis should exist");
 
         let projected = [
             project_to_screen_axes([-0.5, 1.0, -0.5], basis),

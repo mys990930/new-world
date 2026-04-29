@@ -10,9 +10,10 @@
 - default material policy ids and definitions
 - seasonal biome-state ids and definitions
 - cover override rules such as snowy grass or frozen mud
+- coherent material-domain selection between atlas region influence and final block stacks
 - resolve one chunk-column surface owner per sampled region archetype
 - choose per-column top, filler, core, and water block keys from archetype policy plus hydrology
-- quantize terrain / standing-water tops for voxelization without re-solving hydrology
+- quantize terrain / standing-water tops for voxelization without re-solving hydrology or raising water above the hydrology-provided level
 
 ## Non-Responsibilities
 
@@ -26,4 +27,5 @@
 - `material.md`
 - `seasonal.md`
 - `cover.md`
+- `domain.md`
 - `resolve.md`

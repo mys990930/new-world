@@ -8,7 +8,7 @@
 ## Responsibilities
 
 - map the local player translation to the current atlas cell
-- sample `RegionClassSample`, `WorldCalendar`, runtime climate state, and local weather from `WorldCore`
+- sample cached `RegionClassSample`, `WorldCalendar`, runtime climate state, and local weather from `WorldCore`
 - convert simulation-owned climate signals into HUD-friendly Celsius and percent values
 - expose one read-only local environment snapshot for app bridge consumption
 
@@ -58,6 +58,7 @@ EcsRuntime::local_environment_status() -> Option<LocalEnvironmentSnapshot>
 2. the same world snapshot and player atlas cell must produce the same local environment snapshot
 3. biome and terrain labels shown in HUD come from `BiomeFamily / TerrainFormFamily`, not from app-owned ad-hoc strings
 4. Celsius and humidity display values come from the same simulation-owned climate interpretation used for local weather derivation, with small weather-facing presentation clamps so snow/rain HUD readings stay believable
+5. environment refresh must not synchronously resolve uncached atlas region classification; missing cache uses the default region sample until app/job warmup publishes the real one
 
 ## HUD Interpretation Notes
 

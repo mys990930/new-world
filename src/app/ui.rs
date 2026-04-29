@@ -9,7 +9,8 @@ use crate::platform::RawInputState;
 use crate::world::{CreatedWorldManifest, read_created_world_manifest};
 
 const DEFAULT_CREATE_WORLD_SEED: u64 = 42;
-const MIN_CREATE_WORLD_RADIUS: i32 = 2;
+const DEFAULT_CREATE_WORLD_RADIUS: i32 = 0;
+const MIN_CREATE_WORLD_RADIUS: i32 = 0;
 const MAX_CREATE_WORLD_RADIUS: i32 = 12;
 const WORLD_SELECT_MARGIN_X_PX: f32 = 32.0;
 const WORLD_SELECT_MARGIN_Y_PX: f32 = 28.0;
@@ -50,7 +51,11 @@ pub enum WorldSelectSection {
 }
 
 impl WorldSelectSection {
-    const ORDER: [Self; 3] = [Self::CreateWorld, Self::SelectCreatedWorld, Self::SpawnChunk];
+    const ORDER: [Self; 3] = [
+        Self::CreateWorld,
+        Self::SelectCreatedWorld,
+        Self::SpawnChunk,
+    ];
 
     fn offset(self, delta: i32) -> Self {
         let index = Self::ORDER
@@ -115,10 +120,9 @@ pub enum WorldSelectInputField {
 impl WorldSelectInputField {
     fn section(self) -> WorldSelectSection {
         match self {
-            Self::CreateSeed
-            | Self::CreateRadius
-            | Self::CreateCenterX
-            | Self::CreateCenterZ => WorldSelectSection::CreateWorld,
+            Self::CreateSeed | Self::CreateRadius | Self::CreateCenterX | Self::CreateCenterZ => {
+                WorldSelectSection::CreateWorld
+            }
             Self::SpawnChunkX | Self::SpawnChunkZ => WorldSelectSection::SpawnChunk,
         }
     }
@@ -134,8 +138,8 @@ impl WorldSelectInputField {
         match self {
             Self::CreateSeed => "CREATE SEED",
             Self::CreateRadius => "CREATE RADIUS",
-            Self::CreateCenterX => "CREATE CENTER X",
-            Self::CreateCenterZ => "CREATE CENTER Z",
+            Self::CreateCenterX => "CREATE CENTER-X",
+            Self::CreateCenterZ => "CREATE CENTER-Z",
             Self::SpawnChunkX => "SPAWN CHUNK X",
             Self::SpawnChunkZ => "SPAWN CHUNK Z",
         }
@@ -204,6 +208,8 @@ pub struct WorldSelectPendingJob {
     pub kind: WorldSelectPendingJobKind,
     pub root: PathBuf,
     pub label: String,
+    pub completed_steps: u32,
+    pub total_steps: u32,
 }
 
 impl WorldSelectPendingJob {
@@ -216,6 +222,8 @@ impl WorldSelectPendingJob {
                 .and_then(|name| name.to_str())
                 .unwrap_or("WORLD")
                 .to_ascii_uppercase(),
+            completed_steps: 0,
+            total_steps: 0,
         }
     }
 
@@ -233,7 +241,35 @@ impl WorldSelectPendingJob {
 
     pub fn status_line(&self) -> String {
         match self.kind {
-            WorldSelectPendingJobKind::CreateWorld => format!("CREATE IN PROGRESS {}", self.label),
+            WorldSelectPendingJobKind::CreateWorld => {
+                if self.total_steps > 0 {
+                    format!(
+                        "CREATE IN PROGRESS {} {}/{}",
+                        self.label, self.completed_steps, self.total_steps
+                    )
+                } else {
+                    format!("CREATE IN PROGRESS {}", self.label)
+                }
+            }
+        }
+    }
+
+    fn set_progress(&mut self, completed_steps: u32, total_steps: u32) {
+        self.total_steps = total_steps;
+        self.completed_steps = completed_steps.min(total_steps);
+    }
+
+    fn progress_fraction(&self) -> Option<f32> {
+        (self.total_steps > 0)
+            .then(|| self.completed_steps as f32 / self.total_steps as f32)
+            .map(|fraction| fraction.clamp(0.0, 1.0))
+    }
+
+    fn progress_label(&self) -> String {
+        if self.total_steps > 0 {
+            format!("{}/{}", self.completed_steps, self.total_steps)
+        } else {
+            "WORKING".to_string()
         }
     }
 }
@@ -264,7 +300,7 @@ impl Default for WorldSelectState {
             selected_created_world_index: 0,
             selected_created_world_scroll: 0,
             create_world_seed: DEFAULT_CREATE_WORLD_SEED,
-            create_world_radius: 6,
+            create_world_radius: DEFAULT_CREATE_WORLD_RADIUS,
             create_world_center_x: 0,
             create_world_center_z: 0,
             spawn_chunk_x: 0,
@@ -385,9 +421,13 @@ pub(crate) struct WorldSelectLoadingPopupLayout {
     pub title_rect: UiRectPx,
     pub message_rect: UiRectPx,
     pub detail_rect: UiRectPx,
+    pub progress_track_rect: UiRectPx,
+    pub progress_fill_rect: UiRectPx,
+    pub progress_label_rect: UiRectPx,
     pub title: String,
     pub message: String,
     pub detail: String,
+    pub progress_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -493,6 +533,8 @@ pub(crate) fn build_world_select_layout(
     state: &WorldSelectState,
     viewport: [f32; 2],
     current_loaded_label: Option<&str>,
+    can_close: bool,
+    animation_frame: u64,
 ) -> WorldSelectLayout {
     let frame = build_world_select_frame_rects(viewport);
     let busy = state.busy();
@@ -501,14 +543,16 @@ pub(crate) fn build_world_select_layout(
 
     let close_button = WorldSelectButtonLayout {
         rect: UiRectPx {
-            x: frame.footer_rect.x + frame.footer_rect.w - WORLD_SELECT_CLOSE_BUTTON_WIDTH_PX - 18.0,
+            x: frame.footer_rect.x + frame.footer_rect.w
+                - WORLD_SELECT_CLOSE_BUTTON_WIDTH_PX
+                - 18.0,
             y: frame.footer_rect.y + frame.footer_rect.h - WORLD_SELECT_BUTTON_HEIGHT_PX - 16.0,
             w: WORLD_SELECT_CLOSE_BUTTON_WIDTH_PX,
             h: WORLD_SELECT_BUTTON_HEIGHT_PX,
         },
         label: "CLOSE",
         action: WorldSelectAction::CloseWorldSelect,
-        enabled: true,
+        enabled: can_close && !busy,
     };
 
     let create_fields = vec![
@@ -538,7 +582,7 @@ pub(crate) fn build_world_select_layout(
             frame.create_rect,
             2,
             WorldSelectInputField::CreateCenterX,
-            "CENTER X",
+            "CENTER-X",
             state.value_string(WorldSelectInputField::CreateCenterX),
             WorldSelectAction::IncrementCreateCenterX,
             WorldSelectAction::DecrementCreateCenterX,
@@ -549,7 +593,7 @@ pub(crate) fn build_world_select_layout(
             frame.create_rect,
             3,
             WorldSelectInputField::CreateCenterZ,
-            "CENTER Z",
+            "CENTER-Z",
             state.value_string(WorldSelectInputField::CreateCenterZ),
             WorldSelectAction::IncrementCreateCenterZ,
             WorldSelectAction::DecrementCreateCenterZ,
@@ -568,7 +612,12 @@ pub(crate) fn build_world_select_layout(
         rect: frame.create_rect,
         fields: create_fields,
         info_lines: vec![
-            build_info_line(frame.create_rect, create_info_start, 0, "CLICK A VALUE TO TYPE".to_string()),
+            build_info_line(
+                frame.create_rect,
+                create_info_start,
+                0,
+                "CLICK A VALUE TO TYPE".to_string(),
+            ),
             build_info_line(
                 frame.create_rect,
                 create_info_start,
@@ -613,7 +662,12 @@ pub(crate) fn build_world_select_layout(
                     select_list_layout.total_rows
                 ),
             ),
-            build_info_line(frame.select_rect, info_start, 1, format!("SEED {}", selected.manifest.seed)),
+            build_info_line(
+                frame.select_rect,
+                info_start,
+                1,
+                format!("SEED {}", selected.manifest.seed),
+            ),
             build_info_line(
                 frame.select_rect,
                 info_start,
@@ -625,9 +679,24 @@ pub(crate) fn build_world_select_layout(
         let info_start =
             select_list_layout.rect.y + select_list_layout.rect.h + WORLD_SELECT_LIST_FOOTER_GAP_PX;
         vec![
-            build_info_line(frame.select_rect, info_start, 0, "NO CREATED WORLDS".to_string()),
-            build_info_line(frame.select_rect, info_start, 1, "CREATE A WORLD FIRST".to_string()),
-            build_info_line(frame.select_rect, info_start, 2, "THEN CLICK IT TO SELECT".to_string()),
+            build_info_line(
+                frame.select_rect,
+                info_start,
+                0,
+                "NO CREATED WORLDS".to_string(),
+            ),
+            build_info_line(
+                frame.select_rect,
+                info_start,
+                1,
+                "CREATE A WORLD FIRST".to_string(),
+            ),
+            build_info_line(
+                frame.select_rect,
+                info_start,
+                2,
+                "THEN CLICK IT TO SELECT".to_string(),
+            ),
         ]
     };
     let select_section = WorldSelectSectionLayout {
@@ -693,9 +762,24 @@ pub(crate) fn build_world_select_layout(
         ]
     } else {
         vec![
-            build_info_line(frame.spawn_rect, spawn_info_start, 0, "SELECT A WORLD FIRST".to_string()),
-            build_info_line(frame.spawn_rect, spawn_info_start, 1, "THEN ADJUST THE LOAD CHUNK".to_string()),
-            build_info_line(frame.spawn_rect, spawn_info_start, 2, "LOAD AT CHUNK USES THIS DRAFT".to_string()),
+            build_info_line(
+                frame.spawn_rect,
+                spawn_info_start,
+                0,
+                "SELECT A WORLD FIRST".to_string(),
+            ),
+            build_info_line(
+                frame.spawn_rect,
+                spawn_info_start,
+                1,
+                "THEN ADJUST THE LOAD CHUNK".to_string(),
+            ),
+            build_info_line(
+                frame.spawn_rect,
+                spawn_info_start,
+                2,
+                "LOAD AT CHUNK USES THIS DRAFT".to_string(),
+            ),
         ]
     };
     let spawn_section = WorldSelectSectionLayout {
@@ -744,7 +828,7 @@ pub(crate) fn build_world_select_layout(
         loading_popup: state
             .pending_job
             .as_ref()
-            .map(|pending| build_loading_popup_layout(viewport, pending)),
+            .map(|pending| build_loading_popup_layout(viewport, pending, animation_frame)),
     }
 }
 
@@ -771,7 +855,8 @@ fn build_world_select_frame_rects(viewport: [f32; 2]) -> WorldSelectFrameRects {
         x: outer_rect.x,
         y: title_rect.y + title_rect.h + WORLD_SELECT_VERTICAL_GAP_PX,
         w: outer_rect.w,
-        h: footer_rect.y - (title_rect.y + title_rect.h + WORLD_SELECT_VERTICAL_GAP_PX)
+        h: footer_rect.y
+            - (title_rect.y + title_rect.h + WORLD_SELECT_VERTICAL_GAP_PX)
             - WORLD_SELECT_VERTICAL_GAP_PX,
     };
     let section_width = ((body_rect.w - WORLD_SELECT_SECTION_GAP_PX * 2.0) / 3.0).floor();
@@ -823,15 +908,13 @@ fn build_field_row(
         w: panel.w - WORLD_SELECT_SECTION_PADDING_PX * 2.0,
         h: WORLD_SELECT_ROW_HEIGHT_PX,
     };
-    let label_width = ((row_rect.w
-        - WORLD_SELECT_ARROW_WIDTH_PX
-        - WORLD_SELECT_FIELD_GAP_PX * 2.0)
-        * WORLD_SELECT_LABEL_WIDTH_RATIO)
-        .floor();
+    let label_width =
+        ((row_rect.w - WORLD_SELECT_ARROW_WIDTH_PX - WORLD_SELECT_FIELD_GAP_PX * 2.0)
+            * WORLD_SELECT_LABEL_WIDTH_RATIO)
+            .floor();
     let value_width =
         row_rect.w - label_width - WORLD_SELECT_ARROW_WIDTH_PX - WORLD_SELECT_FIELD_GAP_PX * 2.0;
-    let arrow_button_height =
-        ((row_rect.h - WORLD_SELECT_ARROW_BUTTON_GAP_PX) * 0.5).floor();
+    let arrow_button_height = ((row_rect.h - WORLD_SELECT_ARROW_BUTTON_GAP_PX) * 0.5).floor();
 
     let label_rect = UiRectPx {
         x: row_rect.x,
@@ -901,8 +984,7 @@ fn build_bottom_button(
     WorldSelectButtonLayout {
         rect: UiRectPx {
             x: panel.x + WORLD_SELECT_SECTION_PADDING_PX,
-            y: panel.y
-                + panel.h
+            y: panel.y + panel.h
                 - WORLD_SELECT_SECTION_PADDING_PX
                 - WORLD_SELECT_BUTTON_HEIGHT_PX
                 - index_from_bottom as f32
@@ -929,8 +1011,10 @@ fn build_created_world_list_layout(
             + (info_line_count.saturating_sub(1)) as f32 * WORLD_SELECT_INFO_LINE_GAP_PX
     };
     let list_top = panel.y + WORLD_SELECT_ROWS_TOP_PX;
-    let list_bottom =
-        load_button_rect.y - WORLD_SELECT_LIST_FOOTER_GAP_PX - info_height - WORLD_SELECT_LIST_FOOTER_GAP_PX;
+    let list_bottom = load_button_rect.y
+        - WORLD_SELECT_LIST_FOOTER_GAP_PX
+        - info_height
+        - WORLD_SELECT_LIST_FOOTER_GAP_PX;
     let rect = UiRectPx {
         x: panel.x + WORLD_SELECT_SECTION_PADDING_PX,
         y: list_top,
@@ -946,7 +1030,8 @@ fn build_created_world_list_layout(
         .len()
         .saturating_sub(visible_rows);
     let first_visible_index = state.selected_created_world_scroll.min(max_start);
-    let last_visible_index = (first_visible_index + visible_rows).min(state.available_created_worlds.len());
+    let last_visible_index =
+        (first_visible_index + visible_rows).min(state.available_created_worlds.len());
 
     let mut rows = Vec::new();
     for (visible_row, (world_index, world)) in state
@@ -959,7 +1044,9 @@ fn build_created_world_list_layout(
     {
         let row_rect = UiRectPx {
             x: rect.x,
-            y: rect.y + visible_row as f32 * (WORLD_SELECT_LIST_ROW_HEIGHT_PX + WORLD_SELECT_LIST_ROW_GAP_PX),
+            y: rect.y
+                + visible_row as f32
+                    * (WORLD_SELECT_LIST_ROW_HEIGHT_PX + WORLD_SELECT_LIST_ROW_GAP_PX),
             w: rect.w,
             h: WORLD_SELECT_LIST_ROW_HEIGHT_PX,
         };
@@ -989,6 +1076,7 @@ fn build_created_world_list_layout(
 fn build_loading_popup_layout(
     viewport: [f32; 2],
     pending: &WorldSelectPendingJob,
+    animation_frame: u64,
 ) -> WorldSelectLoadingPopupLayout {
     let rect = UiRectPx {
         x: ((viewport[0] - WORLD_SELECT_POPUP_WIDTH_PX) * 0.5).max(40.0),
@@ -996,6 +1084,16 @@ fn build_loading_popup_layout(
         w: WORLD_SELECT_POPUP_WIDTH_PX.min(viewport[0] - 80.0),
         h: WORLD_SELECT_POPUP_HEIGHT_PX.min(viewport[1] - 80.0),
     };
+    let progress_track_rect = UiRectPx {
+        x: rect.x + 32.0,
+        y: rect.y + rect.h - 42.0,
+        w: rect.w - 64.0,
+        h: 18.0,
+    };
+    let progress_fill_rect = pending
+        .progress_fraction()
+        .map(|fraction| build_determinate_progress_fill(progress_track_rect, fraction))
+        .unwrap_or_else(|| build_indeterminate_progress_fill(progress_track_rect, animation_frame));
 
     WorldSelectLoadingPopupLayout {
         overlay_rect: UiRectPx {
@@ -1022,10 +1120,49 @@ fn build_loading_popup_layout(
             w: rect.w - 48.0,
             h: 18.0,
         },
+        progress_track_rect,
+        progress_fill_rect,
+        progress_label_rect: progress_track_rect,
         rect,
         title: pending.popup_title().to_string(),
         message: pending.popup_message().to_string(),
         detail: pending.label.clone(),
+        progress_label: pending.progress_label(),
+    }
+}
+
+fn build_determinate_progress_fill(track: UiRectPx, fraction: f32) -> UiRectPx {
+    let inner = track.inset(5.0);
+    UiRectPx {
+        x: inner.x,
+        y: inner.y,
+        w: (inner.w * fraction.clamp(0.0, 1.0)).max(0.0),
+        h: inner.h.max(0.0),
+    }
+}
+
+fn build_indeterminate_progress_fill(track: UiRectPx, animation_frame: u64) -> UiRectPx {
+    let inner = track.inset(5.0);
+    if inner.w <= 0.0 || inner.h <= 0.0 {
+        return UiRectPx {
+            x: inner.x,
+            y: inner.y,
+            w: 0.0,
+            h: inner.h.max(0.0),
+        };
+    }
+
+    let segment_w = (inner.w * 0.36).clamp(24.0, inner.w);
+    let phase = (animation_frame % 96) as f32 / 96.0;
+    let raw_x = inner.x - segment_w + (inner.w + segment_w) * phase;
+    let x = raw_x.max(inner.x);
+    let right = (raw_x + segment_w).min(inner.x + inner.w);
+
+    UiRectPx {
+        x,
+        y: inner.y,
+        w: (right - x).max(0.0),
+        h: inner.h,
     }
 }
 
@@ -1061,7 +1198,13 @@ impl GameApp {
             .as_ref()
             .and_then(|source| source.root().file_name())
             .and_then(|name| name.to_str());
-        let layout = build_world_select_layout(&self.ui.world_select, viewport, current_loaded_label);
+        let layout = build_world_select_layout(
+            &self.ui.world_select,
+            viewport,
+            current_loaded_label,
+            self.can_leave_world_select(),
+            self.timing.frame_index,
+        );
 
         if input.just_pressed_keys.contains(&KeyCode::Escape) {
             self.cancel_world_select_input_edit();
@@ -1074,7 +1217,8 @@ impl GameApp {
         }
 
         if !self.ui.world_select.busy() && input.wheel_delta.1.abs() > f32::EPSILON {
-            if layout.section_at(input.mouse_position) == Some(WorldSelectSection::SelectCreatedWorld)
+            if layout.section_at(input.mouse_position)
+                == Some(WorldSelectSection::SelectCreatedWorld)
             {
                 self.scroll_created_world_list(wheel_scroll_steps(input.wheel_delta.1));
             }
@@ -1259,6 +1403,14 @@ impl GameApp {
                     consumed = true;
                 }
             }
+        } else {
+            for key in &input.just_pressed_keys {
+                if let Some(character) = world_select_key_input_char(*key) {
+                    if self.try_push_world_select_input_char(field, character) {
+                        consumed = true;
+                    }
+                }
+            }
         }
 
         if input.just_pressed_keys.contains(&KeyCode::Enter) {
@@ -1335,14 +1487,14 @@ impl GameApp {
                     self.ui.world_select.create_world_center_x = value;
                     self.set_create_status_line();
                 })
-                .map_err(|_| "INVALID CREATE CENTER X".to_string()),
+                .map_err(|_| "INVALID CREATE CENTER-X".to_string()),
             WorldSelectInputField::CreateCenterZ => buffer
                 .parse::<i32>()
                 .map(|value| {
                     self.ui.world_select.create_world_center_z = value;
                     self.set_create_status_line();
                 })
-                .map_err(|_| "INVALID CREATE CENTER Z".to_string()),
+                .map_err(|_| "INVALID CREATE CENTER-Z".to_string()),
             WorldSelectInputField::SpawnChunkX => buffer
                 .parse::<i32>()
                 .map(|value| {
@@ -1376,7 +1528,9 @@ impl GameApp {
     fn world_select_field_value_string(&self, field: WorldSelectInputField) -> String {
         match field {
             WorldSelectInputField::CreateSeed => self.ui.world_select.create_world_seed.to_string(),
-            WorldSelectInputField::CreateRadius => self.ui.world_select.create_world_radius.to_string(),
+            WorldSelectInputField::CreateRadius => {
+                self.ui.world_select.create_world_radius.to_string()
+            }
             WorldSelectInputField::CreateCenterX => {
                 self.ui.world_select.create_world_center_x.to_string()
             }
@@ -1432,16 +1586,39 @@ impl GameApp {
         if let Some(pending) = self.ui.world_select.pending_job.as_ref() {
             self.ui.world_select.status_line = pending.status_line();
         } else if self.ui.world_select.available_created_worlds.is_empty() {
-            self.ui.world_select.status_line = "NO CREATED WORLDS FOUND. CREATE ONE FIRST.".to_string();
+            self.ui.world_select.status_line =
+                "NO CREATED WORLDS FOUND. CREATE ONE FIRST.".to_string();
         } else {
             self.ui.world_select.status_line =
                 "CLICK A VALUE TO TYPE. SCROLL THE WORLD LIST.".to_string();
         }
     }
 
+    pub(crate) fn enter_startup_world_select(&mut self) {
+        self.open_world_select();
+        if self.ui.world_select.available_created_worlds.is_empty() {
+            self.ui.world_select.section = WorldSelectSection::CreateWorld;
+            self.ui.world_select.status_line =
+                "NO CREATED WORLDS FOUND. CREATE ONE TO START.".to_string();
+        } else {
+            self.ui.world_select.section = WorldSelectSection::SelectCreatedWorld;
+            self.ui.world_select.status_line =
+                "SELECT A WORLD OR CREATE A NEW ONE TO START.".to_string();
+        }
+    }
+
     fn close_world_select(&mut self) {
+        if !self.can_leave_world_select() {
+            self.ui.world_select.status_line = "LOAD A CREATED WORLD TO START.".to_string();
+            return;
+        }
+
         self.cancel_world_select_input_edit();
         self.ui.mode = AppMode::InGame;
+    }
+
+    fn can_leave_world_select(&self) -> bool {
+        self.created_world.is_some()
     }
 
     fn refresh_created_worlds(&mut self) {
@@ -1473,18 +1650,24 @@ impl GameApp {
             {
                 self.ui.world_select.selected_created_world_index = index;
             } else {
-                self.ui.world_select.selected_created_world_index = self
-                    .ui
-                    .world_select
-                    .selected_created_world_index
-                    .min(self.ui.world_select.available_created_worlds.len().saturating_sub(1));
+                self.ui.world_select.selected_created_world_index =
+                    self.ui.world_select.selected_created_world_index.min(
+                        self.ui
+                            .world_select
+                            .available_created_worlds
+                            .len()
+                            .saturating_sub(1),
+                    );
             }
         } else {
-            self.ui.world_select.selected_created_world_index = self
-                .ui
-                .world_select
-                .selected_created_world_index
-                .min(self.ui.world_select.available_created_worlds.len().saturating_sub(1));
+            self.ui.world_select.selected_created_world_index =
+                self.ui.world_select.selected_created_world_index.min(
+                    self.ui
+                        .world_select
+                        .available_created_worlds
+                        .len()
+                        .saturating_sub(1),
+                );
         }
 
         self.ensure_selected_created_world_visible();
@@ -1542,18 +1725,24 @@ impl GameApp {
     }
 
     fn adjust_world_create_radius(&mut self, delta: i32) {
-        self.ui.world_select.create_world_radius =
-            (self.ui.world_select.create_world_radius + delta)
-                .clamp(MIN_CREATE_WORLD_RADIUS, MAX_CREATE_WORLD_RADIUS);
+        self.ui.world_select.create_world_radius = (self.ui.world_select.create_world_radius
+            + delta)
+            .clamp(MIN_CREATE_WORLD_RADIUS, MAX_CREATE_WORLD_RADIUS);
         self.sync_focused_input_field(WorldSelectInputField::CreateRadius);
         self.set_create_status_line();
     }
 
     fn adjust_world_create_center(&mut self, dx: i32, dz: i32) {
-        self.ui.world_select.create_world_center_x =
-            self.ui.world_select.create_world_center_x.saturating_add(dx);
-        self.ui.world_select.create_world_center_z =
-            self.ui.world_select.create_world_center_z.saturating_add(dz);
+        self.ui.world_select.create_world_center_x = self
+            .ui
+            .world_select
+            .create_world_center_x
+            .saturating_add(dx);
+        self.ui.world_select.create_world_center_z = self
+            .ui
+            .world_select
+            .create_world_center_z
+            .saturating_add(dz);
         self.sync_focused_input_field(WorldSelectInputField::CreateCenterX);
         self.sync_focused_input_field(WorldSelectInputField::CreateCenterZ);
         self.set_create_status_line();
@@ -1577,8 +1766,13 @@ impl GameApp {
             return;
         }
 
-        self.ui.world_select.selected_created_world_index = index
-            .min(self.ui.world_select.available_created_worlds.len().saturating_sub(1));
+        self.ui.world_select.selected_created_world_index = index.min(
+            self.ui
+                .world_select
+                .available_created_worlds
+                .len()
+                .saturating_sub(1),
+        );
         self.ensure_selected_created_world_visible();
         self.reset_world_select_spawn_to_selected_created_world();
 
@@ -1616,7 +1810,11 @@ impl GameApp {
         if selected < self.ui.world_select.selected_created_world_scroll {
             self.ui.world_select.selected_created_world_scroll = selected;
         } else if selected
-            >= self.ui.world_select.selected_created_world_scroll.saturating_add(visible_rows)
+            >= self
+                .ui
+                .world_select
+                .selected_created_world_scroll
+                .saturating_add(visible_rows)
         {
             self.ui.world_select.selected_created_world_scroll =
                 selected.saturating_add(1).saturating_sub(visible_rows);
@@ -1634,8 +1832,13 @@ impl GameApp {
             true,
         )
         .rect;
-        build_created_world_list_layout(&self.ui.world_select, frame.select_rect, load_button_rect, 3)
-            .visible_rows
+        build_created_world_list_layout(
+            &self.ui.world_select,
+            frame.select_rect,
+            load_button_rect,
+            3,
+        )
+        .visible_rows
     }
 
     fn adjust_world_select_spawn(&mut self, dx: i32, dz: i32) {
@@ -1730,6 +1933,23 @@ impl GameApp {
                 self.ui.world_select.status_line = format!("LOAD FAILED {}", message);
             }
         }
+    }
+
+    pub(crate) fn handle_create_world_progress(
+        &mut self,
+        root: &Path,
+        completed_chunks: u32,
+        total_chunks: u32,
+    ) {
+        let Some(pending) = self.ui.world_select.pending_job.as_mut() else {
+            return;
+        };
+        if pending.root.as_path() != root {
+            return;
+        }
+
+        pending.set_progress(completed_chunks, total_chunks);
+        self.ui.world_select.status_line = pending.status_line();
     }
 
     pub(crate) fn handle_world_created_result(
@@ -1840,6 +2060,23 @@ fn wheel_scroll_steps(delta_y: f32) -> i32 {
     if delta_y > 0.0 { -steps } else { steps }
 }
 
+fn world_select_key_input_char(key: KeyCode) -> Option<char> {
+    match key {
+        KeyCode::Digit0 | KeyCode::Numpad0 => Some('0'),
+        KeyCode::Digit1 | KeyCode::Numpad1 => Some('1'),
+        KeyCode::Digit2 | KeyCode::Numpad2 => Some('2'),
+        KeyCode::Digit3 | KeyCode::Numpad3 => Some('3'),
+        KeyCode::Digit4 | KeyCode::Numpad4 => Some('4'),
+        KeyCode::Digit5 | KeyCode::Numpad5 => Some('5'),
+        KeyCode::Digit6 | KeyCode::Numpad6 => Some('6'),
+        KeyCode::Digit7 | KeyCode::Numpad7 => Some('7'),
+        KeyCode::Digit8 | KeyCode::Numpad8 => Some('8'),
+        KeyCode::Digit9 | KeyCode::Numpad9 => Some('9'),
+        KeyCode::Minus | KeyCode::NumpadSubtract => Some('-'),
+        _ => None,
+    }
+}
+
 fn discover_created_world_options(base_dir: &Path) -> Vec<CreatedWorldOption> {
     let Ok(entries) = fs::read_dir(base_dir) else {
         return Vec::new();
@@ -1864,7 +2101,14 @@ fn discover_created_world_options(base_dir: &Path) -> Vec<CreatedWorldOption> {
             .and_then(|name| name.to_str())
             .unwrap_or("CREATED_WORLD")
             .to_string();
-        discovered.push((modified, CreatedWorldOption { root, label, manifest }));
+        discovered.push((
+            modified,
+            CreatedWorldOption {
+                root,
+                label,
+                manifest,
+            },
+        ));
     }
 
     discovered.sort_by(|left, right| {
@@ -1909,7 +2153,7 @@ mod tests {
     #[test]
     fn world_select_layout_hits_create_and_close_buttons() {
         let state = WorldSelectState::default();
-        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"));
+        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 0);
 
         assert_eq!(
             layout.action_at(layout.sections[0].buttons[0].rect.center()),
@@ -1926,7 +2170,7 @@ mod tests {
         let mut state = WorldSelectState::default();
         state.available_created_worlds = (0..4).map(sample_world).collect();
 
-        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"));
+        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 0);
         let list = layout.sections[1]
             .world_list
             .as_ref()
@@ -1943,21 +2187,96 @@ mod tests {
     }
 
     #[test]
+    fn world_select_layout_uses_center_dash_labels() {
+        let state = WorldSelectState::default();
+        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 0);
+
+        assert_eq!(layout.sections[0].fields[2].label, "CENTER-X");
+        assert_eq!(layout.sections[0].fields[3].label, "CENTER-Z");
+    }
+
+    #[test]
+    fn world_select_defaults_to_single_stack_create_radius() {
+        let state = WorldSelectState::default();
+
+        assert_eq!(state.create_world_radius, 0);
+    }
+
+    #[test]
+    fn world_select_key_input_char_maps_number_keys() {
+        assert_eq!(world_select_key_input_char(KeyCode::Digit7), Some('7'));
+        assert_eq!(world_select_key_input_char(KeyCode::Numpad7), Some('7'));
+        assert_eq!(world_select_key_input_char(KeyCode::Minus), Some('-'));
+        assert_eq!(
+            world_select_key_input_char(KeyCode::NumpadSubtract),
+            Some('-')
+        );
+        assert_eq!(world_select_key_input_char(KeyCode::KeyA), None);
+    }
+
+    #[test]
     fn loading_popup_blocks_background_interactions() {
         let mut state = WorldSelectState::default();
         state.pending_job = Some(WorldSelectPendingJob::create_world(Path::new(
             "target/world-create/runtime_seed_42",
         )));
 
-        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"));
+        let layout = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 12);
 
-        assert_eq!(
-            layout.action_at(layout.close_button.rect.center()),
-            Some(WorldSelectAction::CloseWorldSelect)
-        );
+        assert_eq!(layout.action_at(layout.close_button.rect.center()), None);
         assert_eq!(
             layout.input_field_at(layout.sections[0].fields[0].value_rect.center()),
             None
         );
+    }
+
+    #[test]
+    fn loading_popup_has_animated_progress_fill() {
+        let mut state = WorldSelectState::default();
+        state.pending_job = Some(WorldSelectPendingJob::create_world(Path::new(
+            "target/world-create/runtime_seed_42",
+        )));
+
+        let early = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 24)
+            .loading_popup
+            .expect("pending job should build loading popup");
+        let later = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 60)
+            .loading_popup
+            .expect("pending job should build loading popup");
+
+        assert!(early.progress_fill_rect.w > 0.0);
+        assert!(early.progress_fill_rect.x >= early.progress_track_rect.x);
+        assert!(
+            early.progress_fill_rect.x + early.progress_fill_rect.w
+                <= early.progress_track_rect.x + early.progress_track_rect.w
+        );
+        assert_ne!(early.progress_fill_rect, later.progress_fill_rect);
+    }
+
+    #[test]
+    fn loading_popup_uses_reported_progress_when_available() {
+        let mut state = WorldSelectState::default();
+        let mut pending =
+            WorldSelectPendingJob::create_world(Path::new("target/world-create/runtime_seed_42"));
+        pending.set_progress(24, 96);
+        state.pending_job = Some(pending);
+
+        let popup = build_world_select_layout(&state, [1280.0, 720.0], Some("runtime"), true, 24)
+            .loading_popup
+            .expect("pending job should build loading popup");
+        let inner = popup.progress_track_rect.inset(5.0);
+
+        assert_eq!(popup.progress_label, "24/96");
+        assert_eq!(popup.progress_fill_rect.x, inner.x);
+        assert!((popup.progress_fill_rect.w - inner.w * 0.25).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn startup_world_select_disables_close_until_world_loaded() {
+        let state = WorldSelectState::default();
+        let layout = build_world_select_layout(&state, [1280.0, 720.0], None, false, 0);
+
+        assert_eq!(layout.action_at(layout.close_button.rect.center()), None);
+        assert_eq!(layout.footer_current_label, "NONE");
     }
 }

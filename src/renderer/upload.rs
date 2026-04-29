@@ -124,8 +124,8 @@ impl GpuChunkMesh {
             }
         }
 
-        let vertex_count =
-            u32::try_from(mesh.vertices.len()).map_err(|_| RenderUploadError::VertexCountOverflow)?;
+        let vertex_count = u32::try_from(mesh.vertices.len())
+            .map_err(|_| RenderUploadError::VertexCountOverflow)?;
         let index_count =
             u32::try_from(mesh.indices.len()).map_err(|_| RenderUploadError::IndexCountOverflow)?;
         let bounds = mesh.bounds;
@@ -279,9 +279,7 @@ pub(crate) fn split_chunk_mesh_for_transparency(mesh: CpuMesh) -> (CpuMesh, Opti
 
     for triangle in mesh.indices.chunks_exact(3) {
         let first_vertex = mesh.vertices[triangle[0] as usize];
-        let translucent_triangle = first_vertex
-            .material_kind
-            == RenderMaterialKind::Water.as_u32();
+        let translucent_triangle = first_vertex.material_kind == RenderMaterialKind::Water.as_u32();
         let (target, remap) = if translucent_triangle {
             (&mut translucent, &mut translucent_remap)
         } else {

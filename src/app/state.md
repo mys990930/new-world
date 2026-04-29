@@ -18,6 +18,7 @@
 - `renderer`
 - `ui`
 - `minimap`
+- `pending_player_spawn_anchor`
 - `timing`
 
 ### AppTimingState
@@ -42,6 +43,7 @@
 
 - module instances are created during bootstrap and then owned by `GameApp`
 - minimap cache is app-owned long-lived state alongside world/jobs/renderer so cached top-down data survives across frames
+- pending player spawn anchor is app-owned because app owns created-world selection and decides when enough streamed chunk data exists to snap the player onto a safe world surface
 - `frame_index` and `frame_dt` update only when a frame actually runs
 - `next_frame_deadline` is only meaningful while a frame cap is active
 - `fixed_accumulator` stores carry-over frame time for app-owned fixed stepping
@@ -69,6 +71,7 @@
 ## Notes
 
 - the current `GameApp` always owns exactly one active `Platform`, `EcsRuntime`, `WorldCore`, `SimulationCore`, `JobSystem`, and `Renderer`
-- created-world runtime ownership lives in app state because `app` decides whether world acquisition should load from disk or fall back to generation
+- created-world runtime ownership lives in app state because `app` decides whether world acquisition should load from disk or stay on the startup world-select screen without chunk realization
 - top-level screen mode and lightweight overlay visibility are also app-owned because they should not force ECS/world dependencies
 - minimap cache is also app-owned because viewport policy and cache invalidation live above `world` and below `renderer`
+- `pending_player_spawn_anchor` is cleared after frame job results provide enough loaded world data for ECS player placement to succeed

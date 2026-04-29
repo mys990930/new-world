@@ -121,7 +121,7 @@ NOT:
 - Screen-space app UI currently enters as `RenderUiSprite` and is rendered in a dedicated overlay pass with no camera/world dependency.
 - steady-state chunk unload is app-owned, but renderer already exposes `remove_chunk_mesh(...)` / `RemoveChunkMesh` as the render-side destruction path for chunks that leave the retain envelope.
 - Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
-- The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping a light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
+- The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping only a very light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
 - Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.

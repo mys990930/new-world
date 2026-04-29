@@ -1,4 +1,4 @@
-# terrain_find
+﻿# terrain_find
 
 ## Role
 
@@ -37,10 +37,10 @@
 
 ## Search Model
 
-1. Generate atlas fields and structure for the requested atlas window.
-2. Resolve the public launch-fallback region classes for that same window.
-3. Generate atlas-owned meso guides for that window.
-4. Sample region and meso state at each searched chunk center.
+1. Walk chunk centers inside the requested atlas search window.
+2. Prepare each candidate through `ChunkGenerationInputCache`, matching the canonical chunk generation input assembly path used by `meso_preview` and live generation.
+3. Sample region and meso state from that chunk's cached `RegionClassMap` and `MesoGuideMap`.
+4. Reuse cached input windows across neighboring chunks so search remains practical while staying aligned with chunk-generation context.
 5. Filter by launch archetype when requested.
 6. Score candidates by:
    - requested meso keys allowed by the current archetype

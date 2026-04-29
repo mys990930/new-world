@@ -1,4 +1,4 @@
-## world
+﻿## world
 
 ### Role
 
@@ -18,6 +18,7 @@
 - deterministic region-classification ownership between atlas raw fields / skeleton guidance and chunk-local realization
 - deterministic meso terrain-guide ownership after region classification and before final chunk-local realization
 - surface material policy and seasonal biome-state ownership before final voxel fill
+- artifact-suppression ownership across generation handoff points so atlas, meso, and structure cache boundaries do not become visible terrain or material masks
 - world calendar, date, and season source-of-truth ownership
 - atlas-cell runtime climate state ownership
 - deferred seasonal/weather/ecology patch ownership for far-away regions
@@ -33,6 +34,7 @@
 - block-grid raycast queries
 - exact top-down column sampling for previews such as debug dumps and minimap overlays
 - snapshot-based top-down chunk-column derivation for cached minimap rebuild jobs
+- runtime region-classification sample cache for main-thread environment consumers
 
 ### Non-Responsibilities
 
@@ -78,6 +80,7 @@
 - `LocalWeatherState`
 - `DeferredSeasonPatch`
 - `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
+- `CreateWorldProgress`
 - `CreateWorldConfig`
 - `WorldCore`
 
@@ -136,7 +139,10 @@ WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
 WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
 WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
 WorldCore::resolve_region_class_area(area: AtlasArea) -> RegionClassMap
+WorldCore::cached_region_class_area(area: AtlasArea) -> Option<RegionClassMap>
+WorldCore::sample_cached_region_class_atlas(coord: AtlasCoord) -> Option<RegionClassSample>
 WorldCore::sample_region_class_atlas(coord: AtlasCoord) -> RegionClassSample
+WorldCore::cache_region_class_map(classes: &RegionClassMap)
 
 read_created_world_manifest(root: &Path) -> Result<CreatedWorldManifest, CreatedWorldError>
 load_created_world_chunk(root: &Path, coord: ChunkCoord) -> Result<ChunkData, CreatedWorldError>
@@ -144,7 +150,10 @@ detect_latest_created_world_root(base_dir: &Path) -> io::Result<Option<PathBuf>>
 write_created_world_manifest(root: &Path, manifest: &CreatedWorldManifest) -> Result<(), CreatedWorldError>
 save_created_world_chunk(root: &Path, chunk: &ChunkData) -> Result<PathBuf, CreatedWorldError>
 summarize_created_world_stack(world: &WorldCore, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> CreatedWorldStackSummary
+summarize_created_world_stack_from_voxelization_plan(plan: &VoxelizationPlan, center_x: i32, center_z: i32, min_chunk_y: i32, max_chunk_y: i32) -> CreatedWorldStackSummary
 create_world_to_directory(root: &Path, config: CreateWorldConfig, block_registry: &BlockRegistry) -> Result<CreatedWorldManifest, CreatedWorldError>
+create_world_to_directory_with_progress(root: &Path, config: CreateWorldConfig, block_registry: &BlockRegistry, report_progress: impl FnMut(CreateWorldProgress)) -> Result<CreatedWorldManifest, CreatedWorldError>
+CreateWorldConfig::total_chunk_count(self) -> Option<u32>
 
 storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
@@ -209,6 +218,8 @@ NOT:
 6. chunk-order-independent macro terrain direction such as mountain spines and river paths belongs to atlas/world rather than per-chunk realization code
 7. atlas structure may be generated on demand by region, but the resulting guides must remain deterministic and independent of generation order
 8. atlas-owned meso terrain guides must remain deterministic, span multiple chunks, and avoid whole-world precomputation
+9. atlas cells, meso guide cells, structure regions, and raw skeleton segments are not visible output primitives; downstream generation must diffuse, warp, resolve, or mask them before height, hydrology, or material block decisions reach `ChunkData`
+10. frame-time environment/HUD consumers must prefer cached region classification and avoid forcing atlas structure/classification resolution on the main thread
 
 ### Submodules
 
@@ -258,7 +269,8 @@ NOT:
 - atlas-owned meso guide emission is still the broad Wave 1A channel set: `hill clusters`, `basins`, `escarpment bands`, and `terraces`
 - the current chunk-side runtime-backed meso subset now applies feature-owned surface resolvers for `hill_cluster`, `shallow_basin`, `escarpment_band`, `upland_terrace`, `ravine`, `coastal_cliff_band`, `dune_field`, and `crater`
 - `ravine`, `coastal_cliff_band`, `dune_field`, and `crater` currently borrow those existing Wave 1A guide channels provisionally until dedicated atlas meso channels are added
-- the old legacy V1 chunk generator has now been removed instead of being kept beside V2
-- the current top-level `world::generate_chunk(...)` path now runs the initial end-to-end V2 realization stack through surface resolve and voxel block fill
+- removed legacy chunk-generation code is not kept beside the active generation path
+- the current top-level `world::generate_chunk(...)` path now runs the initial end-to-end generation realization stack through surface resolve and voxel block fill
+- `WorldCore` now caches resolved `RegionClassSample`s so app/ECS runtime environment refreshes can read cached atlas identity while uncached classification is resolved through jobs
 - the current `probe_chunk(...)`, `probe_column(...)`, and `sample_chunk_surface_lod(...)` surfaces are also compile-only TODO stubs
 - the planned long-term terrain pipeline is `atlas raw fields -> atlas skeleton -> region classification -> realization field solve -> river corridor solve -> biome-aware base heightfield -> meso accents -> smoothing/local refinement -> final hydrology -> material/block fill`

@@ -86,10 +86,7 @@ pub fn resolve_atlas(fields: &AtlasFieldMap) -> AtlasResolvedMap {
     resolve_atlas_with_tuning(fields, &AtlasTuning::default())
 }
 
-pub fn resolve_atlas_with_tuning(
-    fields: &AtlasFieldMap,
-    tuning: &AtlasTuning,
-) -> AtlasResolvedMap {
+pub fn resolve_atlas_with_tuning(fields: &AtlasFieldMap, tuning: &AtlasTuning) -> AtlasResolvedMap {
     let mut resolved = Vec::with_capacity(fields.cells().values().len());
     for cell in fields.cells().values() {
         let thermal = dominant_thermal(cell);
@@ -189,7 +186,8 @@ fn classify_biome(
         return BiomePreview::Ocean;
     }
     if matches!(overlay, OverlayClass::Alpine)
-        || (form == TerrainFormClass::Mountain && cell.alpine_factor > resolver.alpine_form_threshold)
+        || (form == TerrainFormClass::Mountain
+            && cell.alpine_factor > resolver.alpine_form_threshold)
     {
         return BiomePreview::Alpine;
     }

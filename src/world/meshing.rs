@@ -1,5 +1,7 @@
 use super::chunk::{BlockFace, BlockId, ChunkSnapshot};
-use super::coord::{CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world};
+use super::coord::{
+    CHUNK_EDGE_I32, ChunkCoord, LocalBlockCoord, WorldBlockCoord, chunk_local_to_world,
+};
 use super::query::NeighborChunks;
 use super::registry::{BlockDef, BlockMaterialKind, BlockRegistry};
 
@@ -48,6 +50,10 @@ pub fn build_chunk_mesh(
     neighbors: NeighborChunks,
     registry: &BlockRegistry,
 ) -> CpuMesh {
+    if let Some(mesh) = uniform_chunk_mesh(center, &neighbors, registry) {
+        return mesh;
+    }
+
     let mut mesh = CpuMesh::default();
 
     for y in 0..super::coord::CHUNK_EDGE as u8 {
@@ -62,15 +68,22 @@ pub fn build_chunk_mesh(
                 if !block_def.is_rendered_cube() {
                     continue;
                 }
-                let block_height = resolved_block_surface_height(center, &neighbors, local, registry);
+                let block_height =
+                    resolved_block_surface_height(center, &neighbors, local, registry);
                 if block_height <= HEIGHT_EPSILON {
                     continue;
                 }
 
                 for face in faces() {
-                    let Some(face_span) =
-                        visible_face_span(center, &neighbors, local, block_def, block_height, face, registry)
-                    else {
+                    let Some(face_span) = visible_face_span(
+                        center,
+                        &neighbors,
+                        local,
+                        block_def,
+                        block_height,
+                        face,
+                        registry,
+                    ) else {
                         continue;
                     };
 
@@ -81,7 +94,14 @@ pub fn build_chunk_mesh(
                         block_def,
                         face,
                         face_span,
-                        top_face_contour_edges(center, &neighbors, local, block_height, face, registry),
+                        top_face_contour_edges(
+                            center,
+                            &neighbors,
+                            local,
+                            block_height,
+                            face,
+                            registry,
+                        ),
                     );
                 }
             }
@@ -89,6 +109,78 @@ pub fn build_chunk_mesh(
     }
 
     mesh
+}
+
+fn uniform_chunk_mesh(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    registry: &BlockRegistry,
+) -> Option<CpuMesh> {
+    let block = center.uniform_block()?;
+    let block_def = registry.block_or_missing(block);
+    if !block_def.is_rendered_cube() {
+        return Some(CpuMesh::default());
+    }
+    if !block_def.is_opaque() || block_def.surface_height() < 1.0 - HEIGHT_EPSILON {
+        return None;
+    }
+
+    Some(build_uniform_opaque_boundary_mesh(
+        center, neighbors, block_def, registry,
+    ))
+}
+
+fn build_uniform_opaque_boundary_mesh(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    block_def: &BlockDef,
+    registry: &BlockRegistry,
+) -> CpuMesh {
+    let mut mesh = CpuMesh::default();
+    let block_height = 1.0;
+
+    for face in faces() {
+        for a in 0..super::coord::CHUNK_EDGE as u8 {
+            for b in 0..super::coord::CHUNK_EDGE as u8 {
+                let local = boundary_local_for_face(face, a, b);
+                let Some(face_span) = visible_face_span(
+                    center,
+                    neighbors,
+                    local,
+                    block_def,
+                    block_height,
+                    face,
+                    registry,
+                ) else {
+                    continue;
+                };
+
+                append_face(
+                    &mut mesh,
+                    center.coord(),
+                    local,
+                    block_def,
+                    face,
+                    face_span,
+                    top_face_contour_edges(center, neighbors, local, block_height, face, registry),
+                );
+            }
+        }
+    }
+
+    mesh
+}
+
+fn boundary_local_for_face(face: BlockFace, a: u8, b: u8) -> LocalBlockCoord {
+    let edge = super::coord::CHUNK_EDGE as u8 - 1;
+    match face {
+        BlockFace::NegX => LocalBlockCoord::new(0, a, b).unwrap(),
+        BlockFace::PosX => LocalBlockCoord::new(edge, a, b).unwrap(),
+        BlockFace::NegY => LocalBlockCoord::new(a, 0, b).unwrap(),
+        BlockFace::PosY => LocalBlockCoord::new(a, edge, b).unwrap(),
+        BlockFace::NegZ => LocalBlockCoord::new(a, b, 0).unwrap(),
+        BlockFace::PosZ => LocalBlockCoord::new(a, b, edge).unwrap(),
+    }
 }
 
 fn neighbor_block(
@@ -258,9 +350,14 @@ fn visible_face_span(
 
             if let Some(neighbor_def) = neighbor_def {
                 if shared_water_volume(block_def, neighbor_def) {
-                    let neighbor_height =
-                        surface_height_at_offset(center, neighbors, local, face_offset(face), registry)
-                            .unwrap_or(1.0);
+                    let neighbor_height = surface_height_at_offset(
+                        center,
+                        neighbors,
+                        local,
+                        face_offset(face),
+                        registry,
+                    )
+                    .unwrap_or(1.0);
                     if neighbor_height >= block_height - HEIGHT_EPSILON {
                         return None;
                     }
@@ -324,12 +421,7 @@ fn surface_height_at_offset(
 
     let mut height = block_def.surface_height();
     if matches!(block_def.material, BlockMaterialKind::Water) {
-        let above = block_at_offset(
-            center,
-            neighbors,
-            local,
-            (offset.0, offset.1 + 1, offset.2),
-        );
+        let above = block_at_offset(center, neighbors, local, (offset.0, offset.1 + 1, offset.2));
         if above.is_some_and(|block| {
             let above_def = registry.block_or_missing(block);
             above_def.is_rendered_cube() && matches!(above_def.material, BlockMaterialKind::Water)
@@ -488,14 +580,19 @@ mod tests {
             }
         }
 
-        let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default(), &test_registry());
+        let mesh = build_chunk_mesh(
+            &chunk.snapshot(),
+            NeighborChunks::default(),
+            &test_registry(),
+        );
 
         assert!(!mesh.is_empty());
         assert!(mesh.triangle_count() > 0);
-        assert!(mesh
-            .vertices
-            .iter()
-            .all(|vertex| vertex.material_kind == BlockMaterialKind::Grass));
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.material_kind == BlockMaterialKind::Grass)
+        );
         assert_eq!(
             mesh.bounds,
             Some(RenderBounds {
@@ -541,12 +638,55 @@ mod tests {
     }
 
     #[test]
+    fn uniform_opaque_chunk_without_neighbors_emits_boundary_shell() {
+        let chunk = ChunkData::new_filled(ChunkCoord(0, 0, 0), BlockId::STONE);
+
+        let mesh = build_chunk_mesh(
+            &chunk.snapshot(),
+            NeighborChunks::default(),
+            &test_registry(),
+        );
+
+        assert_eq!(mesh.triangle_count(), 6 * CHUNK_EDGE * CHUNK_EDGE * 2);
+        assert_eq!(
+            mesh.bounds,
+            Some(RenderBounds {
+                min: [0.0, 0.0, 0.0],
+                max: [CHUNK_EDGE as f32, CHUNK_EDGE as f32, CHUNK_EDGE as f32],
+            })
+        );
+    }
+
+    #[test]
+    fn uniform_opaque_chunk_with_opaque_neighbors_produces_empty_mesh() {
+        let center = ChunkData::new_filled(ChunkCoord(0, 0, 0), BlockId::STONE);
+        let neighbors = NeighborChunks {
+            neg_x: Some(ChunkData::new_filled(ChunkCoord(-1, 0, 0), BlockId::STONE).snapshot()),
+            pos_x: Some(ChunkData::new_filled(ChunkCoord(1, 0, 0), BlockId::STONE).snapshot()),
+            neg_y: Some(ChunkData::new_filled(ChunkCoord(0, -1, 0), BlockId::STONE).snapshot()),
+            pos_y: Some(ChunkData::new_filled(ChunkCoord(0, 1, 0), BlockId::STONE).snapshot()),
+            neg_z: Some(ChunkData::new_filled(ChunkCoord(0, 0, -1), BlockId::STONE).snapshot()),
+            pos_z: Some(ChunkData::new_filled(ChunkCoord(0, 0, 1), BlockId::STONE).snapshot()),
+        };
+
+        let mesh = build_chunk_mesh(&center.snapshot(), neighbors, &test_registry());
+
+        assert!(mesh.is_empty());
+    }
+
+    #[test]
     fn lowered_water_top_marks_real_top_face_edges() {
         let registry = test_registry();
-        let water = registry.block_id("water").expect("water block should exist");
+        let water = registry
+            .block_id("water")
+            .expect("water block should exist");
         let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
-        chunk.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water).unwrap();
-        chunk.set_block(LocalBlockCoord::new(1, 0, 0).unwrap(), BlockId::GRASS).unwrap();
+        chunk
+            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water)
+            .unwrap();
+        chunk
+            .set_block(LocalBlockCoord::new(1, 0, 0).unwrap(), BlockId::GRASS)
+            .unwrap();
 
         let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default(), &registry);
         let top_face_vertices = mesh
@@ -560,25 +700,40 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(top_face_vertices.len(), 4);
-        assert!(top_face_vertices.iter().all(|vertex| vertex.contour_edges != 0));
-        assert!(top_face_vertices
-            .iter()
-            .all(|vertex| vertex.contour_edges & TOP_EDGE_POS_X != 0));
+        assert!(
+            top_face_vertices
+                .iter()
+                .all(|vertex| vertex.contour_edges != 0)
+        );
+        assert!(
+            top_face_vertices
+                .iter()
+                .all(|vertex| vertex.contour_edges & TOP_EDGE_POS_X != 0)
+        );
     }
 
     #[test]
     fn stacked_water_keeps_full_submerged_height_and_only_exposes_upper_side_strip() {
         let registry = test_registry();
-        let water = registry.block_id("water").expect("water block should exist");
+        let water = registry
+            .block_id("water")
+            .expect("water block should exist");
         let mut center = ChunkData::new_empty(ChunkCoord(0, 0, 0));
         let mut east = ChunkData::new_empty(ChunkCoord(1, 0, 0));
         center
-            .set_block(LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 0, 0).unwrap(), water)
+            .set_block(
+                LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 0, 0).unwrap(),
+                water,
+            )
             .unwrap();
         center
-            .set_block(LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 1, 0).unwrap(), water)
+            .set_block(
+                LocalBlockCoord::new(CHUNK_EDGE as u8 - 1, 1, 0).unwrap(),
+                water,
+            )
             .unwrap();
-        east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water).unwrap();
+        east.set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), water)
+            .unwrap();
 
         let mesh = build_chunk_mesh(
             &center.snapshot(),
@@ -589,13 +744,10 @@ mod tests {
             &registry,
         );
 
-        assert!(mesh
-            .vertices
-            .iter()
-            .any(|vertex| {
-                vertex.material_kind == BlockMaterialKind::Water
-                    && (vertex.position[1] - 1.9).abs() <= HEIGHT_EPSILON
-            }));
+        assert!(mesh.vertices.iter().any(|vertex| {
+            vertex.material_kind == BlockMaterialKind::Water
+                && (vertex.position[1] - 1.9).abs() <= HEIGHT_EPSILON
+        }));
         assert!(mesh.vertices.iter().any(|vertex| {
             vertex.material_kind == BlockMaterialKind::Water
                 && vertex.normal == [1.0, 0.0, 0.0]

@@ -2,9 +2,8 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use super::{
-    camera::CameraUniform, CameraUpdateError, ChunkCoord, MeshVertex, RenderBounds,
-    RenderCameraState, RenderMaterialKind, RenderSurfaceError, RenderUiSprite, Renderer,
-    ui::UiVertex,
+    CameraUpdateError, ChunkCoord, MeshVertex, RenderBounds, RenderCameraState, RenderMaterialKind,
+    RenderSurfaceError, RenderUiSprite, Renderer, camera::CameraUniform, ui::UiVertex,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,9 +66,10 @@ impl Renderer {
         self.frame_index = self.frame_index.saturating_add(1);
 
         let (uploaded_mesh_count, removed_mesh_count) = self.world.finish_frame();
-        let clear_color = frame
-            .clear_color_override
-            .unwrap_or_else(|| self.environment.resolved_clear_color(self.config.clear_color));
+        let clear_color = frame.clear_color_override.unwrap_or_else(|| {
+            self.environment
+                .resolved_clear_color(self.config.clear_color)
+        });
 
         let visible_chunk_count = u32::try_from(frame.visible_chunks.len()).unwrap_or(u32::MAX);
         let mut stats = RenderStats {
@@ -102,12 +102,9 @@ impl Renderer {
             .visible_chunks
             .iter()
             .filter(|coord| {
-                self.world
-                    .chunk_meshes
-                    .get(coord)
-                    .is_some_and(|mesh| {
-                        mesh.opaque_buffers.is_some() || mesh.translucent_buffers.is_some()
-                    })
+                self.world.chunk_meshes.get(coord).is_some_and(|mesh| {
+                    mesh.opaque_buffers.is_some() || mesh.translucent_buffers.is_some()
+                })
             })
             .count();
         let submitted_chunk_count = u32::try_from(submitted_chunk_count).unwrap_or(u32::MAX);
@@ -115,7 +112,10 @@ impl Renderer {
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = 0;
 
-        let dynamic_cube_mesh = frame.draw_scene.then(|| build_cube_mesh(frame.cube_instances)).flatten();
+        let dynamic_cube_mesh = frame
+            .draw_scene
+            .then(|| build_cube_mesh(frame.cube_instances))
+            .flatten();
         let debug_edge_mesh = self
             .config
             .debug
@@ -173,63 +173,61 @@ impl Renderer {
             cast_slice(&[sun_shadow_uniform]),
         );
 
-        let dynamic_cube_buffers = dynamic_cube_mesh
-            .as_ref()
-            .map(|(vertices, indices)| {
-                let vertex_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_vertex_buffer"),
-                            contents: cast_slice(vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                let index_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_index_buffer"),
-                            contents: cast_slice(indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
-                (vertex_buffer, index_buffer, indices.len() as u32)
-            });
-        let debug_edge_buffers = debug_edge_mesh
-            .as_ref()
-            .map(|(vertices, indices)| {
-                let vertex_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_edge_vertex_buffer"),
-                            contents: cast_slice(vertices),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                let index_buffer =
-                    backend
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("renderer_cube_edge_index_buffer"),
-                            contents: cast_slice(indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
-                (vertex_buffer, index_buffer, indices.len() as u32)
-            });
+        let dynamic_cube_buffers = dynamic_cube_mesh.as_ref().map(|(vertices, indices)| {
+            let vertex_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_vertex_buffer"),
+                        contents: cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            let index_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_index_buffer"),
+                        contents: cast_slice(indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+            (vertex_buffer, index_buffer, indices.len() as u32)
+        });
+        let debug_edge_buffers = debug_edge_mesh.as_ref().map(|(vertices, indices)| {
+            let vertex_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_edge_vertex_buffer"),
+                        contents: cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            let index_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_cube_edge_index_buffer"),
+                        contents: cast_slice(indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+            (vertex_buffer, index_buffer, indices.len() as u32)
+        });
         let ui_sprite_buffers = ui_sprite_mesh.as_ref().map(|(vertices, indices)| {
-            let vertex_buffer = backend
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("renderer_ui_sprite_vertex_buffer"),
-                    contents: cast_slice(vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            let index_buffer = backend
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("renderer_ui_sprite_index_buffer"),
-                    contents: cast_slice(indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
+            let vertex_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_ui_sprite_vertex_buffer"),
+                        contents: cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+            let index_buffer =
+                backend
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("renderer_ui_sprite_index_buffer"),
+                        contents: cast_slice(indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
             (vertex_buffer, index_buffer, indices.len() as u32)
         });
 
@@ -298,15 +296,14 @@ impl Renderer {
                 };
 
                 shadow_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
-                shadow_pass.set_index_buffer(
-                    buffers.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
+                shadow_pass
+                    .set_index_buffer(buffers.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 shadow_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
-            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref() {
+            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref()
+            {
                 shadow_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 shadow_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 shadow_pass.draw_indexed(0..*index_count, 0, 0..1);
@@ -378,8 +375,7 @@ impl Renderer {
                 {
                     render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    render_pass
-                        .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..*index_count, 0, 0..1);
                     stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
@@ -402,7 +398,6 @@ impl Renderer {
                     stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
             }
-
         }
 
         if frame.draw_scene && self.config.debug.debug_overlay {
@@ -432,8 +427,7 @@ impl Renderer {
                 edge_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
                 edge_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
                 edge_pass.set_vertex_buffer(0, edge_vertex_buffer.slice(..));
-                edge_pass
-                    .set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                edge_pass.set_index_buffer(edge_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 edge_pass.draw_indexed(0..*edge_index_count, 0, 0..1);
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
@@ -502,7 +496,11 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
             ([0_u32, 4, 7, 3], [-1.0, 0.0, 0.0], cube.side_texture_layer),
             ([5_u32, 1, 2, 6], [1.0, 0.0, 0.0], cube.side_texture_layer),
             ([3_u32, 7, 6, 2], [0.0, 1.0, 0.0], cube.top_texture_layer),
-            ([0_u32, 1, 5, 4], [0.0, -1.0, 0.0], cube.bottom_texture_layer),
+            (
+                [0_u32, 1, 5, 4],
+                [0.0, -1.0, 0.0],
+                cube.bottom_texture_layer,
+            ),
         ];
         let face_uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
@@ -726,9 +724,8 @@ fn build_sun_shadow_uniform(
     };
 
     let sun_direction = normalize3(environment.sun_direction);
-    let scene_bounds =
-        scene_bounds_from_visible_geometry(visible_chunks, world, cube_instances)
-            .unwrap_or_else(|| fallback_bounds_from_camera(camera));
+    let scene_bounds = scene_bounds_from_visible_geometry(visible_chunks, world, cube_instances)
+        .unwrap_or_else(|| fallback_bounds_from_camera(camera));
     let center = [
         (scene_bounds.min[0] + scene_bounds.max[0]) * 0.5,
         (scene_bounds.min[1] + scene_bounds.max[1]) * 0.5,
@@ -790,7 +787,12 @@ fn build_sun_shadow_uniform(
             environment.sun_intensity,
         ],
         sun_screen_position_radius: [sun_screen_x, sun_screen_y, sun_radius, halo_radius],
-        shadow_params: [0.0015, 1.0 / shadow_map_size as f32, 1.0, shadow_map_size as f32],
+        shadow_params: [
+            0.0015,
+            1.0 / shadow_map_size as f32,
+            1.0,
+            shadow_map_size as f32,
+        ],
     }
 }
 
@@ -822,13 +824,7 @@ fn scene_bounds_from_visible_geometry(
             cube.center[1] + cube.half_extents[1],
             cube.center[2] + cube.half_extents[2],
         ];
-        expand_bounds(
-            &mut bounds,
-            RenderBounds {
-                min,
-                max,
-            },
-        );
+        expand_bounds(&mut bounds, RenderBounds { min, max });
     }
 
     bounds
@@ -849,14 +845,21 @@ fn fallback_bounds_from_camera(camera: &RenderCameraState) -> RenderBounds {
     }
 }
 
-fn project_sun_to_screen(camera: &RenderCameraState, sun_direction: [f32; 3]) -> Option<(f32, f32)> {
+fn project_sun_to_screen(
+    camera: &RenderCameraState,
+    sun_direction: [f32; 3],
+) -> Option<(f32, f32)> {
     let view_projection = camera_view_projection(camera)?;
     let sun_anchor = add3(camera.target, scale3(normalize3(sun_direction), 96.0));
     let clip = multiply_row_vector(
         [sun_anchor[0], sun_anchor[1], sun_anchor[2], 1.0],
         view_projection,
     );
-    let w = if clip[3].abs() <= f32::EPSILON { 1.0 } else { clip[3] };
+    let w = if clip[3].abs() <= f32::EPSILON {
+        1.0
+    } else {
+        clip[3]
+    };
     Some((clip[0] / w, clip[1] / w))
 }
 
@@ -867,12 +870,9 @@ fn camera_view_projection(camera: &RenderCameraState) -> Option<[[f32; 4]; 4]> {
         None => look_at_rh(camera.eye, camera.target, camera.up),
     };
     let projection = match camera.projection_mode {
-        super::RenderProjectionMode::Perspective => perspective_rh(
-            std::f32::consts::FRAC_PI_3,
-            aspect,
-            0.1,
-            1_000.0,
-        )?,
+        super::RenderProjectionMode::Perspective => {
+            perspective_rh(std::f32::consts::FRAC_PI_3, aspect, 0.1, 1_000.0)?
+        }
         super::RenderProjectionMode::Orthographic {
             vertical_world_size,
         } => orthographic_symmetric_rh(aspect, vertical_world_size, 0.1, 1_000.0)?,
@@ -955,7 +955,9 @@ fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
 fn multiply_row_vector(vector: [f32; 4], matrix: [[f32; 4]; 4]) -> [f32; 4] {
     let mut result = [0.0; 4];
     for column in 0..4 {
-        result[column] = (0..4).map(|index| vector[index] * matrix[index][column]).sum();
+        result[column] = (0..4)
+            .map(|index| vector[index] * matrix[index][column])
+            .sum();
     }
     result
 }
@@ -988,10 +990,7 @@ fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
     ]
 }
 
-fn view_from_basis(
-    eye: [f32; 3],
-    basis: super::RenderViewBasis,
-) -> Option<[[f32; 4]; 4]> {
+fn view_from_basis(eye: [f32; 3], basis: super::RenderViewBasis) -> Option<[[f32; 4]; 4]> {
     let right = normalize3(basis.right);
     let up = normalize3(basis.up);
     let forward = normalize3(basis.forward);
@@ -1000,12 +999,7 @@ fn view_from_basis(
         [right[0], up[0], -forward[0], 0.0],
         [right[1], up[1], -forward[1], 0.0],
         [right[2], up[2], -forward[2], 0.0],
-        [
-            -dot3(right, eye),
-            -dot3(up, eye),
-            dot3(forward, eye),
-            1.0,
-        ],
+        [-dot3(right, eye), -dot3(up, eye), dot3(forward, eye), 1.0],
     ])
 }
 
@@ -1028,7 +1022,12 @@ fn perspective_rh(
         [focal_length / aspect_ratio, 0.0, 0.0, 0.0],
         [0.0, focal_length, 0.0, 0.0],
         [0.0, 0.0, far_plane / (near_plane - far_plane), -1.0],
-        [0.0, 0.0, (near_plane * far_plane) / (near_plane - far_plane), 0.0],
+        [
+            0.0,
+            0.0,
+            (near_plane * far_plane) / (near_plane - far_plane),
+            0.0,
+        ],
     ])
 }
 
@@ -1088,19 +1087,21 @@ mod tests {
 
     use super::*;
     use crate::renderer::{
-        surface::{
-            create_environment_bind_group_layout, create_shadow_sampling_bind_group_layout,
-            default_environment_uniform, EnvironmentUniform, SunShadowUniform,
-        },
         CameraGpuState, CameraProjectionConfig, RenderProjectionMode, RenderViewBasis,
+        surface::{
+            EnvironmentUniform, SunShadowUniform, create_environment_bind_group_layout,
+            create_shadow_sampling_bind_group_layout, default_environment_uniform,
+        },
     };
 
     #[test]
     fn offscreen_cube_render_contains_visible_top_face_pixels() {
-        let stats =
-            block_on(render_cube_offscreen(true)).expect("offscreen render should succeed");
+        let stats = block_on(render_cube_offscreen(true)).expect("offscreen render should succeed");
 
-        assert!(stats.highlight_pixels > 0, "top face should contribute a highlight");
+        assert!(
+            stats.highlight_pixels > 0,
+            "top face should contribute a highlight"
+        );
         assert!(
             stats.midtone_pixels + stats.shadow_pixels > 0,
             "visible side faces should contribute non-highlight pixels"
@@ -1190,8 +1191,9 @@ mod tests {
                 view_formats: &[],
             })
         });
-        let depth_view =
-            depth_texture.as_ref().map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let depth_view = depth_texture
+            .as_ref()
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("player_cube.wgsl"));
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1435,13 +1437,13 @@ mod tests {
                 vertical_world_size: 5.0,
             },
             basis_override: Some(RenderViewBasis {
-                right: [std::f32::consts::FRAC_1_SQRT_2, 0.0, std::f32::consts::FRAC_1_SQRT_2],
-                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
-                forward: [
-                    -0.5,
-                    -std::f32::consts::FRAC_1_SQRT_2,
-                    0.5,
+                right: [
+                    std::f32::consts::FRAC_1_SQRT_2,
+                    0.0,
+                    std::f32::consts::FRAC_1_SQRT_2,
                 ],
+                up: [-0.5, std::f32::consts::FRAC_1_SQRT_2, 0.5],
+                forward: [-0.5, -std::f32::consts::FRAC_1_SQRT_2, 0.5],
             }),
         };
         let mut camera_gpu_state = CameraGpuState::default();

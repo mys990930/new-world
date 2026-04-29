@@ -46,5 +46,5 @@
 - `Medium` enables a smaller hard-sun shadow map.
 - `High` enables a larger hard-sun shadow map.
 - The current default quality preset is still `medium`, so the default app path now uses visible direct sun plus shadows.
-- The default fixed environment preset is a warm sunset quarter-view setup with stronger top/side readability and only a light amount of atmosphere.
+- The default fixed environment preset is a warm sunset quarter-view setup with stronger top/side readability and only a very light amount of atmosphere.
 - Time-of-day, weather, and climate fields already exist in `RenderEnvironment`, but the default app path still uses a fixed preset until gameplay systems call `Renderer::set_environment(...)`.

@@ -12,6 +12,7 @@
 - remove cached chunk-column data when no loaded chunk remains in that column
 - compose the current player-centered one-chunk minimap viewport from cached columns
 - expose cache update helpers for completed minimap jobs
+- expose lightweight diagnostic counters for cached, pending, and dirty minimap columns
 - expose local single-column patch helpers for future world edits
 
 ## Non-Responsibilities
@@ -45,6 +46,7 @@
 
 - jobs-facing rebuild intent for chunk columns
 - render-bridge-facing cached viewport data
+- app-frame-facing diagnostic counts for minimap cache pressure
 
 ## State Transition Rules
 
@@ -60,6 +62,7 @@
 - cached data is chunk-column-scoped, not frame-scoped
 - viewport composition may read up to four nearby cached chunk columns when the player stands near chunk boundaries
 - minimap rendering should never require a live full-window world scan during normal frames
+- diagnostic counters must be read-only and must not trigger rebuilds or live world scans
 
 ## Related Modules
 
@@ -75,4 +78,5 @@
 - the current minimap still covers a one-chunk `32x32` block window around the player
 - the current runtime refreshes cached minimap columns when chunk load/generate results arrive
 - chunk unload now also participates: losing one chunk in a still-loaded column should rebuild that column, while losing the last chunk in a column should drop the cached patch entirely
+- opt-in frame diagnostics include minimap cache `cached/pending/dirty` counts so minimap rebuild backlog can be distinguished from mesh/load backlog
 - future player block edits should patch only the affected local block columns whenever possible

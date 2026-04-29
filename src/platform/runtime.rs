@@ -82,11 +82,7 @@ impl PlatformRuntime {
         true
     }
 
-    fn ensure_window(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        config: &PlatformConfig,
-    ) {
+    fn ensure_window(&mut self, event_loop: &ActiveEventLoop, config: &PlatformConfig) {
         if self.window.is_some() {
             return;
         }

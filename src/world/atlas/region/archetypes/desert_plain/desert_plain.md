@@ -25,7 +25,6 @@
 
 ## Initial Meso Allowance Stub
 - `dune_field`
-- `ravine`
 - `crater`
 
 ## Follow-up

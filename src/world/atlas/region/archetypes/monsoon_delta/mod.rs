@@ -1,5 +1,5 @@
-﻿use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
+use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
     id: RegionArchetype::MonsoonDelta,
@@ -14,7 +14,7 @@ pub const DEF: RegionArchetypeDef = RegionArchetypeDef {
         "Biome family and terrain-form family are locked for this candidate.",
         "Detailed vegetation density and gameplay-facing ecology rules remain to be specified.",
     ],
-    allowed_meso_keys: &["shallow_basin", "dune_field",],
+    allowed_meso_keys: &["shallow_basin", "dune_field"],
     seasonal_profile: SeasonalSurfaceProfile::TropicalWetDry,
     water_response: WaterResponseHint::EmbracesFloodplain,
     ecology_density: EcologyDensityHint::Dense,

@@ -3,7 +3,7 @@
 ## Role
 
 - list the authoritative launch and scaffolded extended/deferred `RegionArchetype` modules
-- keep planning and implementation on the same candidate pool while V2 is still scaffold-first
+- keep planning and implementation on the same candidate pool while current generation is still scaffold-first
 
 ## Candidate Labels
 

@@ -3,8 +3,8 @@ use crate::simulation::{
     SimInputBundle, SimRegion, SimTick, SimulationResult, TimeSimBundleInput, TimeSimCellInput,
 };
 use crate::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasClimateRuntimeState, AtlasCoord, LocalWeatherState,
-    WorldCalendar, CHUNK_EDGE_I32,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, CHUNK_EDGE_I32,
+    LocalWeatherState, RegionClassSample, WorldCalendar,
 };
 
 use super::GameApp;
@@ -31,7 +31,11 @@ impl GameApp {
                 atlas_area: active_region.area,
             };
             let input = SimInputBundle {
-                time: Some(self.build_time_sim_input_bundle(active_region.center_atlas, active_region.area, tick)),
+                time: Some(self.build_time_sim_input_bundle(
+                    active_region.center_atlas,
+                    active_region.area,
+                    tick,
+                )),
             };
             let results = self.simulation.step_all(tick, sim_region, input);
             self.ecs.enqueue_simulation_results(results);
@@ -54,7 +58,10 @@ impl GameApp {
             .local_player_transform()
             .map(|transform| atlas_coord_for_translation(transform.translation))
             .unwrap_or_else(|| self.ecs.active_sim_region().center_atlas);
-        let region = self.world.sample_region_class_atlas(focus_atlas);
+        let region = self
+            .world
+            .sample_cached_region_class_atlas(focus_atlas)
+            .unwrap_or_else(RegionClassSample::default);
         let climate = self.world.climate_state(focus_atlas);
         let weather = self.world.local_weather(focus_atlas).unwrap_or_else(|| {
             LocalWeatherState::clear(
@@ -71,16 +78,56 @@ impl GameApp {
         ));
     }
 
+    pub(crate) fn queue_environment_region_resolve_for_focus(&mut self) {
+        let focus_atlas = self
+            .ecs
+            .local_player_transform()
+            .map(|transform| atlas_coord_for_translation(transform.translation))
+            .unwrap_or_else(|| self.ecs.active_sim_region().center_atlas);
+        let area =
+            AtlasArea::new(focus_atlas, 1, 1).expect("single focus atlas area must be valid");
+        if self.world.cached_region_class_area(area).is_some() {
+            return;
+        }
+
+        if let Err(error) = self
+            .jobs
+            .submit(crate::jobs::JobRequest::ResolveRegionClassArea {
+                meta: *self.world.meta(),
+                area,
+            })
+        {
+            eprintln!(
+                "[app] failed to queue region class resolve for atlas ({}, {}): {:?}",
+                focus_atlas.x, focus_atlas.z, error
+            );
+        }
+    }
+
     fn build_time_sim_input_bundle(
         &self,
         center_atlas: AtlasCoord,
         area: crate::world::AtlasArea,
         tick: SimTick,
     ) -> TimeSimBundleInput {
-        let classes = self.world.resolve_region_class_area(area);
-        let weather_window_end = tick.index.saturating_add(
-            u64::from(self.simulation.config().time.ticks_per_game_minute.max(1)),
-        );
+        let ticks_per_game_minute =
+            u64::from(self.simulation.config().time.ticks_per_game_minute.max(1));
+        if tick.index % ticks_per_game_minute != 0 {
+            return TimeSimBundleInput {
+                world_seed: self.world.meta().seed,
+                calendar: *self.world.calendar(),
+                cells: Vec::new(),
+            };
+        }
+
+        let Some(classes) = self.world.cached_region_class_area(area) else {
+            return TimeSimBundleInput {
+                world_seed: self.world.meta().seed,
+                calendar: *self.world.calendar(),
+                cells: Vec::new(),
+            };
+        };
+        let weather_window_end = tick.index.saturating_add(ticks_per_game_minute);
         let mut cells = Vec::with_capacity(area.len());
         for coord in area.coords() {
             let region = classes
@@ -89,7 +136,12 @@ impl GameApp {
                 .unwrap_or_else(|| self.world.sample_region_class_atlas(center_atlas));
             let climate_state = self.world.climate_state(coord);
             let current_weather = self.world.local_weather(coord).unwrap_or_else(|| {
-                LocalWeatherState::clear(coord, region.climate_regime, tick.index, weather_window_end)
+                LocalWeatherState::clear(
+                    coord,
+                    region.climate_regime,
+                    tick.index,
+                    weather_window_end,
+                )
             });
             cells.push(TimeSimCellInput {
                 coord,
@@ -144,11 +196,7 @@ fn render_environment_from_world(
     let sun_color_day = [1.02, 1.0, 0.95];
     let sun_color_dusk = [1.10, 0.76, 0.49];
 
-    let mut sky_color = lerp3(
-        lerp3(sky_night, sky_dusk, twilight),
-        sky_day,
-        daylight,
-    );
+    let mut sky_color = lerp3(lerp3(sky_night, sky_dusk, twilight), sky_day, daylight);
     let mut horizon_color = lerp3(
         lerp3(horizon_night, horizon_dusk, twilight),
         horizon_day,
@@ -165,8 +213,8 @@ fn render_environment_from_world(
         ambient_color: lerp3([0.13, 0.15, 0.22], [0.56, 0.64, 0.74], daylight),
         ambient_intensity: 0.22 + daylight * 0.84,
         fog_color: lerp3(horizon_color, sky_color, 0.35),
-        fog_density: 0.011 + overcast * 0.010 + (1.0 - daylight) * 0.009,
-        fog_height_falloff: 0.046 + overcast * 0.018,
+        fog_density: 0.0038 + overcast * 0.0042 + (1.0 - daylight) * 0.0032,
+        fog_height_falloff: 0.032 + overcast * 0.010,
         sky_color,
         horizon_color,
         overcast,
@@ -214,4 +262,28 @@ fn lerp3(start: [f32; 3], end: [f32; 3], t: f32) -> [f32; 3] {
         start[1] + (end[1] - start[1]) * t,
         start[2] + (end[2] - start[2]) * t,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::{AtlasCoord, ClimateRegime, LocalWeatherState, WorldCalendar};
+
+    #[test]
+    fn clear_default_evening_environment_keeps_atmosphere_subtle() {
+        let environment = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            LocalWeatherState::clear(
+                AtlasCoord::new(0, 0),
+                ClimateRegime::TemperateSeasonal,
+                0,
+                0,
+            ),
+        );
+
+        assert!(environment.fog_density <= 0.008);
+        assert!(environment.fog_height_falloff <= 0.04);
+        assert!(environment.validate().is_ok());
+    }
 }
