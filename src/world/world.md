@@ -44,8 +44,9 @@ spline/domain warp, noise synthesis를 거쳐 현실화되어야 한다.
 - continuous field sampling 계약
 - biome, surface policy, material transition의 world-side 의미 결정
 - graph hydrology와 watershed ownership
-- base noise heightfield와 graph-derived gradient 합성 계약
+- Voronoi graph 기반 macro elevation과 Perlin 기반 micro elevation 합성 계약
 - river, lake, wetland, coast, mountain, basin 같은 macro/meso 제약의 source-of-truth
+- 각 generation stage의 topdown preview binary 출력 계약
 - deterministic procedural generation result를 `ChunkData`로 표현
 - 기존 `world` 구현을 `legacy` 아래 보존하고, 새 generator가 대체될 때까지 runtime compatibility bridge 유지
 
@@ -206,7 +207,6 @@ edge는 두 site와 두 corner 사이의 관계다.
 - coast 후보
 - river 후보
 - fault/cliff/plateau 후보
-- road/bridge crossing 후보
 - noisy boundary realization seed
 
 ### 2. Dual Graph Representation
@@ -235,7 +235,8 @@ corner graph는 아래에 유용하다.
 - noisy edge guard geometry
 
 하나의 Voronoi edge는 보통 `두 site + 두 corner`를 함께 알아야 한다. 이 구조를 유지해야
-나중에 강은 corner edge를 따라가고, 도로는 site 사이를 가로지르는 식의 레이어 분리가 쉬워진다.
+강, 해안선, 단층, 절벽 같은 edge 기반 feature가 같은 graph topology를 공유하면서도 서로 다른
+현실화 규칙을 가질 수 있다.
 
 ### 3. Continuous Region Fields
 
@@ -266,11 +267,16 @@ world-space column sampling은 주변 site/corner의 influence를 섞어 continu
 중요한 점은 `dominant_site`와 `visible field`를 분리하는 것이다. gameplay query는 안정적인
 owner를 원할 수 있지만, 화면에 보이는 바이옴/재질/높이는 blended field를 먹어야 한다.
 
-### 4. Land, Ocean, Lake, Coast
+### 4. Continent, Ocean, Lake, Coast
 
 water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의 의미를 구분해야 한다.
 
+이 프로젝트는 Amit의 작은 island map과 달리 큰 대륙과 큰 바다가 공존하는 구조를 목표로 한다.
+대륙은 하나의 작은 섬이 아니라 장거리 macro ownership을 가진 land mass이며, 그 내부에 산맥,
+분수계, 강, 호수, 습지, 평야, 해안 지형이 배치된다.
+
 - ocean: 큰 바다 또는 외부 ocean basin과 연결된 물
+- continent: 큰 land mass와 그 내부 macro elevation / drainage ownership
 - lake: land 내부의 local minimum 또는 basin fill로 생긴 고립 물
 - wetland/marsh: 얕은 물, 높은 hydration, 낮은 slope가 겹친 지역
 - coast: ocean과 land 사이의 transition band
@@ -278,50 +284,64 @@ water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의
 
 Amit의 island map에서는 border flood fill로 ocean과 lake를 구분할 수 있지만, 이 프로젝트는
 무한 월드이므로 같은 방법을 그대로 쓸 수 없다. 대신 graph scale의 ocean basin ownership,
-continentality field, outlet-to-ocean routing을 사용해야 한다.
+continent ownership, continentality field, outlet-to-ocean routing을 사용해야 한다.
 
 Land/ocean 판정은 아래 입력을 합성한다.
 
-- base elevation noise
+- Voronoi graph 기반 macro elevation
 - continentality
+- continent / ocean basin id
 - graph basin id
 - distance-to-ocean-basin
 - coastness
 - sea-level contract
 - local lake/sink resolution
 
-### 5. Elevation And Heightfield
+### 5. Macro Elevation And Heightfield
 
-전체 heightfield는 fBm/OpenSimplex/Perlin 계열의 base noise를 사용한다. 그러나 noise만으로
-높이를 만들면 지형에 이유가 부족하고, hydrology가 끊기기 쉽다.
+전체 heightfield는 "Voronoi graph 기반 macro elevation"과 "Perlin 기반 micro elevation"을
+합성해서 만든다. 여기서 중요한 순서는 macro가 먼저이고 Perlin이 나중이라는 점이다.
+
+Macro elevation은 대륙, 바다, 산맥, 능선, 분수계, 강 후보망을 이미 알고 있는 graph-derived
+field다. Perlin noise는 이 macro structure를 뒤집는 source가 아니라, 최종 표면에 국소적인
+높낮이와 질감을 더하는 micro relief다.
 
 최종 높이 후보:
 
 ```text
 height =
-    base_low_frequency_noise
-  + mid_frequency_relief_noise
-  + graph_continental_gradient
-  + mountain_distance_gradient
-  + ridge/fault/plateau contribution
-  - river_valley_carve
-  - lake_basin_flatten
-  + local_detail_noise
+    voronoi_macro_elevation
+  + continent_ocean_gradient
+  + edge_mountain_ridge_field
+  + edge_fault_plateau_field
+  - edge_hydrology_valley_field
+  - lake_basin_flatten_field
+  + noisy_boundary_displacement_field
+  + perlin_micro_relief
 ```
 
-noise 사용 규칙:
+heightfield 생성 순서:
 
+1. continent/ocean basin과 대륙 내부 macro elevation을 Voronoi graph에서 만든다.
+2. Voronoi edge 기반 mountain/ridge/fault/plateau 구조를 먼저 정한다.
+3. 이 edge structure와 macro elevation을 바탕으로 edge 기반 hydrology를 설정한다.
+4. river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
+5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
+6. 마지막에 Perlin noise를 합성해 국소 micro elevation을 만든다.
+
+Perlin noise 사용 규칙:
+
+- Perlin은 지형의 큰 구조를 발명하지 않는다.
+- Perlin amplitude는 ruggedness, slope, hydrology role, coast/lake mask로 제한한다.
 - octave별 seed/offset/rotation을 분리해 correlation artifact를 줄인다.
-- elevation redistribution curve를 둬 평지, 구릉, 산지 비율을 조절한다.
-- ruggedness field가 높은 지역에서만 high-frequency amplitude를 키운다.
-- mountainness는 noise threshold가 아니라 graph-derived distance field와 합성한다.
-- ocean/coast/basin 영역은 noise를 그대로 두지 말고 flatten/terrace/sediment policy를 거친다.
+- ocean, lake, river, wetland, floodplain 영역에서는 Perlin을 감쇠하거나 flatten한다.
+- mountain/ridge 주변에서는 Perlin이 능선 방향을 보조할 수 있지만, ridge ownership을 뒤집으면 안 된다.
 
 중요한 위험:
 
-- noise-first heightfield에는 local minima가 생긴다.
-- local minima를 방치하면 강이 바다로 흐르지 않고 끊긴다.
-- 따라서 hydrology 전후로 sink fill, lake creation, outlet carve 중 하나 이상의 명시적 처리가 필요하다.
+- macro elevation과 hydrology가 Perlin보다 먼저 정해지므로 순수 noise-first 방식보다 local minima 문제가 줄어든다.
+- 그래도 micro relief 때문에 국소적인 depression은 생길 수 있다.
+- 따라서 river/lake 주변에서는 micro relief clamp, local sink cleanup, lake creation, outlet carve 중 하나 이상의 명시적 처리가 필요하다.
 
 ### 6. Mountain And Ridge Structure
 
@@ -336,7 +356,10 @@ world는 graph 위에 mountain belt / ridge chain / fault line 후보를 소유�
 - continental core와 coast distance를 이용해 broad mountainness field 생성
 - ruggedness와 elevation bias로 ridge 주변 local relief 강화
 
-산맥은 최종 heightfield에 아래 방식으로 반영한다.
+산맥은 hydrology보다 먼저 정해져야 한다. 대륙 내부의 큰 산맥과 ridge는 분수계와 강의 방향을
+만드는 원인이며, hydrology가 나중에 그 구조를 읽어야 한다.
+
+산맥은 macro elevation과 Voronoi-derived noise map에 아래 방식으로 반영한다.
 
 - distance-to-ridge gradient
 - along-ridge variation
@@ -345,8 +368,9 @@ world는 graph 위에 mountain belt / ridge chain / fault line 후보를 소유�
 - snow/alpine temperature modifier
 - erosion/valley carve에 대한 저항 또는 우선순위
 
-산맥 선이 그대로 보이면 안 된다. ridge skeleton은 broad envelope로 확산되고, domain warp와
-local relief noise를 거쳐 자연스러운 능선/봉우리/안부로 바뀌어야 한다.
+산맥 선이 그대로 보이면 안 된다. ridge skeleton은 broad envelope로 확산되고, noisy boundary와
+Voronoi-derived gradient map을 거쳐 자연스러운 능선/봉우리/안부로 바뀌어야 한다. Perlin micro
+relief는 마지막에 이 구조 위에 얹히는 표면 디테일이다.
 
 ### 7. Hydrology Graph
 
@@ -460,7 +484,7 @@ polygon boundary, coast, river, biome transition은 raw straight line으로 보�
 만든다.
 
 - blue/corner edge는 polygon boundary, coast, river 후보선이 된다.
-- red/site edge는 polygon center 사이의 연결선이며 road/analysis/path 등에 쓸 수 있다.
+- red/site edge는 polygon center 사이의 연결선이며 region adjacency와 terrain analysis에 쓸 수 있다.
 - noisy line은 guard quadrilateral 안에서 recursive subdivision 또는 spline perturbation으로 만든다.
 - 같은 edge id와 seed는 언제나 같은 noisy line을 만든다.
 - neighboring chunk가 같은 edge를 샘플하면 같은 line을 얻어야 한다.
@@ -471,7 +495,6 @@ polygon boundary, coast, river, biome transition은 raw straight line으로 보�
 - coast line
 - river centerline
 - cliff/fault line
-- road/bridge relation
 
 boundary 표현은 feature마다 다를 수 있다.
 
@@ -480,19 +503,7 @@ boundary 표현은 feature마다 다를 수 있다.
 - coast: noisy coastline + beach/cliff material policy
 - fault/cliff: 부분적으로 discontinuous height transition 허용
 
-### 11. Roads, Bridges, And Cross-Graph Features
-
-원문에서 흥미로운 분리는 "강은 Voronoi edge를 따라가고, 도로는 Delaunay edge를 따라간다"는
-것이다. 이 프로젝트에서도 나중에 쓸 가치가 있다.
-
-- 강은 corner graph edge를 따라 흐른다.
-- 도로, 경로, 동물 이동로는 site graph edge 또는 contour-crossing path로 만든다.
-- 도로가 river edge를 crossing하면 bridge 후보가 명확해진다.
-- pathfinding상 가까운데 실제 경로가 먼 지점은 bridge/tunnel/ford 후보가 된다.
-
-이 레이어는 launch generator의 필수 범위는 아니지만, graph schema가 막아서는 안 된다.
-
-### 12. Watersheds And Named Areas
+### 11. Watersheds And Named Areas
 
 downhill edge를 따라가면 각 corner는 어떤 outlet 또는 lake/sink에 도달한다. 같은 outlet을
 공유하는 corner와 polygon 묶음은 watershed가 된다.
@@ -510,7 +521,7 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 만들 수 있다. 이 프로젝트가 생활/생태계/탐험 샌드박스를 목표로 한다면, watershed 기반
 named area는 장기적으로 중요한 시스템이 될 수 있다.
 
-### 13. Impassable Or Discontinuous Borders
+### 12. Impassable Or Discontinuous Borders
 
 모든 polygon 경계가 부드럽게 이어질 필요는 없다. 일부 edge는 gameplay와 지형 정체성을 위해
 불연속성을 가질 수 있다.
@@ -528,7 +539,7 @@ named area는 장기적으로 중요한 시스템이 될 수 있다.
 이 edge들은 visible boundary가 될 수 있지만, 그래도 raw polygon edge가 그대로 보이면 안 된다.
 noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연스럽게 현실화해야 한다.
 
-### 14. Variable Density
+### 13. Variable Density
 
 모든 지역에 같은 graph density를 쓸 필요는 없다.
 
@@ -543,7 +554,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 seam이 생길 수 있다. 따라서 launch 단계에서는 고정 density를 먼저 쓰고, graph schema만
 variable density를 막지 않게 열어둔다.
 
-### 15. Terrain Analysis
+### 14. Terrain Analysis
 
 polygon graph는 빠른 terrain analysis에 유용하다.
 
@@ -551,7 +562,6 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 
 - shortest path와 euclidean distance 차이
 - chokepoint
-- bridge/tunnel 후보
 - coast 접근성
 - mountain pass
 - river crossing
@@ -563,7 +573,7 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 그 결과를 gameplay 의미로 해석할 수 있지만, 원본 지형 graph와 접근성 계산은 world 데이터에
 가깝다.
 
-### 16. Module Annotation Model
+### 15. Module Annotation Model
 
 graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대해진다. Amit의 원문에서
 가져올 만한 구조는 "core graph는 index/id를 제공하고, feature module은 외부 table로 annotate한다"는 방식이다.
@@ -574,7 +584,7 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 - hydrology는 `edge_id -> river segment`, `corner_id -> drainage node` 같은 별도 layer를 가진다.
 - biome은 `site_id -> biome owner`, `column -> blended influence` 별도 layer를 가진다.
 - boundary realization은 `edge_id -> noisy curve` cache를 가진다.
-- roads/faults/lava/ecology 같은 feature는 core graph에 직접 의존하지 않고 id 기반 layer로 붙는다.
+- faults/lava/ecology 같은 feature는 core graph에 직접 의존하지 않고 id 기반 layer로 붙는다.
 
 이 방식은 world 내부에서도 의존성을 줄인다. `graph`는 `hydrology`를 몰라도 되고, `hydrology`는
 필요한 graph id와 샘플만 읽는다.
@@ -585,24 +595,30 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 
 새 generator의 목표 pipeline은 아래 순서다.
 
+각 단계는 그 단계까지의 결과를 world-owned topdown preview binary로 출력할 수 있어야 한다.
+이 binary는 PNG 같은 이미지 출력뿐 아니라, 필요하면 stage별 raw dump도 함께 제공할 수 있다.
+초기 구현에서는 기능 완성도보다 "어느 단계에서 artifact가 생겼는지 바로 볼 수 있음"을 더
+중요하게 둔다.
+
 1. target chunk 또는 preview area가 필요한 world-space x/z 범위를 정한다.
 2. 이 범위를 덮는 padded graph region area를 계산한다.
 3. deterministic site 후보를 생성한다.
 4. site 분포를 안정화한다. launch에서는 Poisson Disc 또는 jittered grid를 우선한다.
 5. Voronoi/Delaunay dual graph patch를 만든다.
-6. site/corner/edge에 macro seed field를 부여한다.
-7. neighbor smoothing과 low-frequency field로 continuous climate/terrain seed를 만든다.
-8. land/ocean/lake/coast 후보를 계산한다.
-9. corner elevation과 downhill direction을 계산한다.
-10. local minima를 lake/sink/outlet carve로 처리한다.
+6. 대륙과 바다의 macro ownership을 만든다.
+7. 대륙 내부의 Voronoi 기반 macro elevation seed를 만든다.
+8. Voronoi edge 기반 mountain/ridge/fault/coast 후보를 먼저 정한다.
+9. edge structure와 macro elevation을 바탕으로 hydrology 후보망을 설정한다.
+10. downhill routing, local minima, lake/sink/outlet carve를 처리한다.
 11. watershed와 flow accumulation을 계산한다.
-12. selected river edge chain을 만든다.
-13. mountain/ridge/fault/coast gradient를 만든다.
-14. column별 blended field sample을 만든다.
-15. base noise heightfield와 graph-derived gradient를 합성한다.
-16. river valley, lake flattening, floodplain, wetland를 반영한다.
-17. biome/material/surface policy를 blended field와 hydrology role에서 resolve한다.
-18. `ChunkData`로 voxel fill한다.
+12. 충분한 flow와 지형 조건을 만족하는 selected river edge chain을 만든다.
+13. river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 현실화한다.
+14. mountain/ridge/hydrology/coast/noisy boundary 정보를 합쳐 Voronoi-derived macro noise/gradient map을 만든다.
+15. column별 blended climate/hydration/biome influence field sample을 만든다.
+16. macro elevation과 Voronoi-derived map 위에 Perlin micro relief를 합성한다.
+17. river valley, lake flattening, floodplain, wetland, coast flatten/terrace를 최종 column plan에 반영한다.
+18. biome/material/surface policy를 blended field와 hydrology role에서 resolve한다.
+19. `ChunkData`로 voxel fill한다.
 
 ---
 
@@ -647,14 +663,23 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 
 초기 구현은 반드시 진단 출력을 포함해야 한다.
 
+각 generation stage는 독립적으로 실행 가능한 topdown preview binary를 가져야 한다. 같은 seed,
+같은 area, 같은 stage input이면 같은 이미지를 내야 하며, preview binary는 chunk 생성 없이도
+stage 결과를 검사할 수 있어야 한다.
+
 - site/corner/edge graph preview
 - graph region ownership preview
+- continent/ocean ownership preview
+- Voronoi macro elevation preview
+- mountain/ridge/fault/coast edge preview
 - dominant site map
 - blended influence map
 - elevation/corner downhill arrow map
 - watershed map
 - river flow accumulation map
 - noisy edge preview
+- Voronoi-derived macro noise/gradient map preview
+- Perlin micro relief preview
 - final heightfield preview
 - biome/material preview
 
@@ -692,12 +717,14 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 5. Voronoi edge는 hydrology 후보선이지 자동 river가 아니다.
 6. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
 7. hydrology는 최종 heightfield와 voxel fill 전에 제약으로 반영되어야 한다.
-8. noise-first heightfield를 사용할 경우 local minima 처리가 명시되어야 한다.
+8. macro elevation은 Voronoi graph 기반으로 먼저 생성되고, Perlin noise는 그 위에 얹히는 micro elevation이어야 한다.
 9. selected river path는 generation order와 chunk order에 독립적이어야 한다.
 10. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-11. biome owner와 visible material boundary는 분리될 수 있어야 한다.
-12. 같은 `(seed, generator_version, coord)`는 같은 generated block 결과를 내야 한다.
-13. legacy API는 migration bridge이며, 새 기능은 가능한 한 graph-first 모듈에 추가한다.
+11. Perlin micro relief가 만든 국소 depression은 river/lake/coast policy와 충돌하지 않도록 clamp 또는 cleanup되어야 한다.
+12. biome owner와 visible material boundary는 분리될 수 있어야 한다.
+13. 각 generation stage는 topdown preview binary로 검토 가능해야 한다.
+14. 같은 `(seed, generator_version, coord)`는 같은 generated block 결과를 내야 한다.
+15. legacy API는 migration bridge이며, 새 기능은 가능한 한 graph-first 모듈에 추가한다.
 
 ---
 
@@ -716,7 +743,7 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 - 이전 `world` 구현은 `src/world/legacy` 아래로 이동되어 보존되어 있다.
 - `src/world/mod.rs`는 기존 app/tool/runtime compile을 위해 legacy API를 re-export한다.
 - 새 graph-first 모듈은 현재 scaffold contract 단계다.
-- 아직 실제 Voronoi graph 생성, Delaunay/Voronoi construction, padded graph patch assembly, hydrology solve, noise heightfield 합성은 구현되지 않았다.
+- 아직 실제 Voronoi graph 생성, Delaunay/Voronoi construction, padded graph patch assembly, macro elevation, hydrology solve, Voronoi-derived map, Perlin micro relief 합성은 구현되지 않았다.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.
 
 ---
@@ -726,13 +753,14 @@ graph core에 모든 feature field를 직접 박아 넣으면 빠르게 비대�
 1. graph region과 deterministic site generation
 2. padded graph patch와 overlap determinism 테스트
 3. site/corner/edge topology 생성
-4. graph preview dump
-5. continuous field sampling
-6. land/ocean/lake/coast classification prototype
-7. corner elevation과 downhill routing
+4. stage별 topdown preview binary scaffold
+5. continent/ocean ownership과 Voronoi macro elevation
+6. edge 기반 mountain/ridge/fault/coast 후보
+7. edge 기반 hydrology 후보망과 downhill routing
 8. local minima 처리
 9. watershed/flow accumulation
 10. selected river edge chain과 noisy river curve
-11. base noise heightfield + graph gradient 합성
-12. chunk voxel fill
-13. topdown/debug preview와 seam regression 테스트
+11. Voronoi-derived macro noise/gradient map
+12. Perlin micro relief 합성
+13. chunk voxel fill
+14. topdown/debug preview와 seam regression 테스트
