@@ -290,8 +290,7 @@ fn build_polar_tundra_shrub(
     }
 
     for center in [[x, height, z], [x - lean.0, height - 1, z - lean.1]] {
-        let radius = 2 + rng.range_i16(0, 1);
-        add_blob(builder, rng, center, radius, 1, palette.leaves, 66);
+        add_blob(builder, rng, center, 2, 1, palette.leaves, 38);
         builder.put(center, palette.leaves, TreeVoxelRole::Leaf);
     }
 }
@@ -306,14 +305,18 @@ fn build_boreal_taiga_conifer(
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
     }
 
-    for y in 2..=height {
+    for y in 3..=height {
         let distance_from_top = height - y;
-        let mut radius = 1 + distance_from_top / 4;
-        radius = radius.clamp(1, 5);
-        if y % 2 == 0 {
+        let mut radius = if distance_from_top <= 1 {
+            1
+        } else {
+            1 + distance_from_top / 5
+        };
+        radius = radius.clamp(1, 4);
+        if y % 3 == 0 && distance_from_top > 4 {
             radius += 1;
         }
-        radius = radius.clamp(1, 6);
+        radius = radius.clamp(1, 5);
         add_conifer_layer(builder, rng, y, radius, palette.leaves);
     }
 
@@ -326,22 +329,13 @@ fn build_temperate_deciduous(
     palette: TreeBlockPalette,
 ) {
     let height = 10 + rng.range_i16(0, 5);
+    let two_by_two = rng.chance(1, 3);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        if y < 5 && rng.chance(1, 2) {
+        if two_by_two {
             builder.put([1, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        }
-    }
-
-    let branch_y = height - 4;
-    for dir in shuffled_dirs4(rng.next_u32()) {
-        let length = 3 + rng.range_i16(0, 2);
-        for step in 1..=length {
-            builder.put(
-                [dir.0 * step, branch_y + step / 2, dir.1 * step],
-                palette.trunk,
-                TreeVoxelRole::Branch,
-            );
+            builder.put([0, y, 1], palette.trunk, TreeVoxelRole::Trunk);
+            builder.put([1, y, 1], palette.trunk, TreeVoxelRole::Trunk);
         }
     }
 
@@ -385,7 +379,7 @@ fn build_mediterranean_olive(
     }
 
     for dir in shuffled_dirs4(rng.next_u32()) {
-        let length = 5 + rng.range_i16(0, 3);
+        let length = 4 + rng.range_i16(0, 2);
         for step in 1..=length {
             builder.put(
                 [dir.0 * step, height - 1 + step / 3, dir.1 * step],
@@ -397,7 +391,7 @@ fn build_mediterranean_olive(
             builder,
             rng,
             [dir.0 * length, height, dir.1 * length],
-            4,
+            3,
             2,
             palette.leaves,
             44,
@@ -408,35 +402,22 @@ fn build_mediterranean_olive(
 fn build_swamp_cypress(builder: &mut TreeBuilder, rng: &mut TreeRng, palette: TreeBlockPalette) {
     let height = 14 + rng.range_i16(0, 7);
     let root_block = palette.root.unwrap_or(palette.trunk);
+    let two_by_two = rng.chance(1, 2);
     for y in 0..height {
         builder.put([0, y, 0], palette.trunk, TreeVoxelRole::Trunk);
-        if y < height - 2 && y % 2 == 0 {
+        if two_by_two {
             builder.put([1, y, 0], palette.trunk, TreeVoxelRole::Trunk);
+            builder.put([0, y, 1], palette.trunk, TreeVoxelRole::Trunk);
+            builder.put([1, y, 1], palette.trunk, TreeVoxelRole::Trunk);
         }
     }
 
-    for dir in dirs8() {
-        let length = if dir.0 == 0 || dir.1 == 0 { 5 } else { 3 };
-        for step in 1..=length {
-            builder.put(
-                [dir.0 * step, 0, dir.1 * step],
-                root_block,
-                TreeVoxelRole::Root,
-            );
-            if step <= 2 {
-                builder.put(
-                    [dir.0 * step, 1, dir.1 * step],
-                    root_block,
-                    TreeVoxelRole::Root,
-                );
-            }
-        }
-    }
+    add_irregular_roots(builder, rng, root_block, 4, 6);
 
     add_blob(builder, rng, [0, height, 0], 5, 3, palette.leaves, 64);
     add_blob(builder, rng, [1, height - 2, 1], 4, 3, palette.leaves, 58);
     if let Some(vine) = palette.vine {
-        add_hanging_vines(builder, rng, height - 1, 5, vine, 10);
+        add_attached_hanging_vines(builder, rng, height - 1, 5, vine, 10);
     }
 }
 
@@ -478,15 +459,7 @@ fn build_tropical_rainforest_jungle(
         }
     }
 
-    for dir in dirs8() {
-        for step in 1..=3 {
-            builder.put(
-                [dir.0 * step, step - 1, dir.1 * step],
-                root_block,
-                TreeVoxelRole::Root,
-            );
-        }
-    }
+    add_irregular_roots(builder, rng, root_block, 5, 8);
 
     add_blob(builder, rng, [0, height, 0], 6, 4, palette.leaves, 78);
     add_blob(builder, rng, [3, height - 5, 1], 5, 3, palette.leaves, 68);
@@ -501,7 +474,7 @@ fn build_tropical_rainforest_jungle(
     );
 
     if let Some(vine) = palette.vine {
-        add_hanging_vines(builder, rng, height, 6, vine, 18);
+        add_attached_hanging_vines(builder, rng, height, 6, vine, 18);
     }
 }
 
@@ -548,13 +521,13 @@ fn add_conifer_layer(
     for z in -radius..=radius {
         for x in -radius..=radius {
             let distance = x.abs() + z.abs();
-            if distance > radius + 1 {
+            if distance > radius {
                 continue;
             }
-            if distance == 0 && y % 2 == 0 {
+            if distance == 0 {
                 continue;
             }
-            if distance > radius && rng.chance(1, 2) {
+            if distance == radius && rng.chance(1, 3) {
                 continue;
             }
             builder.put([x, y, z], block, TreeVoxelRole::Leaf);
@@ -589,23 +562,81 @@ fn add_flat_canopy(
     }
 }
 
-fn add_hanging_vines(
+fn add_irregular_roots(
     builder: &mut TreeBuilder,
     rng: &mut TreeRng,
-    canopy_y: i16,
+    block: BlockId,
+    min_roots: usize,
+    max_roots: usize,
+) {
+    let dirs = shuffled_dirs8(rng.next_u32());
+    let count = rng
+        .range_i16(min_roots as i16, max_roots as i16)
+        .clamp(1, 8) as usize;
+
+    for dir in dirs.into_iter().take(count) {
+        let length = if dir.0 == 0 || dir.1 == 0 {
+            3 + rng.range_i16(0, 2)
+        } else {
+            2 + rng.range_i16(0, 1)
+        };
+        let bend = if rng.chance(1, 2) {
+            perpendicular4(dir, rng.next_u32())
+        } else {
+            (0, 0)
+        };
+
+        for step in 1..=length {
+            let bend_step = if step > length / 2 { 1 } else { 0 };
+            let x = dir.0 * step + bend.0 * bend_step;
+            let z = dir.1 * step + bend.1 * bend_step;
+            builder.put([x, 0, z], block, TreeVoxelRole::Root);
+            if step == 1 || (step == 2 && rng.chance(1, 2)) {
+                builder.put([x, 1, z], block, TreeVoxelRole::Root);
+            }
+        }
+    }
+}
+
+fn add_attached_hanging_vines(
+    builder: &mut TreeBuilder,
+    rng: &mut TreeRng,
+    max_anchor_y: i16,
     radius: i16,
     block: BlockId,
     attempts: usize,
 ) {
+    let anchors = builder
+        .voxels
+        .iter()
+        .filter(|voxel| {
+            voxel.role == TreeVoxelRole::Leaf
+                && voxel.offset[1] <= max_anchor_y
+                && voxel.offset[0].abs() + voxel.offset[2].abs() >= radius / 2
+        })
+        .map(|voxel| voxel.offset)
+        .collect::<Vec<_>>();
+
+    if anchors.is_empty() {
+        return;
+    }
+
     for _ in 0..attempts {
-        let x = rng.range_i16(-radius, radius);
-        let z = rng.range_i16(-radius, radius);
-        if x.abs() + z.abs() < radius / 2 {
+        let anchor = anchors[rng.range_usize(0, anchors.len() - 1)];
+        let mut start = [anchor[0], anchor[1] - 1, anchor[2]];
+        if builder.is_occupied(start) {
+            start = [anchor[0], anchor[1], anchor[2]];
+        }
+        if builder.is_occupied(start) {
             continue;
         }
         let length = 2 + rng.range_i16(0, 5);
         for step in 0..length {
-            builder.put([x, canopy_y - step, z], block, TreeVoxelRole::Vine);
+            let offset = [start[0], start[1] - step, start[2]];
+            if builder.is_woody(offset) {
+                break;
+            }
+            builder.put(offset, block, TreeVoxelRole::Vine);
         }
     }
 }
@@ -642,6 +673,20 @@ impl TreeBuilder {
             block,
             role,
         });
+    }
+
+    fn is_occupied(&self, offset: [i16; 3]) -> bool {
+        self.voxels.iter().any(|voxel| voxel.offset == offset)
+    }
+
+    fn is_woody(&self, offset: [i16; 3]) -> bool {
+        self.voxels.iter().any(|voxel| {
+            voxel.offset == offset
+                && matches!(
+                    voxel.role,
+                    TreeVoxelRole::Trunk | TreeVoxelRole::Root | TreeVoxelRole::Branch
+                )
+        })
     }
 
     fn finish(mut self) -> TreeBlueprint {
@@ -741,6 +786,14 @@ impl TreeRng {
         let span = i32::from(max - min + 1) as u32;
         min + (self.next_u32() % span) as i16
     }
+
+    fn range_usize(&mut self, min: usize, max: usize) -> usize {
+        if min >= max {
+            return min;
+        }
+        let span = max - min + 1;
+        min + (self.next_u32() as usize % span)
+    }
 }
 
 fn splitmix64(mut value: u64) -> u64 {
@@ -769,6 +822,19 @@ fn shuffled_dirs4(value: u32) -> [(i16, i16); 4] {
     }
 }
 
+fn shuffled_dirs8(value: u32) -> [(i16, i16); 8] {
+    let mut dirs = dirs8();
+    let mut state = value;
+    let mut index = dirs.len();
+    while index > 1 {
+        index -= 1;
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let swap = (state as usize) % (index + 1);
+        dirs.swap(index, swap);
+    }
+    dirs
+}
+
 fn dirs8() -> [(i16, i16); 8] {
     [
         (1, 0),
@@ -780,6 +846,12 @@ fn dirs8() -> [(i16, i16); 8] {
         (1, -1),
         (-1, -1),
     ]
+}
+
+fn perpendicular4(dir: (i16, i16), value: u32) -> (i16, i16) {
+    let left = (-dir.1, dir.0);
+    let right = (dir.1, -dir.0);
+    if value % 2 == 0 { left } else { right }
 }
 
 #[cfg(test)]
@@ -870,6 +942,59 @@ mod tests {
                 .expect("tree palette should resolve");
             assert!(registry.block(palette.trunk).is_some());
             assert!(registry.block(palette.leaves).is_some());
+        }
+    }
+
+    #[test]
+    fn deciduous_and_swamp_trunks_stay_in_straight_columns() {
+        for kind in [TreeKind::TemperateDeciduous, TreeKind::SwampCypress] {
+            for seed in 0..12 {
+                let tree = generate_tree_blueprint(TreeGenRequest {
+                    kind,
+                    origin: WorldBlockCoord(0, 0, 0),
+                    seed,
+                    palette: palette(),
+                });
+
+                assert!(tree.voxels.iter().all(|voxel| {
+                    voxel.role != TreeVoxelRole::Trunk
+                        || ((voxel.offset[0] == 0 || voxel.offset[0] == 1)
+                            && (voxel.offset[2] == 0 || voxel.offset[2] == 1))
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn hanging_vines_start_attached_to_leaves() {
+        for kind in [TreeKind::SwampCypress, TreeKind::TropicalRainforestJungle] {
+            for seed in 0..12 {
+                let tree = generate_tree_blueprint(TreeGenRequest {
+                    kind,
+                    origin: WorldBlockCoord(0, 0, 0),
+                    seed,
+                    palette: palette(),
+                });
+                let vines = tree
+                    .voxels
+                    .iter()
+                    .filter(|voxel| voxel.role == TreeVoxelRole::Vine)
+                    .collect::<Vec<_>>();
+
+                for vine in &vines {
+                    let has_vine_above = vines.iter().any(|other| {
+                        other.offset == [vine.offset[0], vine.offset[1] + 1, vine.offset[2]]
+                    });
+                    if has_vine_above {
+                        continue;
+                    }
+
+                    assert!(tree.voxels.iter().any(|other| {
+                        other.role == TreeVoxelRole::Leaf
+                            && other.offset == [vine.offset[0], vine.offset[1] + 1, vine.offset[2]]
+                    }));
+                }
+            }
         }
     }
 }

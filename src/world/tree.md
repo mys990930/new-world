@@ -48,14 +48,14 @@ generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
 
 ## Tree Kinds
 
-- `PolarTundraShrub`: low, crooked shrub form, roughly 1.0-2.0m tall.
-- `BorealTaigaConifer`: pointed conifer with stacked triangular leaf shelves, roughly 7.0-11.5m tall.
-- `TemperateDeciduous`: broad oak-like trunk with rounded crown, roughly 5.0-8.0m tall.
+- `PolarTundraShrub`: low, crooked sparse-leaf shrub form, roughly 1.0-2.0m tall.
+- `BorealTaigaConifer`: pointed conifer with a short visible lower trunk and narrow stacked triangular leaf shelves, roughly 7.0-11.5m tall.
+- `TemperateDeciduous`: broad oak-like straight 1x1 or 2x2 trunk with rounded crown, roughly 5.0-8.0m tall.
 - `TemperateBirch`: pale straight trunk with light oval crown, roughly 6.0-10.0m tall.
-- `MediterraneanOlive`: low, spreading, sparse dry-climate crown, roughly 3.0-5.5m tall.
-- `SwampCypress`: wetland tree with exposed roots and hanging vines, roughly 7.0-11.5m tall.
+- `MediterraneanOlive`: low, moderately spreading, sparse dry-climate crown, roughly 3.0-5.5m tall.
+- `SwampCypress`: wetland tree with straight 1x1 or 2x2 trunk, irregular exposed roots, and leaf-attached hanging vines, roughly 7.0-11.5m tall.
 - `SavannaAcacia`: tall trunk with sparse branches and umbrella crown, roughly 5.5-9.0m tall.
-- `TropicalRainforestJungle`: very tall dense tree with layered crown and vines, roughly 12.0-19.0m tall.
+- `TropicalRainforestJungle`: very tall dense tree with layered crown, irregular buttress roots, and leaf-attached vines, roughly 12.0-19.0m tall.
 
 ## Scale
 
