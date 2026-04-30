@@ -16,6 +16,7 @@ macro elevation은 graph 기반으로 먼저 생성되고, Perlin은 그 위에 
 - Perlin micro relief amplitude와 mask 정책 정의
 - river, lake, wetland, floodplain, coast flatten/terrace 반영
 - local depression cleanup 또는 clamp 정책 정의
+- voxel fill이 읽을 heightfield column output 제공
 
 ---
 
@@ -55,6 +56,10 @@ height =
 5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
 6. Perlin noise를 만들고 hydrology/coast/lake/ridge mask로 amplitude를 제한한다.
 7. macro map, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+
+heightfield 단계의 출력은 block 배치가 아니라 column별 높이 계약이다. 예를 들어
+`surface_y`, `water_surface_y`, `stone_floor_y`, `soil_depth_blocks`, `slope`, `floodplain_mask`,
+`cave_or_void_interval` 같은 값을 만들고, voxel fill은 이 값을 읽어 `ChunkData`를 채운다.
 
 ---
 
