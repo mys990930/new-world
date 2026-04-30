@@ -167,7 +167,7 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 - Defaults:
   - `--width 3840`
   - `--height 2160`
-  - `--world-span-blocks 8192`
+  - `--world-span-blocks 32768`
   - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
   - `--stage macro_map`

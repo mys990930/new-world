@@ -1,5 +1,5 @@
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::graph::{
     GraphBaseFields, GraphRegionCoord, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch,
@@ -243,6 +243,7 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
         })
         .collect::<Vec<_>>();
     edges.sort_by_key(|edge| edge.id.0);
+    apply_pre_hydrology_river_corridors(&mut edges, &site_map, config);
 
     GraphMacroMap {
         sites,
@@ -485,6 +486,441 @@ fn macro_edge_guide(
         ridgeness,
         river_potential,
     }
+}
+
+fn apply_pre_hydrology_river_corridors(
+    edges: &mut [MacroEdge],
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    config: MacroMapConfig,
+) {
+    let adjacency = river_corridor_adjacency(edges, sites);
+    let mut sources = sites
+        .values()
+        .filter(|site| is_river_corridor_source(site, config))
+        .map(|site| (river_corridor_source_score(site, config), site.id))
+        .collect::<Vec<_>>();
+    sources.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.0.cmp(&b.1.0)));
+
+    let max_sources = (sources.len() / 8).clamp(8, 96);
+    let max_steps = ((config.super_cell_size_blocks as f32 / 96.0).round() as usize).clamp(8, 36);
+    let minimum_edge_score = (config.river_candidate_threshold * 0.70).clamp(0.28, 0.86);
+    let mut selected_edges = HashSet::new();
+
+    for (_, source_id) in sources.into_iter().take(max_sources) {
+        let mut current_id = source_id;
+        let mut visited_sites = HashSet::from([source_id]);
+
+        for _ in 0..max_steps {
+            let Some(current) = sites.get(&current_id).copied() else {
+                break;
+            };
+            if current.coastness >= 0.86 || current.signed_macro_elevation <= 0.035 {
+                break;
+            }
+
+            let Some(next) = best_downstream_corridor_step(
+                current,
+                &adjacency,
+                sites,
+                &visited_sites,
+                minimum_edge_score,
+                config,
+            ) else {
+                break;
+            };
+
+            selected_edges.insert(next.edge_id);
+            current_id = next.site_id;
+            visited_sites.insert(current_id);
+        }
+    }
+    selected_edges.extend(pre_hydrology_corner_edge_corridors(edges, sites, config));
+
+    for edge in edges {
+        if !selected_edges.contains(&edge.id) {
+            edge.guide.is_river_candidate = false;
+            continue;
+        }
+
+        edge.guide.is_river_candidate = true;
+        edge.guide.river_potential = edge.guide.river_potential.max(0.72);
+    }
+}
+
+fn pre_hydrology_corner_edge_corridors(
+    edges: &[MacroEdge],
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    config: MacroMapConfig,
+) -> HashSet<VoronoiEdgeId> {
+    let mut corner_edges = HashMap::<VoronoiCornerId, Vec<usize>>::new();
+
+    for (index, edge) in edges.iter().enumerate() {
+        if !is_river_corridor_edge_candidate(*edge, sites) {
+            continue;
+        }
+
+        corner_edges.entry(edge.corners[0]).or_default().push(index);
+        corner_edges.entry(edge.corners[1]).or_default().push(index);
+    }
+
+    for indices in corner_edges.values_mut() {
+        indices.sort_by_key(|index| edges[*index].id.0);
+        indices.dedup();
+    }
+
+    let max_steps = ((config.super_cell_size_blocks as f32 / 128.0).round() as usize).clamp(8, 32);
+    let mut selected = HashSet::new();
+
+    for source_index in 0..edges.len() {
+        if !is_river_corridor_edge_candidate(edges[source_index], sites) {
+            continue;
+        }
+        let Some(source_score) =
+            river_corridor_edge_source_score(edges[source_index], sites, config)
+        else {
+            continue;
+        };
+        if source_score < 0.55
+            || deterministic_corridor_edge_bias(edges[source_index].id, config) > 0.08
+        {
+            continue;
+        }
+
+        let mut current_index = source_index;
+        let mut visited = HashSet::from([edges[current_index].id]);
+
+        for _ in 0..max_steps {
+            let current = edges[current_index];
+            selected.insert(current.id);
+
+            if river_corridor_edge_coastness(current, sites) >= 0.82
+                || river_corridor_edge_drainage(current, sites) <= 0.035
+            {
+                break;
+            }
+
+            let Some(next_index) = best_corner_connected_downstream_edge(
+                current_index,
+                edges,
+                sites,
+                &corner_edges,
+                &visited,
+            ) else {
+                break;
+            };
+
+            current_index = next_index;
+            visited.insert(edges[current_index].id);
+        }
+    }
+
+    selected
+}
+
+fn best_corner_connected_downstream_edge(
+    current_index: usize,
+    edges: &[MacroEdge],
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    corner_edges: &HashMap<VoronoiCornerId, Vec<usize>>,
+    visited: &HashSet<VoronoiEdgeId>,
+) -> Option<usize> {
+    let current = edges[current_index];
+    let current_drainage = river_corridor_edge_drainage(current, sites);
+    let current_coast_distance = river_corridor_edge_coast_distance(current, sites);
+    let mut best = None::<(f32, usize)>;
+
+    for corner in current.corners {
+        let Some(neighbor_indices) = corner_edges.get(&corner) else {
+            continue;
+        };
+        for &next_index in neighbor_indices {
+            if next_index == current_index || visited.contains(&edges[next_index].id) {
+                continue;
+            }
+            let next = edges[next_index];
+            if !is_river_corridor_edge_candidate(next, sites) {
+                continue;
+            }
+
+            let next_drainage = river_corridor_edge_drainage(next, sites);
+            let descent = current_drainage - next_drainage;
+            let coast_progress =
+                current_coast_distance - river_corridor_edge_coast_distance(next, sites);
+            let soft_downhill = descent >= -0.012 && coast_progress > 0.0;
+            if descent < 0.006 && !soft_downhill {
+                continue;
+            }
+
+            let score = (descent.max(0.0) * 1.72
+                + coast_progress.max(0.0) * 0.0028
+                + next.guide.river_potential * 0.32
+                + river_corridor_edge_basinness(next, sites) * 0.18
+                + river_corridor_edge_coastness(next, sites) * 0.08
+                - next.guide.ridgeness * 0.12)
+                .clamp(0.0, 1.0);
+            if best.is_none_or(|(best_score, best_index)| {
+                score > best_score || (score == best_score && next.id.0 < edges[best_index].id.0)
+            }) {
+                best = Some((score, next_index));
+            }
+        }
+    }
+
+    best.and_then(|(score, index)| (score >= 0.25).then_some(index))
+}
+
+fn is_river_corridor_edge_candidate(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> bool {
+    if edge.guide.is_coast || edge.guide.is_ridge_candidate {
+        return false;
+    }
+
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return false;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return false;
+    };
+
+    a.surface_kind.is_land_owned()
+        && b.surface_kind.is_land_owned()
+        && (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5 > 0.025
+}
+
+fn river_corridor_edge_source_score(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    config: MacroMapConfig,
+) -> Option<f32> {
+    let a = sites.get(&edge.sites[0]).copied()?;
+    let b = sites.get(&edge.sites[1]).copied()?;
+    let elevation = (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5;
+    let basinness = (a.basinness + b.basinness) * 0.5;
+    let inlandness = (river_corridor_edge_coast_distance(edge, sites)
+        / (config.coast_width_blocks * 4.0))
+        .clamp(0.0, 1.0);
+
+    Some(
+        (elevation * 0.34
+            + basinness * 0.24
+            + river_corridor_edge_mountainness(edge, sites) * 0.16
+            + inlandness * 0.16
+            + edge.guide.river_potential * 0.10)
+            .max(0.0),
+    )
+}
+
+fn river_corridor_edge_drainage(edge: MacroEdge, sites: &HashMap<VoronoiSiteId, MacroSite>) -> f32 {
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return 0.0;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return 0.0;
+    };
+
+    (drainage_elevation(a) + drainage_elevation(b)) * 0.5
+}
+
+fn river_corridor_edge_coast_distance(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> f32 {
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return 0.0;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return 0.0;
+    };
+
+    (a.distance_to_coast_blocks + b.distance_to_coast_blocks) * 0.5
+}
+
+fn river_corridor_edge_coastness(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> f32 {
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return 0.0;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return 0.0;
+    };
+
+    (a.coastness + b.coastness) * 0.5
+}
+
+fn river_corridor_edge_basinness(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> f32 {
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return 0.0;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return 0.0;
+    };
+
+    (a.basinness + b.basinness) * 0.5
+}
+
+fn river_corridor_edge_mountainness(
+    edge: MacroEdge,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> f32 {
+    let Some(a) = sites.get(&edge.sites[0]).copied() else {
+        return 0.0;
+    };
+    let Some(b) = sites.get(&edge.sites[1]).copied() else {
+        return 0.0;
+    };
+
+    (a.mountainness + b.mountainness) * 0.5
+}
+
+fn deterministic_corridor_edge_bias(edge_id: VoronoiEdgeId, config: MacroMapConfig) -> f32 {
+    unit_f32(splitmix64(
+        splitmix64(edge_id.0 ^ 0xbacf_17e5_d0c0_51de)
+            ^ splitmix64(config.seed)
+            ^ u64::from(config.generator_version),
+    ))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RiverCorridorStep {
+    edge_id: VoronoiEdgeId,
+    site_id: VoronoiSiteId,
+    edge_potential: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RankedRiverCorridorStep {
+    edge_id: VoronoiEdgeId,
+    site_id: VoronoiSiteId,
+    score: f32,
+}
+
+fn river_corridor_adjacency(
+    edges: &[MacroEdge],
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> HashMap<VoronoiSiteId, Vec<RiverCorridorStep>> {
+    let mut adjacency = HashMap::<VoronoiSiteId, Vec<RiverCorridorStep>>::new();
+
+    for edge in edges {
+        if edge.guide.is_coast || edge.guide.is_ridge_candidate {
+            continue;
+        }
+
+        let Some(a) = sites.get(&edge.sites[0]).copied() else {
+            continue;
+        };
+        let Some(b) = sites.get(&edge.sites[1]).copied() else {
+            continue;
+        };
+        if !a.surface_kind.is_land_owned() || !b.surface_kind.is_land_owned() {
+            continue;
+        }
+
+        adjacency.entry(a.id).or_default().push(RiverCorridorStep {
+            edge_id: edge.id,
+            site_id: b.id,
+            edge_potential: edge.guide.river_potential,
+        });
+        adjacency.entry(b.id).or_default().push(RiverCorridorStep {
+            edge_id: edge.id,
+            site_id: a.id,
+            edge_potential: edge.guide.river_potential,
+        });
+    }
+
+    adjacency.par_iter_mut().for_each(|(_, steps)| {
+        steps.sort_by_key(|step| (step.site_id.0, step.edge_id.0));
+        steps.dedup_by_key(|step| (step.site_id, step.edge_id));
+    });
+
+    adjacency
+}
+
+fn is_river_corridor_source(site: &MacroSite, config: MacroMapConfig) -> bool {
+    site.surface_kind.is_land_owned()
+        && site.signed_macro_elevation >= 0.14
+        && site.basinness >= 0.34
+        && site.coastness <= 0.58
+        && site.distance_to_coast_blocks >= config.coast_width_blocks * 0.45
+}
+
+fn river_corridor_source_score(site: &MacroSite, config: MacroMapConfig) -> f32 {
+    let inlandness =
+        (site.distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
+    (site.signed_macro_elevation * 0.34
+        + site.basinness * 0.24
+        + site.mountainness * 0.18
+        + inlandness * 0.14
+        + (1.0 - site.coastness) * 0.10)
+        .max(0.0)
+}
+
+fn best_downstream_corridor_step(
+    current: MacroSite,
+    adjacency: &HashMap<VoronoiSiteId, Vec<RiverCorridorStep>>,
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    visited_sites: &HashSet<VoronoiSiteId>,
+    minimum_edge_score: f32,
+    config: MacroMapConfig,
+) -> Option<RankedRiverCorridorStep> {
+    let current_drainage = drainage_elevation(current);
+    let current_coast_distance = current.distance_to_coast_blocks;
+
+    adjacency
+        .get(&current.id)?
+        .iter()
+        .filter_map(|step| {
+            if visited_sites.contains(&step.site_id) {
+                return None;
+            }
+
+            let next = sites.get(&step.site_id).copied()?;
+            let next_drainage = drainage_elevation(next);
+            let descent = current_drainage - next_drainage;
+            let coast_progress = (current_coast_distance - next.distance_to_coast_blocks)
+                / config.coast_width_blocks;
+            let ocean_basin_progress = (current.distance_to_ocean_basin_blocks
+                - next.distance_to_ocean_basin_blocks)
+                / config.super_cell_size_blocks as f32;
+            let outlet_progress = coast_progress.max(ocean_basin_progress);
+            let soft_downhill = descent >= -0.015 && coast_progress > 0.10;
+            let soft_outlet_step = descent >= -0.010 && outlet_progress > 0.045;
+            if descent < 0.010 && !soft_downhill && !soft_outlet_step {
+                return None;
+            }
+
+            let score = (descent.max(0.0) * 1.85
+                + outlet_progress.max(0.0) * 0.30
+                + next.basinness * 0.18
+                + step.edge_potential * 0.34
+                + next.coastness * 0.08
+                - next.ridgeness * 0.16)
+                .clamp(0.0, 1.0);
+            if score < minimum_edge_score {
+                return None;
+            }
+
+            Some(RankedRiverCorridorStep {
+                edge_id: step.edge_id,
+                site_id: step.site_id,
+                score,
+            })
+        })
+        .max_by(|a, b| {
+            a.score
+                .total_cmp(&b.score)
+                .then_with(|| b.edge_id.0.cmp(&a.edge_id.0))
+        })
+}
+
+fn drainage_elevation(site: MacroSite) -> f32 {
+    site.signed_macro_elevation - site.basinness * 0.09 - site.coastness * 0.06
 }
 
 fn empty_edge_guide() -> MacroEdgeGuide {
@@ -887,6 +1323,66 @@ mod tests {
     }
 
     #[test]
+    fn river_candidates_form_pre_hydrology_downstream_corridors() {
+        let patch = generate_voronoi_graph_patch(test_request(91, 0, 0));
+        let mut config = test_macro_config(91);
+        config.ridge_candidate_threshold = 0.46;
+        config.river_candidate_threshold = 0.46;
+        let map = generate_macro_map(&patch, config);
+        let site_map = macro_sites_by_id(&map);
+        let river_edges = map.river_candidate_edges().collect::<Vec<_>>();
+
+        assert!(!river_edges.is_empty());
+        for edge in &river_edges {
+            let a = site_map[&edge.sites[0]];
+            let b = site_map[&edge.sites[1]];
+
+            assert!(a.surface_kind.is_land_owned());
+            assert!(b.surface_kind.is_land_owned());
+            assert!(!edge.guide.is_ridge_candidate);
+        }
+
+        let components = river_candidate_components(&river_edges);
+        let best = components
+            .iter()
+            .filter_map(|component| {
+                let mut min_elevation = f32::INFINITY;
+                let mut max_elevation = f32::NEG_INFINITY;
+                let mut min_outlet_distance = f32::INFINITY;
+                let mut max_outlet_distance = f32::NEG_INFINITY;
+
+                for site_id in &component.site_ids {
+                    let site = site_map[site_id];
+                    min_elevation = min_elevation.min(site.signed_macro_elevation);
+                    max_elevation = max_elevation.max(site.signed_macro_elevation);
+                    let outlet_distance = site.distance_to_ocean_basin_blocks;
+                    min_outlet_distance = min_outlet_distance.min(outlet_distance);
+                    max_outlet_distance = max_outlet_distance.max(outlet_distance);
+                }
+
+                (component.edge_count >= 3).then_some((
+                    component.edge_count,
+                    max_elevation - min_elevation,
+                    max_outlet_distance - min_outlet_distance,
+                ))
+            })
+            .max_by(|a, b| a.0.cmp(&b.0));
+
+        let Some((edge_count, elevation_drop, outlet_progress)) = best else {
+            panic!("expected at least one connected river candidate corridor");
+        };
+        assert!(edge_count >= 3);
+        assert!(
+            elevation_drop >= 0.05,
+            "corridor should span high-to-low macro elevation; drop={elevation_drop}"
+        );
+        assert!(
+            outlet_progress >= config.coast_width_blocks * 0.20,
+            "corridor should make visible progress toward lower/coastal ground; progress={outlet_progress}"
+        );
+    }
+
+    #[test]
     fn adjacent_patch_overlap_keeps_macro_sites_and_edges_stable() {
         let left = generate_voronoi_graph_patch(test_request(77, 0, 0));
         let right =
@@ -960,5 +1456,60 @@ mod tests {
             .filter(|edge| sites.contains_key(&edge.sites[0]) && sites.contains_key(&edge.sites[1]))
             .map(|edge| (edge.id, *edge))
             .collect()
+    }
+
+    #[derive(Debug)]
+    struct RiverCandidateComponent {
+        site_ids: HashSet<VoronoiSiteId>,
+        edge_count: usize,
+    }
+
+    fn river_candidate_components(edges: &[&MacroEdge]) -> Vec<RiverCandidateComponent> {
+        let mut adjacency = HashMap::<VoronoiSiteId, Vec<(VoronoiSiteId, VoronoiEdgeId)>>::new();
+        for edge in edges {
+            adjacency
+                .entry(edge.sites[0])
+                .or_default()
+                .push((edge.sites[1], edge.id));
+            adjacency
+                .entry(edge.sites[1])
+                .or_default()
+                .push((edge.sites[0], edge.id));
+        }
+
+        let mut visited_sites = HashSet::new();
+        let mut components = Vec::new();
+        let mut starts = adjacency.keys().copied().collect::<Vec<_>>();
+        starts.sort_by_key(|site| site.0);
+
+        for start in starts {
+            if visited_sites.contains(&start) {
+                continue;
+            }
+
+            let mut stack = vec![start];
+            let mut site_ids = HashSet::new();
+            let mut edge_ids = HashSet::new();
+            visited_sites.insert(start);
+
+            while let Some(site_id) = stack.pop() {
+                site_ids.insert(site_id);
+                if let Some(neighbors) = adjacency.get(&site_id) {
+                    for &(neighbor_id, edge_id) in neighbors {
+                        edge_ids.insert(edge_id);
+                        if visited_sites.insert(neighbor_id) {
+                            stack.push(neighbor_id);
+                        }
+                    }
+                }
+            }
+
+            components.push(RiverCandidateComponent {
+                site_ids,
+                edge_count: edge_ids.len(),
+            });
+        }
+
+        components
     }
 }

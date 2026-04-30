@@ -116,7 +116,7 @@
 - 선택 인자:
   - `--width <u32>`: 기본 `3840`
   - `--height <u32>`: 기본 `2160`
-  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `8192`
+  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
   - `--stage macro_map`
@@ -149,6 +149,8 @@
 - coast/ridge/river candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
+- macro-scale 기본 footprint에서는 river candidate corridor를 마지막에 더 선명하게 그려 상류에서
+  하류로 이어지는 후보 chain을 확인할 수 있게 한다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
 
 ---

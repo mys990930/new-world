@@ -23,7 +23,7 @@
 
 - `--width 3840`
 - `--height 2160`
-- `--world-span-blocks 8192`
+- `--world-span-blocks 32768`
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--stage macro_map`
@@ -58,7 +58,8 @@
 5. Generate the RGB pixel buffer with Rayon.
 6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
-   projecting it onto pixel centers.
+   projecting it onto pixel centers. Coast and ridge overlays are drawn first, and river candidate
+   corridors are drawn last so they remain visible at the default macro-scale footprint.
 7. Draw the compact legend and encode PNG metadata.
 
 ## Integration Note

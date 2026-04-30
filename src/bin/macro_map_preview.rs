@@ -18,7 +18,7 @@ use new_world::world::generation::{
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
-const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
+const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "macro_map";
 const OUTPUT_DIR: &str = "target/macro-map-preview";
 const SEA_LEVEL: f32 = 0.0;
@@ -458,11 +458,12 @@ fn build_macro_map_for_preview(
         .iter()
         .map(|site| (site.id, *site))
         .collect::<HashMap<_, _>>();
-    let edge_samples = macro_map
+    let mut edge_samples = macro_map
         .edges
         .par_iter()
         .filter_map(|edge| macro_edge_sample(*edge))
         .collect::<Vec<_>>();
+    edge_samples.sort_by_key(|sample| (edge_kind_draw_order(sample.kind), sample.edge.id.0));
 
     Ok(PreviewGraph {
         patch,
@@ -517,6 +518,14 @@ fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
         });
     }
     None
+}
+
+fn edge_kind_draw_order(kind: EdgeKind) -> u8 {
+    match kind {
+        EdgeKind::Coast => 0,
+        EdgeKind::Ridge => 1,
+        EdgeKind::River => 2,
+    }
 }
 
 fn render_preview(window: PreviewWindow, graph: &PreviewGraph) -> Result<RgbImage, Box<dyn Error>> {
@@ -680,12 +689,12 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
         let color = match sample.kind {
             EdgeKind::Coast => [236, 213, 128],
             EdgeKind::Ridge => [247, 248, 242],
-            EdgeKind::River => [35, 96, 218],
+            EdgeKind::River => [24, 82, 255],
         };
         let width = match sample.kind {
             EdgeKind::Coast => 1,
             EdgeKind::Ridge => 2,
-            EdgeKind::River => 2,
+            EdgeKind::River => 3,
         };
         draw_line(
             image,

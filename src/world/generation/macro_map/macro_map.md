@@ -16,6 +16,7 @@ gradient map을 만든다.
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
 - Voronoi graph 기반 macro elevation 생성
 - edge 기반 mountain/ridge/fault/coast/river-candidate guide 선택
+- hydrology가 읽을 수 있는 `pre-hydrology candidate corridor` 형태의 river 후보 chain 선택
 - ridge/fault/coast guide를 broad field로 확산
 - hydrology가 읽을 drainage divide, basin, outlet 후보 제공
 
@@ -61,7 +62,9 @@ MacroEdgeGuide {
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
 coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. `MacroCorner`는 corner
 position에서 같은 macro field를 샘플한다. `MacroEdge`는 두 site의 macro ownership과 elevation
-context를 읽어 hydrology 이전 guide를 붙인다.
+context를 읽어 hydrology 이전 guide를 붙인다. river guide는 흩어진 독립 edge가 아니라 land site
+graph 위에서 고지대/분지성 source부터 낮은 drainage elevation, ocean basin, coast 방향으로 이어지는
+deterministic `pre-hydrology candidate corridor` edge chain으로 후처리된다.
 
 ---
 
@@ -208,7 +211,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 2. 대륙성은 target land ratio가 아니라 continent/ocean basin ownership과 connected component 정책으로 보장한다.
 3. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
 4. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
-5. river guide는 routing 결과가 아니라 hydrology가 읽을 후보 annotation이다.
+5. river guide는 routing 결과가 아니라 hydrology가 읽을 `pre-hydrology candidate corridor` 후보 annotation이다.
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
 7. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
 8. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
@@ -223,3 +226,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate, hydrology 전 river candidate를 포함한다.
+- river candidate는 edge별 noise 점수가 threshold를 넘는 조각을 그대로 노출하지 않고, land-only adjacency에서
+  ridge를 피하며 macro drainage elevation이 낮아지거나 ocean basin/coast 쪽으로 진행하는 deterministic
+  `pre-hydrology candidate corridor` chain으로 선택한다. 이 chain은 hydrology의 selected river,
+  flow accumulation, lake/sink/outlet carve가 아니며, 이후 hydrology가 읽을 후보 surface에 머문다.
