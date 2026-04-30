@@ -20,7 +20,8 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 - noise는 제약으로 고정할 필요가 없는 자연스러운 변주를 만든다.
 - chunk는 저장과 출력 window일 뿐, 지형 정체성의 소유자가 아니다.
 - polygon 경계는 후보선이자 소유권 경계일 수 있지만, 그대로 보이는 선이어서는 안 된다.
-- 이 프로젝트는 작은 island가 아니라 큰 대륙과 바다, 대륙 내부 산맥과 강을 목표로 한다.
+- 이 프로젝트는 큰 대륙과 바다, 대륙 내부 산맥과 강을 목표로 하되, ocean basin 안에 크고 작은
+  섬과 archipelago도 deterministic feature로 허용한다.
 
 이 방향은 Amit Patel의 Polygonal Map Generation 계열 아이디어를 이 프로젝트의 무한 복셀 월드
 구조에 맞춰 재해석한 것이다.

@@ -8,13 +8,15 @@ use super::graph::{
 
 pub const DEFAULT_MACRO_SUPER_CELL_SIZE_BLOCKS: i32 = 4096;
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
-pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.68;
-pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.78;
+pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.58;
+pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
 
 const HASH_CONTINENT_FIELD: u64 = 0x2179_c56a_5bb7_43d1;
 const HASH_OCEAN_FIELD: u64 = 0x6c8e_9cf5_12a4_f0b3;
 const HASH_MOUNTAIN_FIELD: u64 = 0xb451_2d4e_9f07_63bb;
-const CORE_SEARCH_RADIUS_CELLS: i32 = 3;
+const HASH_COAST_WARP_FIELD: u64 = 0x7b7b_6a55_c04a_57c1;
+const HASH_ISLAND_FIELD: u64 = 0x15a1_1d5e_7a11_9c31;
+const CORE_SEARCH_RADIUS_CELLS: i32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroMapConfig {
@@ -303,17 +305,23 @@ fn sample_macro_fields(
     ruggedness: f32,
     config: MacroMapConfig,
 ) -> MacroFieldSample {
-    let continent_core = nearest_macro_core(position, MacroCoreKind::Continent, config);
-    let ocean_core = nearest_macro_core(position, MacroCoreKind::Ocean, config);
-    let continent_distance = distance(position, continent_core.position);
-    let ocean_distance = distance(position, ocean_core.position);
+    let warped_position = warped_macro_position(position, config);
+    let continent_core = nearest_macro_core(warped_position, MacroCoreKind::Continent, config);
+    let ocean_core = nearest_macro_core(warped_position, MacroCoreKind::Ocean, config);
+    let continent_distance = distance(warped_position, continent_core.position);
+    let ocean_distance = distance(warped_position, ocean_core.position);
     let normalized_core_balance = ((ocean_distance - continent_distance)
         / config.super_cell_size_blocks as f32)
         .clamp(-1.0, 1.0);
+    let large_landmass = continent_field(warped_position, config);
+    let islandness = island_field(position, large_landmass, config);
     let continentality = clamp_signed(
-        normalized_core_balance * 0.68
-            + base_fields.continentality * 0.24
-            + base_fields.elevation_seed * 0.08
+        normalized_core_balance * 0.46
+            + large_landmass * 0.38
+            + islandness * 0.40
+            + base_fields.continentality * 0.18
+            + base_fields.elevation_seed * 0.05
+            + 0.04
             - config.sea_level,
     );
     let is_land_owned = continentality >= 0.0;
@@ -321,23 +329,28 @@ fn sample_macro_fields(
         ((ocean_distance - continent_distance).abs() * 0.5).min(config.coast_width_blocks * 4.0);
     let coastness = (1.0 - distance_to_coast_blocks / config.coast_width_blocks).clamp(0.0, 1.0);
     let ridge_wave = deterministic_ridge_wave(position, config);
+    let highlandness = smoothstep(0.06, 0.64, continentality.max(0.0) + ridge_wave * 0.42);
     let mountainness = if is_land_owned {
         smoothstep(
-            0.36,
-            0.94,
-            ridge_wave * 0.48
-                + ruggedness.clamp(0.0, 1.0) * 0.27
-                + continentality.max(0.0) * 0.20
-                + (1.0 - coastness) * 0.05,
+            0.34,
+            0.90,
+            ridge_wave * 0.52
+                + ruggedness.clamp(0.0, 1.0) * 0.18
+                + continentality.max(0.0) * 0.18
+                + highlandness * 0.10
+                + (1.0 - coastness) * 0.02,
         )
     } else {
         0.0
     };
     let ridgeness = if is_land_owned {
         smoothstep(
-            0.52,
-            0.96,
-            ridge_wave * 0.58 + ruggedness.clamp(0.0, 1.0) * 0.24 + mountainness * 0.18,
+            0.45,
+            0.90,
+            ridge_wave * 0.52
+                + mountainness * 0.28
+                + base_fields.elevation_seed.max(0.0) * 0.12
+                + ruggedness.clamp(0.0, 1.0) * 0.08,
         )
     } else {
         0.0
@@ -354,8 +367,9 @@ fn sample_macro_fields(
     };
     let mut signed_macro_elevation = if is_land_owned {
         0.04 + continentality.max(0.0) * 0.58
-            + base_fields.elevation_seed * 0.18
-            + mountainness * 0.32
+            + base_fields.elevation_seed * 0.14
+            + mountainness * 0.24
+            + ridgeness * 0.20
             - basinness * 0.16
     } else {
         -0.04 + continentality.min(0.0) * 0.62 + base_fields.elevation_seed * 0.08
@@ -427,21 +441,27 @@ fn macro_edge_guide(
     } else {
         ((a.coastness + b.coastness) * 0.5).clamp(0.0, 1.0)
     };
-    let ridgeness = ((a.ridgeness + b.ridgeness) * 0.5).clamp(0.0, 1.0);
+    let average_elevation = (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5;
     let elevation_slope = (a.signed_macro_elevation - b.signed_macro_elevation).abs();
     let both_land = a_land && b_land;
+    let highland_edge = smoothstep(0.18, 0.78, average_elevation);
+    let ridgeness = (((a.ridgeness + b.ridgeness) * 0.5) * 0.62
+        + ((a.mountainness + b.mountainness) * 0.5) * 0.23
+        + highland_edge * 0.15)
+        .clamp(0.0, 1.0);
     let is_ridge_candidate = both_land
         && ridgeness >= config.ridge_candidate_threshold
-        && (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5 > 0.10;
+        && average_elevation > 0.12
+        && a.coastness.max(b.coastness) < 0.92;
     let average_basinness = (a.basinness + b.basinness) * 0.5;
     let average_mountainness = (a.mountainness + b.mountainness) * 0.5;
     let average_coastness = (a.coastness + b.coastness) * 0.5;
     let river_potential = if both_land {
-        (average_basinness * 0.34
-            + (1.0 - ridgeness) * 0.16
-            + (1.0 - average_mountainness) * 0.12
-            + hydrology_bias.clamp(0.0, 1.0) * 0.22
-            + smoothstep(0.03, 0.30, elevation_slope) * 0.16)
+        (average_basinness * 0.30
+            + (1.0 - ridgeness) * 0.14
+            + (1.0 - average_mountainness) * 0.10
+            + hydrology_bias.clamp(0.0, 1.0) * 0.26
+            + smoothstep(0.02, 0.26, elevation_slope) * 0.20)
             .clamp(0.0, 1.0)
     } else {
         0.0
@@ -449,10 +469,10 @@ fn macro_edge_guide(
     let is_river_candidate = both_land
         && !is_ridge_candidate
         && river_potential >= config.river_candidate_threshold
-        && average_basinness >= 0.54
+        && average_basinness >= 0.46
         && average_coastness <= 0.82
-        && elevation_slope >= 0.03
-        && (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5 > 0.03;
+        && elevation_slope >= 0.018
+        && average_elevation > 0.02;
     let is_fault_candidate =
         both_land && is_ridge_candidate && elevation_slope > 0.18 && hydrology_bias > 0.40;
 
@@ -501,8 +521,11 @@ fn nearest_macro_core(
         }
     }
 
-    best.expect("checker macro core field provides both continent and ocean cores nearby")
-        .1
+    best.unwrap_or_else(|| {
+        let (fallback_x, fallback_z) = nearest_forced_core_cell(cell_x, cell_z, kind, config);
+        (0.0, macro_core(fallback_x, fallback_z, kind, config))
+    })
+    .1
 }
 
 fn macro_core(x: i32, z: i32, kind: MacroCoreKind, config: MacroMapConfig) -> MacroCore {
@@ -530,12 +553,90 @@ fn macro_core(x: i32, z: i32, kind: MacroCoreKind, config: MacroMapConfig) -> Ma
 }
 
 fn macro_core_kind(x: i32, z: i32, config: MacroMapConfig) -> MacroCoreKind {
-    let seed_phase = (splitmix64(config.seed ^ u64::from(config.generator_version)) & 1) as i32;
-    if (x + z + seed_phase).rem_euclid(2) == 0 {
+    let size = config.super_cell_size_blocks as f32;
+    let position = WorldPlanePoint::new(x as f32 * size + size * 0.5, z as f32 * size + size * 0.5);
+    if continent_field(position, config) >= -0.08 {
         MacroCoreKind::Continent
     } else {
         MacroCoreKind::Ocean
     }
+}
+
+fn nearest_forced_core_cell(
+    cell_x: i32,
+    cell_z: i32,
+    kind: MacroCoreKind,
+    config: MacroMapConfig,
+) -> (i32, i32) {
+    let mut best = None::<(f32, i32, i32)>;
+
+    for z in (cell_z - CORE_SEARCH_RADIUS_CELLS * 2)..=(cell_z + CORE_SEARCH_RADIUS_CELLS * 2) {
+        for x in (cell_x - CORE_SEARCH_RADIUS_CELLS * 2)..=(cell_x + CORE_SEARCH_RADIUS_CELLS * 2) {
+            let hash = macro_hash(config, HASH_CONTINENT_FIELD, x, z, kind as i32);
+            let prefers_kind = (hash & 1) == matches!(kind, MacroCoreKind::Continent) as u64;
+            if !prefers_kind {
+                continue;
+            }
+
+            let dx = (x - cell_x) as f32;
+            let dz = (z - cell_z) as f32;
+            let distance_squared = dx.mul_add(dx, dz * dz);
+            if best.is_none_or(|(best_distance, _, _)| distance_squared < best_distance) {
+                best = Some((distance_squared, x, z));
+            }
+        }
+    }
+
+    best.map(|(_, x, z)| (x, z)).unwrap_or((cell_x, cell_z))
+}
+
+fn warped_macro_position(position: WorldPlanePoint, config: MacroMapConfig) -> WorldPlanePoint {
+    let scale = config.super_cell_size_blocks as f32 * 1.75;
+    let warp_x = fbm_signed(position, scale, HASH_COAST_WARP_FIELD, config);
+    let warp_z = fbm_signed(
+        WorldPlanePoint::new(position.z + 1013.0, position.x - 719.0),
+        scale,
+        HASH_COAST_WARP_FIELD ^ 0xa9d8_4c31_7f07_d351,
+        config,
+    );
+    let amount = config.super_cell_size_blocks as f32 * 0.34;
+
+    WorldPlanePoint::new(position.x + warp_x * amount, position.z + warp_z * amount)
+}
+
+fn continent_field(position: WorldPlanePoint, config: MacroMapConfig) -> f32 {
+    let size = config.super_cell_size_blocks as f32;
+    let broad = fbm_signed(position, size * 3.8, HASH_CONTINENT_FIELD, config);
+    let lobe = fbm_signed(
+        position,
+        size * 1.55,
+        HASH_CONTINENT_FIELD ^ 0x91e3_57d2_c1aa_09b5,
+        config,
+    );
+    let tendril = fbm_signed(
+        position,
+        size * 0.78,
+        HASH_CONTINENT_FIELD ^ 0x24b6_b08d_34ac_4491,
+        config,
+    );
+
+    clamp_signed(broad * 0.62 + lobe * 0.28 + tendril * 0.10 + 0.14)
+}
+
+fn island_field(position: WorldPlanePoint, large_landmass: f32, config: MacroMapConfig) -> f32 {
+    let size = config.super_cell_size_blocks as f32;
+    let archipelago = fbm_unit(position, size * 0.72, HASH_ISLAND_FIELD, config);
+    let small_island = value_noise_unit(
+        position,
+        size * 0.28,
+        HASH_ISLAND_FIELD ^ 0x5e7a_1d5a_1204_d11d,
+        config,
+    );
+    let offshore_mask = smoothstep(-0.74, -0.18, -large_landmass);
+    let island_peak =
+        smoothstep(0.64, 0.90, archipelago) * 0.78 + smoothstep(0.82, 0.98, small_island) * 0.50;
+
+    island_peak * offshore_mask
 }
 
 fn deterministic_ridge_wave(position: WorldPlanePoint, config: MacroMapConfig) -> f32 {
@@ -550,8 +651,83 @@ fn deterministic_ridge_wave(position: WorldPlanePoint, config: MacroMapConfig) -
     let projected = (position.x * wave_x + position.z * wave_z) / cell_size + phase;
     let line_wave = 1.0 - projected.sin().abs();
     let patch_noise = unit_f32(splitmix64(hash ^ 0xd1b5_4a32_d192_ed03));
+    let broad_highland = fbm_unit(
+        position,
+        config.super_cell_size_blocks as f32 * 0.92,
+        HASH_MOUNTAIN_FIELD ^ 0x7065_c3d0_21af_99c7,
+        config,
+    );
+    let chain = 1.0 - (line_wave - broad_highland * 0.30).abs().clamp(0.0, 1.0);
 
-    (line_wave * 0.72 + patch_noise * 0.28).clamp(0.0, 1.0)
+    (chain * 0.58 + line_wave * 0.20 + patch_noise * 0.22).clamp(0.0, 1.0)
+}
+
+fn fbm_signed(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: MacroMapConfig,
+) -> f32 {
+    fbm_unit(position, scale_blocks, namespace, config) * 2.0 - 1.0
+}
+
+fn fbm_unit(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: MacroMapConfig,
+) -> f32 {
+    let first = value_noise_unit(position, scale_blocks, namespace, config);
+    let second = value_noise_unit(
+        WorldPlanePoint::new(position.x + 349.0, position.z - 577.0),
+        scale_blocks * 0.52,
+        namespace ^ 0x6d2b_79f5_aa73_19c9,
+        config,
+    );
+    let third = value_noise_unit(
+        WorldPlanePoint::new(position.x - 911.0, position.z + 233.0),
+        scale_blocks * 0.27,
+        namespace ^ 0xf17b_1a2c_45f1_08ea,
+        config,
+    );
+
+    (first * 0.56 + second * 0.30 + third * 0.14).clamp(0.0, 1.0)
+}
+
+fn value_noise_unit(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: MacroMapConfig,
+) -> f32 {
+    let scale = scale_blocks.max(1.0);
+    let x = position.x / scale;
+    let z = position.z / scale;
+    let x0 = x.floor() as i32;
+    let z0 = z.floor() as i32;
+    let tx = smooth_unit(x - x0 as f32);
+    let tz = smooth_unit(z - z0 as f32);
+    let a = lattice_unit(config, namespace, x0, z0);
+    let b = lattice_unit(config, namespace, x0 + 1, z0);
+    let c = lattice_unit(config, namespace, x0, z0 + 1);
+    let d = lattice_unit(config, namespace, x0 + 1, z0 + 1);
+    let top = lerp(a, b, tx);
+    let bottom = lerp(c, d, tx);
+
+    lerp(top, bottom, tz).clamp(0.0, 1.0)
+}
+
+fn lattice_unit(config: MacroMapConfig, namespace: u64, x: i32, z: i32) -> f32 {
+    unit_f32(macro_hash(config, namespace, x, z, 0))
+}
+
+fn smooth_unit(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(a: f32, b: f32, amount: f32) -> f32 {
+    a + (b - a) * amount
 }
 
 fn super_cell_coord(position: WorldPlanePoint, super_cell_size_blocks: i32) -> (i32, i32) {

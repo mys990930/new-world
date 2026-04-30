@@ -75,6 +75,7 @@ water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의
 
 - ocean: 큰 바다 또는 외부 ocean basin과 연결된 물
 - continent: 큰 land mass와 그 내부 macro elevation / drainage ownership
+- island / archipelago: ocean basin 안에서 별도 island field가 만든 크고 작은 양수 land component
 - lake: land 내부의 local minimum 또는 basin fill로 생긴 고립 물
 - wetland/marsh: 얕은 물, 높은 hydration, 낮은 slope가 겹친 지역
 - coast: ocean과 land 사이의 transition band
@@ -104,18 +105,22 @@ launch 정책은 아래처럼 잡는다.
 - continent seed와 ocean basin seed를 낮은 빈도의 super-region 또는 plate-like graph에서 먼저 생성한다.
 - 각 Voronoi site는 가까운 continent/ocean basin id, continentality, distance-to-continent-core, distance-to-ocean-basin을 받는다.
 - signed macro elevation은 이 ownership field 위에 얹히며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
-- 작은 양수 land component는 기본적으로 island candidate다. launch 기본값에서는 큰 continent에 붙지 않은 작은 island candidate를 낮추거나 coast/wetland로 흡수한다.
-- 의도적인 섬을 만들려면 island feature id와 최소 크기, coast policy를 별도로 부여한다.
+- 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
+- launch 기본값에서도 큰 대륙만 만들지 않고, ocean basin 안에 크고 작은 섬이 일정 비율로 나타날 수 있게 island field를 둔다.
+- 섬은 대륙 ownership을 뒤집는 예외가 아니라 별도 deterministic island bump가 continentality를 양수로 끌어올린 결과여야 한다.
+- 이후 hydrology/surface 단계에서는 큰 대륙에 붙지 않은 land component를 island로 취급하고, 최소 크기, 해안 폭, 담수 생성 가능성, 식생 밀도 정책을 다르게 줄 수 있어야 한다.
 
 무한 월드에서는 전체 land cell 수와 ocean cell 수를 전역으로 세어 제약할 수 없다. 대신
 deterministic super-region ownership, 충분한 padding, component pruning/assimilation 규칙으로
 요청 영역마다 같은 대륙성이 재현되게 만든다.
 
-현재 launch 구현은 coarse super-cell checker core field를 seed/generator version으로 phase/jitter
-시켜 continent core와 ocean basin center를 만든다. site/corner는 가까운 continent core와 ocean
-basin center까지의 거리, stage 2 base continentality/elevation seed를 합성해 ownership과 signed
-macro elevation을 얻는다. 이 구현은 global target ratio를 세지 않으며, 같은 world-space position은
-어떤 padded patch에서 샘플해도 같은 macro annotation을 받는다.
+현재 launch 구현은 coarse super-cell 위에 낮은 빈도 continental field, domain warp, island field를
+합성해 continent core와 ocean basin center를 만든다. checkerboard처럼 land/ocean을 번갈아 배치하지
+않고, 대륙 가장자리가 여러 방향으로 뻗거나 들어가며 ocean basin 안에 크고 작은 섬 후보가 생길 수
+있게 한다. site/corner는 가까운 continent core와 ocean basin center까지의 거리, stage 2 base
+continentality/elevation seed, island bump를 합성해 ownership과 signed macro elevation을 얻는다.
+이 구현은 global target ratio를 세지 않으며, 같은 world-space position은 어떤 padded patch에서
+샘플해도 같은 macro annotation을 받는다.
 
 ---
 
@@ -153,6 +158,11 @@ elevation edge만 고르면 높은 평원도 ridge가 되어버린다. ridge는 
 - plate-like region boundary를 uplift source로 사용
 - continental core와 coast distance를 이용해 broad mountainness field 생성
 - ruggedness와 elevation bias로 ridge 주변 local relief 강화
+
+현재 launch 구현의 ridge 후보는 두 land site의 평균 macro elevation, mountainness/ridgeness,
+coast distance를 함께 본다. 즉, 낮은 평지의 random line보다 높은 고도와 산맥성이 겹치는 edge가
+더 쉽게 ridge candidate가 된다. 이 단계의 ridge는 최종 능선 mesh가 아니라 hydrology와
+Voronoi-derived macro field가 읽을 skeleton이다.
 
 산맥은 hydrology보다 먼저 정해져야 한다. 대륙 내부의 큰 산맥과 ridge는 분수계와 강의 방향을
 만드는 원인이며, hydrology가 나중에 그 구조를 읽어야 한다.

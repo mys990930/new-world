@@ -146,6 +146,9 @@
   생성한다.
 - continent/ocean ownership, signed elevation, lake/coast, ridge/river 후보 의미는
   `macro_map` 모듈이 소유한다.
+- coast/ridge/river candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
+  `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
+  clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
 
 ---

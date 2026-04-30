@@ -51,6 +51,12 @@ seed와 generator version으로 jitter하고, 2x2 site 평균점을 corner로 �
 연결한다. 따라서 site, corner, edge topology가 실제로 존재하고, 같은 전역 lattice 좌표는 어떤
 patch 요청에서 생성하더라도 같은 id와 위치를 갖는다.
 
+현재 기본 `DEFAULT_SITE_SPACING_BLOCKS`는 192다. 이 프로젝트가 1 block = 0.5m 복셀 스케일을
+사용하면 site 중심 간격은 약 96m이고, 하나의 Voronoi-style polygon은 대략 지름 100m 안팎의
+macro semantic cell로 해석한다. 이 값은 대륙 하나의 크기가 아니라 대륙/해안/산맥/하천 후보를
+표현하는 graph 해상도다. 실제 해안선, 능선, 강 폭, biome transition은 이후 noisy boundary,
+field, heightfield 단계에서 block-space로 더 세분화된다.
+
 공개 생성 API는 graph leaf가 소유한다.
 
 ```rust

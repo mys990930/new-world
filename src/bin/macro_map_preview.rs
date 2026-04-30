@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphMacroMap, GraphRegionArea,
+    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
     GraphRegionCoord, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, VoronoiGraphConfig,
     VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint,
     generate_macro_map, generate_voronoi_graph_patch, graph_region_for_world_block,
@@ -114,17 +114,50 @@ impl PreviewWindow {
         self.min_z() + (pixel_z as f32 + 0.5) * self.world_span_z / self.height as f32
     }
 
-    fn world_to_pixel(self, point: WorldPlanePoint) -> Option<(i32, i32)> {
-        if point.x < self.min_x()
-            || point.x > self.max_x()
-            || point.z < self.min_z()
-            || point.z > self.max_z()
+    fn world_segment_to_pixels(
+        self,
+        a: WorldPlanePoint,
+        b: WorldPlanePoint,
+    ) -> Option<((i32, i32), (i32, i32))> {
+        let (a, b) = self.clip_world_segment(a, b)?;
+        Some((
+            self.world_to_pixel_clamped(a),
+            self.world_to_pixel_clamped(b),
+        ))
+    }
+
+    fn clip_world_segment(
+        self,
+        a: WorldPlanePoint,
+        b: WorldPlanePoint,
+    ) -> Option<(WorldPlanePoint, WorldPlanePoint)> {
+        let dx = b.x - a.x;
+        let dz = b.z - a.z;
+        let mut enter = 0.0;
+        let mut exit = 1.0;
+
+        if !clip_segment_axis(-dx, a.x - self.min_x(), &mut enter, &mut exit)
+            || !clip_segment_axis(dx, self.max_x() - a.x, &mut enter, &mut exit)
+            || !clip_segment_axis(-dz, a.z - self.min_z(), &mut enter, &mut exit)
+            || !clip_segment_axis(dz, self.max_z() - a.z, &mut enter, &mut exit)
         {
             return None;
         }
-        let x = ((point.x - self.min_x()) / self.world_span_x * self.width as f32).round() as i32;
-        let y = ((point.z - self.min_z()) / self.world_span_z * self.height as f32).round() as i32;
-        Some((x, y))
+
+        Some((
+            WorldPlanePoint::new(a.x + dx * enter, a.z + dz * enter),
+            WorldPlanePoint::new(a.x + dx * exit, a.z + dz * exit),
+        ))
+    }
+
+    fn world_to_pixel_clamped(self, point: WorldPlanePoint) -> (i32, i32) {
+        let x = ((point.x - self.min_x()) / self.world_span_x * self.width as f32 - 0.5)
+            .round()
+            .clamp(0.0, self.width.saturating_sub(1) as f32) as i32;
+        let y = ((point.z - self.min_z()) / self.world_span_z * self.height as f32 - 0.5)
+            .round()
+            .clamp(0.0, self.height.saturating_sub(1) as f32) as i32;
+        (x, y)
     }
 
     fn graph_area(self, region_size_blocks: i32) -> Result<GraphRegionArea, Box<dyn Error>> {
@@ -142,6 +175,26 @@ impl PreviewWindow {
     }
 }
 
+fn clip_segment_axis(p: f32, q: f32, enter: &mut f32, exit: &mut f32) -> bool {
+    if p.abs() <= f32::EPSILON {
+        return q >= 0.0;
+    }
+
+    let t = q / p;
+    if p < 0.0 {
+        if t > *exit {
+            return false;
+        }
+        *enter = (*enter).max(t);
+    } else {
+        if t < *enter {
+            return false;
+        }
+        *exit = (*exit).min(t);
+    }
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct SiteGridCoord {
     x: i32,
@@ -151,7 +204,6 @@ struct SiteGridCoord {
 #[derive(Debug, Clone)]
 struct PreviewGraph {
     patch: VoronoiGraphPatch,
-    macro_map: GraphMacroMap,
     site_grid: HashMap<SiteGridCoord, usize>,
     site_samples: HashMap<VoronoiSiteId, MacroSite>,
     edge_samples: Vec<MacroEdgeSample>,
@@ -414,7 +466,6 @@ fn build_macro_map_for_preview(
 
     Ok(PreviewGraph {
         patch,
-        macro_map,
         site_grid,
         site_samples,
         edge_samples,
@@ -610,7 +661,7 @@ fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
 
 fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
     let corners = graph
-        .macro_map
+        .patch
         .corners
         .iter()
         .map(|corner| (corner.id, corner.position))
@@ -623,10 +674,7 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
         let Some(b) = corners.get(&sample.edge.corners[1]).copied() else {
             continue;
         };
-        let Some(start) = window.world_to_pixel(a) else {
-            continue;
-        };
-        let Some(end) = window.world_to_pixel(b) else {
+        let Some((start, end)) = window.world_segment_to_pixels(a, b) else {
             continue;
         };
         let color = match sample.kind {
@@ -1046,6 +1094,67 @@ mod tests {
         draw_legend_overlay(&mut image);
 
         assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(180 * 90));
+    }
+
+    #[test]
+    fn world_segment_projection_matches_pixel_sample_centers() {
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 100,
+            height: 50,
+            world_span_x: 200.0,
+            world_span_z: 100.0,
+        };
+        let pixel_x = 12;
+        let pixel_y = 7;
+        let point = WorldPlanePoint::new(
+            window.sample_world_x(pixel_x),
+            window.sample_world_z(pixel_y),
+        );
+
+        assert_eq!(window.world_to_pixel_clamped(point), (12, 7));
+    }
+
+    #[test]
+    fn world_segment_projection_clips_edges_crossing_the_preview_window() {
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 10,
+            height: 10,
+            world_span_x: 100.0,
+            world_span_z: 100.0,
+        };
+
+        let segment = window
+            .world_segment_to_pixels(
+                WorldPlanePoint::new(-100.0, 0.0),
+                WorldPlanePoint::new(100.0, 0.0),
+            )
+            .expect("crossing graph edge should be clipped instead of dropped");
+
+        assert_eq!(segment, ((0, 5), (9, 5)));
+    }
+
+    #[test]
+    fn world_segment_projection_drops_edges_outside_the_preview_window() {
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 10,
+            height: 10,
+            world_span_x: 100.0,
+            world_span_z: 100.0,
+        };
+
+        assert_eq!(
+            window.world_segment_to_pixels(
+                WorldPlanePoint::new(-100.0, -100.0),
+                WorldPlanePoint::new(-75.0, -75.0),
+            ),
+            None
+        );
     }
 
     #[test]

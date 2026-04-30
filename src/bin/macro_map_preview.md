@@ -56,7 +56,9 @@
 3. Build a padded Voronoi graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`.
 5. Generate the RGB pixel buffer with Rayon.
-6. Draw candidate edge overlays using graph edge corner positions.
+6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
+   `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
+   projecting it onto pixel centers.
 7. Draw the compact legend and encode PNG metadata.
 
 ## Integration Note
