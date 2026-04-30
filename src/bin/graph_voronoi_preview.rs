@@ -21,6 +21,15 @@ const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_STAGE: &str = "graph_voronoi";
 const OUTPUT_DIR: &str = "target/graph-voronoi-preview";
 
+const RENDERABLE_MODES: [PreviewMode; 6] = [
+    PreviewMode::Identity,
+    PreviewMode::Temperature,
+    PreviewMode::Hydration,
+    PreviewMode::Continentality,
+    PreviewMode::Elevation,
+    PreviewMode::Ruggedness,
+];
+
 #[derive(Debug, Clone, PartialEq)]
 struct PreviewConfig {
     seed: u64,
@@ -32,6 +41,7 @@ struct PreviewConfig {
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     stage: String,
+    mode: PreviewModeSelection,
     output: Option<PathBuf>,
 }
 
@@ -84,6 +94,106 @@ impl PreviewConfig {
                 self.site_spacing_blocks
             ))
         })
+    }
+
+    fn output_dir(&self, generator_version: u32) -> PathBuf {
+        self.output.clone().unwrap_or_else(|| {
+            PathBuf::from(format!(
+                "{OUTPUT_DIR}/seed_{}_cx{}_cz{}_generator_gv{}_stage_{}_{}x{}_span{}_spacing{}",
+                self.seed,
+                self.center_x,
+                self.center_z,
+                generator_version,
+                self.stage,
+                self.width,
+                self.height,
+                self.world_span_blocks,
+                self.site_spacing_blocks
+            ))
+        })
+    }
+
+    fn default_mode_file_name(&self, generator_version: u32, mode: PreviewMode) -> String {
+        format!(
+            "seed_{}_cx{}_cz{}_generator_gv{}_stage_{}_mode_{}_{}x{}_span{}_spacing{}.png",
+            self.seed,
+            self.center_x,
+            self.center_z,
+            generator_version,
+            self.stage,
+            mode.as_str(),
+            self.width,
+            self.height,
+            self.world_span_blocks,
+            self.site_spacing_blocks
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewModeSelection {
+    All,
+    Single(PreviewMode),
+}
+
+impl PreviewModeSelection {
+    fn modes(self) -> &'static [PreviewMode] {
+        match self {
+            PreviewModeSelection::All => &RENDERABLE_MODES,
+            PreviewModeSelection::Single(PreviewMode::Identity) => &RENDERABLE_MODES[0..1],
+            PreviewModeSelection::Single(PreviewMode::Temperature) => &RENDERABLE_MODES[1..2],
+            PreviewModeSelection::Single(PreviewMode::Hydration) => &RENDERABLE_MODES[2..3],
+            PreviewModeSelection::Single(PreviewMode::Continentality) => &RENDERABLE_MODES[3..4],
+            PreviewModeSelection::Single(PreviewMode::Elevation) => &RENDERABLE_MODES[4..5],
+            PreviewModeSelection::Single(PreviewMode::Ruggedness) => &RENDERABLE_MODES[5..6],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewMode {
+    Identity,
+    Temperature,
+    Hydration,
+    Continentality,
+    Elevation,
+    Ruggedness,
+}
+
+impl PreviewMode {
+    fn parse(value: &str) -> Option<PreviewModeSelection> {
+        match value {
+            "all" => Some(PreviewModeSelection::All),
+            "identity" => Some(PreviewModeSelection::Single(Self::Identity)),
+            "temperature" => Some(PreviewModeSelection::Single(Self::Temperature)),
+            "hydration" | "humidity" => Some(PreviewModeSelection::Single(Self::Hydration)),
+            "continentality" => Some(PreviewModeSelection::Single(Self::Continentality)),
+            "elevation" => Some(PreviewModeSelection::Single(Self::Elevation)),
+            "ruggedness" => Some(PreviewModeSelection::Single(Self::Ruggedness)),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Identity => "identity",
+            Self::Temperature => "temperature",
+            Self::Hydration => "hydration",
+            Self::Continentality => "continentality",
+            Self::Elevation => "elevation",
+            Self::Ruggedness => "ruggedness",
+        }
+    }
+
+    fn map_name(self) -> &'static str {
+        match self {
+            Self::Identity => "graph site identity",
+            Self::Temperature => "site temperature",
+            Self::Hydration => "site hydration",
+            Self::Continentality => "site continentality",
+            Self::Elevation => "site elevation bias",
+            Self::Ruggedness => "site ruggedness",
+        }
     }
 }
 
@@ -167,6 +277,7 @@ struct PreviewHeader {
     seed: u64,
     generator_version: u32,
     stage: String,
+    mode: PreviewMode,
     center_x: i32,
     center_z: i32,
     width: u32,
@@ -187,6 +298,8 @@ impl PreviewHeader {
             format!("seed={}", self.seed),
             format!("generator_version={}", self.generator_version),
             format!("stage={}", self.stage),
+            format!("mode={}", self.mode.as_str()),
+            format!("map_name={}", self.mode.map_name()),
             format!("center_x={}", self.center_x),
             format!("center_z={}", self.center_z),
             format!("width={}", self.width),
@@ -216,35 +329,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     let window = config.window();
     let graph_area = window.graph_area(config.region_size_blocks)?;
     let graph = build_graph_patch_for_preview(&meta, &config, graph_area)?;
-    let output = config.output_path(meta.generator_version);
 
-    let header = PreviewHeader {
-        binary: "graph_voronoi_preview",
-        seed: config.seed,
-        generator_version: meta.generator_version,
-        stage: config.stage.clone(),
-        center_x: config.center_x,
-        center_z: config.center_z,
-        width: config.width,
-        height: config.height,
-        world_span_blocks: config.world_span_blocks,
-        region_size_blocks: config.region_size_blocks,
-        site_spacing_blocks: config.site_spacing_blocks,
-        graph_area,
-        site_count: graph.patch.sites.len(),
-        owner_region_count: graph.patch.owner_regions.len(),
-        graph_source: "world_generation_graph",
-    };
+    let output_paths = output_paths_for_config(&config, meta.generator_version)?;
+    let mut generated = Vec::with_capacity(output_paths.len());
+    for (mode, output) in output_paths {
+        let header = PreviewHeader {
+            binary: "graph_voronoi_preview",
+            seed: config.seed,
+            generator_version: meta.generator_version,
+            stage: config.stage.clone(),
+            mode,
+            center_x: config.center_x,
+            center_z: config.center_z,
+            width: config.width,
+            height: config.height,
+            world_span_blocks: config.world_span_blocks,
+            region_size_blocks: config.region_size_blocks,
+            site_spacing_blocks: config.site_spacing_blocks,
+            graph_area,
+            site_count: graph.patch.sites.len(),
+            owner_region_count: graph.patch.owner_regions.len(),
+            graph_source: "world_generation_graph",
+        };
 
-    let image = render_preview(window, &graph, config.region_size_blocks)?;
-    write_png_with_metadata(&image, &output, &header)?;
+        let image = render_preview(window, &graph, config.region_size_blocks, mode)?;
+        write_png_with_metadata(&image, &output, &header)?;
+        generated.push((mode, output, image.width(), image.height()));
+    }
 
-    println!("seed: {}", header.seed);
-    println!("generator version: {}", header.generator_version);
-    println!("stage: {}", header.stage);
+    println!("seed: {}", config.seed);
+    println!("generator version: {}", meta.generator_version);
+    println!("stage: {}", config.stage);
+    println!(
+        "modes: {}",
+        config
+            .mode
+            .modes()
+            .iter()
+            .map(|mode| mode.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!(
         "center world block: ({}, {})",
-        header.center_x, header.center_z
+        config.center_x, config.center_z
     );
     println!(
         "world footprint: x={:.1}..{:.1}, z={:.1}..{:.1}",
@@ -255,19 +383,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     println!(
         "graph regions: x={}..{}, z={}..{} ({} owned regions)",
-        header.graph_area.min.x,
-        header.graph_area.max.x,
-        header.graph_area.min.z,
-        header.graph_area.max.z,
-        header.owner_region_count
+        graph_area.min.x,
+        graph_area.max.x,
+        graph_area.min.z,
+        graph_area.max.z,
+        graph.patch.owner_regions.len()
     );
     println!(
         "site spacing: {} blocks, sites: {}",
-        header.site_spacing_blocks, header.site_count
+        config.site_spacing_blocks,
+        graph.patch.sites.len()
     );
-    println!("image: {}x{}", image.width(), image.height());
     println!("metadata: new-world-preview-header iTXt chunk");
-    println!("output: {}", output.display());
+    println!();
+    println!("generated files:");
+    for (mode, output, width, height) in generated {
+        println!(
+            "{} {}x{} {}",
+            mode.as_str(),
+            width,
+            height,
+            output.display()
+        );
+    }
 
     Ok(())
 }
@@ -287,6 +425,7 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
     let mut stage = DEFAULT_STAGE.to_string();
+    let mut mode = PreviewModeSelection::Single(PreviewMode::Identity);
     let mut output = None;
 
     while let Some(flag) = args.first().cloned() {
@@ -304,6 +443,12 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
                 site_spacing_blocks = parse_required::<i32>(&mut args, "site-spacing-blocks")?
             }
             "--stage" => stage = parse_required::<String>(&mut args, "stage")?,
+            "--mode" => {
+                let value = parse_required::<String>(&mut args, "mode")?;
+                mode = PreviewMode::parse(&value).ok_or_else(|| {
+                    cli_error(format!("unsupported mode: {value}\n\n{}", usage()))
+                })?;
+            }
             "--output" => {
                 output = Some(PathBuf::from(parse_required::<String>(
                     &mut args, "output",
@@ -323,8 +468,63 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         region_size_blocks,
         site_spacing_blocks,
         stage,
+        mode,
         output,
     })
+}
+
+fn output_paths_for_config(
+    config: &PreviewConfig,
+    generator_version: u32,
+) -> Result<Vec<(PreviewMode, PathBuf)>, Box<dyn Error>> {
+    let modes = config.mode.modes();
+    if matches!(config.mode, PreviewModeSelection::All) {
+        if config
+            .output
+            .as_ref()
+            .is_some_and(|path| looks_like_file(path))
+        {
+            return Err(cli_error(
+                "--mode all requires --output to be a directory path, not a PNG file",
+            ));
+        }
+        let output_dir = config.output_dir(generator_version);
+        return Ok(modes
+            .iter()
+            .copied()
+            .map(|mode| {
+                (
+                    mode,
+                    output_dir.join(config.default_mode_file_name(generator_version, mode)),
+                )
+            })
+            .collect());
+    }
+
+    let mode = modes[0];
+    let output = config.output.as_ref().map_or_else(
+        || {
+            if mode == PreviewMode::Identity {
+                config.output_path(generator_version)
+            } else {
+                PathBuf::from(OUTPUT_DIR)
+                    .join(config.default_mode_file_name(generator_version, mode))
+            }
+        },
+        |path| {
+            if looks_like_file(path) {
+                path.clone()
+            } else {
+                path.join(config.default_mode_file_name(generator_version, mode))
+            }
+        },
+    );
+
+    Ok(vec![(mode, output)])
+}
+
+fn looks_like_file(path: &Path) -> bool {
+    path.extension().is_some()
 }
 
 fn build_graph_patch_for_preview(
@@ -389,6 +589,7 @@ fn render_preview(
     window: PreviewWindow,
     graph: &PreviewGraph,
     region_size_blocks: i32,
+    mode: PreviewMode,
 ) -> Result<RgbImage, Box<dyn Error>> {
     let width = usize::try_from(window.width).map_err(|_| cli_error("image width overflowed"))?;
     let height =
@@ -407,7 +608,8 @@ fn render_preview(
             let pixel_z = (index as u32) / window.width;
             let world_x = window.sample_world_x(pixel_x);
             let world_z = window.sample_world_z(pixel_z);
-            let color = color_for_world_sample(window, graph, region_size_blocks, world_x, world_z);
+            let color =
+                color_for_world_sample(window, graph, region_size_blocks, mode, world_x, world_z);
             pixel.copy_from_slice(&color);
         });
 
@@ -419,24 +621,29 @@ fn color_for_world_sample(
     window: PreviewWindow,
     graph: &PreviewGraph,
     region_size_blocks: i32,
+    mode: PreviewMode,
     world_x: f32,
     world_z: f32,
 ) -> [u8; 3] {
     let nearest = nearest_sites(graph, world_x, world_z);
     let site = graph.patch.sites[nearest.nearest_index];
-    let mut color = color_for_site(site);
+    let mut color = color_for_site(site, mode);
 
     let nearest_distance = nearest.nearest_distance_sq.sqrt();
     let second_distance = nearest.second_distance_sq.sqrt();
     let edge_strength =
         (1.0 - ((second_distance - nearest_distance) / (graph.spacing * 0.10))).clamp(0.0, 1.0);
     if edge_strength > 0.0 {
-        color = blend(color, [20, 24, 34], edge_strength * 0.86);
+        color = blend(
+            color,
+            [20, 24, 34],
+            edge_strength * edge_overlay_amount(mode),
+        );
     }
 
     let dot_radius = (graph.spacing * 0.032).max(window.pixel_span() * 1.25);
     if nearest_distance <= dot_radius {
-        let dot = blend([246, 248, 240], color_for_site(site), 0.28);
+        let dot = blend([246, 248, 240], color_for_site(site, mode), 0.28);
         color = blend(color, dot, 0.88);
     }
 
@@ -490,15 +697,98 @@ fn nearest_sites(graph: &PreviewGraph, world_x: f32, world_z: f32) -> NearestSit
     }
 }
 
-fn color_for_site(site: VoronoiSite) -> [u8; 3] {
+fn color_for_site(site: VoronoiSite, mode: PreviewMode) -> [u8; 3] {
+    match mode {
+        PreviewMode::Identity => color_for_identity_site(site),
+        PreviewMode::Temperature => gradient_color(
+            site.base_fields.temperature.clamp(0.0, 1.0),
+            &[
+                (0.00, [20, 42, 116]),
+                (0.38, [82, 161, 213]),
+                (0.55, [230, 232, 194]),
+                (0.75, [220, 126, 68]),
+                (1.00, [164, 37, 43]),
+            ],
+        ),
+        PreviewMode::Hydration => gradient_color(
+            site.base_fields.hydration.clamp(0.0, 1.0),
+            &[
+                (0.00, [173, 119, 55]),
+                (0.35, [218, 190, 108]),
+                (0.62, [92, 158, 104]),
+                (1.00, [40, 118, 157]),
+            ],
+        ),
+        PreviewMode::Continentality => gradient_color(
+            signed_to_unit(site.base_fields.continentality),
+            &[
+                (0.00, [24, 80, 146]),
+                (0.42, [83, 161, 186]),
+                (0.52, [218, 210, 142]),
+                (0.73, [134, 157, 89]),
+                (1.00, [112, 86, 58]),
+            ],
+        ),
+        PreviewMode::Elevation => gradient_color(
+            signed_to_unit(site.base_fields.elevation_seed),
+            &[
+                (0.00, [35, 88, 127]),
+                (0.32, [79, 141, 104]),
+                (0.58, [181, 167, 100]),
+                (0.80, [139, 124, 111]),
+                (1.00, [241, 242, 232]),
+            ],
+        ),
+        PreviewMode::Ruggedness => gradient_color(
+            site.ruggedness.clamp(0.0, 1.0),
+            &[
+                (0.00, [87, 151, 116]),
+                (0.42, [172, 178, 126]),
+                (0.72, [139, 119, 104]),
+                (1.00, [70, 70, 76]),
+            ],
+        ),
+    }
+}
+
+fn color_for_identity_site(site: VoronoiSite) -> [u8; 3] {
     let identity = color_from_hash(site.id.0);
     let climate = [
-        scale_channel(74, 0.55 + site.temperature * 0.95),
-        scale_channel(122, 0.55 + site.hydration * 0.85),
-        scale_channel(168, 0.48 + (1.0 - site.continentality) * 0.70),
+        scale_channel(74, 0.55 + site.base_fields.temperature * 0.95),
+        scale_channel(122, 0.55 + site.base_fields.hydration * 0.85),
+        scale_channel(168, 0.48 + (1.0 - site.base_fields.continentality) * 0.70),
     ];
-    let elevation = (0.82 + site.height_bias * 0.20 + site.ruggedness * 0.10).clamp(0.62, 1.18);
+    let elevation =
+        (0.82 + site.base_fields.elevation_seed * 0.20 + site.ruggedness * 0.10).clamp(0.62, 1.18);
     scale(blend(identity, climate, 0.62), elevation)
+}
+
+fn signed_to_unit(value: f32) -> f32 {
+    ((value + 1.0) * 0.5).clamp(0.0, 1.0)
+}
+
+fn edge_overlay_amount(mode: PreviewMode) -> f32 {
+    match mode {
+        PreviewMode::Identity => 0.86,
+        _ => 0.42,
+    }
+}
+
+fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
+    debug_assert!(!stops.is_empty());
+    let value = value.clamp(0.0, 1.0);
+
+    for pair in stops.windows(2) {
+        let (left_value, left_color) = pair[0];
+        let (right_value, right_color) = pair[1];
+        if value <= right_value {
+            let span = (right_value - left_value).max(f32::EPSILON);
+            let amount = ((value - left_value) / span).clamp(0.0, 1.0);
+            return blend(left_color, right_color, amount);
+        }
+    }
+
+    stops[stops.len() - 1].1
 }
 
 fn color_from_hash(hash: u64) -> [u8; 3] {
@@ -601,7 +891,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin graph_voronoi_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--stage graph_voronoi] [--output <path>]"
+    "usage: cargo run --bin graph_voronoi_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--stage graph_voronoi] [--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -624,6 +914,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::Single(PreviewMode::Identity),
             output: None,
         }
         .validate()
@@ -646,6 +937,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::Single(PreviewMode::Identity),
             output: None,
         };
         let window = config.window();
@@ -670,6 +962,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::Single(PreviewMode::Identity),
             output: None,
         };
         let path = config.output_path(11).display().to_string();
@@ -679,5 +972,38 @@ mod tests {
         assert!(path.contains("cz20"));
         assert!(path.contains("generator_gv11"));
         assert!(path.contains("stage_graph_voronoi"));
+    }
+
+    #[test]
+    fn mode_all_expands_to_all_renderable_maps() {
+        let selection = PreviewMode::parse("all").expect("all mode should parse");
+        assert_eq!(selection.modes(), &RENDERABLE_MODES);
+    }
+
+    #[test]
+    fn all_mode_writes_to_directory_paths() {
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: -10,
+            center_z: 20,
+            width: 64,
+            height: 32,
+            world_span_blocks: 512,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::All,
+            output: Some(PathBuf::from("target/graph-voronoi-preview/smoke")),
+        };
+
+        let paths = output_paths_for_config(&config, 11).unwrap();
+
+        assert_eq!(paths.len(), RENDERABLE_MODES.len());
+        assert!(
+            paths
+                .iter()
+                .any(|(mode, path)| *mode == PreviewMode::Temperature
+                    && path.display().to_string().contains("mode_temperature"))
+        );
     }
 }

@@ -14,7 +14,7 @@
 | `atlas_realization_chunk_topdown_preview` | One-image atlas → realization → final chunk top-down comparison | Works |
 | `chunk_preview` | Quarter-view isometric chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
-| `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph preview | Works |
+| `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph and site-field preview maps | Works |
 | `realization_field_preview` | Top-down realization/control-field preview | Works |
 | `region_topdown_preview` | Top-down atlas region-classification preview | Works |
 | `terrain_corridor` | Atlas-scale ocean-to-mountain corridor search and chart | Works |
@@ -123,10 +123,10 @@ cargo run --bin chunk_topdown_preview -- --world-dir <existing-world-dir> --cent
 
 ## graph_voronoi_preview
 
-- Purpose: render a 4K top-down PNG for the graph-first Voronoi macro graph stage.
+- Purpose: render 4K top-down PNG previews for the graph-first Voronoi macro graph stage and current site-field maps.
 - Parameters:
   - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
-  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage graph_voronoi`, `--output <path>`
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage graph_voronoi`, `--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>`, `--output <path>`
 - Defaults:
   - `--width 3840`
   - `--height 2160`
@@ -134,16 +134,25 @@ cargo run --bin chunk_topdown_preview -- --world-dir <existing-world-dir> --cent
   - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
   - `--stage graph_voronoi`
+  - `--mode identity`
 - Example:
 
 ```bash
 cargo run --bin graph_voronoi_preview -- 42 0 0
 ```
 
+```bash
+cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph-voronoi-preview/seed_42_maps
+```
+
 - Notes:
-  - The default output path includes seed, center, generator version, stage, image size, span, and site spacing.
-  - The same header is embedded in the PNG `new-world-preview-header` iTXt metadata chunk.
+  - `--mode identity` preserves the existing single-PNG graph ownership preview.
+  - `--mode all` writes `identity`, `temperature`, `hydration`, `continentality`, `elevation`, and `ruggedness` PNGs under an output directory.
+  - In single mode, an `--output` value with an extension is treated as the target PNG path; a path without an extension is treated as an output directory.
+  - The default output path includes seed, center, generator version, stage, image size, span, and site spacing. Directory outputs include mode names in each PNG filename.
+  - The same header is embedded in the PNG `new-world-preview-header` iTXt metadata chunk, including mode and map name.
   - Graph construction uses `world::generation::graph::generate_voronoi_graph_patch(...)`; the binary only owns image sampling and PNG output.
+  - Field-map modes read the smoothed `VoronoiSite::base_fields` values produced by the graph base-field stage.
   - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
 
 ## realization_field_preview

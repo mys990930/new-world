@@ -69,14 +69,20 @@
   - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
   - `--stage graph_voronoi`
+  - `--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>`: 기본 `identity`
   - `--output <path>`
 
 ### 출력
 
 - 기본 출력은 `target/graph-voronoi-preview/` 아래 PNG다.
+- `--mode identity`는 기존 단일 PNG 출력을 유지한다.
+- `--mode all`은 `identity`, `temperature`, `hydration`, `continentality`, `elevation`, `ruggedness`
+  PNG를 한 디렉터리에 생성한다. 이때 `--output`은 디렉터리 경로여야 한다.
+- 단일 mode에서 `--output`이 확장자를 가진 경로이면 기존처럼 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
+  디렉터리로 보고 mode 이름을 포함한 PNG 파일을 그 아래에 쓴다.
 - 기본 파일명은 seed, center, generator version, stage, image size, world span, site spacing을 포함한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며, filename에 들어간 header 필드와
-  graph area, site count, owner region count를 함께 기록한다.
+  graph area, site count, owner region count, mode/map name을 함께 기록한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 현재 구현 상태
@@ -85,6 +91,9 @@
   같은 graph contract를 시각화한다.
 - binary는 graph 의미를 새로 만들지 않고, preview window에서 필요한 padding을 계산한 뒤
   `VoronoiGraphPatchRequest`를 구성한다.
+- temperature, hydration/humidity, continentality, elevation map은 graph base-field stage가 만든
+  smoothed `VoronoiSite::base_fields`를 색상 gradient로 표현한다.
+- ruggedness map은 아직 smoothing 대상이 아닌 site-level roughness seed를 표현한다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이며, graph 생성 정책은 `graph` 모듈이
   소유한다.
 
