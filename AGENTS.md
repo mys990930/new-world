@@ -1,3 +1,9 @@
+## Parallel Implementation Policy
+
+- 모든 구현은 가능한 범위에서 멀티스레드 처리를 적극 활용한다.
+- 구현 작업은 서브에이전트 spawn을 기본 실행 단위로 삼고, main context는 orchestration, 취합, 보고에 집중한다.
+- 이 정책은 아래 Core Rules의 SDD/TDD, 문서 우선, 모듈 경계, 검증/보고 규칙을 깨지 않는 범위에서 적용한다.
+
 ## Core Rules
 
 이 프로젝트는 **Specification-Driven Development (SDD)** 와 **Test-Driven Development (TDD)** 를 함께 따른다. 문서, 계약, 모듈 경계가 의도된 시스템 동작을 정의하고, 구현과 테스트는 그 문서를 기준으로 개발·검증·정렬한다.

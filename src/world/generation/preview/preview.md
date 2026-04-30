@@ -53,6 +53,43 @@
 
 ---
 
+## `graph_voronoi_preview` CLI 계약
+
+`graph_voronoi_preview`는 graph-first pipeline의 첫 단계인 Voronoi macro graph를 chunk 생성 없이
+검사하는 topdown preview binary다.
+
+### 입력
+
+- 필수 positional 인자: `<seed> <center-x> <center-z>`
+  - `center-x`, `center-z`는 world-block 좌표다.
+- 선택 인자:
+  - `--width <u32>`: 기본 `3840`
+  - `--height <u32>`: 기본 `2160`
+  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `8192`
+  - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
+  - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
+  - `--stage graph_voronoi`
+  - `--output <path>`
+
+### 출력
+
+- 기본 출력은 `target/graph-voronoi-preview/` 아래 PNG다.
+- 기본 파일명은 seed, center, generator version, stage, image size, world span, site spacing을 포함한다.
+- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며, filename에 들어간 header 필드와
+  graph area, site count, owner region count를 함께 기록한다.
+- 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
+
+### 현재 구현 상태
+
+- `graph_voronoi_preview`는 `world::generation::graph::generate_voronoi_graph_patch(...)`를 호출해
+  같은 graph contract를 시각화한다.
+- binary는 graph 의미를 새로 만들지 않고, preview window에서 필요한 padding을 계산한 뒤
+  `VoronoiGraphPatchRequest`를 구성한다.
+- 픽셀 sampling과 PNG encoding은 preview binary 책임이며, graph 생성 정책은 `graph` 모듈이
+  소유한다.
+
+---
+
 ## Determinism
 
 - 같은 seed, generator version, area, stage input은 같은 preview를 만든다.

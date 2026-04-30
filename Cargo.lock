@@ -1350,6 +1350,7 @@ dependencies = [
  "bevy_ecs",
  "bytemuck",
  "image",
+ "png",
  "pollster",
  "rayon",
  "serde",

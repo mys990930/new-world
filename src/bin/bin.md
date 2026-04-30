@@ -14,6 +14,7 @@
 | `atlas_realization_chunk_topdown_preview` | One-image atlas → realization → final chunk top-down comparison | Works |
 | `chunk_preview` | Quarter-view isometric chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
+| `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph preview | Works |
 | `realization_field_preview` | Top-down realization/control-field preview | Works |
 | `region_topdown_preview` | Top-down atlas region-classification preview | Works |
 | `terrain_corridor` | Atlas-scale ocean-to-mountain corridor search and chart | Works |
@@ -119,6 +120,31 @@ cargo run --bin chunk_topdown_preview -- --world-dir <existing-world-dir> --cent
   - Direct-seed mode currently depends on `generate_chunk(...)`, so it is not the recommended path today.
   - If you already have a valid created-world dump, `--world-dir` is the exact realized-data path.
   - See [chunk_topdown_preview.md](./chunk_topdown_preview.md).
+
+## graph_voronoi_preview
+
+- Purpose: render a 4K top-down PNG for the graph-first Voronoi macro graph stage.
+- Parameters:
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage graph_voronoi`, `--output <path>`
+- Defaults:
+  - `--width 3840`
+  - `--height 2160`
+  - `--world-span-blocks 8192`
+  - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
+  - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
+  - `--stage graph_voronoi`
+- Example:
+
+```bash
+cargo run --bin graph_voronoi_preview -- 42 0 0
+```
+
+- Notes:
+  - The default output path includes seed, center, generator version, stage, image size, span, and site spacing.
+  - The same header is embedded in the PNG `new-world-preview-header` iTXt metadata chunk.
+  - Graph construction uses `world::generation::graph::generate_voronoi_graph_patch(...)`; the binary only owns image sampling and PNG output.
+  - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
 
 ## realization_field_preview
 
