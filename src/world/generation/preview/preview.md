@@ -75,14 +75,19 @@
 ### 출력
 
 - 기본 출력은 `target/graph-voronoi-preview/` 아래 PNG다.
-- `--mode identity`는 기존 단일 PNG 출력을 유지한다.
+- 기본 단일 mode 출력 파일명은 `s<seed>_x<center-x>_z<center-z>_<mode>.png`처럼 seed, center,
+  mode만 담는다.
 - `--mode all`은 `identity`, `temperature`, `hydration`, `continentality`, `elevation`, `ruggedness`
-  PNG를 한 디렉터리에 생성한다. 이때 `--output`은 디렉터리 경로여야 한다.
+  PNG를 `s<seed>_x<center-x>_z<center-z>/` 같은 짧은 이름의 디렉터리에 생성한다. 이때 `--output`은
+  디렉터리 경로여야 한다.
 - 단일 mode에서 `--output`이 확장자를 가진 경로이면 기존처럼 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
-  디렉터리로 보고 mode 이름을 포함한 PNG 파일을 그 아래에 쓴다.
-- 기본 파일명은 seed, center, generator version, stage, image size, world span, site spacing을 포함한다.
-- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며, filename에 들어간 header 필드와
-  graph area, site count, owner region count, mode/map name을 함께 기록한다.
+  디렉터리로 보고 `<mode>.png` 파일을 그 아래에 쓴다.
+- width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG metadata에만
+  기록한다.
+- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
+  owner region count, mode/map name을 함께 기록한다.
+- 각 PNG는 작은 legend overlay를 가진다. field map은 gradient color bar와 양끝 의미 label을 표시하고,
+  identity map은 간단한 header만 표시한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 현재 구현 상태

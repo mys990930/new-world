@@ -3,7 +3,7 @@
 ## Role
 
 - Render deterministic 4K top-down PNG previews for the graph-first Voronoi macro graph stage and current site-field maps.
-- Preserve the preview header both in PNG metadata and in the default deterministic filename.
+- Preserve detailed preview configuration in PNG metadata while keeping default filenames short.
 - Use the world-owned `world::generation::graph` patch construction API.
 
 ## Inputs
@@ -29,7 +29,8 @@
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--stage graph_voronoi`
 - `--mode identity`
-- `--output target/graph-voronoi-preview/seed_<seed>_cx<center-x>_cz<center-z>_generator_gv<generator-version>_stage_graph_voronoi_<width>x<height>_span<world-span-blocks>_spacing<site-spacing-blocks>.png`
+- single mode output: `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>_<mode>.png`
+- all-mode output directory: `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>/`
 
 ## Outputs
 
@@ -45,16 +46,20 @@
   - `elevation`: low to high, lowland water/green through upland and snow colors
   - `ruggedness`: flat to rough, green/yellow through rock gray
 - `--mode all` emits `identity`, `temperature`, `hydration`, `continentality`, `elevation`, and `ruggedness` PNG files in an output directory.
+- each PNG includes a compact legend overlay in one corner:
+  - identity mode shows a small map label/header only
+  - field modes show a small gradient bar with low/high meaning labels
 - stdout summary for seed, generator version, selected modes, world footprint, graph region area, site count, metadata, and generated file paths
 - a PNG iTXt chunk named `new-world-preview-header` containing the deterministic header fields plus `mode` and `map_name`
 
 ## Output Path Rules
 
-- In `identity` mode with no `--output`, the existing single-PNG default path is preserved.
-- In `all` mode with no `--output`, the binary creates a deterministic directory under `target/graph-voronoi-preview/`.
+- In a single mode with no `--output`, the binary writes `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>_<mode>.png`.
+- In `all` mode with no `--output`, the binary creates `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>/`.
 - In `all` mode, `--output` must be a directory path.
 - In a single mode, `--output <path>.png` writes that file.
-- In a single mode, `--output <directory>` writes a deterministic mode-named PNG below that directory.
+- In a single mode, `--output <directory>` writes `<mode>.png` below that directory.
+- Width, height, span, spacing, stage, and generator version stay in PNG metadata rather than the default filename.
 
 ## Current Flow
 
@@ -64,7 +69,8 @@
    - The preview derives the required padding from the requested image footprint so the visible area has surrounding sites.
 4. Generate the RGB pixel buffer with Rayon via parallel chunks.
 5. Convert that buffer through `image::RgbImage`.
-6. Encode PNG with the `png` crate so the header is preserved as metadata.
+6. Draw the compact legend overlay directly into the RGB image without external font dependencies.
+7. Encode PNG with the `png` crate so the header is preserved as metadata.
 
 The temperature, hydration, continentality, and elevation modes read the graph base-field stage's smoothed `VoronoiSite::base_fields`. Ruggedness remains a site-level graph roughness seed until a later terrain stage derives a richer roughness field.
 
@@ -83,5 +89,5 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --width 960 --height 540 --world
 All-map directory output:
 
 ```bash
-cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --width 960 --height 540 --world-span-blocks 4096 --output target/graph-voronoi-preview/seed_42_maps
+cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --width 960 --height 540 --world-span-blocks 4096 --output target/graph-voronoi-preview/s42_maps
 ```

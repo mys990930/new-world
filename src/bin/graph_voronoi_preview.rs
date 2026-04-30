@@ -79,54 +79,36 @@ impl PreviewConfig {
         }
     }
 
-    fn output_path(&self, generator_version: u32) -> PathBuf {
+    fn output_path(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
             PathBuf::from(format!(
-                "{OUTPUT_DIR}/seed_{}_cx{}_cz{}_generator_gv{}_stage_{}_{}x{}_span{}_spacing{}.png",
-                self.seed,
-                self.center_x,
-                self.center_z,
-                generator_version,
-                self.stage,
-                self.width,
-                self.height,
-                self.world_span_blocks,
-                self.site_spacing_blocks
+                "{OUTPUT_DIR}/s{}_x{}_z{}_identity.png",
+                self.seed, self.center_x, self.center_z
             ))
         })
     }
 
-    fn output_dir(&self, generator_version: u32) -> PathBuf {
+    fn output_dir(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
             PathBuf::from(format!(
-                "{OUTPUT_DIR}/seed_{}_cx{}_cz{}_generator_gv{}_stage_{}_{}x{}_span{}_spacing{}",
-                self.seed,
-                self.center_x,
-                self.center_z,
-                generator_version,
-                self.stage,
-                self.width,
-                self.height,
-                self.world_span_blocks,
-                self.site_spacing_blocks
+                "{OUTPUT_DIR}/s{}_x{}_z{}",
+                self.seed, self.center_x, self.center_z
             ))
         })
     }
 
-    fn default_mode_file_name(&self, generator_version: u32, mode: PreviewMode) -> String {
-        format!(
-            "seed_{}_cx{}_cz{}_generator_gv{}_stage_{}_mode_{}_{}x{}_span{}_spacing{}.png",
+    fn default_mode_file_name(&self, mode: PreviewMode) -> String {
+        format!("{}.png", mode.as_str())
+    }
+
+    fn default_single_mode_path(&self, mode: PreviewMode) -> PathBuf {
+        PathBuf::from(format!(
+            "{OUTPUT_DIR}/s{}_x{}_z{}_{}.png",
             self.seed,
             self.center_x,
             self.center_z,
-            generator_version,
-            self.stage,
-            mode.as_str(),
-            self.width,
-            self.height,
-            self.world_span_blocks,
-            self.site_spacing_blocks
-        )
+            mode.as_str()
+        ))
     }
 }
 
@@ -193,6 +175,39 @@ impl PreviewMode {
             Self::Continentality => "site continentality",
             Self::Elevation => "site elevation bias",
             Self::Ruggedness => "site ruggedness",
+        }
+    }
+
+    fn legend_title(self) -> &'static str {
+        match self {
+            Self::Identity => "IDENTITY",
+            Self::Temperature => "TEMP",
+            Self::Hydration => "HYDRATION",
+            Self::Continentality => "CONTINENT",
+            Self::Elevation => "ELEVATION",
+            Self::Ruggedness => "RUGGED",
+        }
+    }
+
+    fn legend_min_label(self) -> Option<&'static str> {
+        match self {
+            Self::Identity => None,
+            Self::Temperature => Some("COLD"),
+            Self::Hydration => Some("DRY"),
+            Self::Continentality => Some("OCEAN"),
+            Self::Elevation => Some("LOW"),
+            Self::Ruggedness => Some("FLAT"),
+        }
+    }
+
+    fn legend_max_label(self) -> Option<&'static str> {
+        match self {
+            Self::Identity => None,
+            Self::Temperature => Some("WARM"),
+            Self::Hydration => Some("WET"),
+            Self::Continentality => Some("LAND"),
+            Self::Elevation => Some("HIGH"),
+            Self::Ruggedness => Some("ROUGH"),
         }
     }
 }
@@ -352,7 +367,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             graph_source: "world_generation_graph",
         };
 
-        let image = render_preview(window, &graph, config.region_size_blocks, mode)?;
+        let mut image = render_preview(window, &graph, config.region_size_blocks, mode)?;
+        draw_legend_overlay(&mut image, mode);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((mode, output, image.width(), image.height()));
     }
@@ -475,7 +491,7 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
 
 fn output_paths_for_config(
     config: &PreviewConfig,
-    generator_version: u32,
+    _generator_version: u32,
 ) -> Result<Vec<(PreviewMode, PathBuf)>, Box<dyn Error>> {
     let modes = config.mode.modes();
     if matches!(config.mode, PreviewModeSelection::All) {
@@ -488,16 +504,11 @@ fn output_paths_for_config(
                 "--mode all requires --output to be a directory path, not a PNG file",
             ));
         }
-        let output_dir = config.output_dir(generator_version);
+        let output_dir = config.output_dir();
         return Ok(modes
             .iter()
             .copied()
-            .map(|mode| {
-                (
-                    mode,
-                    output_dir.join(config.default_mode_file_name(generator_version, mode)),
-                )
-            })
+            .map(|mode| (mode, output_dir.join(config.default_mode_file_name(mode))))
             .collect());
     }
 
@@ -505,17 +516,16 @@ fn output_paths_for_config(
     let output = config.output.as_ref().map_or_else(
         || {
             if mode == PreviewMode::Identity {
-                config.output_path(generator_version)
+                config.output_path()
             } else {
-                PathBuf::from(OUTPUT_DIR)
-                    .join(config.default_mode_file_name(generator_version, mode))
+                config.default_single_mode_path(mode)
             }
         },
         |path| {
             if looks_like_file(path) {
                 path.clone()
             } else {
-                path.join(config.default_mode_file_name(generator_version, mode))
+                path.join(config.default_mode_file_name(mode))
             }
         },
     );
@@ -700,54 +710,25 @@ fn nearest_sites(graph: &PreviewGraph, world_x: f32, world_z: f32) -> NearestSit
 fn color_for_site(site: VoronoiSite, mode: PreviewMode) -> [u8; 3] {
     match mode {
         PreviewMode::Identity => color_for_identity_site(site),
-        PreviewMode::Temperature => gradient_color(
+        PreviewMode::Temperature => gradient_color_for_mode(
+            PreviewMode::Temperature,
             site.base_fields.temperature.clamp(0.0, 1.0),
-            &[
-                (0.00, [20, 42, 116]),
-                (0.38, [82, 161, 213]),
-                (0.55, [230, 232, 194]),
-                (0.75, [220, 126, 68]),
-                (1.00, [164, 37, 43]),
-            ],
         ),
-        PreviewMode::Hydration => gradient_color(
+        PreviewMode::Hydration => gradient_color_for_mode(
+            PreviewMode::Hydration,
             site.base_fields.hydration.clamp(0.0, 1.0),
-            &[
-                (0.00, [173, 119, 55]),
-                (0.35, [218, 190, 108]),
-                (0.62, [92, 158, 104]),
-                (1.00, [40, 118, 157]),
-            ],
         ),
-        PreviewMode::Continentality => gradient_color(
+        PreviewMode::Continentality => gradient_color_for_mode(
+            PreviewMode::Continentality,
             signed_to_unit(site.base_fields.continentality),
-            &[
-                (0.00, [24, 80, 146]),
-                (0.42, [83, 161, 186]),
-                (0.52, [218, 210, 142]),
-                (0.73, [134, 157, 89]),
-                (1.00, [112, 86, 58]),
-            ],
         ),
-        PreviewMode::Elevation => gradient_color(
+        PreviewMode::Elevation => gradient_color_for_mode(
+            PreviewMode::Elevation,
             signed_to_unit(site.base_fields.elevation_seed),
-            &[
-                (0.00, [35, 88, 127]),
-                (0.32, [79, 141, 104]),
-                (0.58, [181, 167, 100]),
-                (0.80, [139, 124, 111]),
-                (1.00, [241, 242, 232]),
-            ],
         ),
-        PreviewMode::Ruggedness => gradient_color(
-            site.ruggedness.clamp(0.0, 1.0),
-            &[
-                (0.00, [87, 151, 116]),
-                (0.42, [172, 178, 126]),
-                (0.72, [139, 119, 104]),
-                (1.00, [70, 70, 76]),
-            ],
-        ),
+        PreviewMode::Ruggedness => {
+            gradient_color_for_mode(PreviewMode::Ruggedness, site.ruggedness.clamp(0.0, 1.0))
+        }
     }
 }
 
@@ -791,6 +772,60 @@ fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
     stops[stops.len() - 1].1
 }
 
+fn gradient_color_for_mode(mode: PreviewMode, value: f32) -> [u8; 3] {
+    match mode {
+        PreviewMode::Identity => [220, 224, 216],
+        PreviewMode::Temperature => gradient_color(
+            value,
+            &[
+                (0.00, [20, 42, 116]),
+                (0.38, [82, 161, 213]),
+                (0.55, [230, 232, 194]),
+                (0.75, [220, 126, 68]),
+                (1.00, [164, 37, 43]),
+            ],
+        ),
+        PreviewMode::Hydration => gradient_color(
+            value,
+            &[
+                (0.00, [173, 119, 55]),
+                (0.35, [218, 190, 108]),
+                (0.62, [92, 158, 104]),
+                (1.00, [40, 118, 157]),
+            ],
+        ),
+        PreviewMode::Continentality => gradient_color(
+            value,
+            &[
+                (0.00, [24, 80, 146]),
+                (0.42, [83, 161, 186]),
+                (0.52, [218, 210, 142]),
+                (0.73, [134, 157, 89]),
+                (1.00, [112, 86, 58]),
+            ],
+        ),
+        PreviewMode::Elevation => gradient_color(
+            value,
+            &[
+                (0.00, [35, 88, 127]),
+                (0.32, [79, 141, 104]),
+                (0.58, [181, 167, 100]),
+                (0.80, [139, 124, 111]),
+                (1.00, [241, 242, 232]),
+            ],
+        ),
+        PreviewMode::Ruggedness => gradient_color(
+            value,
+            &[
+                (0.00, [87, 151, 116]),
+                (0.42, [172, 178, 126]),
+                (0.72, [139, 119, 104]),
+                (1.00, [70, 70, 76]),
+            ],
+        ),
+    }
+}
+
 fn color_from_hash(hash: u64) -> [u8; 3] {
     let r = 72 + ((hash >> 8) & 0x7f) as u8;
     let g = 72 + ((hash >> 24) & 0x7f) as u8;
@@ -819,6 +854,190 @@ fn region_grid_strength(
 fn distance_to_grid_line(value: f32, size: f32) -> f32 {
     let local = value.rem_euclid(size);
     local.min(size - local)
+}
+
+fn draw_legend_overlay(image: &mut RgbImage, mode: PreviewMode) {
+    if image.width() < 48 || image.height() < 28 {
+        return;
+    }
+
+    let scale = if image.width() >= 640 && image.height() >= 360 {
+        2
+    } else {
+        1
+    };
+    let margin = 8 * scale;
+    let field_mode = mode.legend_min_label().is_some();
+    let panel_width = if field_mode { 156 * scale } else { 92 * scale }.min(image.width());
+    let panel_height = if field_mode { 48 * scale } else { 28 * scale }.min(image.height());
+    let x = margin.min(image.width().saturating_sub(panel_width));
+    let y = margin.min(image.height().saturating_sub(panel_height));
+
+    blend_rect(image, x, y, panel_width, panel_height, [10, 13, 18], 0.72);
+    draw_text(
+        image,
+        x + 7 * scale,
+        y + 6 * scale,
+        mode.legend_title(),
+        [238, 241, 232],
+        scale,
+    );
+
+    if let (Some(left), Some(right)) = (mode.legend_min_label(), mode.legend_max_label()) {
+        let bar_x = x + 8 * scale;
+        let bar_y = y + 20 * scale;
+        let bar_width = panel_width.saturating_sub(16 * scale).max(1);
+        let bar_height = 7 * scale;
+        draw_gradient_bar(image, mode, bar_x, bar_y, bar_width, bar_height);
+        draw_text(
+            image,
+            bar_x,
+            bar_y + bar_height + 5 * scale,
+            left,
+            [218, 224, 212],
+            scale,
+        );
+        let right_width = text_width(right, scale);
+        draw_text(
+            image,
+            bar_x + bar_width.saturating_sub(right_width),
+            bar_y + bar_height + 5 * scale,
+            right,
+            [218, 224, 212],
+            scale,
+        );
+    }
+}
+
+fn blend_rect(
+    image: &mut RgbImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: [u8; 3],
+    amount: f32,
+) {
+    let max_x = (x + width).min(image.width());
+    let max_y = (y + height).min(image.height());
+    for py in y..max_y {
+        for px in x..max_x {
+            blend_pixel(image, px, py, color, amount);
+        }
+    }
+}
+
+fn draw_gradient_bar(
+    image: &mut RgbImage,
+    mode: PreviewMode,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) {
+    let max_x = (x + width).min(image.width());
+    let max_y = (y + height).min(image.height());
+    let denom = width.saturating_sub(1).max(1) as f32;
+    for py in y..max_y {
+        for px in x..max_x {
+            let t = (px - x) as f32 / denom;
+            set_pixel(image, px, py, gradient_color_for_mode(mode, t));
+        }
+    }
+}
+
+fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3], scale: u32) {
+    let mut cursor_x = x;
+    for ch in text.chars() {
+        draw_char(image, cursor_x, y, ch, color, scale);
+        cursor_x = cursor_x.saturating_add(4 * scale);
+    }
+}
+
+fn draw_char(image: &mut RgbImage, x: u32, y: u32, ch: char, color: [u8; 3], scale: u32) {
+    let glyph = glyph_3x5(ch);
+    for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..3 {
+            if (bits >> (2 - col)) & 1 == 0 {
+                continue;
+            }
+            for sy in 0..scale {
+                for sx in 0..scale {
+                    let px = x + col * scale + sx;
+                    let py = y + row as u32 * scale + sy;
+                    blend_pixel(image, px, py, color, 0.95);
+                }
+            }
+        }
+    }
+}
+
+fn text_width(text: &str, scale: u32) -> u32 {
+    text.chars().count() as u32 * 4 * scale
+}
+
+fn glyph_3x5(ch: char) -> [u8; 5] {
+    match ch {
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
+        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
+        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
+        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
+        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'J' => [0b001, 0b001, 0b001, 0b101, 0b010],
+        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
+        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
+        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
+        'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
+        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
+        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
+        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
+        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
+        '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
+        '3' => [0b110, 0b001, 0b010, 0b001, 0b110],
+        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
+        '5' => [0b111, 0b100, 0b110, 0b001, 0b110],
+        '6' => [0b011, 0b100, 0b110, 0b101, 0b010],
+        '7' => [0b111, 0b001, 0b010, 0b010, 0b010],
+        '8' => [0b010, 0b101, 0b010, 0b101, 0b010],
+        '9' => [0b010, 0b101, 0b011, 0b001, 0b110],
+        '-' => [0b000, 0b000, 0b111, 0b000, 0b000],
+        '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
+        _ => [0b000, 0b000, 0b000, 0b000, 0b000],
+    }
+}
+
+fn blend_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3], amount: f32) {
+    if x >= image.width() || y >= image.height() {
+        return;
+    }
+    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
+    let pixels: &mut [u8] = image.as_mut();
+    let base = [pixels[index], pixels[index + 1], pixels[index + 2]];
+    let blended = blend(base, color, amount);
+    pixels[index..index + 3].copy_from_slice(&blended);
+}
+
+fn set_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3]) {
+    if x >= image.width() || y >= image.height() {
+        return;
+    }
+    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
+    let pixels: &mut [u8] = image.as_mut();
+    pixels[index..index + 3].copy_from_slice(&color);
 }
 
 fn write_png_with_metadata(
@@ -951,7 +1170,7 @@ mod tests {
     }
 
     #[test]
-    fn default_output_path_preserves_seed_center_generator_stage() {
+    fn default_output_path_uses_short_seed_center_mode_name() {
         let config = PreviewConfig {
             seed: 42,
             center_x: -10,
@@ -965,13 +1184,11 @@ mod tests {
             mode: PreviewModeSelection::Single(PreviewMode::Identity),
             output: None,
         };
-        let path = config.output_path(11).display().to_string();
+        let path = config.output_path().display().to_string();
 
-        assert!(path.contains("seed_42"));
-        assert!(path.contains("cx-10"));
-        assert!(path.contains("cz20"));
-        assert!(path.contains("generator_gv11"));
-        assert!(path.contains("stage_graph_voronoi"));
+        assert!(path.ends_with("target/graph-voronoi-preview/s42_x-10_z20_identity.png"));
+        assert!(!path.contains("generator_gv"));
+        assert!(!path.contains("span"));
     }
 
     #[test]
@@ -1003,7 +1220,60 @@ mod tests {
             paths
                 .iter()
                 .any(|(mode, path)| *mode == PreviewMode::Temperature
-                    && path.display().to_string().contains("mode_temperature"))
+                    && path.display().to_string().ends_with("temperature.png"))
+        );
+        assert!(
+            paths
+                .iter()
+                .all(|(_, path)| !path.display().to_string().contains("generator_gv"))
+        );
+    }
+
+    #[test]
+    fn explicit_png_output_path_is_preserved() {
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: -10,
+            center_z: 20,
+            width: 64,
+            height: 32,
+            world_span_blocks: 512,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::Single(PreviewMode::Temperature),
+            output: Some(PathBuf::from("target/custom/name.png")),
+        };
+
+        let paths = output_paths_for_config(&config, 11).unwrap();
+
+        assert_eq!(
+            paths,
+            vec![(
+                PreviewMode::Temperature,
+                PathBuf::from("target/custom/name.png")
+            )]
+        );
+    }
+
+    #[test]
+    fn legend_overlay_changes_image_pixels() {
+        let mut image = RgbImage::from_pixel(96, 52, image::Rgb([4, 5, 6]));
+
+        draw_legend_overlay(&mut image, PreviewMode::Temperature);
+
+        assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(96 * 52));
+    }
+
+    #[test]
+    fn legend_gradient_uses_mode_end_colors() {
+        assert_eq!(
+            gradient_color_for_mode(PreviewMode::Temperature, 0.0),
+            [20, 42, 116]
+        );
+        assert_eq!(
+            gradient_color_for_mode(PreviewMode::Temperature, 1.0),
+            [164, 37, 43]
         );
     }
 }

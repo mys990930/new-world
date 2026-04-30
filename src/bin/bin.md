@@ -142,14 +142,16 @@ cargo run --bin graph_voronoi_preview -- 42 0 0
 ```
 
 ```bash
-cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph-voronoi-preview/seed_42_maps
+cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph-voronoi-preview/s42_maps
 ```
 
 - Notes:
   - `--mode identity` preserves the existing single-PNG graph ownership preview.
-  - `--mode all` writes `identity`, `temperature`, `hydration`, `continentality`, `elevation`, and `ruggedness` PNGs under an output directory.
-  - In single mode, an `--output` value with an extension is treated as the target PNG path; a path without an extension is treated as an output directory.
-  - The default output path includes seed, center, generator version, stage, image size, span, and site spacing. Directory outputs include mode names in each PNG filename.
+  - Default single-mode filenames are short: `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>_<mode>.png`.
+  - Default `--mode all` output is a short directory: `target/graph-voronoi-preview/s<seed>_x<center-x>_z<center-z>/`, containing `identity.png`, `temperature.png`, `hydration.png`, `continentality.png`, `elevation.png`, and `ruggedness.png`.
+  - In single mode, an explicit `--output <path>.png` is treated as the target PNG path and preserved exactly; a path without an extension is treated as an output directory.
+  - Width, height, world span, site spacing, stage, and generator version stay in PNG metadata rather than default filenames.
+  - Each output PNG has a compact legend overlay; field maps show a gradient bar and endpoint labels, while identity mode only shows a small header.
   - The same header is embedded in the PNG `new-world-preview-header` iTXt metadata chunk, including mode and map name.
   - Graph construction uses `world::generation::graph::generate_voronoi_graph_patch(...)`; the binary only owns image sampling and PNG output.
   - Field-map modes read the smoothed `VoronoiSite::base_fields` values produced by the graph base-field stage.
