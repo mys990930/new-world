@@ -223,7 +223,9 @@ struct NearestSite {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EdgeKind {
     Coast,
+    Mountain,
     Ridge,
+    Fault,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -249,6 +251,10 @@ struct PreviewHeader {
     graph_area: GraphRegionArea,
     site_count: usize,
     edge_count: usize,
+    coast_edge_count: usize,
+    mountain_edge_count: usize,
+    ridge_edge_count: usize,
+    fault_edge_count: usize,
     macro_source: &'static str,
 }
 
@@ -278,7 +284,12 @@ impl PreviewHeader {
             ),
             format!("site_count={}", self.site_count),
             format!("candidate_edge_count={}", self.edge_count),
+            format!("coast_edge_count={}", self.coast_edge_count),
+            format!("mountain_edge_count={}", self.mountain_edge_count),
+            format!("ridge_edge_count={}", self.ridge_edge_count),
+            format!("fault_edge_count={}", self.fault_edge_count),
             format!("sea_level={SEA_LEVEL}"),
+            "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
             format!("macro_source={}", self.macro_source),
             "world_api=new_world::world::generation::generate_macro_map(patch, config)".to_string(),
         ]
@@ -293,6 +304,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     let graph_area = window.graph_area(config.region_size_blocks)?;
     let graph = build_macro_map_for_preview(&meta, &config, graph_area)?;
     let output = output_path_for_config(&config);
+    let coast_edge_count = graph
+        .edge_samples
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Coast)
+        .count();
+    let mountain_edge_count = graph
+        .edge_samples
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Mountain)
+        .count();
+    let ridge_edge_count = graph
+        .edge_samples
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Ridge)
+        .count();
+    let fault_edge_count = graph
+        .edge_samples
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Fault)
+        .count();
 
     let header = PreviewHeader {
         seed: config.seed,
@@ -309,6 +340,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area,
         site_count: graph.patch.sites.len(),
         edge_count: graph.edge_samples.len(),
+        coast_edge_count,
+        mountain_edge_count,
+        ridge_edge_count,
+        fault_edge_count,
         macro_source: "world_generation_macro_map",
     };
 
@@ -336,9 +371,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area.min.x, graph_area.max.x, graph_area.min.z, graph_area.max.z
     );
     println!(
-        "sites: {}, candidate edges: {}",
+        "sites: {}, candidate edges: {} (coast {}, mountain {}, ridge {}, fault {})",
         graph.patch.sites.len(),
-        graph.edge_samples.len()
+        graph.edge_samples.len(),
+        coast_edge_count,
+        mountain_edge_count,
+        ridge_edge_count,
+        fault_edge_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -509,11 +548,25 @@ fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
             strength: edge.guide.coastness,
         });
     }
+    if edge.guide.is_fault_candidate {
+        return Some(MacroEdgeSample {
+            edge,
+            kind: EdgeKind::Fault,
+            strength: edge.guide.signed_elevation_gradient.abs(),
+        });
+    }
     if edge.guide.is_ridge_candidate {
         return Some(MacroEdgeSample {
             edge,
             kind: EdgeKind::Ridge,
             strength: edge.guide.ridgeness,
+        });
+    }
+    if edge.guide.is_mountain_candidate {
+        return Some(MacroEdgeSample {
+            edge,
+            kind: EdgeKind::Mountain,
+            strength: edge.guide.mountainness,
         });
     }
     None
@@ -529,7 +582,9 @@ fn macro_map_config_for_preview(meta: &WorldMeta, config: &PreviewConfig) -> Mac
 fn edge_kind_draw_order(kind: EdgeKind) -> u8 {
     match kind {
         EdgeKind::Coast => 0,
-        EdgeKind::Ridge => 1,
+        EdgeKind::Mountain => 1,
+        EdgeKind::Ridge => 2,
+        EdgeKind::Fault => 3,
     }
 }
 
@@ -710,11 +765,15 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
         };
         let color = match sample.kind {
             EdgeKind::Coast => [236, 213, 128],
+            EdgeKind::Mountain => [207, 176, 93],
             EdgeKind::Ridge => [247, 248, 242],
+            EdgeKind::Fault => [231, 92, 88],
         };
         let width = match sample.kind {
             EdgeKind::Coast => 1,
+            EdgeKind::Mountain => 1,
             EdgeKind::Ridge => 2,
+            EdgeKind::Fault => 2,
         };
         draw_line(
             image,
@@ -777,8 +836,8 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         1
     };
     let margin = 8 * scale;
-    let panel_width = (132 * scale).min(image.width());
-    let panel_height = (62 * scale).min(image.height());
+    let panel_width = (160 * scale).min(image.width());
+    let panel_height = (78 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -816,12 +875,28 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         scale,
     );
 
-    let key_y = y + panel_height.saturating_sub(14 * scale);
+    let key_y = y + panel_height.saturating_sub(30 * scale);
     draw_key(image, bar_x, key_y, [247, 248, 242], "RIDGE", scale);
     draw_key(
         image,
-        bar_x + 62 * scale,
+        bar_x + 68 * scale,
         key_y,
+        [231, 92, 88],
+        "FAULT",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x,
+        key_y + 13 * scale,
+        [207, 176, 93],
+        "MTN",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 68 * scale,
+        key_y + 13 * scale,
         [236, 213, 128],
         "COAST",
         scale,

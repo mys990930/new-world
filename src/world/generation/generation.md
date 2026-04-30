@@ -118,7 +118,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   mountainness/ridgeness, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
   독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 graph base
   `continentality`를 land/ocean ownership의 source of truth로 읽고, graph adjacency component와
-  coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다.
+  coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. stage 4 guide는
+  같은 land component 내부성, signed elevation gradient, inlandness, mountain/rugged context,
+  drainage divide potential을 함께 읽어 mountain/ridge/fault edge candidate를 선택한다.
 - stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 이 단계의
   river는 후보 surface가 아니라 downhill/local-minimum/outlet 정책을 통과한 결과여야 한다.
 

@@ -62,11 +62,15 @@ MacroSurfaceKind::{
 }
 MacroEdgeGuide {
     is_coast,
+    is_mountain_candidate,
     is_ridge_candidate,
     is_river_candidate,
     is_fault_candidate,
     coastness,
+    mountainness,
     ridgeness,
+    signed_elevation_gradient,
+    drainage_divide_potential,
     river_potential,
 }
 ```
@@ -184,10 +188,19 @@ elevation edge만 고르면 높은 평원도 ridge가 되어버린다. ridge는 
 - land component 내부 위치와 coast distance를 이용해 broad mountainness field 생성
 - ruggedness와 elevation bias로 ridge 주변 local relief 강화
 
-현재 launch 구현의 ridge 후보는 두 land site의 평균 macro elevation, mountainness/ridgeness,
-coast distance를 함께 본다. 즉, 낮은 평지의 random line보다 높은 고도와 산맥성이 겹치는 edge가
-더 쉽게 ridge candidate가 된다. 이 단계의 ridge는 최종 능선 mesh가 아니라 hydrology와
-Voronoi-derived macro field가 읽을 skeleton이다.
+현재 launch 구현의 mountain/ridge/fault 후보는 같은 land component 내부 edge만 대상으로 한다.
+단순히 signed macro elevation이 높은 두 site를 잇는 edge는 ridge가 아니다. edge guide는 두 site의
+signed macro elevation gradient, inlandness/coast distance, mountainness/ridgeness, 낮은 basinness,
+drainage divide 가능성을 함께 점수화한다.
+
+- mountain candidate는 같은 land component 내부의 inland highland envelope다.
+- ridge candidate는 mountain candidate 중 elevation gradient와 drainage divide potential을 함께
+  만족하는 skeleton이다.
+- fault candidate는 같은 land component 내부에서 signed elevation gradient가 크고 산악성이 있는
+  edge다.
+
+이 단계의 ridge/fault/mountain은 최종 능선 mesh가 아니라 hydrology와 Voronoi-derived macro field가
+읽을 skeleton이다.
 
 산맥은 hydrology보다 먼저 정해져야 한다. 대륙 내부의 큰 산맥과 ridge는 분수계와 강의 방향을
 만드는 원인이며, hydrology가 나중에 그 구조를 읽어야 한다.
@@ -249,6 +262,8 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
   `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
-- edge guide는 coast, ridge candidate, fault candidate를 포함한다. stage 3 macro_map은 hydrology 전
-  river candidate corridor를 선택하지 않으며, selected river chain, flow accumulation,
-  lake/sink/outlet carve는 hydrology stage가 확정한다.
+- edge guide는 coast, mountain candidate, ridge candidate, fault candidate를 포함한다. ridge는
+  단순 high elevation edge가 아니라 같은 land component 내부성, signed elevation gradient,
+  inlandness, mountain/rugged context, drainage divide potential을 함께 만족해야 한다.
+  stage 3 macro_map은 hydrology 전 river candidate corridor를 선택하지 않으며, selected river chain,
+  flow accumulation, lake/sink/outlet carve는 hydrology stage가 확정한다.

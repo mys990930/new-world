@@ -7,7 +7,7 @@ use super::graph::{
 };
 
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
-pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.42;
+pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.32;
 pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
 pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.0;
 
@@ -118,11 +118,15 @@ pub struct MacroCorner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroEdgeGuide {
     pub is_coast: bool,
+    pub is_mountain_candidate: bool,
     pub is_ridge_candidate: bool,
     pub is_river_candidate: bool,
     pub is_fault_candidate: bool,
     pub coastness: f32,
+    pub mountainness: f32,
     pub ridgeness: f32,
+    pub signed_elevation_gradient: f32,
+    pub drainage_divide_potential: f32,
     pub river_potential: f32,
 }
 
@@ -166,6 +170,18 @@ impl GraphMacroMap {
         self.edges
             .iter()
             .filter(|edge| edge.guide.is_ridge_candidate)
+    }
+
+    pub fn mountain_candidate_edges(&self) -> impl Iterator<Item = &MacroEdge> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.guide.is_mountain_candidate)
+    }
+
+    pub fn fault_candidate_edges(&self) -> impl Iterator<Item = &MacroEdge> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.guide.is_fault_candidate)
     }
 
     pub fn river_candidate_edges(&self) -> impl Iterator<Item = &MacroEdge> {
@@ -685,29 +701,69 @@ fn macro_edge_guide(
         ((a.coastness + b.coastness) * 0.5).clamp(0.0, 1.0)
     };
     let average_elevation = (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5;
-    let elevation_slope = (a.signed_macro_elevation - b.signed_macro_elevation).abs();
+    let signed_elevation_gradient = b.signed_macro_elevation - a.signed_macro_elevation;
+    let elevation_slope = signed_elevation_gradient.abs();
     let both_land = a_land && b_land;
-    let ridgeness = if both_land {
-        (((a.ridgeness + b.ridgeness) * 0.5) * 0.74
-            + smoothstep(0.18, 0.72, average_elevation) * 0.18
-            + smoothstep(0.08, 0.34, elevation_slope) * 0.08)
+    let same_land_component = both_land && a.continent.is_some() && a.continent == b.continent;
+    let average_coastness = (a.coastness + b.coastness) * 0.5;
+    let minimum_inland_distance = a.distance_to_coast_blocks.min(b.distance_to_coast_blocks);
+    let inlandness = (minimum_inland_distance / (config.coast_width_blocks * 2.5)).clamp(0.0, 1.0);
+    let mountainness = if same_land_component {
+        (((a.mountainness + b.mountainness) * 0.5) * 0.58
+            + ((a.ridgeness + b.ridgeness) * 0.5) * 0.22
+            + smoothstep(0.20, 0.70, average_elevation) * 0.12
+            + inlandness * 0.08)
             .clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let is_ridge_candidate = both_land
+    let drainage_divide_potential = if same_land_component {
+        (mountainness * 0.40
+            + ((a.ridgeness + b.ridgeness) * 0.5) * 0.24
+            + (1.0 - ((a.basinness + b.basinness) * 0.5)) * 0.18
+            + inlandness * 0.12
+            + smoothstep(0.04, 0.24, elevation_slope) * 0.06)
+            .clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let gradient_score = smoothstep(0.025, 0.18, elevation_slope);
+    let ridgeness = if same_land_component {
+        (((a.ridgeness + b.ridgeness) * 0.5) * 0.34
+            + mountainness * 0.24
+            + drainage_divide_potential * 0.22
+            + gradient_score * 0.14
+            + inlandness * 0.06)
+            .clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let is_mountain_candidate = same_land_component
+        && mountainness >= 0.20
+        && average_elevation > 0.05
+        && average_coastness < 0.72
+        && inlandness >= 0.18;
+    let is_ridge_candidate = is_mountain_candidate
         && ridgeness >= config.ridge_candidate_threshold
-        && average_elevation > 0.12
-        && a.coastness.max(b.coastness) < 0.86;
-    let is_fault_candidate = is_ridge_candidate && elevation_slope > 0.20;
+        && gradient_score >= 0.04
+        && drainage_divide_potential >= 0.26;
+    let is_fault_candidate = same_land_component
+        && elevation_slope > 0.06
+        && mountainness >= 0.20
+        && average_coastness < 0.78
+        && inlandness >= 0.14;
 
     MacroEdgeGuide {
         is_coast,
+        is_mountain_candidate,
         is_ridge_candidate,
         is_river_candidate: false,
         is_fault_candidate,
         coastness,
+        mountainness,
         ridgeness,
+        signed_elevation_gradient,
+        drainage_divide_potential,
         river_potential: 0.0,
     }
 }
@@ -715,11 +771,15 @@ fn macro_edge_guide(
 fn empty_edge_guide() -> MacroEdgeGuide {
     MacroEdgeGuide {
         is_coast: false,
+        is_mountain_candidate: false,
         is_ridge_candidate: false,
         is_river_candidate: false,
         is_fault_candidate: false,
         coastness: 0.0,
+        mountainness: 0.0,
         ridgeness: 0.0,
+        signed_elevation_gradient: 0.0,
+        drainage_divide_potential: 0.0,
         river_potential: 0.0,
     }
 }
@@ -920,6 +980,50 @@ mod tests {
     }
 
     #[test]
+    fn ridge_candidates_require_component_interior_gradient_and_divide_context() {
+        let component = Some(MacroContinentId(10));
+        let lowland = test_macro_site(1, component, 0.74, 0.75, 0.95, 0.08, 0.06, 0.20, 768.0);
+        let high_plain = test_macro_site(2, component, 0.78, 0.78, 0.95, 0.08, 0.06, 0.18, 768.0);
+        let ridge_a = test_macro_site(3, component, 0.42, 0.78, 0.18, 0.82, 0.78, 0.18, 768.0);
+        let ridge_b = test_macro_site(4, component, 0.64, 0.84, 0.12, 0.86, 0.82, 0.16, 768.0);
+        let coastal_ridge = test_macro_site(5, component, 0.66, 0.84, 0.96, 0.90, 0.86, 0.12, 0.0);
+        let other_component = test_macro_site(
+            6,
+            Some(MacroContinentId(11)),
+            0.66,
+            0.84,
+            0.10,
+            0.90,
+            0.86,
+            0.12,
+            768.0,
+        );
+        let config = test_macro_config(123);
+
+        assert!(!macro_edge_guide(Some(lowland), Some(high_plain), config).is_ridge_candidate);
+        assert!(macro_edge_guide(Some(ridge_a), Some(ridge_b), config).is_ridge_candidate);
+        assert!(
+            macro_edge_guide(Some(ridge_a), Some(ridge_b), config).drainage_divide_potential
+                >= 0.50
+        );
+        assert!(!macro_edge_guide(Some(ridge_a), Some(coastal_ridge), config).is_ridge_candidate);
+        assert!(!macro_edge_guide(Some(ridge_a), Some(other_component), config).is_ridge_candidate);
+    }
+
+    #[test]
+    fn fault_candidates_preserve_signed_gradient_context() {
+        let component = Some(MacroContinentId(20));
+        let left = test_macro_site(7, component, 0.26, 0.68, 0.18, 0.56, 0.44, 0.24, 576.0);
+        let right = test_macro_site(8, component, 0.58, 0.72, 0.14, 0.62, 0.50, 0.22, 576.0);
+
+        let guide = macro_edge_guide(Some(left), Some(right), test_macro_config(124));
+
+        assert!(guide.is_fault_candidate);
+        assert!(guide.signed_elevation_gradient > 0.0);
+        assert!(guide.mountainness >= 0.38);
+    }
+
+    #[test]
     fn adjacent_patch_overlap_keeps_macro_sites_and_edges_stable() {
         let left = generate_voronoi_graph_patch(test_request(77, 0, 0));
         let right =
@@ -1000,5 +1104,36 @@ mod tests {
             (actual - expected).abs() <= 0.000_001,
             "actual={actual} expected={expected}"
         );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn test_macro_site(
+        id: u64,
+        continent: Option<MacroContinentId>,
+        signed_macro_elevation: f32,
+        continentality: f32,
+        coastness: f32,
+        mountainness: f32,
+        ridgeness: f32,
+        basinness: f32,
+        distance_to_coast_blocks: f32,
+    ) -> MacroSite {
+        MacroSite {
+            id: VoronoiSiteId(id),
+            owner_region: GraphRegionCoord::new(0, 0),
+            position: WorldPlanePoint::new(0.0, 0.0),
+            surface_kind: MacroSurfaceKind::Continent,
+            continent,
+            ocean_basin: None,
+            signed_macro_elevation,
+            continentality,
+            coastness,
+            distance_to_coast_blocks,
+            distance_to_continent_core_blocks: distance_to_coast_blocks,
+            distance_to_ocean_basin_blocks: distance_to_coast_blocks,
+            mountainness,
+            ridgeness,
+            basinness,
+        }
     }
 }
