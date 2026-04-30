@@ -17,7 +17,7 @@ use new_world::world::generation::{
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
-const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
+const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "graph_voronoi";
 const OUTPUT_DIR: &str = "target/graph-voronoi-preview";
 
@@ -1141,6 +1141,7 @@ mod tests {
 
         assert_eq!(config.width, 3840);
         assert_eq!(config.height, 2160);
+        assert_eq!(config.world_span_blocks, 32768);
     }
 
     #[test]

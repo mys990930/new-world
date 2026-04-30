@@ -65,7 +65,7 @@
 - 선택 인자:
   - `--width <u32>`: 기본 `3840`
   - `--height <u32>`: 기본 `2160`
-  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `8192`
+  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
   - `--stage graph_voronoi`

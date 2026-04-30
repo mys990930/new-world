@@ -24,7 +24,7 @@
 
 - `--width 3840`
 - `--height 2160`
-- `--world-span-blocks 8192`
+- `--world-span-blocks 32768`
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--stage graph_voronoi`
@@ -80,14 +80,14 @@ The temperature, hydration, continentality, and elevation modes read the graph b
 cargo run --bin graph_voronoi_preview -- 42 0 0
 ```
 
-Lower-resolution smoke check:
+Lower-resolution smoke check with the default macro-map-aligned world span:
 
 ```bash
-cargo run --bin graph_voronoi_preview -- 42 0 0 --width 960 --height 540 --world-span-blocks 4096
+cargo run --bin graph_voronoi_preview -- 42 0 0 --width 960 --height 540
 ```
 
 All-map directory output:
 
 ```bash
-cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --width 960 --height 540 --world-span-blocks 4096 --output target/graph-voronoi-preview/s42_maps
+cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --width 960 --height 540 --output target/graph-voronoi-preview/s42_maps
 ```
