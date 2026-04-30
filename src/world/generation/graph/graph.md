@@ -45,6 +45,35 @@
 
 이 단계의 출력은 site, corner, edge, adjacency를 포함한 graph patch다.
 
+현재 구현은 launch 단계의 안정성을 우선해 고정 density jittered grid 기반의 Voronoi-style
+barycentric dual patch를 만든다. 완전한 Delaunay/Voronoi 계산은 아니지만, 전역 site lattice를
+seed와 generator version으로 jitter하고, 2x2 site 평균점을 corner로 삼으며, 인접 site 쌍을 edge로
+연결한다. 따라서 site, corner, edge topology가 실제로 존재하고, 같은 전역 lattice 좌표는 어떤
+patch 요청에서 생성하더라도 같은 id와 위치를 갖는다.
+
+공개 생성 API는 graph leaf가 소유한다.
+
+```rust
+VoronoiGraphConfig {
+    seed,
+    generator_version,
+    region_size_blocks,
+    site_spacing_blocks,
+    padding_regions,
+}
+
+VoronoiGraphPatchRequest::new(config, center_world_x, center_world_z)
+generate_voronoi_graph_patch(request) -> VoronoiGraphPatch
+```
+
+`center_world_x/z`는 Euclidean division으로 중심 graph region을 고른다. `owner_regions`는 요청의
+중심 region을 나타내며, 실제 site/corner/edge 후보는 `padding_regions`만큼 확장한 주변 region과
+추가 site-cell guard에서 생성한다. 이 guard는 patch 바깥 boundary edge를 조립하기 위한 내부 계산
+범위다.
+
+생성 단계는 rayon으로 site와 corner, edge 후보를 병렬 계산한다. 병렬 수집 뒤에는 id 기준 정렬과
+dedup을 수행하므로 thread scheduling은 결과 순서에 영향을 주지 않는다.
+
 ---
 
 ## Site / Corner / Edge
@@ -159,10 +188,14 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 3. neighboring graph region은 충분한 padding으로 생성되어 ownership 경계를 넘는 site와 edge가 안정적이어야 한다.
 4. negative world coordinate는 Euclidean division을 사용해 모든 사분면에서 region ownership이 안정적이어야 한다.
 5. graph core는 feature-specific state를 직접 끌어안지 않고 id 기반 annotation layer를 허용해야 한다.
+6. 같은 `VoronoiGraphConfig`와 같은 전역 lattice 좌표에서 생성된 site/corner/edge는 요청 중심이 달라도 같은 결과를 가져야 한다.
+7. seed와 generator version은 site jitter, base field seed, edge seed에 반영되어야 한다.
+8. 병렬 생성은 최종 정렬/dedup 이후 deterministic해야 한다.
 
 ---
 
 ## 현재 구현 상태
 
-- 현재는 data contract와 coordinate helper scaffold 단계다.
-- 실제 site generation, graph relaxation, Delaunay/Voronoi construction, padded graph patch assembly는 아직 구현되지 않았다.
+- data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Voronoi-style patch 생성이 구현되어 있다.
+- 구현된 patch 생성은 고정 density jittered grid와 barycentric dual topology를 사용한다.
+- 아직 구현되지 않은 것: Lloyd relaxation, 실제 Delaunay/Voronoi construction, variable density, hydrology routing, noisy boundary realization.

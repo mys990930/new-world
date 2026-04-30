@@ -88,6 +88,9 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 ```rust
 graph_region_for_world_block(world_x: i32, world_z: i32, region_size_blocks: i32) -> GraphRegionCoord
 GraphRegionArea::new(min: GraphRegionCoord, max: GraphRegionCoord) -> Option<GraphRegionArea>
+VoronoiGraphConfig::new(seed: u64, generator_version: u32) -> VoronoiGraphConfig
+VoronoiGraphPatchRequest::new(config, center_world_x, center_world_z) -> VoronoiGraphPatchRequest
+generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> VoronoiGraphPatch
 VoronoiGraphPatch::site(id: VoronoiSiteId) -> Option<&VoronoiSite>
 
 normalize_influences(influences: &mut [GraphInfluence])
