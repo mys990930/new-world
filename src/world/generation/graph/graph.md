@@ -54,6 +54,18 @@ patch 요청에서 생성하더라도 같은 id와 위치를 갖는다.
 공개 생성 API는 graph leaf가 소유한다.
 
 ```rust
+GraphBaseFields {
+    temperature,
+    hydration,
+    continentality,
+    elevation_seed,
+}
+
+GraphBaseFieldConfig {
+    smoothing_passes,
+    self_weight,
+}
+
 VoronoiGraphConfig {
     seed,
     generator_version,
@@ -64,15 +76,46 @@ VoronoiGraphConfig {
 
 VoronoiGraphPatchRequest::new(config, center_world_x, center_world_z)
 generate_voronoi_graph_patch(request) -> VoronoiGraphPatch
+apply_base_graph_fields(patch, GraphBaseFieldConfig::default())
 ```
 
 `center_world_x/z`는 Euclidean division으로 중심 graph region을 고른다. `owner_regions`는 요청의
 중심 region을 나타내며, 실제 site/corner/edge 후보는 `padding_regions`만큼 확장한 주변 region과
 추가 site-cell guard에서 생성한다. 이 guard는 patch 바깥 boundary edge를 조립하기 위한 내부 계산
-범위다.
+범위다. base field smoothing은 이웃 site를 여러 pass 읽으므로, 현재 구현은 topology guard에
+기본 smoothing pass 수만큼 site-cell guard를 더해 overlap 영역의 smoothed field가 요청 중심에
+따라 달라지지 않게 한다.
 
 생성 단계는 rayon으로 site와 corner, edge 후보를 병렬 계산한다. 병렬 수집 뒤에는 id 기준 정렬과
 dedup을 수행하므로 thread scheduling은 결과 순서에 영향을 주지 않는다.
+
+## Base Graph Field Stage
+
+pipeline 2단계는 graph leaf 안에서 명시적인 base field stage로 실행된다.
+`generate_voronoi_graph_patch`는 topology를 만든 뒤 `apply_base_graph_fields`를 호출해 site와
+corner에 base temperature, hydration, continentality, elevation seed를 채운다.
+
+`GraphBaseFields`는 stage 2의 공용 field 묶음이다.
+
+- `temperature`: 0..1 base climate seed
+- `hydration`: 0..1 base humidity/hydration seed
+- `continentality`: -1..1 base continent/ocean tendency seed
+- `elevation_seed`: -1..1 hydrology 전 macro elevation bias seed
+
+site는 두 값을 함께 가진다.
+
+- `raw_base_fields`: seed와 lattice coordinate에서 직접 나온 raw 값
+- `base_fields`: center graph adjacency를 참고해 smoothing된 값
+
+기존 `VoronoiSite.temperature`, `hydration`, `height_bias`, `continentality`는 downstream 호환을
+위해 `base_fields`를 복사한 convenience field다. 새 code는 raw/smoothed 구분이 필요하면
+`raw_base_fields`와 `base_fields`를 직접 읽는다.
+
+corner도 `raw_base_fields`와 `base_fields`를 가진다. corner 값은 독립 hash가 아니라 surrounding
+site 4개의 raw/smoothed base field를 corner와 site position 사이 거리로 가중 평균해 만든다.
+`VoronoiCorner.elevation`은 이 단계에서는 hydrology solve 결과가 아니라 `base_fields.elevation_seed`
+를 복사한 base elevation bias다. downhill, water accumulation, lake/sink/outlet 처리는 이후
+hydrology 단계가 별도 layer에서 소유한다.
 
 ---
 
@@ -90,7 +133,7 @@ site는 지역의 중심 의미를 가진다.
 
 corner는 지형 흐름의 계산점이다.
 
-- elevation
+- base elevation seed / bias
 - downhill direction
 - water accumulation
 - lake/sink/outlet state
@@ -198,4 +241,6 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 
 - data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Voronoi-style patch 생성이 구현되어 있다.
 - 구현된 patch 생성은 고정 density jittered grid와 barycentric dual topology를 사용한다.
+- pipeline 2단계 base graph field가 구현되어 있으며, site raw seed와 smoothed base field,
+  corner 주변 site 기반 base field/elevation seed를 제공한다.
 - 아직 구현되지 않은 것: Lloyd relaxation, 실제 Delaunay/Voronoi construction, variable density, hydrology routing, noisy boundary realization.

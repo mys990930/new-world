@@ -52,6 +52,12 @@ world-space column sampling은 주변 site/corner의 influence를 섞어 continu
 - base graph field: graph 생성 직후 site/corner에 temperature, humidity, continentality, elevation seed를 부여하고 이웃 smoothing한다.
 - final column field: heightfield와 hydrology 이후 elevation, water proximity, rain shadow, river/lake/wetland proximity를 반영해 temperature/hydration/biome influence를 다시 resolve한다.
 
+현재 base graph field는 `graph` leaf의 `GraphBaseFields`가 소유한다. site는 seed hash에서 직접 나온
+`raw_base_fields`와 neighbor smoothing 후의 `base_fields`를 함께 가진다. corner는 주변 site 4개의
+raw/smoothed field를 거리 가중 평균해 같은 두 값을 가진다. 이때 `elevation_seed`와
+`VoronoiCorner.elevation`은 hydrology elevation이 아니라 이후 macro elevation/hydrology가 읽을
+초기 bias다.
+
 방법 후보:
 
 - graph neighbor smoothing
@@ -143,5 +149,6 @@ polygon 하나가 반드시 하나의 biome일 필요가 없다.
 
 ## 현재 구현 상태
 
-- 현재는 sampling contract scaffold 단계다.
-- future work는 graph-neighborhood sampling, spline-warped boundary distance field, cached field patch를 추가해야 한다.
+- continuous column sampling은 아직 contract scaffold 단계다.
+- base graph field stage는 `graph` leaf에 구현되어 site/corner raw seed와 smoothed 값을 제공한다.
+- future work는 graph-neighborhood column sampling, spline-warped boundary distance field, cached field patch를 추가해야 한다.

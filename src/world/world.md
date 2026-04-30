@@ -91,6 +91,7 @@ GraphRegionArea::new(min: GraphRegionCoord, max: GraphRegionCoord) -> Option<Gra
 VoronoiGraphConfig::new(seed: u64, generator_version: u32) -> VoronoiGraphConfig
 VoronoiGraphPatchRequest::new(config, center_world_x, center_world_z) -> VoronoiGraphPatchRequest
 generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> VoronoiGraphPatch
+apply_base_graph_fields(patch: &mut VoronoiGraphPatch, config: GraphBaseFieldConfig)
 VoronoiGraphPatch::site(id: VoronoiSiteId) -> Option<&VoronoiSite>
 
 normalize_influences(influences: &mut [GraphInfluence])
@@ -160,5 +161,8 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - 이전 `world` 구현은 `src/world/legacy` 아래로 이동되어 보존되어 있다.
 - `src/world/mod.rs`는 기존 app/tool/runtime compile을 위해 legacy API를 re-export한다.
 - 새 graph-first 모듈은 `src/world/generation` 아래의 scaffold contract 단계다.
-- 아직 실제 Voronoi graph 생성, Delaunay/Voronoi construction, padded graph patch assembly, macro elevation, hydrology solve, Voronoi-derived map, Perlin micro relief 합성은 구현되지 않았다.
+- 현재 `graph` leaf는 deterministic padded Voronoi-style graph patch assembly와 base graph field
+  smoothing을 제공한다.
+- 아직 실제 Delaunay/Voronoi construction, macro elevation, hydrology solve, Voronoi-derived map,
+  Perlin micro relief 합성은 구현되지 않았다.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

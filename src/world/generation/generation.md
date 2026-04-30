@@ -92,6 +92,13 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 - `hydrology/hydrology.md`: watershed, drainage node, selected river edge 계약
 - `pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
 
+현재 구현된 graph-first processing:
+
+- stage 1 padded Voronoi-style graph patch 생성: deterministic jittered grid site, barycentric corner,
+  site/corner-linked edge topology를 rayon 병렬 생성 뒤 id 정렬/dedup한다.
+- stage 2 base graph field: site raw seed field와 smoothed field를 생성하고, corner field/elevation
+  seed를 주변 site 기반으로 안정적으로 계산한다.
+
 문서화된 다음 leaf:
 
 - `macro_map/macro_map.md`: continent/ocean ownership, Voronoi macro elevation, mountain/ridge/fault/coast guide
@@ -142,6 +149,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 ### Field Continuity
 
 - 인접 site의 temperature/hydration/elevation bias는 비현실적으로 튀지 않는다.
+- base graph field smoothing은 raw seed 대비 인접 site 차이를 줄여야 한다.
+- corner base field와 elevation seed는 독립 random 값이 아니라 주변 site field에서 파생되어야 한다.
 - biome transition은 gradient 또는 domain warp를 통해 완만하게 변한다.
 - ocean/coast/lake/wetland 구분은 material policy와 topdown preview에서 일관된다.
 
