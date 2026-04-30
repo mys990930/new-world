@@ -9,6 +9,7 @@ pub enum GraphGenerationStage {
     HydrologySolve,
     NoisyBoundaryRealization,
     GraphDerivedMacroMap,
+    MesoFeaturePlanning,
     PerlinMicroRelief,
     HeightfieldAndWaterSurface,
     ClimateHydrationBiomeResolve,
@@ -17,7 +18,7 @@ pub enum GraphGenerationStage {
     VoxelFill,
 }
 
-pub const GRAPH_GENERATION_STAGES: [GraphGenerationStage; 13] = [
+pub const GRAPH_GENERATION_STAGES: [GraphGenerationStage; 14] = [
     GraphGenerationStage::PaddedVoronoiGraph,
     GraphGenerationStage::BaseGraphFields,
     GraphGenerationStage::ContinentOceanMacroElevation,
@@ -25,6 +26,7 @@ pub const GRAPH_GENERATION_STAGES: [GraphGenerationStage; 13] = [
     GraphGenerationStage::HydrologySolve,
     GraphGenerationStage::NoisyBoundaryRealization,
     GraphGenerationStage::GraphDerivedMacroMap,
+    GraphGenerationStage::MesoFeaturePlanning,
     GraphGenerationStage::PerlinMicroRelief,
     GraphGenerationStage::HeightfieldAndWaterSurface,
     GraphGenerationStage::ClimateHydrationBiomeResolve,
@@ -93,6 +95,7 @@ mod tests {
                 GraphGenerationStage::HydrologySolve,
                 GraphGenerationStage::NoisyBoundaryRealization,
                 GraphGenerationStage::GraphDerivedMacroMap,
+                GraphGenerationStage::MesoFeaturePlanning,
                 GraphGenerationStage::PerlinMicroRelief,
                 GraphGenerationStage::HeightfieldAndWaterSurface,
                 GraphGenerationStage::ClimateHydrationBiomeResolve,

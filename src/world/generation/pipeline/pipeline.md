@@ -6,7 +6,7 @@
 
 이 모듈은 새 파이프라인이 legacy generator를 대체하기 전까지 compile-time stage contract를
 제공한다. 실제 stage 구현은 `graph`, `macro_map`, `hydrology`, `boundary`, `field`,
-`heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
+`meso_feature`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
 
 ---
 
@@ -40,12 +40,13 @@
 5. hydrology solve
 6. noisy boundary realization
 7. graph-derived macro map
-8. Perlin micro relief
-9. heightfield and water surface
-10. climate/hydration/biome resolve
-11. surface plan
-12. vegetation plan
-13. voxel fill
+8. meso feature planning
+9. Perlin micro relief
+10. heightfield and water surface
+11. climate/hydration/biome resolve
+12. surface plan
+13. vegetation plan
+14. voxel fill
 
 pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜야 한다.
 
@@ -56,6 +57,7 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - hydrology는 final heightfield와 voxel fill보다 먼저다.
 - noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
 - Voronoi-derived macro map은 graph guide와 boundary 정보를 heightfield가 읽을 수 있는 field로 바꾸는 중간 layer다.
+- meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.
 - Perlin micro relief는 마지막 표면 디테일이며 macro ownership을 뒤집지 않는다.
 - material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다.
 

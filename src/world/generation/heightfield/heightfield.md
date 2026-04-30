@@ -13,6 +13,7 @@ macro elevation은 graph 기반으로 먼저 생성되고, Perlin은 그 위에 
 
 - macro elevation, continent/ocean gradient, ridge/fault field, hydrology valley field 합성
 - Voronoi-derived macro noise/gradient map 입력 계약
+- meso feature deformation plan 입력 계약
 - Perlin micro relief amplitude와 mask 정책 정의
 - river, lake, wetland, floodplain, coast flatten/terrace 반영
 - local depression cleanup 또는 clamp 정책 정의
@@ -39,6 +40,7 @@ height =
   + continent_ocean_gradient
   + edge_mountain_ridge_field
   + edge_fault_plateau_field
+  + meso_feature_height_delta
   - edge_hydrology_valley_field
   - lake_basin_flatten_field
   + noisy_boundary_displacement_field
@@ -54,8 +56,9 @@ height =
 3. 이 edge structure와 macro elevation을 바탕으로 edge 기반 hydrology를 설정한다.
 4. river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
 5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
-6. Perlin noise를 만들고 hydrology/coast/lake/ridge mask로 amplitude를 제한한다.
-7. macro map, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+6. meso feature plan을 만든다.
+7. Perlin noise를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
+8. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
 
 heightfield 단계의 출력은 block 배치가 아니라 column별 높이 계약이다. 예를 들어
 `surface_y`, `water_surface_y`, `stone_floor_y`, `soil_depth_blocks`, `slope`, `floodplain_mask`,
@@ -68,7 +71,7 @@ heightfield 단계의 출력은 block 배치가 아니라 column별 높이 계�
 Perlin noise 사용 규칙:
 
 - Perlin은 지형의 큰 구조를 발명하지 않는다.
-- Perlin amplitude는 ruggedness, slope, hydrology role, coast/lake mask로 제한한다.
+- Perlin amplitude는 ruggedness, slope, hydrology role, coast/lake mask, meso feature mask로 제한한다.
 - octave별 seed/offset/rotation을 분리해 correlation artifact를 줄인다.
 - ocean, lake, river, wetland, floodplain 영역에서는 Perlin을 감쇠하거나 flatten한다.
 - mountain/ridge 주변에서는 Perlin이 능선 방향을 보조할 수 있지만, ridge ownership을 뒤집으면 안 된다.

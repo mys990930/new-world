@@ -40,6 +40,7 @@ surface resolve는 아래 입력을 함께 본다.
 - ocean/lake/river/wetland/coast role
 - river flow accumulation과 floodplain width
 - ridge/fault/cliff guide
+- meso feature material hint와 deformation mask
 - local soil/sediment class
 - runtime season/weather state가 허용하는 override
 

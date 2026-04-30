@@ -43,12 +43,13 @@
 10. river flow accumulation map
 11. noisy edge preview
 12. Voronoi-derived macro noise/gradient map preview
-13. Perlin micro relief preview
-14. heightfield and water surface preview
-15. final temperature/hydration/biome influence preview
-16. biome/material/surface plan preview
-17. vegetation placement preview
-18. voxel fill preview
+13. meso feature plan preview
+14. Perlin micro relief preview
+15. heightfield and water surface preview
+16. final temperature/hydration/biome influence preview
+17. biome/material/surface plan preview
+18. vegetation placement preview
+19. voxel fill preview
 
 ---
 

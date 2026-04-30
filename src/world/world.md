@@ -140,6 +140,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/macro_map/macro_map.md`: 대륙/바다, macro elevation, 산맥/ridge/fault/coast guide
 - `generation/hydrology/hydrology.md`: graph-first watershed, river, lake, local minima 계약
 - `generation/boundary/boundary.md`: noisy boundary와 feature별 boundary realization
+- `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
 - `generation/heightfield/heightfield.md`: Voronoi macro map과 Perlin micro relief 합성
 - `generation/surface_plan/surface_plan.md`: biome/material/water/coast surface policy resolve
