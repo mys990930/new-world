@@ -5,8 +5,9 @@
 `boundary`는 polygon boundary, coast, river, biome transition, cliff/fault line의 noisy realization
 계약을 소유한다.
 
-raw Voronoi edge는 후보선일 뿐이다. visible boundary는 spline, recursive subdivision, domain
-warp, feature-specific width와 mask를 통해 현실화되어야 한다.
+raw Voronoi edge는 후보선일 뿐이다. 모든 edge를 visible boundary로 바꾸지 않는다. visible
+boundary는 coast, selected river, biome transition, cliff/fault처럼 feature role을 받은 edge만
+spline, recursive subdivision, domain warp, feature-specific width와 mask를 통해 현실화한다.
 
 ---
 
@@ -17,6 +18,7 @@ warp, feature-specific width와 mask를 통해 현실화되어야 한다.
 - coast, river, biome transition, cliff/fault boundary별 realization 정책
 - edge id와 seed 기반 cache key 정의
 - boundary가 이웃 chunk/region에서 동일하게 재현되도록 입력 계약 유지
+- raw graph topology와 visible boundary realization layer 분리
 
 ---
 
@@ -63,7 +65,9 @@ boundary 표현은 feature마다 다를 수 있다.
 ## 불변식
 
 1. raw Voronoi edge가 그대로 직선 river/coast/biome boundary로 보이면 안 된다.
-2. noisy boundary는 edge guard 영역 밖으로 나가거나 이웃 edge와 교차하면 안 된다.
-3. 같은 edge id, seed, feature role은 같은 curve를 만들어야 한다.
-4. boundary realization은 chunk 요청 순서와 graph patch padding 차이에 독립적이어야 한다.
-5. hard owner와 visible material boundary가 과도하게 같은 선을 따라가면 회귀다.
+2. feature role이 없는 edge는 visible noisy boundary를 만들지 않는다.
+3. noisy boundary는 raw graph topology를 대체하지 않는다.
+4. noisy boundary는 edge guard 영역 밖으로 나가거나 이웃 edge와 교차하면 안 된다.
+5. 같은 edge id, seed, feature role은 같은 curve를 만들어야 한다.
+6. boundary realization은 chunk 요청 순서와 graph patch padding 차이에 독립적이어야 한다.
+7. hard owner와 visible material boundary가 과도하게 같은 선을 따라가면 회귀다.

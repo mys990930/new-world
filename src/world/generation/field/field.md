@@ -46,7 +46,11 @@ world-space column sampling은 주변 site/corner의 influence를 섞어 continu
 - coastness
 - fresh-water proximity
 
-인접 site끼리는 완전 랜덤 값이 아니라 어느 정도 연속성을 가져야 한다.
+인접 site끼리는 완전 랜덤 값이 아니라 어느 정도 연속성을 가져야 한다. field는 한 번에 끝나는
+단계가 아니라 두 층으로 나뉜다.
+
+- base graph field: graph 생성 직후 site/corner에 temperature, humidity, continentality, elevation seed를 부여하고 이웃 smoothing한다.
+- final column field: heightfield와 hydrology 이후 elevation, water proximity, rain shadow, river/lake/wetland proximity를 반영해 temperature/hydration/biome influence를 다시 resolve한다.
 
 방법 후보:
 

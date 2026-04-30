@@ -44,8 +44,11 @@
 11. noisy edge preview
 12. Voronoi-derived macro noise/gradient map preview
 13. Perlin micro relief preview
-14. final heightfield preview
-15. biome/material preview
+14. heightfield and water surface preview
+15. final temperature/hydration/biome influence preview
+16. biome/material/surface plan preview
+17. vegetation placement preview
+18. voxel fill preview
 
 ---
 

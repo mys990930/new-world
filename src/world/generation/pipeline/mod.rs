@@ -2,24 +2,34 @@ use super::field::{ContinuousFieldSample, VoronoiBlendSample};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphGenerationStage {
-    MacroVoronoiGraph,
-    ContinuousRegionFields,
-    LandOceanGradient,
-    MountainGradient,
-    HydrologyGraph,
-    BiomeResolve,
-    HeightfieldSynthesis,
+    PaddedVoronoiGraph,
+    BaseGraphFields,
+    ContinentOceanMacroElevation,
+    EdgeGuideSelection,
+    HydrologySolve,
+    NoisyBoundaryRealization,
+    GraphDerivedMacroMap,
+    PerlinMicroRelief,
+    HeightfieldAndWaterSurface,
+    ClimateHydrationBiomeResolve,
+    SurfacePlan,
+    VegetationPlan,
     VoxelFill,
 }
 
-pub const GRAPH_GENERATION_STAGES: [GraphGenerationStage; 8] = [
-    GraphGenerationStage::MacroVoronoiGraph,
-    GraphGenerationStage::ContinuousRegionFields,
-    GraphGenerationStage::LandOceanGradient,
-    GraphGenerationStage::MountainGradient,
-    GraphGenerationStage::HydrologyGraph,
-    GraphGenerationStage::BiomeResolve,
-    GraphGenerationStage::HeightfieldSynthesis,
+pub const GRAPH_GENERATION_STAGES: [GraphGenerationStage; 13] = [
+    GraphGenerationStage::PaddedVoronoiGraph,
+    GraphGenerationStage::BaseGraphFields,
+    GraphGenerationStage::ContinentOceanMacroElevation,
+    GraphGenerationStage::EdgeGuideSelection,
+    GraphGenerationStage::HydrologySolve,
+    GraphGenerationStage::NoisyBoundaryRealization,
+    GraphGenerationStage::GraphDerivedMacroMap,
+    GraphGenerationStage::PerlinMicroRelief,
+    GraphGenerationStage::HeightfieldAndWaterSurface,
+    GraphGenerationStage::ClimateHydrationBiomeResolve,
+    GraphGenerationStage::SurfacePlan,
+    GraphGenerationStage::VegetationPlan,
     GraphGenerationStage::VoxelFill,
 ];
 
@@ -76,13 +86,18 @@ mod tests {
         assert_eq!(
             graph_generation_stages(),
             &[
-                GraphGenerationStage::MacroVoronoiGraph,
-                GraphGenerationStage::ContinuousRegionFields,
-                GraphGenerationStage::LandOceanGradient,
-                GraphGenerationStage::MountainGradient,
-                GraphGenerationStage::HydrologyGraph,
-                GraphGenerationStage::BiomeResolve,
-                GraphGenerationStage::HeightfieldSynthesis,
+                GraphGenerationStage::PaddedVoronoiGraph,
+                GraphGenerationStage::BaseGraphFields,
+                GraphGenerationStage::ContinentOceanMacroElevation,
+                GraphGenerationStage::EdgeGuideSelection,
+                GraphGenerationStage::HydrologySolve,
+                GraphGenerationStage::NoisyBoundaryRealization,
+                GraphGenerationStage::GraphDerivedMacroMap,
+                GraphGenerationStage::PerlinMicroRelief,
+                GraphGenerationStage::HeightfieldAndWaterSurface,
+                GraphGenerationStage::ClimateHydrationBiomeResolve,
+                GraphGenerationStage::SurfacePlan,
+                GraphGenerationStage::VegetationPlan,
                 GraphGenerationStage::VoxelFill,
             ]
         );

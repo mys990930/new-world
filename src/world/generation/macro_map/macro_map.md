@@ -61,6 +61,22 @@ Land/ocean 판정은 아래 입력을 합성한다.
 - sea-level contract
 - local lake/sink resolution
 
+`target land ratio`만으로는 대륙성이 보장되지 않는다. land ratio는 preview area 또는 graph patch에서
+land/open water 비율을 조율하는 보조 tuning일 뿐이다. 대륙성은 별도의 continent/ocean basin
+ownership layer가 먼저 제공해야 한다.
+
+launch 정책은 아래처럼 잡는다.
+
+- continent seed와 ocean basin seed를 낮은 빈도의 super-region 또는 plate-like graph에서 먼저 생성한다.
+- 각 Voronoi site는 가까운 continent/ocean basin id, continentality, distance-to-continent-core, distance-to-ocean-basin을 받는다.
+- signed macro elevation은 이 ownership field 위에 얹히며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
+- 작은 양수 land component는 기본적으로 island candidate다. launch 기본값에서는 큰 continent에 붙지 않은 작은 island candidate를 낮추거나 coast/wetland로 흡수한다.
+- 의도적인 섬을 만들려면 island feature id와 최소 크기, coast policy를 별도로 부여한다.
+
+무한 월드에서는 전체 land cell 수와 ocean cell 수를 전역으로 세어 제약할 수 없다. 대신
+deterministic super-region ownership, 충분한 padding, component pruning/assimilation 규칙으로
+요청 영역마다 같은 대륙성이 재현되게 만든다.
+
 ---
 
 ## Macro Elevation
@@ -74,9 +90,11 @@ macro elevation 생성 순서:
 1. continent/ocean basin ownership을 정한다.
 2. 대륙 내부의 broad elevation gradient를 만든다.
 3. coast distance, continent core, basinness를 합성한다.
-4. edge 기반 mountain/ridge/fault/plateau 후보를 먼저 정한다.
-5. ridge/fault/coast skeleton을 broad field로 확산한다.
-6. hydrology가 사용할 divide, basin, outlet 후보를 annotation한다.
+4. signed macro elevation을 만들되, ocean basin ownership과 sea level contract를 함께 저장한다.
+5. edge 기반 mountain/ridge/fault/plateau 후보를 먼저 정한다.
+6. coast는 signed macro elevation 경계가 아니라 land ownership과 connected-ocean basin 경계에서 우선 찾는다.
+7. ridge/fault/coast skeleton을 broad field로 확산한다.
+8. hydrology가 사용할 divide, basin, outlet 후보를 annotation한다.
 
 ---
 
@@ -84,8 +102,11 @@ macro elevation 생성 순서:
 
 산맥은 단순히 높은 noise가 아니다.
 
-world는 graph 위에 mountain belt / ridge chain / fault line 후보를 소유해야 한다. 구현 방식은
-아래 중 하나 또는 조합이 될 수 있다.
+world는 graph 위에 mountain belt / ridge chain / fault line 후보를 소유해야 한다. 단순히 high
+elevation edge만 고르면 높은 평원도 ridge가 되어버린다. ridge는 높은 값뿐 아니라 주변 gradient,
+연속 chain, drainage divide, uplift/fault 성격을 함께 만족해야 한다.
+
+구현 방식은 아래 중 하나 또는 조합이 될 수 있다.
 
 - graph site chain을 mountain belt로 선택
 - edge chain을 fault/ridge candidate로 선택
@@ -134,7 +155,9 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 ## 불변식
 
 1. 대륙/바다 ownership은 chunk 생성 순서와 독립적이어야 한다.
-2. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
-3. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
-4. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-5. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+2. 대륙성은 target land ratio가 아니라 continent/ocean basin ownership과 connected component 정책으로 보장한다.
+3. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
+4. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
+5. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
+6. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
+7. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.

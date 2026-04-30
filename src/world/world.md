@@ -143,6 +143,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
 - `generation/heightfield/heightfield.md`: Voronoi macro map과 Perlin micro relief 합성
 - `generation/surface_plan/surface_plan.md`: biome/material/water/coast surface policy resolve
+- `generation/vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `generation/voxel/voxel.md`: column plan에서 `ChunkData`로 이어지는 voxel fill 계약
 - `generation/preview/preview.md`: stage별 topdown preview binary 계약
 - `generation/pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold

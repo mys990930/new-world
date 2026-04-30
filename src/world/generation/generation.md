@@ -57,26 +57,28 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 
 ---
 
-## 처리 순서
+## 표준 처리 순서
 
 generation pipeline은 chunk를 지형 정체성의 기준으로 쓰지 않는다. chunk는 출력 window이며,
 macro terrain identity는 graph와 field가 소유한다.
 
-1. 요청된 world-space x/z 범위를 덮는 padded graph region area를 계산한다.
-2. deterministic site 후보를 만들고 안정화한다.
-3. Voronoi/Delaunay dual graph patch를 만든다.
-4. 대륙/바다 ownership과 Voronoi 기반 macro elevation을 만든다.
-5. edge 기반 mountain/ridge/fault/coast guide를 먼저 정한다.
-6. macro elevation과 edge guide를 읽어 hydrology 후보망을 설정한다.
-7. downhill routing, local minima, lake/sink/outlet carve를 처리한다.
-8. watershed, flow accumulation, selected river edge chain을 만든다.
-9. river, coast, biome transition, cliff/fault boundary를 noisy boundary로 현실화한다.
-10. graph-derived guide를 합쳐 Voronoi macro noise/gradient map을 만든다.
-11. column별 blended climate/hydration/biome influence field를 만든다.
-12. Perlin micro relief를 마지막에 합성해 final heightfield를 만든다.
-13. river valley, lake flattening, wetland, coast terrace를 column plan에 반영한다.
-14. biome/material/surface policy를 resolve한다.
-15. `ChunkData`로 voxel fill한다.
+아래 순서가 현재 graph-first generator의 표준 순서다. 각 단계는 같은 seed, generator version,
+area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown preview binary로 검사할 수
+있어야 한다.
+
+1. seed 기반 padded Voronoi/Delaunay dual graph를 생성한다.
+2. site/corner에 base temperature, humidity, continentality, elevation seed를 부여하고 이웃 graph를 참고해 smoothing한다.
+3. continent/ocean basin ownership과 signed macro elevation을 만든다.
+4. macro elevation, gradient, continent/coast context를 읽어 ridge/fault/mountain/coast edge guide를 선정한다.
+5. macro elevation과 edge guide를 읽어 hydrology를 푼다: downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation, selected river chain.
+6. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
+7. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
+8. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge mask로 amplitude를 제한한다.
+9. macro map, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+10. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
+11. biome/material/water/coast surface plan을 만든다.
+12. vegetation/feature placement plan을 만든다.
+13. heightfield, water, surface, vegetation plan을 한 번에 `ChunkData`로 voxel fill한다.
 
 ---
 
@@ -95,6 +97,7 @@ macro terrain identity는 graph와 field가 소유한다.
 - `boundary/boundary.md`: noisy coast/river/biome/fault boundary realization
 - `heightfield/heightfield.md`: Voronoi-derived macro map과 Perlin micro relief 합성
 - `surface_plan/surface_plan.md`: biome, material, water/coast/wetland policy resolve
+- `vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `voxel/voxel.md`: column plan을 `ChunkData`로 채우는 graph-first voxel fill
 - `preview/preview.md`: stage별 topdown preview binary 입력/출력 계약
 
@@ -167,6 +170,8 @@ macro terrain identity는 graph와 field가 소유한다.
 2. macro elevation은 Voronoi graph 기반으로 먼저 생성되고, Perlin은 마지막 micro relief로만 합성된다.
 3. 산맥/능선/단층/해안 edge guide는 hydrology보다 먼저 정해진다.
 4. hydrology는 최종 heightfield와 voxel fill 전에 valley/lake/coast 제약을 제공한다.
-5. polygon owner와 visible material/biome boundary는 분리될 수 있어야 한다.
-6. 각 stage는 topdown preview binary로 진단 가능해야 한다.
-7. legacy generation re-export는 migration bridge이며, 새 graph-first 책임을 legacy 쪽으로 늘리지 않는다.
+5. noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
+6. polygon owner와 visible material/biome boundary는 분리될 수 있어야 한다.
+7. material, water, vegetation은 직접 `ChunkData`를 수정하지 않고 plan으로 합쳐진 뒤 voxel fill에서 반영된다.
+8. 각 stage는 topdown preview binary로 진단 가능해야 한다.
+9. legacy generation re-export는 migration bridge이며, 새 graph-first 책임을 legacy 쪽으로 늘리지 않는다.

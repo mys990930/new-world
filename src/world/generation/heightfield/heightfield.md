@@ -53,7 +53,8 @@ height =
 3. 이 edge structure와 macro elevation을 바탕으로 edge 기반 hydrology를 설정한다.
 4. river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
 5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
-6. 마지막에 Perlin noise를 합성해 국소 micro elevation을 만든다.
+6. Perlin noise를 만들고 hydrology/coast/lake/ridge mask로 amplitude를 제한한다.
+7. macro map, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
 
 ---
 
@@ -71,7 +72,8 @@ Perlin noise 사용 규칙:
 
 - macro elevation과 hydrology가 Perlin보다 먼저 정해지므로 순수 noise-first 방식보다 local minima 문제가 줄어든다.
 - 그래도 micro relief 때문에 국소적인 depression은 생길 수 있다.
-- river/lake 주변에서는 micro relief clamp, local sink cleanup, lake creation, outlet carve 중 하나 이상의 명시적 처리가 필요하다.
+- river/lake 주변에서는 micro relief clamp, local fill, wetland/puddle 표현, flatten 중 하나 이상의 명시적 처리가 필요하다.
+- Perlin 이후 생긴 작은 depression은 graph hydrology의 lake/outlet을 새로 정의하지 않는다.
 
 ---
 
@@ -80,5 +82,5 @@ Perlin noise 사용 규칙:
 1. macro elevation은 Voronoi graph 기반으로 먼저 생성되어야 한다.
 2. Perlin micro relief는 macro structure를 뒤집으면 안 된다.
 3. hydrology는 final heightfield와 voxel fill 전에 valley/lake/coast 제약으로 반영되어야 한다.
-4. Perlin micro relief가 만든 국소 depression은 river/lake/coast policy와 충돌하지 않도록 clamp 또는 cleanup되어야 한다.
+4. Perlin micro relief가 만든 국소 depression은 river/lake/coast policy와 충돌하지 않도록 clamp, fill, wetland/puddle 표현, flatten 중 하나로 처리되어야 한다.
 5. graph region 사각 경계가 heightfield에 보이면 회귀다.
