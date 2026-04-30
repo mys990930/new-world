@@ -59,12 +59,21 @@ MacroEdgeGuide {
 }
 ```
 
+`MacroMapConfig`는 land/ocean 비율을 진단하고 조율하기 위한 공개 tuning handle을 가진다.
+`land_bias`는 continent/ocean ownership 합성값에 더해지는 signed offset이며, 양수일수록 land
+ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다. `island_strength`는 ocean basin 안의
+archipelago/island bump가 continentality를 끌어올리는 강도다. 두 값은 대륙성 ownership layer를
+대체하지 않고 preview와 테스트에서 launch 기본 landness를 빠르게 조정하기 위한 보조 knob이다.
+
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
 coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. `MacroCorner`는 corner
 position에서 같은 macro field를 샘플한다. `MacroEdge`는 두 site의 macro ownership과 elevation
 context를 읽어 hydrology 이전 guide를 붙인다. river guide는 흩어진 독립 edge가 아니라 land site
 graph 위에서 고지대/분지성 source부터 낮은 drainage elevation, ocean basin, coast 방향으로 이어지는
-deterministic `pre-hydrology candidate corridor` edge chain으로 후처리된다.
+deterministic `pre-hydrology candidate corridor` edge chain으로 후처리된다. 이 chain은 hydrology 전
+후보일 뿐이므로 모든 후보가 하구까지 이어진다고 보장하지 않는다. 대신 corridor가 coast에 닿으면
+ocean outlet/coast edge를 terminal river candidate로 표시할 수 있게 열어 두고, 실제 상류-하류-하구
+연결성은 hydrology 단계의 selected river, flow accumulation, lake/sink/outlet carve가 확정한다.
 
 ---
 
@@ -226,7 +235,8 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate, hydrology 전 river candidate를 포함한다.
-- river candidate는 edge별 noise 점수가 threshold를 넘는 조각을 그대로 노출하지 않고, land-only adjacency에서
+- river candidate는 edge별 noise 점수가 threshold를 넘는 조각을 그대로 노출하지 않고, land adjacency에서
   ridge를 피하며 macro drainage elevation이 낮아지거나 ocean basin/coast 쪽으로 진행하는 deterministic
   `pre-hydrology candidate corridor` chain으로 선택한다. 이 chain은 hydrology의 selected river,
   flow accumulation, lake/sink/outlet carve가 아니며, 이후 hydrology가 읽을 후보 surface에 머문다.
+  다만 하구가 preview에서 끊겨 보이지 않도록 coast/outlet edge를 terminal river candidate로 포함할 수 있다.

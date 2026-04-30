@@ -102,7 +102,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 - stage 3/4 macro map: `generate_macro_map`이 graph patch를 입력으로 받아 continent/ocean basin
   ownership, signed macro elevation, coastness, mountainness/ridgeness, basinness, coast/ridge/fault/river-candidate
   edge guide를 별도 annotation layer로 생성한다. river guide는 routing 확정이 아니라 hydrology 전
-  후보 surface다.
+  후보 surface다. `MacroMapConfig.land_bias`와 `MacroMapConfig.island_strength`는 preview와 테스트에서
+  land/ocean balance와 island bump 강도를 조율하는 공개 handle이다. river candidate corridor는 아직
+  hydrology solve가 아니므로 모든 chain의 outlet 도달을 보장하지 않는다. 다만 corridor가 coast에
+  닿는 경우 ocean outlet/coast edge를 terminal 후보로 포함할 수 있어야 하며, 완전한 상류-하류-하구
+  연결성은 hydrology 단계가 확정한다.
 
 문서화된 다음 leaf:
 

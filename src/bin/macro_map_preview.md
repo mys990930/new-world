@@ -16,6 +16,8 @@
   - `--world-span-blocks <i32>`
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
+  - `--land-bias <f32>`
+  - `--island-strength <f32>`
   - `--stage macro_map`
   - `--output <path>`
 
@@ -26,6 +28,8 @@
 - `--world-span-blocks 32768`
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
+- `--land-bias MacroMapConfig::new(...).land_bias`
+- `--island-strength MacroMapConfig::new(...).island_strength`
 - `--stage macro_map`
 - output: `target/macro-map-preview/s<seed>_x<center-x>_z<center-z>.png`
 
@@ -39,8 +43,9 @@
   - river candidate edges are blue overlays.
   - ridge candidate edges are white overlays.
   - coast candidate edges are sandy overlays.
+  - coast edges selected as river outlet terminals are drawn as river overlays.
 - A compact in-image legend with an elevation color bar and overlay keys.
-- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, graph area, site count, candidate edge count, sea level, and source notes.
+- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site count, candidate edge count, sea level, and source notes.
 
 ## Output Path Rules
 
@@ -54,7 +59,8 @@
 1. Parse required seed and world-block center.
 2. Resolve the preview window from image dimensions and `--world-span-blocks`.
 3. Build a padded Voronoi graph patch through `generate_voronoi_graph_patch(...)`.
-4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`.
+4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
+   `land_bias` and `island_strength` from CLI options when provided.
 5. Generate the RGB pixel buffer with Rayon.
 6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and

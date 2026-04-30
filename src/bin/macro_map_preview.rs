@@ -33,6 +33,8 @@ struct PreviewConfig {
     world_span_blocks: i32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
+    land_bias: f32,
+    island_strength: f32,
     stage: String,
     output: Option<PathBuf>,
 }
@@ -50,6 +52,12 @@ impl PreviewConfig {
         }
         if self.site_spacing_blocks <= 0 {
             return Err(cli_error("site-spacing-blocks must be positive"));
+        }
+        if !self.land_bias.is_finite() {
+            return Err(cli_error("land-bias must be finite"));
+        }
+        if !self.island_strength.is_finite() || self.island_strength < 0.0 {
+            return Err(cli_error("island-strength must be non-negative and finite"));
         }
         if self.stage != DEFAULT_STAGE {
             return Err(cli_error(format!(
@@ -242,6 +250,8 @@ struct PreviewHeader {
     world_span_blocks: i32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
+    land_bias: f32,
+    island_strength: f32,
     graph_area: GraphRegionArea,
     site_count: usize,
     edge_count: usize,
@@ -263,6 +273,8 @@ impl PreviewHeader {
             format!("world_span_blocks={}", self.world_span_blocks),
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
+            format!("land_bias={}", self.land_bias),
+            format!("island_strength={}", self.island_strength),
             format!(
                 "graph_area_min={},{}",
                 self.graph_area.min.x, self.graph_area.min.z
@@ -300,6 +312,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         world_span_blocks: config.world_span_blocks,
         region_size_blocks: config.region_size_blocks,
         site_spacing_blocks: config.site_spacing_blocks,
+        land_bias: config.land_bias,
+        island_strength: config.island_strength,
         graph_area,
         site_count: graph.patch.sites.len(),
         edge_count: graph.edge_samples.len(),
@@ -359,6 +373,8 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
+    let mut land_bias = MacroMapConfig::new(seed, 0).land_bias;
+    let mut island_strength = MacroMapConfig::new(seed, 0).island_strength;
     let mut stage = DEFAULT_STAGE.to_string();
     let mut output = None;
 
@@ -375,6 +391,10 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
             }
             "--site-spacing-blocks" => {
                 site_spacing_blocks = parse_required::<i32>(&mut args, "site-spacing-blocks")?
+            }
+            "--land-bias" => land_bias = parse_required::<f32>(&mut args, "land-bias")?,
+            "--island-strength" => {
+                island_strength = parse_required::<f32>(&mut args, "island-strength")?
             }
             "--stage" => stage = parse_required::<String>(&mut args, "stage")?,
             "--output" => {
@@ -395,6 +415,8 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         world_span_blocks,
         region_size_blocks,
         site_spacing_blocks,
+        land_bias,
+        island_strength,
         stage,
         output,
     })
@@ -449,10 +471,7 @@ fn build_macro_map_for_preview(
         return Err(cli_error("generated graph patch did not contain sites"));
     }
 
-    let macro_map = generate_macro_map(
-        &patch,
-        MacroMapConfig::new(meta.seed, meta.generator_version),
-    );
+    let macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
     let site_samples = macro_map
         .sites
         .iter()
@@ -496,6 +515,13 @@ fn site_grid_coord_for_position(position: WorldPlanePoint, spacing: f32) -> Site
 }
 
 fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
+    if edge.guide.is_river_candidate {
+        return Some(MacroEdgeSample {
+            edge,
+            kind: EdgeKind::River,
+            strength: edge.guide.river_potential,
+        });
+    }
     if edge.guide.is_coast {
         return Some(MacroEdgeSample {
             edge,
@@ -510,14 +536,15 @@ fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
             strength: edge.guide.ridgeness,
         });
     }
-    if edge.guide.is_river_candidate {
-        return Some(MacroEdgeSample {
-            edge,
-            kind: EdgeKind::River,
-            strength: edge.guide.river_potential,
-        });
-    }
     None
+}
+
+fn macro_map_config_for_preview(meta: &WorldMeta, config: &PreviewConfig) -> MacroMapConfig {
+    MacroMapConfig {
+        land_bias: config.land_bias,
+        island_strength: config.island_strength,
+        ..MacroMapConfig::new(meta.seed, meta.generator_version)
+    }
 }
 
 fn edge_kind_draw_order(kind: EdgeKind) -> u8 {
@@ -1025,7 +1052,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_map_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--stage macro_map] [--output <path>]"
+    "usage: cargo run --bin macro_map_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--island-strength <f32>] [--stage macro_map] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1046,6 +1073,8 @@ mod tests {
             world_span_blocks: 512,
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            land_bias: MacroMapConfig::new(42, 0).land_bias,
+            island_strength: MacroMapConfig::new(42, 0).island_strength,
             stage: DEFAULT_STAGE.to_string(),
             output: None,
         }
@@ -1082,6 +1111,21 @@ mod tests {
             output_path_for_config(&config),
             PathBuf::from("target/custom/macro.png")
         );
+    }
+
+    #[test]
+    fn preview_macro_map_config_passes_land_tuning() {
+        let meta = WorldMeta::new(42);
+        let mut config = test_config();
+        config.land_bias = -0.18;
+        config.island_strength = 0.12;
+
+        let macro_config = macro_map_config_for_preview(&meta, &config);
+
+        assert_eq!(macro_config.land_bias, -0.18);
+        assert_eq!(macro_config.island_strength, 0.12);
+        assert_eq!(macro_config.seed, meta.seed);
+        assert_eq!(macro_config.generator_version, meta.generator_version);
     }
 
     #[test]

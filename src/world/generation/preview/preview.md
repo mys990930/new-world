@@ -119,6 +119,8 @@
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
+  - `--land-bias <f32>`: `MacroMapConfig.land_bias`, 양수는 land ownership을 늘리고 음수는 ocean ownership을 늘림
+  - `--island-strength <f32>`: `MacroMapConfig.island_strength`, ocean basin 안 island/archipelago bump 강도
   - `--stage macro_map`
   - `--output <path>`
 
@@ -130,6 +132,8 @@
   가장 높은 peak는 흰색으로 표현한다.
 - ridge candidate edge는 흰색, river candidate edge는 파란색, coast candidate edge는 sandy color
   overlay로 표시한다.
+- river candidate corridor가 coast/outlet edge를 terminal 후보로 포함하면 해당 coast edge는
+  river overlay로 마지막에 표시될 수 있다.
 - 작은 legend overlay는 elevation gradient와 river/ridge/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.

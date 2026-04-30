@@ -10,6 +10,8 @@ pub const DEFAULT_MACRO_SUPER_CELL_SIZE_BLOCKS: i32 = 4096;
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.58;
 pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
+pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.0;
+pub const DEFAULT_MACRO_ISLAND_STRENGTH: f32 = 0.40;
 
 const HASH_CONTINENT_FIELD: u64 = 0x2179_c56a_5bb7_43d1;
 const HASH_OCEAN_FIELD: u64 = 0x6c8e_9cf5_12a4_f0b3;
@@ -27,6 +29,8 @@ pub struct MacroMapConfig {
     pub coast_width_blocks: f32,
     pub ridge_candidate_threshold: f32,
     pub river_candidate_threshold: f32,
+    pub land_bias: f32,
+    pub island_strength: f32,
 }
 
 impl MacroMapConfig {
@@ -39,6 +43,8 @@ impl MacroMapConfig {
             coast_width_blocks: DEFAULT_MACRO_COAST_WIDTH_BLOCKS,
             ridge_candidate_threshold: DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD,
             river_candidate_threshold: DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD,
+            land_bias: DEFAULT_MACRO_LAND_BIAS,
+            island_strength: DEFAULT_MACRO_ISLAND_STRENGTH,
         }
     }
 }
@@ -298,6 +304,11 @@ fn validate_macro_map_config(config: MacroMapConfig) {
         config.river_candidate_threshold.is_finite(),
         "river_candidate_threshold must be finite"
     );
+    assert!(config.land_bias.is_finite(), "land_bias must be finite");
+    assert!(
+        config.island_strength.is_finite() && config.island_strength >= 0.0,
+        "island_strength must be non-negative and finite"
+    );
 }
 
 fn sample_macro_fields(
@@ -319,10 +330,10 @@ fn sample_macro_fields(
     let continentality = clamp_signed(
         normalized_core_balance * 0.46
             + large_landmass * 0.38
-            + islandness * 0.40
+            + islandness * config.island_strength
             + base_fields.continentality * 0.18
             + base_fields.elevation_seed * 0.05
-            + 0.04
+            + config.land_bias
             - config.sea_level,
     );
     let is_land_owned = continentality >= 0.0;
@@ -502,7 +513,7 @@ fn apply_pre_hydrology_river_corridors(
     sources.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.0.cmp(&b.1.0)));
 
     let max_sources = (sources.len() / 8).clamp(8, 96);
-    let max_steps = ((config.super_cell_size_blocks as f32 / 96.0).round() as usize).clamp(8, 36);
+    let max_steps = ((config.super_cell_size_blocks as f32 / 64.0).round() as usize).clamp(12, 48);
     let minimum_edge_score = (config.river_candidate_threshold * 0.70).clamp(0.28, 0.86);
     let mut selected_edges = HashSet::new();
 
@@ -514,7 +525,7 @@ fn apply_pre_hydrology_river_corridors(
             let Some(current) = sites.get(&current_id).copied() else {
                 break;
             };
-            if current.coastness >= 0.86 || current.signed_macro_elevation <= 0.035 {
+            if !current.surface_kind.is_land_owned() || current.signed_macro_elevation <= -0.01 {
                 break;
             }
 
@@ -535,6 +546,12 @@ fn apply_pre_hydrology_river_corridors(
         }
     }
     selected_edges.extend(pre_hydrology_corner_edge_corridors(edges, sites, config));
+    selected_edges.extend(river_corridor_outlet_extensions(
+        edges,
+        sites,
+        &selected_edges,
+        config,
+    ));
 
     for edge in edges {
         if !selected_edges.contains(&edge.id) {
@@ -593,9 +610,7 @@ fn pre_hydrology_corner_edge_corridors(
             let current = edges[current_index];
             selected.insert(current.id);
 
-            if river_corridor_edge_coastness(current, sites) >= 0.82
-                || river_corridor_edge_drainage(current, sites) <= 0.035
-            {
+            if current.guide.is_coast || river_corridor_edge_drainage(current, sites) <= -0.01 {
                 break;
             }
 
@@ -615,6 +630,54 @@ fn pre_hydrology_corner_edge_corridors(
     }
 
     selected
+}
+
+fn river_corridor_outlet_extensions(
+    edges: &[MacroEdge],
+    sites: &HashMap<VoronoiSiteId, MacroSite>,
+    selected_edges: &HashSet<VoronoiEdgeId>,
+    config: MacroMapConfig,
+) -> HashSet<VoronoiEdgeId> {
+    let edge_map = edges
+        .iter()
+        .map(|edge| (edge.id, *edge))
+        .collect::<HashMap<_, _>>();
+    let selected_sites = selected_edges
+        .iter()
+        .filter_map(|edge_id| edge_map.get(edge_id))
+        .flat_map(|edge| edge.sites)
+        .filter(|site_id| {
+            sites
+                .get(site_id)
+                .is_some_and(|site| site.surface_kind.is_land_owned())
+        })
+        .collect::<HashSet<_>>();
+    if selected_sites.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut extensions = HashSet::new();
+
+    for edge in edges {
+        if selected_edges.contains(&edge.id) || !edge.guide.is_coast {
+            continue;
+        }
+
+        for site_id in edge.sites {
+            let Some(site) = sites.get(&site_id) else {
+                continue;
+            };
+            if site.surface_kind.is_land_owned()
+                && selected_sites.contains(&site_id)
+                && site.distance_to_coast_blocks <= config.coast_width_blocks * 1.6
+            {
+                extensions.insert(edge.id);
+                break;
+            }
+        }
+    }
+
+    extensions
 }
 
 fn best_corner_connected_downstream_edge(
@@ -673,7 +736,7 @@ fn is_river_corridor_edge_candidate(
     edge: MacroEdge,
     sites: &HashMap<VoronoiSiteId, MacroSite>,
 ) -> bool {
-    if edge.guide.is_coast || edge.guide.is_ridge_candidate {
+    if edge.guide.is_ridge_candidate {
         return false;
     }
 
@@ -684,9 +747,13 @@ fn is_river_corridor_edge_candidate(
         return false;
     };
 
-    a.surface_kind.is_land_owned()
-        && b.surface_kind.is_land_owned()
-        && (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5 > 0.025
+    let a_land = a.surface_kind.is_land_owned();
+    let b_land = b.surface_kind.is_land_owned();
+    if edge.guide.is_coast {
+        return a_land != b_land;
+    }
+
+    a_land && b_land && (a.signed_macro_elevation + b.signed_macro_elevation) * 0.5 > 0.025
 }
 
 fn river_corridor_edge_source_score(
@@ -808,7 +875,7 @@ fn river_corridor_adjacency(
     let mut adjacency = HashMap::<VoronoiSiteId, Vec<RiverCorridorStep>>::new();
 
     for edge in edges {
-        if edge.guide.is_coast || edge.guide.is_ridge_candidate {
+        if edge.guide.is_ridge_candidate {
             continue;
         }
 
@@ -818,20 +885,26 @@ fn river_corridor_adjacency(
         let Some(b) = sites.get(&edge.sites[1]).copied() else {
             continue;
         };
-        if !a.surface_kind.is_land_owned() || !b.surface_kind.is_land_owned() {
+        let a_land = a.surface_kind.is_land_owned();
+        let b_land = b.surface_kind.is_land_owned();
+        if !a_land && !b_land {
             continue;
         }
 
-        adjacency.entry(a.id).or_default().push(RiverCorridorStep {
-            edge_id: edge.id,
-            site_id: b.id,
-            edge_potential: edge.guide.river_potential,
-        });
-        adjacency.entry(b.id).or_default().push(RiverCorridorStep {
-            edge_id: edge.id,
-            site_id: a.id,
-            edge_potential: edge.guide.river_potential,
-        });
+        if a_land {
+            adjacency.entry(a.id).or_default().push(RiverCorridorStep {
+                edge_id: edge.id,
+                site_id: b.id,
+                edge_potential: edge.guide.river_potential,
+            });
+        }
+        if b_land {
+            adjacency.entry(b.id).or_default().push(RiverCorridorStep {
+                edge_id: edge.id,
+                site_id: a.id,
+                edge_potential: edge.guide.river_potential,
+            });
+        }
     }
 
     adjacency.par_iter_mut().for_each(|(_, steps)| {
@@ -889,9 +962,10 @@ fn best_downstream_corridor_step(
                 - next.distance_to_ocean_basin_blocks)
                 / config.super_cell_size_blocks as f32;
             let outlet_progress = coast_progress.max(ocean_basin_progress);
+            let outlet_step = !next.surface_kind.is_land_owned();
             let soft_downhill = descent >= -0.015 && coast_progress > 0.10;
             let soft_outlet_step = descent >= -0.010 && outlet_progress > 0.045;
-            if descent < 0.010 && !soft_downhill && !soft_outlet_step {
+            if descent < 0.010 && !soft_downhill && !soft_outlet_step && !outlet_step {
                 return None;
             }
 
@@ -900,6 +974,7 @@ fn best_downstream_corridor_step(
                 + next.basinness * 0.18
                 + step.edge_potential * 0.34
                 + next.coastness * 0.08
+                + if outlet_step { 0.28 } else { 0.0 }
                 - next.ridgeness * 0.16)
                 .clamp(0.0, 1.0);
             if score < minimum_edge_score {
@@ -1292,6 +1367,31 @@ mod tests {
     }
 
     #[test]
+    fn land_bias_tunes_land_ownership() {
+        let patch = generate_voronoi_graph_patch(test_request(7, 0, 0));
+        let mut ocean_leaning = test_macro_config(7);
+        ocean_leaning.land_bias = -0.24;
+        let mut land_leaning = test_macro_config(7);
+        land_leaning.land_bias = 0.24;
+
+        let ocean_leaning_land_sites = generate_macro_map(&patch, ocean_leaning)
+            .sites
+            .iter()
+            .filter(|site| site.surface_kind.is_land_owned())
+            .count();
+        let land_leaning_land_sites = generate_macro_map(&patch, land_leaning)
+            .sites
+            .iter()
+            .filter(|site| site.surface_kind.is_land_owned())
+            .count();
+
+        assert!(
+            land_leaning_land_sites > ocean_leaning_land_sites,
+            "positive land_bias should increase land ownership: {land_leaning_land_sites} <= {ocean_leaning_land_sites}"
+        );
+    }
+
+    #[test]
     fn coast_edges_are_land_ocean_boundaries() {
         let patch = generate_voronoi_graph_patch(test_request(12, 0, 0));
         let map = generate_macro_map(&patch, test_macro_config(12));
@@ -1337,8 +1437,15 @@ mod tests {
             let a = site_map[&edge.sites[0]];
             let b = site_map[&edge.sites[1]];
 
-            assert!(a.surface_kind.is_land_owned());
-            assert!(b.surface_kind.is_land_owned());
+            if edge.guide.is_coast {
+                assert_ne!(
+                    a.surface_kind.is_land_owned(),
+                    b.surface_kind.is_land_owned()
+                );
+            } else {
+                assert!(a.surface_kind.is_land_owned());
+                assert!(b.surface_kind.is_land_owned());
+            }
             assert!(!edge.guide.is_ridge_candidate);
         }
 
@@ -1380,6 +1487,89 @@ mod tests {
             outlet_progress >= config.coast_width_blocks * 0.20,
             "corridor should make visible progress toward lower/coastal ground; progress={outlet_progress}"
         );
+    }
+
+    #[test]
+    fn river_corridor_extension_can_mark_adjacent_coast_outlet_edge() {
+        let config = test_macro_config(91);
+        let land_head = MacroSite {
+            id: VoronoiSiteId(1),
+            owner_region: GraphRegionCoord::new(0, 0),
+            position: WorldPlanePoint::new(0.0, 0.0),
+            surface_kind: MacroSurfaceKind::Continent,
+            continent: Some(MacroContinentId(1)),
+            ocean_basin: None,
+            signed_macro_elevation: 0.18,
+            continentality: 0.24,
+            coastness: 0.0,
+            distance_to_coast_blocks: config.coast_width_blocks * 2.0,
+            distance_to_continent_core_blocks: 128.0,
+            distance_to_ocean_basin_blocks: 512.0,
+            mountainness: 0.24,
+            ridgeness: 0.12,
+            basinness: 0.58,
+        };
+        let land_outlet = MacroSite {
+            id: VoronoiSiteId(2),
+            distance_to_coast_blocks: config.coast_width_blocks,
+            coastness: 0.72,
+            signed_macro_elevation: 0.05,
+            ..land_head
+        };
+        let ocean = MacroSite {
+            id: VoronoiSiteId(3),
+            surface_kind: MacroSurfaceKind::CoastOcean,
+            continent: None,
+            ocean_basin: Some(MacroOceanBasinId(9)),
+            signed_macro_elevation: -0.05,
+            continentality: -0.18,
+            coastness: 0.82,
+            distance_to_coast_blocks: config.coast_width_blocks * 0.5,
+            distance_to_ocean_basin_blocks: 128.0,
+            ..land_head
+        };
+        let sites = HashMap::from([
+            (land_head.id, land_head),
+            (land_outlet.id, land_outlet),
+            (ocean.id, ocean),
+        ]);
+        let river_edge_id = VoronoiEdgeId(10);
+        let coast_edge_id = VoronoiEdgeId(11);
+        let edges = [
+            MacroEdge {
+                id: river_edge_id,
+                sites: [land_head.id, land_outlet.id],
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                guide: MacroEdgeGuide {
+                    is_coast: false,
+                    is_ridge_candidate: false,
+                    is_river_candidate: true,
+                    is_fault_candidate: false,
+                    coastness: 0.0,
+                    ridgeness: 0.0,
+                    river_potential: 0.72,
+                },
+            },
+            MacroEdge {
+                id: coast_edge_id,
+                sites: [land_outlet.id, ocean.id],
+                corners: [VoronoiCornerId(2), VoronoiCornerId(3)],
+                guide: MacroEdgeGuide {
+                    is_coast: true,
+                    is_ridge_candidate: false,
+                    is_river_candidate: false,
+                    is_fault_candidate: false,
+                    coastness: 1.0,
+                    ridgeness: 0.0,
+                    river_potential: 0.0,
+                },
+            },
+        ];
+        let selected = HashSet::from([river_edge_id]);
+
+        let extensions = river_corridor_outlet_extensions(&edges, &sites, &selected, config);
+
+        assert!(extensions.contains(&coast_edge_id));
     }
 
     #[test]
@@ -1429,6 +1619,8 @@ mod tests {
             coast_width_blocks: 192.0,
             ridge_candidate_threshold: DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD,
             river_candidate_threshold: DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD,
+            land_bias: DEFAULT_MACRO_LAND_BIAS,
+            island_strength: DEFAULT_MACRO_ISLAND_STRENGTH,
         }
     }
 
