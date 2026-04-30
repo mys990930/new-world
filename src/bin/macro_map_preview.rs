@@ -339,6 +339,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut image = render_preview(window, &graph)?;
+    draw_base_voronoi_edges(&mut image, window, &graph);
     draw_candidate_edges(&mut image, window, &graph);
     draw_legend_overlay(&mut image);
     write_png_with_metadata(&image, &output, &header)?;
@@ -751,18 +752,41 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
             EdgeKind::Fault => [231, 92, 88],
         };
         let width = match sample.kind {
-            EdgeKind::Coast => 1,
-            EdgeKind::Ridge => 2,
-            EdgeKind::Fault => 2,
+            EdgeKind::Coast => 2,
+            EdgeKind::Ridge => 3,
+            EdgeKind::Fault => 3,
         };
+        draw_line(image, start, end, [14, 17, 20], 0.30, width + 1);
         draw_line(
             image,
             start,
             end,
             color,
-            (0.48 + sample.strength * 0.34).clamp(0.0, 1.0),
+            (0.68 + sample.strength * 0.28).clamp(0.0, 1.0),
             width,
         );
+    }
+}
+
+fn draw_base_voronoi_edges(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
+    let corners = graph
+        .patch
+        .corners
+        .iter()
+        .map(|corner| (corner.id, corner.position))
+        .collect::<HashMap<_, _>>();
+
+    for edge in &graph.patch.edges {
+        let Some(a) = corners.get(&edge.corners[0]).copied() else {
+            continue;
+        };
+        let Some(b) = corners.get(&edge.corners[1]).copied() else {
+            continue;
+        };
+        let Some((start, end)) = window.world_segment_to_pixels(a, b) else {
+            continue;
+        };
+        draw_line(image, start, end, [28, 34, 42], 0.18, 0);
     }
 }
 
@@ -1210,6 +1234,26 @@ mod tests {
         draw_legend_overlay(&mut image);
 
         assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(180 * 90));
+    }
+
+    #[test]
+    fn base_voronoi_edge_overlay_changes_image_pixels() {
+        let meta = WorldMeta::new(42);
+        let config = test_config();
+        let window = config.window();
+        let area = window.graph_area(config.region_size_blocks).unwrap();
+        let graph = build_macro_map_for_preview(&meta, &config, area).unwrap();
+        let mut image =
+            RgbImage::from_pixel(window.width, window.height, image::Rgb([80, 120, 90]));
+        let before = image.as_raw().clone();
+
+        draw_base_voronoi_edges(&mut image, window, &graph);
+
+        assert_ne!(
+            image.as_raw(),
+            &before,
+            "base overlay should expose graph corner-segment edges"
+        );
     }
 
     #[test]

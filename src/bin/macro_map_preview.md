@@ -38,6 +38,7 @@
   - coast areas use sandy transition colors.
   - inland land and island components use green-to-upland colors.
   - high elevation approaches white, and peak colors are white.
+  - all graph Voronoi edges are drawn as a faint base overlay from actual corner-to-corner graph geometry.
   - ridge candidate edges are white overlays.
   - fault candidate edges are red overlays.
   - coast candidate edges are sandy overlays.
@@ -60,11 +61,21 @@
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
 5. Generate the RGB pixel buffer with Rayon.
-6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
+6. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph
+   patch's `VoronoiCorner.position` values, clipping the world-space segment to the preview window,
+   and projecting it onto pixel centers.
+7. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. Stage 3 draws graph-derived coast, ridge, and fault guide overlays;
    selected river chains are reserved for the later hydrology preview.
-7. Draw the compact legend and encode PNG metadata.
+8. Draw the compact legend and encode PNG metadata.
+
+The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from
+the rendered edge overlay because the overlay is not inferred from nearest-site color changes; it uses
+the graph's explicit `edge.corners` and `VoronoiCorner.position` segment. `graph_voronoi_preview`
+identity mode darkens nearest-site distance ties, so it is useful for seeing owner regions, while
+`macro_map_preview` now exposes the actual graph edge network underneath the highlighted coast/ridge/fault
+guides.
 
 ## Integration Note
 

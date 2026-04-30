@@ -160,7 +160,7 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 
 ## macro_map_preview
 
-- Purpose: render one top-down PNG composite for the graph-first macro map stage, showing ocean/lake separation, sandy coast, inland elevation, white peaks, and ridge/river/coast candidate edge overlays.
+- Purpose: render one top-down PNG composite for the graph-first macro map stage, showing ocean/lake separation, sandy coast, inland elevation, white peaks, faint base Voronoi graph edges, and ridge/fault/coast candidate edge overlays.
 - Parameters:
   - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
   - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage macro_map`, `--output <path>`
@@ -186,6 +186,7 @@ cargo run --bin macro_map_preview -- 42 0 0 --width 640 --height 360 --output ta
   - Default filenames stay short; width, height, world span, graph sizing, stage, generator version, and source notes are written to the PNG `new-world-preview-header` iTXt metadata chunk.
   - An explicit `--output <path>.png` is treated as the target PNG path and preserved exactly; a path without an extension is treated as an output directory.
   - The binary builds a Voronoi graph patch, then calls `new_world::world::generation::generate_macro_map(&patch, MacroMapConfig::new(...))`.
+  - The fill layer is nearest-site diagnostic coloring, while the base and highlighted edge overlays are drawn from actual graph corner segments (`edge.corners` / `VoronoiCorner.position`), so the visible color boundary and overlay line can differ.
   - See [macro_map_preview.md](./macro_map_preview.md).
 
 ## realization_field_preview

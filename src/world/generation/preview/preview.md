@@ -129,6 +129,8 @@
 - 기본 출력 파일명은 `s<seed>_x<center-x>_z<center-z>.png`처럼 seed와 center만 담는다.
 - 단일 PNG에서 ocean/lake는 파란색, coast는 sandy color, 내륙은 초록 계열, 고지대는 회백색,
   가장 높은 peak는 흰색으로 표현한다.
+- 모든 graph Voronoi edge는 실제 graph corner-to-corner segment를 기준으로 희미한 base overlay로
+  표시한다.
 - ridge candidate edge는 흰색, fault candidate edge는 붉은색, coast candidate edge는 sandy color overlay로 표시한다.
 - stage 3 macro_map preview는 selected river나 pre-hydrology river corridor를 표시하지 않는다.
   selected river overlay는 hydrology preview가 확정한다.
@@ -152,6 +154,10 @@
   continent/island field 없이 graph base field를 source of truth로 사용한다.
 - lake/coast, ridge/fault 후보 의미는 `macro_map` 모듈이 소유한다. selected river 의미는 hydrology
   모듈이 소유한다.
+- fill layer는 픽셀마다 nearest site의 macro annotation을 칠하는 진단용 색상면이다. 따라서
+  nearest-site color boundary는 실제 graph edge overlay와 정확히 같은 선처럼 보이지 않을 수 있다.
+  overlay는 nearest-site 경계에서 재구성하지 않고 `MacroEdge.corners`와 graph patch의
+  `VoronoiCorner.position`이 정의한 실제 corner segment를 world-space clip/projection해서 그린다.
 - coast/ridge/fault candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
