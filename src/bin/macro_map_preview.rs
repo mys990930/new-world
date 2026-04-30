@@ -34,7 +34,6 @@ struct PreviewConfig {
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
-    island_strength: f32,
     stage: String,
     output: Option<PathBuf>,
 }
@@ -55,9 +54,6 @@ impl PreviewConfig {
         }
         if !self.land_bias.is_finite() {
             return Err(cli_error("land-bias must be finite"));
-        }
-        if !self.island_strength.is_finite() || self.island_strength < 0.0 {
-            return Err(cli_error("island-strength must be non-negative and finite"));
         }
         if self.stage != DEFAULT_STAGE {
             return Err(cli_error(format!(
@@ -228,7 +224,6 @@ struct NearestSite {
 enum EdgeKind {
     Coast,
     Ridge,
-    River,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,7 +246,6 @@ struct PreviewHeader {
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
-    island_strength: f32,
     graph_area: GraphRegionArea,
     site_count: usize,
     edge_count: usize,
@@ -274,7 +268,6 @@ impl PreviewHeader {
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
             format!("land_bias={}", self.land_bias),
-            format!("island_strength={}", self.island_strength),
             format!(
                 "graph_area_min={},{}",
                 self.graph_area.min.x, self.graph_area.min.z
@@ -313,7 +306,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         region_size_blocks: config.region_size_blocks,
         site_spacing_blocks: config.site_spacing_blocks,
         land_bias: config.land_bias,
-        island_strength: config.island_strength,
         graph_area,
         site_count: graph.patch.sites.len(),
         edge_count: graph.edge_samples.len(),
@@ -374,7 +366,6 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
     let mut land_bias = MacroMapConfig::new(seed, 0).land_bias;
-    let mut island_strength = MacroMapConfig::new(seed, 0).island_strength;
     let mut stage = DEFAULT_STAGE.to_string();
     let mut output = None;
 
@@ -393,9 +384,6 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
                 site_spacing_blocks = parse_required::<i32>(&mut args, "site-spacing-blocks")?
             }
             "--land-bias" => land_bias = parse_required::<f32>(&mut args, "land-bias")?,
-            "--island-strength" => {
-                island_strength = parse_required::<f32>(&mut args, "island-strength")?
-            }
             "--stage" => stage = parse_required::<String>(&mut args, "stage")?,
             "--output" => {
                 output = Some(PathBuf::from(parse_required::<String>(
@@ -416,7 +404,6 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         region_size_blocks,
         site_spacing_blocks,
         land_bias,
-        island_strength,
         stage,
         output,
     })
@@ -515,13 +502,6 @@ fn site_grid_coord_for_position(position: WorldPlanePoint, spacing: f32) -> Site
 }
 
 fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
-    if edge.guide.is_river_candidate {
-        return Some(MacroEdgeSample {
-            edge,
-            kind: EdgeKind::River,
-            strength: edge.guide.river_potential,
-        });
-    }
     if edge.guide.is_coast {
         return Some(MacroEdgeSample {
             edge,
@@ -542,7 +522,6 @@ fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
 fn macro_map_config_for_preview(meta: &WorldMeta, config: &PreviewConfig) -> MacroMapConfig {
     MacroMapConfig {
         land_bias: config.land_bias,
-        island_strength: config.island_strength,
         ..MacroMapConfig::new(meta.seed, meta.generator_version)
     }
 }
@@ -551,7 +530,6 @@ fn edge_kind_draw_order(kind: EdgeKind) -> u8 {
     match kind {
         EdgeKind::Coast => 0,
         EdgeKind::Ridge => 1,
-        EdgeKind::River => 2,
     }
 }
 
@@ -653,12 +631,29 @@ fn color_for_macro_site(site: MacroSite) -> [u8; 3] {
                 (1.00, [117, 166, 99]),
             ],
         ),
+        MacroSurfaceKind::CoastIsland => gradient_color(
+            elevation,
+            &[
+                (0.00, [88, 158, 174]),
+                (0.50, [224, 210, 146]),
+                (1.00, [125, 174, 104]),
+            ],
+        ),
         MacroSurfaceKind::WetlandCandidate => gradient_color(
             elevation,
             &[
                 (0.00, [64, 145, 135]),
                 (0.55, [93, 156, 104]),
                 (1.00, [160, 181, 121]),
+            ],
+        ),
+        MacroSurfaceKind::Island => gradient_color(
+            elevation,
+            &[
+                (0.00, [94, 153, 92]),
+                (0.56, [138, 176, 95]),
+                (0.82, [177, 175, 135]),
+                (1.00, [236, 238, 221]),
             ],
         ),
         MacroSurfaceKind::Continent => gradient_color(
@@ -716,12 +711,10 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
         let color = match sample.kind {
             EdgeKind::Coast => [236, 213, 128],
             EdgeKind::Ridge => [247, 248, 242],
-            EdgeKind::River => [24, 82, 255],
         };
         let width = match sample.kind {
             EdgeKind::Coast => 1,
             EdgeKind::Ridge => 2,
-            EdgeKind::River => 3,
         };
         draw_line(
             image,
@@ -784,7 +777,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         1
     };
     let margin = 8 * scale;
-    let panel_width = (176 * scale).min(image.width());
+    let panel_width = (132 * scale).min(image.width());
     let panel_height = (62 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
@@ -824,18 +817,10 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     );
 
     let key_y = y + panel_height.saturating_sub(14 * scale);
-    draw_key(image, bar_x, key_y, [35, 96, 218], "RIVER", scale);
+    draw_key(image, bar_x, key_y, [247, 248, 242], "RIDGE", scale);
     draw_key(
         image,
-        bar_x + 56 * scale,
-        key_y,
-        [247, 248, 242],
-        "RIDGE",
-        scale,
-    );
-    draw_key(
-        image,
-        bar_x + 112 * scale,
+        bar_x + 62 * scale,
         key_y,
         [236, 213, 128],
         "COAST",
@@ -1052,7 +1037,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_map_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--island-strength <f32>] [--stage macro_map] [--output <path>]"
+    "usage: cargo run --bin macro_map_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_map] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1074,7 +1059,6 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: MacroMapConfig::new(42, 0).land_bias,
-            island_strength: MacroMapConfig::new(42, 0).island_strength,
             stage: DEFAULT_STAGE.to_string(),
             output: None,
         }
@@ -1118,12 +1102,10 @@ mod tests {
         let meta = WorldMeta::new(42);
         let mut config = test_config();
         config.land_bias = -0.18;
-        config.island_strength = 0.12;
 
         let macro_config = macro_map_config_for_preview(&meta, &config);
 
         assert_eq!(macro_config.land_bias, -0.18);
-        assert_eq!(macro_config.island_strength, 0.12);
         assert_eq!(macro_config.seed, meta.seed);
         assert_eq!(macro_config.generator_version, meta.generator_version);
     }

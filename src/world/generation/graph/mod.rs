@@ -11,6 +11,10 @@ const SITE_JITTER_FRACTION: f64 = 0.35;
 const TOPOLOGY_SITE_GUARD_CELLS: i64 = 1;
 const HASH_SITE: u64 = 0x8f53_7a29_381d_55f7;
 const HASH_SITE_FIELD: u64 = 0xa1b9_f4d2_0c73_17e5;
+const HASH_CONTINENTALITY_FIELD: u64 = 0x92d3_4f11_6b9a_c807;
+const HASH_ELEVATION_FIELD: u64 = 0x5e6f_18b2_a1c7_49d3;
+const HASH_TEMPERATURE_FIELD: u64 = 0xb047_a3d9_2871_f6c5;
+const HASH_HYDRATION_FIELD: u64 = 0x70c9_f51a_30de_4417;
 const HASH_EDGE: u64 = 0x4d2c_6f01_9ab8_e327;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -456,17 +460,13 @@ fn generate_site(coord: SiteGridCoord, config: VoronoiGraphConfig) -> VoronoiSit
     let x = f64::from(coord.x) * spacing + spacing * 0.5 + jitter_x;
     let z = f64::from(coord.z) * spacing + spacing * 0.5 + jitter_z;
     let field_hash = graph_hash(config, HASH_SITE_FIELD, coord.x, coord.z, 0);
-    let raw_base_fields = GraphBaseFields::new(
-        unit_f32(field_hash),
-        unit_f32(splitmix64(field_hash ^ 0x243f_6a88_85a3_08d3)),
-        unit_f32(splitmix64(field_hash ^ 0xa409_3822_299f_31d0)) * 2.0 - 1.0,
-        unit_f32(splitmix64(field_hash ^ 0x1319_8a2e_0370_7344)) * 2.0 - 1.0,
-    );
+    let position = WorldPlanePoint::new(x as f32, z as f32);
+    let raw_base_fields = raw_macro_friendly_base_fields(position, field_hash, config);
 
     VoronoiSite {
         id: coord.site_id(),
         owner_region: graph_region_for_world_plane(x, z, config.region_size_blocks),
-        position: WorldPlanePoint::new(x as f32, z as f32),
+        position,
         raw_base_fields,
         base_fields: raw_base_fields,
         temperature: raw_base_fields.temperature,
@@ -475,6 +475,133 @@ fn generate_site(coord: SiteGridCoord, config: VoronoiGraphConfig) -> VoronoiSit
         continentality: raw_base_fields.continentality,
         ruggedness: unit_f32(splitmix64(field_hash ^ 0x082e_fa98_ec4e_6c89)),
     }
+}
+
+fn raw_macro_friendly_base_fields(
+    position: WorldPlanePoint,
+    field_hash: u64,
+    config: VoronoiGraphConfig,
+) -> GraphBaseFields {
+    let spacing = config.site_spacing_blocks as f32;
+    let continent_scale = (spacing * 34.0).max(1.0);
+    let regional_scale = (spacing * 13.0).max(1.0);
+    let island_scale = (spacing * 4.5).max(1.0);
+    let site_variation = unit_f32(splitmix64(field_hash ^ 0xa409_3822_299f_31d0)) * 2.0 - 1.0;
+    let broad_continent = fbm_signed(position, continent_scale, HASH_CONTINENTALITY_FIELD, config);
+    let regional_continent = fbm_signed(
+        WorldPlanePoint::new(position.x + spacing * 7.3, position.z - spacing * 3.1),
+        regional_scale,
+        HASH_CONTINENTALITY_FIELD ^ 0x9e37_79b9_7f4a_7c15,
+        config,
+    );
+    let island_detail = fbm_signed(
+        WorldPlanePoint::new(position.x - spacing * 2.7, position.z + spacing * 9.2),
+        island_scale,
+        HASH_CONTINENTALITY_FIELD ^ 0x243f_6a88_85a3_08d3,
+        config,
+    );
+    let continentality = clamp_signed_unit(
+        broad_continent * 0.64
+            + regional_continent * 0.24
+            + island_detail * 0.08
+            + site_variation * 0.04,
+    );
+
+    let broad_elevation = fbm_signed(position, spacing * 22.0, HASH_ELEVATION_FIELD, config);
+    let regional_elevation = fbm_signed(
+        WorldPlanePoint::new(position.x + spacing * 11.0, position.z + spacing * 5.0),
+        spacing * 7.0,
+        HASH_ELEVATION_FIELD ^ 0x1319_8a2e_0370_7344,
+        config,
+    );
+    let local_elevation = unit_f32(splitmix64(field_hash ^ 0x1319_8a2e_0370_7344)) * 2.0 - 1.0;
+    let elevation_seed = clamp_signed_unit(
+        broad_elevation * 0.42
+            + regional_elevation * 0.28
+            + continentality * 0.24
+            + local_elevation * 0.06,
+    );
+
+    let latitude = ((position.z / (spacing * 96.0)).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+    let temperature_noise = fbm_signed(position, spacing * 18.0, HASH_TEMPERATURE_FIELD, config);
+    let temperature = clamp_unit(
+        0.68 - latitude * 0.36 - elevation_seed.max(0.0) * 0.12 + temperature_noise * 0.14,
+    );
+    let humidity_noise = fbm_signed(position, spacing * 16.0, HASH_HYDRATION_FIELD, config);
+    let hydration = clamp_unit(
+        0.50 + humidity_noise * 0.28 - continentality.max(0.0) * 0.10
+            + (-continentality).max(0.0) * 0.08,
+    );
+
+    GraphBaseFields::new(temperature, hydration, continentality, elevation_seed)
+}
+
+fn fbm_signed(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: VoronoiGraphConfig,
+) -> f32 {
+    fbm_unit(position, scale_blocks, namespace, config) * 2.0 - 1.0
+}
+
+fn fbm_unit(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: VoronoiGraphConfig,
+) -> f32 {
+    let first = value_noise_unit(position, scale_blocks, namespace, config);
+    let second = value_noise_unit(
+        WorldPlanePoint::new(position.x + 997.0, position.z - 311.0),
+        scale_blocks * 0.47,
+        namespace ^ 0x6d2b_79f5_aa73_19c9,
+        config,
+    );
+    let third = value_noise_unit(
+        WorldPlanePoint::new(position.x - 521.0, position.z + 773.0),
+        scale_blocks * 0.23,
+        namespace ^ 0xf17b_1a2c_45f1_08ea,
+        config,
+    );
+
+    (first * 0.58 + second * 0.29 + third * 0.13).clamp(0.0, 1.0)
+}
+
+fn value_noise_unit(
+    position: WorldPlanePoint,
+    scale_blocks: f32,
+    namespace: u64,
+    config: VoronoiGraphConfig,
+) -> f32 {
+    let scale = scale_blocks.max(1.0);
+    let x = position.x / scale;
+    let z = position.z / scale;
+    let x0 = x.floor() as i32;
+    let z0 = z.floor() as i32;
+    let tx = smooth_unit(x - x0 as f32);
+    let tz = smooth_unit(z - z0 as f32);
+    let a = lattice_unit(config, namespace, x0, z0);
+    let b = lattice_unit(config, namespace, x0 + 1, z0);
+    let c = lattice_unit(config, namespace, x0, z0 + 1);
+    let d = lattice_unit(config, namespace, x0 + 1, z0 + 1);
+    let top = lerp(a, b, tx);
+    let bottom = lerp(c, d, tx);
+
+    lerp(top, bottom, tz).clamp(0.0, 1.0)
+}
+
+fn lattice_unit(config: VoronoiGraphConfig, namespace: u64, x: i32, z: i32) -> f32 {
+    unit_f32(graph_hash(config, namespace, x, z, 0))
+}
+
+fn smooth_unit(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(a: f32, b: f32, amount: f32) -> f32 {
+    a + (b - a) * amount
 }
 
 fn generate_corner(
@@ -889,6 +1016,49 @@ mod tests {
     }
 
     #[test]
+    fn base_graph_continentality_is_long_range_coherent() {
+        let patch = generate_voronoi_graph_patch(test_request(310, 0, 0));
+        let adjacent_difference =
+            average_edge_component_difference(&patch, |fields| fields.continentality);
+        let global_span = component_span(&patch, |fields| fields.continentality);
+
+        assert!(
+            global_span >= 0.35,
+            "continentality should expose broad land/ocean range; span={global_span}"
+        );
+        assert!(
+            adjacent_difference <= global_span * 0.38,
+            "adjacent sites should vary less than the patch-scale field; adjacent={adjacent_difference} span={global_span}"
+        );
+    }
+
+    #[test]
+    fn base_graph_elevation_seed_is_coherent_with_continentality() {
+        let patch = generate_voronoi_graph_patch(test_request(311, 0, 0));
+        let adjacent_difference =
+            average_edge_component_difference(&patch, |fields| fields.elevation_seed);
+        let global_span = component_span(&patch, |fields| fields.elevation_seed);
+        let correlation = component_correlation(
+            &patch,
+            |fields| fields.continentality,
+            |fields| fields.elevation_seed,
+        );
+
+        assert!(
+            global_span >= 0.20,
+            "elevation_seed should retain macro relief range; span={global_span}"
+        );
+        assert!(
+            adjacent_difference <= global_span * 0.55,
+            "elevation_seed should not be salt-and-pepper noise; adjacent={adjacent_difference} span={global_span}"
+        );
+        assert!(
+            correlation > 0.12,
+            "elevation_seed should carry land/ocean context from continentality; correlation={correlation}"
+        );
+    }
+
+    #[test]
     fn adjacent_center_requests_keep_overlapping_sites_stable() {
         let left = generate_voronoi_graph_patch(test_request(77, 0, 0));
         let right =
@@ -1028,6 +1198,82 @@ mod tests {
         }
 
         total / count as f32
+    }
+
+    fn average_edge_component_difference(
+        patch: &VoronoiGraphPatch,
+        select_component: impl Fn(GraphBaseFields) -> f32,
+    ) -> f32 {
+        let site_map = patch
+            .sites
+            .iter()
+            .map(|site| (site.id, site))
+            .collect::<HashMap<_, _>>();
+        let mut total = 0.0;
+        let mut count = 0;
+
+        for edge in &patch.edges {
+            let Some(a) = site_map.get(&edge.sites[0]) else {
+                continue;
+            };
+            let Some(b) = site_map.get(&edge.sites[1]) else {
+                continue;
+            };
+
+            total += (select_component(a.base_fields) - select_component(b.base_fields)).abs();
+            count += 1;
+        }
+
+        total / count as f32
+    }
+
+    fn component_span(
+        patch: &VoronoiGraphPatch,
+        select_component: impl Fn(GraphBaseFields) -> f32,
+    ) -> f32 {
+        let mut min = f32::INFINITY;
+        let mut max = f32::NEG_INFINITY;
+
+        for site in &patch.sites {
+            let value = select_component(site.base_fields);
+            min = min.min(value);
+            max = max.max(value);
+        }
+
+        max - min
+    }
+
+    fn component_correlation(
+        patch: &VoronoiGraphPatch,
+        select_a: impl Fn(GraphBaseFields) -> f32,
+        select_b: impl Fn(GraphBaseFields) -> f32,
+    ) -> f32 {
+        let count = patch.sites.len() as f32;
+        let mean_a = patch
+            .sites
+            .iter()
+            .map(|site| select_a(site.base_fields))
+            .sum::<f32>()
+            / count;
+        let mean_b = patch
+            .sites
+            .iter()
+            .map(|site| select_b(site.base_fields))
+            .sum::<f32>()
+            / count;
+        let mut covariance = 0.0;
+        let mut variance_a = 0.0;
+        let mut variance_b = 0.0;
+
+        for site in &patch.sites {
+            let a = select_a(site.base_fields) - mean_a;
+            let b = select_b(site.base_fields) - mean_b;
+            covariance += a * b;
+            variance_a += a * a;
+            variance_b += b * b;
+        }
+
+        covariance / (variance_a.sqrt() * variance_b.sqrt()).max(f32::EPSILON)
     }
 
     fn base_field_distance(a: GraphBaseFields, b: GraphBaseFields) -> f32 {

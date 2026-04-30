@@ -111,14 +111,14 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 - stage 1 padded Voronoi-style graph patch 생성: deterministic jittered grid site, barycentric corner,
   site/corner-linked edge topology를 rayon 병렬 생성 뒤 id 정렬/dedup한다.
 - stage 2 base graph field: site raw seed field와 smoothed field를 생성하고, corner field/elevation
-  seed를 주변 site 기반으로 안정적으로 계산한다. 목표 계약상 `continentality`와 `elevation_seed`는
-  macro_map의 source of truth가 될 만큼 장거리 coherent해야 한다.
+  seed를 주변 site 기반으로 안정적으로 계산한다. `continentality`와 `elevation_seed`는 graph preview와
+  macro_map이 같은 값을 읽을 수 있도록 장거리 coherent source of truth로 생성한다.
 - stage 3/4/5 macro map: 목표 계약상 `macro_map`은 graph patch의 smoothed `continentality`와
   `elevation_seed`를 resolve해 continent/ocean/island ownership, signed macro elevation, coastness,
   mountainness/ridgeness, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
-  독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 아직 transition
-  상태라 super-cell 기반 macro field를 함께 사용하며, 다음 리팩토링에서 graph-derived component
-  resolve로 수렴해야 한다.
+  독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 graph base
+  `continentality`를 land/ocean ownership의 source of truth로 읽고, graph adjacency component와
+  coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다.
 - stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 이 단계의
   river는 후보 surface가 아니라 downhill/local-minimum/outlet 정책을 통과한 결과여야 한다.
 

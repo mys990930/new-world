@@ -50,7 +50,16 @@ GraphMacroMap {
     edges: Vec<MacroEdge>,
 }
 
-MacroSurfaceKind::{Continent, OceanBasin, CoastLand, CoastOcean, LakeCandidate, WetlandCandidate}
+MacroSurfaceKind::{
+    Continent,
+    Island,
+    OceanBasin,
+    CoastLand,
+    CoastIsland,
+    CoastOcean,
+    LakeCandidate,
+    WetlandCandidate,
+}
 MacroEdgeGuide {
     is_coast,
     is_ridge_candidate,
@@ -66,17 +75,16 @@ MacroEdgeGuide {
 `land_bias`는 continent/ocean ownership 합성값에 더해지는 signed offset이며, 양수일수록 land
 ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다.
 
-`island_strength`는 현재 구현 transition 기간에 남아 있는 legacy preview tuning handle이다. 목표
-계약에서는 island/archipelago 성향도 graph base `continentality`와 component resolve에서 나와야
-하며, `macro_map`이 별도 island bump를 만들면 안 된다. 다음 구현 리팩토링에서는 이 handle을 graph
-base field tuning으로 이전하거나 제거한다.
+이전 transition 구현에 있던 `island_strength`와 super-cell continent/island source는 제거한다.
+island/archipelago 성향은 graph base `continentality`의 양수 component 해석에서만 나온다.
 
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
-coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. `MacroCorner`는 corner
-position에서 같은 macro field를 샘플한다. `MacroEdge`는 두 site의 macro ownership과 elevation
-context를 읽어 hydrology 이전 guide를 붙인다. river guide는 macro_map의 확정 결과가 아니다. hydrology
-단계가 ridge/coast/elevation/component context를 읽어 selected river chain, flow accumulation,
-lake/sink/outlet carve를 확정한다.
+coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. 작은 land component는
+`Island` 또는 `CoastIsland` surface kind로 드러나며, 별도 island noise source에서 만들어지지 않는다.
+`MacroCorner`는 인접 site ownership과 corner base field를 읽어 같은 macro field를 샘플한다.
+`MacroEdge`는 두 site의 macro ownership과 elevation context를 읽어 coast/ridge/fault guide를 붙인다.
+stage 3 macro_map은 river corridor를 선택하지 않는다. selected river chain, flow accumulation,
+lake/sink/outlet carve는 hydrology 단계가 확정한다.
 
 ---
 
@@ -133,10 +141,11 @@ launch 정책은 아래처럼 잡는다.
 deterministic graph base field, 충분한 padding, component pruning/assimilation 규칙, border portal
 계약으로 요청 영역마다 같은 대륙성이 재현되게 만든다.
 
-현재 launch 구현은 아직 transition 상태다. coarse super-cell 기반 continental/ocean field와 stage 2
-base field를 함께 합성해 ownership과 signed macro elevation을 얻는다. 다음 리팩토링에서는 super-cell
-continent/island source를 제거하고 graph base `continentality/elevation_seed` component resolve로
-수렴해야 한다.
+현재 launch 구현은 graph base `continentality`를 그대로 읽어 land/ocean ownership을 판정한다.
+`land_bias`와 `sea_level`은 그 값에 적용되는 signed offset일 뿐이며, macro_map은 별도 continent/island
+noise source를 합성하지 않는다. signed macro elevation은 graph base `elevation_seed`,
+`continentality`, coastness, basinness를 합성해 얻는다. component id와 distance 값은 아직 launch
+scaffold 수준의 deterministic hint이며, 이후 connected component resolve로 대체되어야 한다.
 
 ---
 
@@ -236,11 +245,10 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 
 - `src/world/generation/macro_map/mod.rs`가 `pub mod macro_map`으로 연결되어 있다.
 - `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
-- 현재 구현은 transition 상태이며, continent/ocean ownership은 deterministic super-cell core/basin
-  field와 base graph field 합성으로 정한다. 목표 계약은 이 super-cell continent/island source를
-  제거하고 graph base `continentality/elevation_seed` 기반 component resolve로 대체하는 것이다.
+- continent/ocean ownership은 graph base `continentality`를 source of truth로 읽고, `land_bias`와
+  `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
-- edge guide는 coast, ridge candidate, fault candidate를 포함한다. 현재 구현에는 hydrology 전
-  river candidate corridor도 남아 있지만, 목표 계약에서는 hydrology stage가 selected river chain,
-  flow accumulation, lake/sink/outlet carve를 확정한다.
+- edge guide는 coast, ridge candidate, fault candidate를 포함한다. stage 3 macro_map은 hydrology 전
+  river candidate corridor를 선택하지 않으며, selected river chain, flow accumulation,
+  lake/sink/outlet carve는 hydrology stage가 확정한다.

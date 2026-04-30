@@ -120,8 +120,6 @@
   - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
   - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
   - `--land-bias <f32>`: `MacroMapConfig.land_bias`, 양수는 land ownership을 늘리고 음수는 ocean ownership을 늘림
-  - `--island-strength <f32>`: 현재 구현 transition용 legacy tuning. 목표 계약에서는 graph base
-    `continentality` 쪽으로 이전하거나 제거한다.
   - `--stage macro_map`
   - `--output <path>`
 
@@ -131,11 +129,9 @@
 - 기본 출력 파일명은 `s<seed>_x<center-x>_z<center-z>.png`처럼 seed와 center만 담는다.
 - 단일 PNG에서 ocean/lake는 파란색, coast는 sandy color, 내륙은 초록 계열, 고지대는 회백색,
   가장 높은 peak는 흰색으로 표현한다.
-- ridge candidate edge는 흰색, river candidate edge는 파란색, coast candidate edge는 sandy color
-  overlay로 표시한다.
-- 현재 구현의 river candidate corridor가 coast/outlet edge를 terminal 후보로 포함하면 해당 coast
-  edge는 river overlay로 마지막에 표시될 수 있다. 목표 계약에서는 selected river overlay를 hydrology
-  preview가 확정한다.
+- ridge candidate edge는 흰색, coast candidate edge는 sandy color overlay로 표시한다.
+- stage 3 macro_map preview는 selected river나 pre-hydrology river corridor를 표시하지 않는다.
+  selected river overlay는 hydrology preview가 확정한다.
 - 작은 legend overlay는 elevation gradient와 river/ridge/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
@@ -151,15 +147,13 @@
   만들고, `world::generation::generate_macro_map(&patch, MacroMapConfig::new(...))`로 macro map을
   생성한다.
 - 목표 계약상 continent/ocean/island ownership과 signed elevation은 graph base `continentality`와
-  `elevation_seed`를 `macro_map`이 resolve한 결과다. 현재 구현은 transition 상태라 macro_map 내부
-  super-cell field도 함께 사용한다.
+  `elevation_seed`를 `macro_map`이 resolve한 결과다. 현재 구현도 macro_map 내부 super-cell
+  continent/island field 없이 graph base field를 source of truth로 사용한다.
 - lake/coast, ridge/fault 후보 의미는 `macro_map` 모듈이 소유한다. selected river 의미는 hydrology
   모듈이 소유한다.
-- coast/ridge/river candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
+- coast/ridge candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
-- macro-scale 기본 footprint에서는 현재 구현의 river candidate corridor를 마지막에 더 선명하게 그린다.
-  이 overlay는 hydrology selected river가 아니라 transition 진단 surface다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
 
 ---

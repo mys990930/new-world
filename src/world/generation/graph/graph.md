@@ -131,14 +131,16 @@ site 4개의 raw/smoothed base field를 corner와 site position 사이 거리로
 를 복사한 base elevation bias다. downhill, water accumulation, lake/sink/outlet 처리는 이후
 hydrology 단계가 별도 layer에서 소유한다.
 
-목표 생성 정책:
+현재 생성 정책:
 
-- raw field는 low-frequency world-space coherent field와 site-level deterministic variation을 함께 읽는다.
+- raw field는 site hash의 독립 random 값이 아니라, seed/generator version/world-space 좌표를 입력으로
+  하는 deterministic value-noise/fBm 계열 coherent field와 작은 site-level deterministic variation을
+  함께 읽는다.
 - smoothing은 local noise를 줄이되 대륙/해양 component의 큰 형태를 흐트러뜨리지 않는다.
 - `continentality`는 macro_map이 연결 component를 안정적으로 찾을 수 있을 만큼 넓은 양수/음수
   덩어리를 만들어야 한다.
 - `elevation_seed`는 대륙 내부 highland/lowland, ocean basin depth, ridge guide 후보를 만들 수
-  있는 broad gradient를 제공해야 한다.
+  있는 broad gradient를 제공하고, `continentality`와 양의 context correlation을 갖는다.
 - graph field preview와 macro map preview는 같은 구조가 해석 전/해석 후로 이어져 보이는 관계여야 한다.
 
 ---
@@ -267,6 +269,6 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 - data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Voronoi-style patch 생성이 구현되어 있다.
 - 구현된 patch 생성은 고정 density jittered grid와 barycentric dual topology를 사용한다.
 - pipeline 2단계 base graph field가 구현되어 있으며, site raw seed와 smoothed base field,
-  corner 주변 site 기반 base field/elevation seed를 제공한다. 다만 현재 구현은 transition 상태라
-  macro-friendly coherent continentality/elevation source of truth로 강화되어야 한다.
+  corner 주변 site 기반 base field/elevation seed를 제공한다. `continentality`와 `elevation_seed`는
+  장거리 coherent field로 생성되어 macro_map ownership/elevation resolve의 source of truth로 읽힌다.
 - 아직 구현되지 않은 것: Lloyd relaxation, 실제 Delaunay/Voronoi construction, variable density, hydrology routing, noisy boundary realization.
