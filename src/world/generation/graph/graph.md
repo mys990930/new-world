@@ -16,6 +16,7 @@
 - site, corner, edge id와 patch container 정의
 - center graph와 corner graph의 dual topology 계약
 - site/corner/edge가 다른 feature layer에서 annotation될 수 있는 id surface 제공
+- macro_map이 source of truth로 읽을 macro-friendly base field 제공
 - `WorldMeta.seed`, `generator_version`, `GraphRegionCoord` 기반 determinism 유지
 
 ---
@@ -101,12 +102,19 @@ pipeline 2단계는 graph leaf 안에서 명시적인 base field stage로 실행
 `generate_voronoi_graph_patch`는 topology를 만든 뒤 `apply_base_graph_fields`를 호출해 site와
 corner에 base temperature, hydration, continentality, elevation seed를 채운다.
 
+이 단계의 `continentality`와 `elevation_seed`는 단순 debug용 random 값이 아니다. macro_map은
+독자적인 continent/island noise source를 소유하지 않고 이 graph base field를 해석해
+continent/ocean/island ownership과 signed macro elevation을 resolve한다. 따라서 graph base field는
+macro-friendly해야 한다.
+
 `GraphBaseFields`는 stage 2의 공용 field 묶음이다.
 
 - `temperature`: 0..1 base climate seed
 - `hydration`: 0..1 base humidity/hydration seed
-- `continentality`: -1..1 base continent/ocean tendency seed
-- `elevation_seed`: -1..1 hydrology 전 macro elevation bias seed
+- `continentality`: -1..1 base continent/ocean tendency seed. 대륙성/해양성 site가 장거리로
+  뭉치는 coherent field여야 하며, macro_map의 land/ocean component resolve source of truth다.
+- `elevation_seed`: -1..1 hydrology 전 macro elevation bias seed. `continentality`와 완전히 독립된
+  salt-and-pepper noise가 아니라, land/ocean context와 합성 가능한 broad elevation bias여야 한다.
 
 site는 두 값을 함께 가진다.
 
@@ -122,6 +130,16 @@ site 4개의 raw/smoothed base field를 corner와 site position 사이 거리로
 `VoronoiCorner.elevation`은 이 단계에서는 hydrology solve 결과가 아니라 `base_fields.elevation_seed`
 를 복사한 base elevation bias다. downhill, water accumulation, lake/sink/outlet 처리는 이후
 hydrology 단계가 별도 layer에서 소유한다.
+
+목표 생성 정책:
+
+- raw field는 low-frequency world-space coherent field와 site-level deterministic variation을 함께 읽는다.
+- smoothing은 local noise를 줄이되 대륙/해양 component의 큰 형태를 흐트러뜨리지 않는다.
+- `continentality`는 macro_map이 연결 component를 안정적으로 찾을 수 있을 만큼 넓은 양수/음수
+  덩어리를 만들어야 한다.
+- `elevation_seed`는 대륙 내부 highland/lowland, ocean basin depth, ridge guide 후보를 만들 수
+  있는 broad gradient를 제공해야 한다.
+- graph field preview와 macro map preview는 같은 구조가 해석 전/해석 후로 이어져 보이는 관계여야 한다.
 
 ---
 
@@ -239,7 +257,8 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 5. graph core는 feature-specific state를 직접 끌어안지 않고 id 기반 annotation layer를 허용해야 한다.
 6. 같은 `VoronoiGraphConfig`와 같은 전역 lattice 좌표에서 생성된 site/corner/edge는 요청 중심이 달라도 같은 결과를 가져야 한다.
 7. seed와 generator version은 site jitter, base field seed, edge seed에 반영되어야 한다.
-8. 병렬 생성은 최종 정렬/dedup 이후 deterministic해야 한다.
+8. base `continentality`와 `elevation_seed`는 macro_map ownership/elevation의 source of truth가 될 만큼 coherent해야 한다.
+9. 병렬 생성은 최종 정렬/dedup 이후 deterministic해야 한다.
 
 ---
 
@@ -248,5 +267,6 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 - data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Voronoi-style patch 생성이 구현되어 있다.
 - 구현된 patch 생성은 고정 density jittered grid와 barycentric dual topology를 사용한다.
 - pipeline 2단계 base graph field가 구현되어 있으며, site raw seed와 smoothed base field,
-  corner 주변 site 기반 base field/elevation seed를 제공한다.
+  corner 주변 site 기반 base field/elevation seed를 제공한다. 다만 현재 구현은 transition 상태라
+  macro-friendly coherent continentality/elevation source of truth로 강화되어야 한다.
 - 아직 구현되지 않은 것: Lloyd relaxation, 실제 Delaunay/Voronoi construction, variable density, hydrology routing, noisy boundary realization.

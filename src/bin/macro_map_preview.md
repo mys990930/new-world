@@ -2,7 +2,7 @@
 
 ## Role
 
-- Render a deterministic top-down PNG composite for the graph-first macro map stage.
+- Render a deterministic top-down PNG composite for the graph-field-resolved macro map stage.
 - Show separated ocean, lake/coast, inland elevation, peak whitening, and ridge/river/coast candidate edge overlays in one image.
 - Keep default filenames short while preserving detailed settings in PNG metadata.
 
@@ -17,7 +17,7 @@
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
-  - `--island-strength <f32>`
+  - `--island-strength <f32>`: current transition-only legacy tuning; planned to move into graph base field tuning or be removed.
   - `--stage macro_map`
   - `--output <path>`
 
@@ -29,7 +29,7 @@
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--land-bias MacroMapConfig::new(...).land_bias`
-- `--island-strength MacroMapConfig::new(...).island_strength`
+- `--island-strength MacroMapConfig::new(...).island_strength` (transition-only)
 - `--stage macro_map`
 - output: `target/macro-map-preview/s<seed>_x<center-x>_z<center-z>.png`
 
@@ -43,7 +43,7 @@
   - river candidate edges are blue overlays.
   - ridge candidate edges are white overlays.
   - coast candidate edges are sandy overlays.
-  - coast edges selected as river outlet terminals are drawn as river overlays.
+  - coast edges selected as transition river outlet terminals are drawn as river overlays.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site count, candidate edge count, sea level, and source notes.
 
@@ -60,12 +60,12 @@
 2. Resolve the preview window from image dimensions and `--world-span-blocks`.
 3. Build a padded Voronoi graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
-   `land_bias` and `island_strength` from CLI options when provided.
+   `land_bias` and transition-only `island_strength` from CLI options when provided.
 5. Generate the RGB pixel buffer with Rayon.
 6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
-   projecting it onto pixel centers. Coast and ridge overlays are drawn first, and river candidate
-   corridors are drawn last so they remain visible at the default macro-scale footprint.
+   projecting it onto pixel centers. Coast and ridge overlays are drawn first, and current transition
+   river candidate corridors are drawn last so they remain visible at the default macro-scale footprint.
 7. Draw the compact legend and encode PNG metadata.
 
 ## Integration Note
@@ -75,6 +75,10 @@ The binary uses the public macro map API exposed by `world::generation::macro_ma
 ```rust
 new_world::world::generation::generate_macro_map(&patch, MacroMapConfig::new(seed, generator_version))
 ```
+
+Goal contract: this preview should show how graph base `continentality/elevation_seed` resolves into
+continent/ocean/island ownership, macro elevation, coast, and ridge/fault guide. The current binary still
+exposes transition tuning inherited from the existing implementation.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

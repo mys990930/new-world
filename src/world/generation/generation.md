@@ -39,8 +39,8 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 
 - Voronoi graph 기반 macro terrain 생성 단계 소유
 - graph region, site, corner, edge 기반의 deterministic 생성 계약
-- 대륙/바다 ownership, macro elevation, 산맥/능선/단층/해안 guide의 생성 순서 정의
-- edge 기반 hydrology, watershed, river 후보망의 생성 순서 정의
+- graph base field 기반 대륙/바다/섬 ownership, macro elevation, 산맥/능선/단층/해안 guide의 생성 순서 정의
+- edge 기반 hydrology, watershed, selected river chain의 생성 순서 정의
 - noisy boundary, meso feature, continuous field, heightfield synthesis, surface plan, voxel fill 단계 경계 정의
 - 각 단계 이후 topdown preview binary가 접근할 수 있는 stage surface 정의
 - 기존 legacy generation API의 임시 호환 re-export
@@ -68,19 +68,32 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 있어야 한다.
 
 1. seed 기반 padded Voronoi/Delaunay dual graph를 생성한다.
-2. site/corner에 base temperature, humidity, continentality, elevation seed를 부여하고 이웃 graph를 참고해 smoothing한다.
-3. continent/ocean basin ownership과 signed macro elevation을 만든다.
-4. macro elevation, gradient, continent/coast context를 읽어 ridge/fault/mountain/coast edge guide를 선정한다.
-5. macro elevation과 edge guide를 읽어 hydrology를 푼다: downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation, selected river chain.
-6. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
-7. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
-8. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
-9. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
-10. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
-11. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
-12. biome/material/water/coast surface plan을 만든다.
-13. vegetation/feature placement plan을 만든다.
-14. heightfield, water, surface, vegetation plan을 한 번에 `ChunkData`로 voxel fill한다.
+2. site/corner에 macro-friendly base field를 부여하고 이웃 graph를 참고해 smoothing한다.
+   - `continentality`는 단순 local random 값이 아니라, 대륙성/해양성 site가 장거리로 뭉치는 coherent field여야 한다.
+   - `elevation_seed`는 `continentality`와 완전히 독립된 noise가 아니라, land/ocean context와 결합 가능한 macro elevation bias여야 한다.
+   - `temperature`, `humidity`도 graph smoothing을 통해 인접 site/corner 사이의 급격한 단절을 줄인다.
+3. graph base field를 resolve해 continent/ocean/island ownership과 signed macro elevation을 만든다.
+   - `macro_map`은 독자적인 continent/island noise source를 소유하지 않는다.
+   - continent/ocean/island의 source of truth는 graph의 smoothed `continentality`와 연결 component 해석이다.
+   - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
+   - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를 합성해 만든다.
+4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault/mountain edge guide를 선정한다.
+   - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness, drainage divide 가능성을 함께 만족해야 한다.
+5. land/ocean ownership 경계에서 coast edge guide를 선정한다.
+   - coast는 signed elevation 부호만으로 찾지 않고, connected ocean basin과 land ownership의 경계를 우선한다.
+6. macro elevation, ridge/coast guide, graph topology를 읽어 hydrology를 푼다.
+   - 이 단계는 potential guide가 아니라 selected hydrology result를 만든다.
+   - downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation을 계산한다.
+   - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
+7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
+8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
+9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
+10. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
+11. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
+13. biome/material/water/coast surface plan을 만든다.
+14. vegetation/feature placement plan을 만든다.
+15. heightfield, water, surface, vegetation plan을 한 번에 `ChunkData`로 voxel fill한다.
 
 ---
 
@@ -98,19 +111,20 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 - stage 1 padded Voronoi-style graph patch 생성: deterministic jittered grid site, barycentric corner,
   site/corner-linked edge topology를 rayon 병렬 생성 뒤 id 정렬/dedup한다.
 - stage 2 base graph field: site raw seed field와 smoothed field를 생성하고, corner field/elevation
-  seed를 주변 site 기반으로 안정적으로 계산한다.
-- stage 3/4 macro map: `generate_macro_map`이 graph patch를 입력으로 받아 continent/ocean basin
-  ownership, signed macro elevation, coastness, mountainness/ridgeness, basinness, coast/ridge/fault/river-candidate
-  edge guide를 별도 annotation layer로 생성한다. river guide는 routing 확정이 아니라 hydrology 전
-  후보 surface다. `MacroMapConfig.land_bias`와 `MacroMapConfig.island_strength`는 preview와 테스트에서
-  land/ocean balance와 island bump 강도를 조율하는 공개 handle이다. river candidate corridor는 아직
-  hydrology solve가 아니므로 모든 chain의 outlet 도달을 보장하지 않는다. 다만 corridor가 coast에
-  닿는 경우 ocean outlet/coast edge를 terminal 후보로 포함할 수 있어야 하며, 완전한 상류-하류-하구
-  연결성은 hydrology 단계가 확정한다.
+  seed를 주변 site 기반으로 안정적으로 계산한다. 목표 계약상 `continentality`와 `elevation_seed`는
+  macro_map의 source of truth가 될 만큼 장거리 coherent해야 한다.
+- stage 3/4/5 macro map: 목표 계약상 `macro_map`은 graph patch의 smoothed `continentality`와
+  `elevation_seed`를 resolve해 continent/ocean/island ownership, signed macro elevation, coastness,
+  mountainness/ridgeness, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
+  독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 아직 transition
+  상태라 super-cell 기반 macro field를 함께 사용하며, 다음 리팩토링에서 graph-derived component
+  resolve로 수렴해야 한다.
+- stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 이 단계의
+  river는 후보 surface가 아니라 downhill/local-minimum/outlet 정책을 통과한 결과여야 한다.
 
 문서화된 다음 leaf:
 
-- `boundary/boundary.md`: noisy coast/river/biome/fault boundary realization
+- `boundary/boundary.md`: selected coast/river/biome/fault boundary realization
 - `meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `heightfield/heightfield.md`: Voronoi-derived macro map과 Perlin micro relief 합성
 - `surface_plan/surface_plan.md`: biome, material, water/coast/wetland policy resolve
@@ -158,6 +172,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 
 - 인접 site의 temperature/hydration/elevation bias는 비현실적으로 튀지 않는다.
 - base graph field smoothing은 raw seed 대비 인접 site 차이를 줄여야 한다.
+- base graph field의 `continentality`는 대륙성/해양성 site가 장거리로 뭉치는 coherent field여야 한다.
+- base graph field의 `elevation_seed`는 macro elevation resolve가 읽을 수 있도록 continentality와
+  완전히 독립된 salt-and-pepper noise가 아니어야 한다.
 - corner base field와 elevation seed는 독립 random 값이 아니라 주변 site field에서 파생되어야 한다.
 - biome transition은 gradient 또는 domain warp를 통해 완만하게 변한다.
 - ocean/coast/lake/wetland 구분은 material policy와 topdown preview에서 일관된다.
@@ -186,9 +203,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 ## 불변식
 
 1. graph region과 chunk boundary는 cache/output 단위일 뿐 visible terrain primitive가 아니다.
-2. macro elevation은 Voronoi graph 기반으로 먼저 생성되고, Perlin은 마지막 micro relief로만 합성된다.
-3. 산맥/능선/단층/해안 edge guide는 hydrology보다 먼저 정해진다.
-4. hydrology는 최종 heightfield와 voxel fill 전에 valley/lake/coast 제약을 제공한다.
+2. macro ownership과 macro elevation은 graph base field resolve로 먼저 생성되고, Perlin은 마지막 micro relief로만 합성된다.
+3. 산맥/능선/단층 edge guide와 coast edge guide는 hydrology보다 먼저 정해진다.
+4. hydrology는 최종 heightfield와 voxel fill 전에 selected river, valley, lake, coast 제약을 제공한다.
 5. noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
 6. meso feature는 macro ownership을 뒤집지 않고 heightfield가 읽을 deterministic deformation plan을 제공한다.
 7. polygon owner와 visible material/biome boundary는 분리될 수 있어야 한다.

@@ -49,7 +49,8 @@ world-space column sampling은 주변 site/corner의 influence를 섞어 continu
 인접 site끼리는 완전 랜덤 값이 아니라 어느 정도 연속성을 가져야 한다. field는 한 번에 끝나는
 단계가 아니라 두 층으로 나뉜다.
 
-- base graph field: graph 생성 직후 site/corner에 temperature, humidity, continentality, elevation seed를 부여하고 이웃 smoothing한다.
+- base graph field: graph 생성 직후 site/corner에 temperature, humidity, macro-friendly continentality,
+  elevation seed를 부여하고 이웃 smoothing한다.
 - final column field: heightfield와 hydrology 이후 elevation, water proximity, rain shadow, river/lake/wetland proximity를 반영해 temperature/hydration/biome influence를 다시 resolve한다.
 
 현재 base graph field는 `graph` leaf의 `GraphBaseFields`가 소유한다. site는 seed hash에서 직접 나온
@@ -58,10 +59,15 @@ raw/smoothed field를 거리 가중 평균해 같은 두 값을 가진다. 이�
 `VoronoiCorner.elevation`은 hydrology elevation이 아니라 이후 macro elevation/hydrology가 읽을
 초기 bias다.
 
+`continentality`와 `elevation_seed`는 macro_map의 source of truth다. 즉, macro_map은 독자적인
+continent/island noise source를 새로 만들기보다, 이 smoothed graph field를 연결 component와
+context로 해석해 continent/ocean/island ownership과 signed macro elevation을 resolve한다.
+
 방법 후보:
 
 - graph neighbor smoothing
 - low-frequency noise를 site seed에 더하기
+- graph-scale coherent continentality/elevation field를 먼저 만들고 site variation을 얹기
 - climate band / latitude / prevailing wind 같은 장거리 field를 site 값에 반영
 - watershed, coast, mountain chain 같은 graph-derived field를 후처리로 합성
 
@@ -144,6 +150,8 @@ polygon 하나가 반드시 하나의 biome일 필요가 없다.
 3. graph boundary distance는 diagnostic과 shaping input일 뿐이며, visible output에 쓰기 전에 warp와 blend를 거쳐야 한다.
 4. biome owner와 visible material boundary는 분리될 수 있어야 한다.
 5. ocean/coast/lake/wetland 구분은 material policy와 topdown preview에서 일관되어야 한다.
+6. base graph `continentality`와 `elevation_seed`는 macro ownership/elevation resolve에 충분한
+   장거리 coherence를 제공해야 한다.
 
 ---
 

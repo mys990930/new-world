@@ -34,27 +34,31 @@
 현재 scaffold stage는 목표 pipeline 순서를 그대로 드러낸다.
 
 1. padded Voronoi graph
-2. base graph fields
-3. continent/ocean macro elevation
-4. edge guide selection
-5. hydrology solve
-6. noisy boundary realization
-7. graph-derived macro map
-8. meso feature planning
-9. Perlin micro relief
-10. heightfield and water surface
-11. climate/hydration/biome resolve
-12. surface plan
-13. vegetation plan
-14. voxel fill
+2. macro-friendly base graph fields
+3. graph-field-based macro ownership/elevation resolve
+4. ridge/fault/mountain guide selection
+5. coast edge guide selection
+6. hydrology solve
+7. noisy boundary realization
+8. graph-derived macro map
+9. meso feature planning
+10. Perlin micro relief
+11. heightfield and water surface
+12. climate/hydration/biome resolve
+13. surface plan
+14. vegetation plan
+15. voxel fill
 
 pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜야 한다.
 
 - graph construction이 먼저다.
 - base climate와 elevation seed는 graph 단계에서 시작하지만, final temperature/hydration은 heightfield와 hydrology 이후에 다시 resolve한다.
-- continent/ocean과 macro elevation은 Perlin보다 먼저다.
-- mountain/ridge/fault/coast edge guide는 hydrology보다 먼저다.
+- base `continentality`와 `elevation_seed`는 macro_map ownership/elevation resolve의 source of truth다.
+- macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 해석한다.
+- continent/ocean/island ownership과 macro elevation은 Perlin보다 먼저다.
+- mountain/ridge/fault edge guide와 coast edge guide는 hydrology보다 먼저다.
 - hydrology는 final heightfield와 voxel fill보다 먼저다.
+- hydrology는 potential river guide가 아니라 selected river chain, flow accumulation, lake/sink/outlet resolution을 만든다.
 - noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
 - Voronoi-derived macro map은 graph guide와 boundary 정보를 heightfield가 읽을 수 있는 field로 바꾸는 중간 layer다.
 - meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.

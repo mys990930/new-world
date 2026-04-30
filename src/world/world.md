@@ -65,6 +65,7 @@
 재노출할 수 있지만, 세부 생성 정책은 generation leaf 문서가 소유한다.
 
 - graph region, site, corner, edge id와 patch
+- graph base `continentality/elevation_seed`와 macro ownership/elevation resolve annotation
 - continuous blended field sample
 - hydrology watershed, drainage node, river segment
 - generation stage, generation config, column synthesis request/result
@@ -168,7 +169,9 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - 현재 `graph` leaf는 deterministic padded Voronoi-style graph patch assembly와 base graph field
   smoothing을 제공한다.
 - 현재 `macro_map` leaf는 graph patch 기반 continent/ocean basin ownership, signed macro elevation,
-  coast/ridge/fault/river-candidate edge guide annotation을 제공한다.
+  coast/ridge/fault/river-candidate edge guide annotation을 제공한다. 목표 계약상 이 ownership과
+  elevation은 graph base `continentality/elevation_seed`를 source of truth로 resolve해야 하며,
+  macro_map의 독자 continent/island noise source는 제거되어야 한다.
 - 아직 실제 Delaunay/Voronoi construction, hydrology solve, Voronoi-derived map, Perlin micro relief
   합성은 구현되지 않았다.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

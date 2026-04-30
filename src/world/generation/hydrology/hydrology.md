@@ -4,16 +4,17 @@
 
 `hydrology`는 Voronoi corner와 selected edge를 기반으로 한 graph-first 물 흐름 계약을 소유한다.
 
-polygon 경계는 강 후보망이지만, 모든 경계가 강이 되어서는 안 된다. hydrology는 macro elevation,
-ridge, coast, basin 정보를 읽어 downhill routing, watershed, river segment, lake/outlet 처리를
-계산하고, 이후 heightfield가 valley와 water surface를 알 수 있게 제약을 제공한다.
+polygon 경계는 river path가 될 수 있는 graph substrate지만, 모든 경계가 강이 되어서는 안 된다.
+hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation, ridge, coast, basin
+정보를 읽어 downhill routing, watershed, selected river segment, lake/outlet 처리를 계산하고,
+이후 heightfield가 valley와 water surface를 알 수 있게 제약을 제공한다.
 
 ---
 
 ## 책임
 
 - watershed, drainage node, river segment 표현
-- selected graph edge를 divide, headwater, tributary, trunk, floodplain, outlet으로 분류
+- selected graph edge를 headwater, tributary, trunk, floodplain, outlet으로 분류
 - flow accumulation과 downstream progress 유지
 - lake, sink, outlet carve 같은 local minima 처리 계약 정의
 - heightfield와 surface plan이 읽을 valley/water constraint 제공
@@ -53,13 +54,15 @@ Amit의 mapgen2에서는 mountain corner에서 시작해 downhill 방향을 따�
 
 ## 처리 순서
 
-1. graph corner elevation을 계산한다.
-2. downhill edge를 고른다.
-3. graph-stage local minimum을 찾는다.
-4. local minimum을 lake로 유지할지, outlet을 carve할지 결정한다.
-5. watershed와 flow accumulation을 계산한다.
-6. 충분한 flow와 지형 조건을 만족하는 edge chain만 river로 선택한다.
-7. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
+1. macro_map의 resolved ownership/elevation, ridge guide, coast guide를 읽는다.
+2. graph corner elevation을 계산한다.
+3. downhill edge를 고른다.
+4. graph-stage local minimum을 찾는다.
+5. local minimum을 lake로 유지할지, sink로 둘지, outlet을 carve할지 결정한다.
+6. watershed와 flow accumulation을 계산한다.
+7. 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
+8. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
+9. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
 
 최종 river geometry는 raw edge segment가 아니다.
 
@@ -99,7 +102,7 @@ contract로 보장한다.
 
 - hydrology solve는 요청 영역보다 넓은 padded graph patch에서 실행한다.
 - 각 graph region은 border portal과 downstream basin id를 가질 수 있다.
-- selected river가 patch 밖으로 나가면 open downstream outlet을 기록하고, 다음 region이 생성될 때 같은 seed와 basin id로 이어받는다.
+- selected river가 patch 밖으로 나가면 open downstream portal을 기록하고, 다음 region이 생성될 때 같은 seed와 basin id로 이어받는다.
 - ocean basin ownership과 drainage potential field는 local sample만으로도 대략적인 downstream 방향을 제공해야 한다.
 - launch에서 "모든 주요 river는 바다로 연결"을 원하면, 닫힌 basin은 lake로 남기지 않고 outlet carve를 선택해 ocean basin까지 이어지는 portal chain을 만든다.
 
@@ -130,7 +133,7 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 
 ## 불변식
 
-1. Voronoi edge는 hydrology 후보선이지 자동 river가 아니다.
+1. Voronoi edge는 hydrology substrate이지 자동 river가 아니다.
 2. selected river segment는 descending 또는 outlet-carved graph logic을 따라야 한다.
 3. local minima는 lake, sink, outlet carve 중 하나로 명시되어야 한다.
 4. selected river는 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기면 안 된다.

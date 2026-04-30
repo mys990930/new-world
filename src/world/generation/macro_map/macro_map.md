@@ -2,21 +2,23 @@
 
 ## 역할
 
-`macro_map`은 대륙/바다 ownership, Voronoi 기반 macro elevation, 산맥/능선/단층/해안 guide를
-소유한다.
+`macro_map`은 graph base field를 해석해 대륙/바다/섬 ownership, resolved macro elevation,
+산맥/능선/단층/해안 guide를 만드는 annotation layer다.
 
-이 모듈의 출력은 최종 heightfield가 아니다. hydrology와 heightfield가 읽을 수 있는 장거리 구조와
-gradient map을 만든다.
+이 모듈의 출력은 최종 heightfield가 아니다. `macro_map`은 독자적인 continent/island noise source를
+만들지 않고, graph stage가 제공한 smoothed `continentality`와 `elevation_seed`를 source of truth로
+읽는다. 그런 다음 hydrology와 heightfield가 읽을 수 있는 장거리 ownership, elevation, ridge/coast
+context를 resolve한다.
 
 ---
 
 ## 책임
 
-- continent와 ocean basin ownership 정의
+- graph base `continentality`를 읽어 continent, ocean basin, island/archipelago ownership resolve
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
-- Voronoi graph 기반 macro elevation 생성
-- edge 기반 mountain/ridge/fault/coast/river-candidate guide 선택
-- hydrology가 읽을 수 있는 `pre-hydrology candidate corridor` 형태의 river 후보 chain 선택
+- graph base `elevation_seed`, continentality, coast distance, basinness를 합성한 signed macro elevation resolve
+- edge 기반 mountain/ridge/fault guide 선택
+- land/ocean ownership 경계 기반 coast guide 선택
 - ridge/fault/coast guide를 broad field로 확산
 - hydrology가 읽을 drainage divide, basin, outlet 후보 제공
 
@@ -24,7 +26,8 @@ gradient map을 만든다.
 
 ## 비책임
 
-- river routing 확정. `macro_map`의 river는 hydrology 전 단계 후보 annotation일 뿐이다.
+- 독자적인 continent/island noise source 생성
+- river routing 확정. selected river chain, flow accumulation, outlet/lake/sink resolution은 hydrology 책임이다.
 - noisy boundary curve 생성
 - Perlin micro relief 합성
 - final surface material 선택
@@ -61,19 +64,19 @@ MacroEdgeGuide {
 
 `MacroMapConfig`는 land/ocean 비율을 진단하고 조율하기 위한 공개 tuning handle을 가진다.
 `land_bias`는 continent/ocean ownership 합성값에 더해지는 signed offset이며, 양수일수록 land
-ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다. `island_strength`는 ocean basin 안의
-archipelago/island bump가 continentality를 끌어올리는 강도다. 두 값은 대륙성 ownership layer를
-대체하지 않고 preview와 테스트에서 launch 기본 landness를 빠르게 조정하기 위한 보조 knob이다.
+ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다.
+
+`island_strength`는 현재 구현 transition 기간에 남아 있는 legacy preview tuning handle이다. 목표
+계약에서는 island/archipelago 성향도 graph base `continentality`와 component resolve에서 나와야
+하며, `macro_map`이 별도 island bump를 만들면 안 된다. 다음 구현 리팩토링에서는 이 handle을 graph
+base field tuning으로 이전하거나 제거한다.
 
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
 coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. `MacroCorner`는 corner
 position에서 같은 macro field를 샘플한다. `MacroEdge`는 두 site의 macro ownership과 elevation
-context를 읽어 hydrology 이전 guide를 붙인다. river guide는 흩어진 독립 edge가 아니라 land site
-graph 위에서 고지대/분지성 source부터 낮은 drainage elevation, ocean basin, coast 방향으로 이어지는
-deterministic `pre-hydrology candidate corridor` edge chain으로 후처리된다. 이 chain은 hydrology 전
-후보일 뿐이므로 모든 후보가 하구까지 이어진다고 보장하지 않는다. 대신 corridor가 coast에 닿으면
-ocean outlet/coast edge를 terminal river candidate로 표시할 수 있게 열어 두고, 실제 상류-하류-하구
-연결성은 hydrology 단계의 selected river, flow accumulation, lake/sink/outlet carve가 확정한다.
+context를 읽어 hydrology 이전 guide를 붙인다. river guide는 macro_map의 확정 결과가 아니다. hydrology
+단계가 ridge/coast/elevation/component context를 읽어 selected river chain, flow accumulation,
+lake/sink/outlet carve를 확정한다.
 
 ---
 
@@ -87,67 +90,68 @@ water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의
 
 - ocean: 큰 바다 또는 외부 ocean basin과 연결된 물
 - continent: 큰 land mass와 그 내부 macro elevation / drainage ownership
-- island / archipelago: ocean basin 안에서 별도 island field가 만든 크고 작은 양수 land component
+- island / archipelago: graph base `continentality`가 만든 land component 중 큰 continent에 속하지
+  않는 작은 양수 component
 - lake: land 내부의 local minimum 또는 basin fill로 생긴 고립 물
 - wetland/marsh: 얕은 물, 높은 hydration, 낮은 slope가 겹친 지역
 - coast: ocean과 land 사이의 transition band
 - beach/cliff/rocky shore: coast의 slope, exposure, material policy에 따른 표면 표현
 
 Amit의 island map에서는 border flood fill로 ocean과 lake를 구분할 수 있지만, 이 프로젝트는
-무한 월드이므로 같은 방법을 그대로 쓸 수 없다. 대신 graph scale의 ocean basin ownership,
-continent ownership, continentality field, outlet-to-ocean routing을 사용해야 한다.
+무한 월드이므로 같은 방법을 그대로 쓸 수 없다. 대신 graph scale의 coherent `continentality`,
+component ownership, ocean basin classification, outlet-to-ocean routing을 사용해야 한다.
 
-Land/ocean 판정은 아래 입력을 합성한다.
+Land/ocean 판정은 아래 입력을 합성하되, source of truth는 graph base field다.
 
-- Voronoi graph 기반 macro elevation
-- continentality
-- continent / ocean basin id
-- graph basin id
-- distance-to-ocean-basin
-- coastness
+- graph base `continentality`
+- graph base `elevation_seed`
+- connected land/ocean component
+- component size와 ocean basin 연결성
+- coast distance / coastness
 - sea-level contract
 - local lake/sink resolution
 
 `target land ratio`만으로는 대륙성이 보장되지 않는다. land ratio는 preview area 또는 graph patch에서
-land/open water 비율을 조율하는 보조 tuning일 뿐이다. 대륙성은 별도의 continent/ocean basin
-ownership layer가 먼저 제공해야 한다.
+land/open water 비율을 조율하는 보조 tuning일 뿐이다. 대륙성은 graph base `continentality`가
+장거리 coherent field를 제공하고, macro_map이 connected component policy로 해석해야 보장된다.
 
 launch 정책은 아래처럼 잡는다.
 
-- continent seed와 ocean basin seed를 낮은 빈도의 super-region 또는 plate-like graph에서 먼저 생성한다.
-- 각 Voronoi site는 가까운 continent/ocean basin id, continentality, distance-to-continent-core, distance-to-ocean-basin을 받는다.
-- signed macro elevation은 이 ownership field 위에 얹히며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
+- graph base field stage가 대륙성/해양성 site가 뭉치는 `continentality`를 먼저 만든다.
+- macro_map은 `continentality >= threshold`를 초기 land mask로 보고 connected component를 resolve한다.
+- 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
+- signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
+  합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
-- launch 기본값에서도 큰 대륙만 만들지 않고, ocean basin 안에 크고 작은 섬이 일정 비율로 나타날 수 있게 island field를 둔다.
-- 섬은 대륙 ownership을 뒤집는 예외가 아니라 별도 deterministic island bump가 continentality를 양수로 끌어올린 결과여야 한다.
+- launch 기본값에서도 큰 대륙만 만들지 않고, graph `continentality`가 ocean basin 안에 크고 작은
+  양수 component를 만들 수 있어야 한다.
+- 섬은 macro_map이 대륙 ownership을 뒤집어 만든 예외가 아니라 graph `continentality`의 component
+  해석 결과여야 한다.
 - 이후 hydrology/surface 단계에서는 큰 대륙에 붙지 않은 land component를 island로 취급하고, 최소 크기, 해안 폭, 담수 생성 가능성, 식생 밀도 정책을 다르게 줄 수 있어야 한다.
 
 무한 월드에서는 전체 land cell 수와 ocean cell 수를 전역으로 세어 제약할 수 없다. 대신
-deterministic super-region ownership, 충분한 padding, component pruning/assimilation 규칙으로
-요청 영역마다 같은 대륙성이 재현되게 만든다.
+deterministic graph base field, 충분한 padding, component pruning/assimilation 규칙, border portal
+계약으로 요청 영역마다 같은 대륙성이 재현되게 만든다.
 
-현재 launch 구현은 coarse super-cell 위에 낮은 빈도 continental field, domain warp, island field를
-합성해 continent core와 ocean basin center를 만든다. checkerboard처럼 land/ocean을 번갈아 배치하지
-않고, 대륙 가장자리가 여러 방향으로 뻗거나 들어가며 ocean basin 안에 크고 작은 섬 후보가 생길 수
-있게 한다. site/corner는 가까운 continent core와 ocean basin center까지의 거리, stage 2 base
-continentality/elevation seed, island bump를 합성해 ownership과 signed macro elevation을 얻는다.
-이 구현은 global target ratio를 세지 않으며, 같은 world-space position은 어떤 padded patch에서
-샘플해도 같은 macro annotation을 받는다.
+현재 launch 구현은 아직 transition 상태다. coarse super-cell 기반 continental/ocean field와 stage 2
+base field를 함께 합성해 ownership과 signed macro elevation을 얻는다. 다음 리팩토링에서는 super-cell
+continent/island source를 제거하고 graph base `continentality/elevation_seed` component resolve로
+수렴해야 한다.
 
 ---
 
 ## Macro Elevation
 
-macro elevation은 대륙, 바다, 산맥, 능선, 분수계, 강 후보망을 이미 알고 있는 graph-derived
+macro elevation은 대륙, 바다, 산맥, 능선, 분수계 context를 이미 알고 있는 graph-derived
 field다. Perlin noise는 이 macro structure를 뒤집는 source가 아니라, 마지막 표면에 국소적인
 높낮이와 질감을 더하는 micro relief다.
 
-macro elevation 생성 순서:
+macro elevation resolve 순서:
 
-1. continent/ocean basin ownership을 정한다.
-2. 대륙 내부의 broad elevation gradient를 만든다.
-3. coast distance, continent core, basinness를 합성한다.
-4. signed macro elevation을 만들되, ocean basin ownership과 sea level contract를 함께 저장한다.
+1. graph base `continentality`를 land/ocean mask로 해석한다.
+2. connected component를 resolve해 continent, ocean basin, island/archipelago ownership을 정한다.
+3. graph base `elevation_seed`, `continentality`, coast distance, basinness를 합성한다.
+4. signed macro elevation을 만들되, ownership과 sea level contract를 함께 저장한다.
 5. edge 기반 mountain/ridge/fault/plateau 후보를 먼저 정한다.
 6. coast는 signed macro elevation 경계가 아니라 land ownership과 connected-ocean basin 경계에서 우선 찾는다.
 7. ridge/fault/coast skeleton을 broad field로 확산한다.
@@ -168,7 +172,7 @@ elevation edge만 고르면 높은 평원도 ridge가 되어버린다. ridge는 
 - graph site chain을 mountain belt로 선택
 - edge chain을 fault/ridge candidate로 선택
 - plate-like region boundary를 uplift source로 사용
-- continental core와 coast distance를 이용해 broad mountainness field 생성
+- land component 내부 위치와 coast distance를 이용해 broad mountainness field 생성
 - ruggedness와 elevation bias로 ridge 주변 local relief 강화
 
 현재 launch 구현의 ridge 후보는 두 land site의 평균 macro elevation, mountainness/ridgeness,
@@ -217,13 +221,14 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 ## 불변식
 
 1. 대륙/바다 ownership은 chunk 생성 순서와 독립적이어야 한다.
-2. 대륙성은 target land ratio가 아니라 continent/ocean basin ownership과 connected component 정책으로 보장한다.
+2. 대륙성은 target land ratio가 아니라 graph base `continentality`의 coherence와 connected component 정책으로 보장한다.
 3. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
 4. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
-5. river guide는 routing 결과가 아니라 hydrology가 읽을 `pre-hydrology candidate corridor` 후보 annotation이다.
+5. macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 resolve해야 한다.
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
 7. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-8. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+8. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
+9. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
 
 ---
 
@@ -231,12 +236,11 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 
 - `src/world/generation/macro_map/mod.rs`가 `pub mod macro_map`으로 연결되어 있다.
 - `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
-- continent/ocean ownership은 target ratio가 아니라 deterministic super-cell core/basin field와 base graph field 합성으로 정한다.
+- 현재 구현은 transition 상태이며, continent/ocean ownership은 deterministic super-cell core/basin
+  field와 base graph field 합성으로 정한다. 목표 계약은 이 super-cell continent/island source를
+  제거하고 graph base `continentality/elevation_seed` 기반 component resolve로 대체하는 것이다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
-- edge guide는 coast, ridge candidate, fault candidate, hydrology 전 river candidate를 포함한다.
-- river candidate는 edge별 noise 점수가 threshold를 넘는 조각을 그대로 노출하지 않고, land adjacency에서
-  ridge를 피하며 macro drainage elevation이 낮아지거나 ocean basin/coast 쪽으로 진행하는 deterministic
-  `pre-hydrology candidate corridor` chain으로 선택한다. 이 chain은 hydrology의 selected river,
-  flow accumulation, lake/sink/outlet carve가 아니며, 이후 hydrology가 읽을 후보 surface에 머문다.
-  다만 하구가 preview에서 끊겨 보이지 않도록 coast/outlet edge를 terminal river candidate로 포함할 수 있다.
+- edge guide는 coast, ridge candidate, fault candidate를 포함한다. 현재 구현에는 hydrology 전
+  river candidate corridor도 남아 있지만, 목표 계약에서는 hydrology stage가 selected river chain,
+  flow accumulation, lake/sink/outlet carve를 확정한다.

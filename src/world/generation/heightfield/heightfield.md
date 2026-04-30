@@ -51,10 +51,10 @@ height =
 
 ## 생성 순서
 
-1. continent/ocean basin과 대륙 내부 macro elevation을 Voronoi graph에서 만든다.
-2. Voronoi edge 기반 mountain/ridge/fault/plateau 구조를 먼저 정한다.
-3. 이 edge structure와 macro elevation을 바탕으로 edge 기반 hydrology를 설정한다.
-4. river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
+1. graph base `continentality/elevation_seed`를 macro_map에서 resolve해 continent/ocean/island ownership과 signed macro elevation을 만든다.
+2. Voronoi edge 기반 mountain/ridge/fault/plateau guide와 coast guide를 먼저 정한다.
+3. 이 edge guide와 macro elevation을 바탕으로 hydrology solve를 실행해 selected river, lake/sink/outlet, watershed, valley constraint를 확정한다.
+4. selected river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
 5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
 6. meso feature plan을 만든다.
 7. Perlin noise를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
@@ -87,7 +87,7 @@ Perlin noise 사용 규칙:
 
 ## 불변식
 
-1. macro elevation은 Voronoi graph 기반으로 먼저 생성되어야 한다.
+1. macro elevation은 graph base field resolve 기반으로 먼저 생성되어야 한다.
 2. Perlin micro relief는 macro structure를 뒤집으면 안 된다.
 3. hydrology는 final heightfield와 voxel fill 전에 valley/lake/coast 제약으로 반영되어야 한다.
 4. Perlin micro relief가 만든 국소 depression은 river/lake/coast policy와 충돌하지 않도록 clamp, fill, wetland/puddle 표현, flatten 중 하나로 처리되어야 한다.
