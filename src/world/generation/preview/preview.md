@@ -96,6 +96,11 @@
   같은 graph contract를 시각화한다.
 - binary는 graph 의미를 새로 만들지 않고, preview window에서 필요한 padding을 계산한 뒤
   `VoronoiGraphPatchRequest`를 구성한다.
+- identity mode의 fill layer는 픽셀마다 nearest site를 칠하는 진단용 raster다. 이 raster의 경계는
+  “가장 가까운 site가 바뀌는 위치”를 보여주며, 실제 공개 graph edge를 재구성한 것이 아니다.
+- 실제 topology overlay는 `VoronoiEdge.corners`가 참조하는 `VoronoiCorner.position` 두 점을
+  world-space에서 clipping/projection한 corner-to-corner segment로 그린다. 따라서 nearest-site raster
+  경계와 Delaunay/circumcenter Voronoi dual edge overlay는 일부 위치에서 다르게 보일 수 있다.
 - temperature, hydration/humidity, continentality, elevation map은 graph base-field stage가 만든
   smoothed `VoronoiSite::base_fields`를 색상 gradient로 표현한다.
 - ruggedness map은 아직 smoothing 대상이 아닌 site-level roughness seed를 표현한다.

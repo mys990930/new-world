@@ -478,11 +478,13 @@ fn macro_field_sample_from_context(
 ) -> MacroFieldSample {
     let fields = context.base_fields;
     let continentality = clamp_signed(fields.continentality + config.land_bias - config.sea_level);
-    let distance_to_coast_blocks = if context.graph_distance_to_coast == u32::MAX {
+    let raw_distance_to_coast_blocks = if context.graph_distance_to_coast == u32::MAX {
         config.coast_width_blocks * 8.0
     } else {
         context.graph_distance_to_coast as f32 * context.spacing_blocks
     };
+    let distance_to_coast_blocks =
+        raw_distance_to_coast_blocks.min(config.coast_width_blocks * 4.0);
     let coastness = (1.0 - distance_to_coast_blocks / config.coast_width_blocks).clamp(0.0, 1.0);
     let inlandness = (distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
     let elevation_seed = fields.elevation_seed;

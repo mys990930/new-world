@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 bevy_ecs = "0.18.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
+delaunator = "1.0.2"
 image = { version = "0.25.6", default-features = false, features = ["png"] }
 pollster = "0.4.0"
 png = "0.18.1"

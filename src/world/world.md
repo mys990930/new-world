@@ -166,12 +166,13 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - 이전 `world` 구현은 `src/world/legacy` 아래로 이동되어 보존되어 있다.
 - `src/world/mod.rs`는 기존 app/tool/runtime compile을 위해 legacy API를 re-export한다.
 - 새 graph-first 모듈은 `src/world/generation` 아래의 scaffold contract 단계다.
-- 현재 `graph` leaf는 deterministic padded Voronoi-style graph patch assembly와 base graph field
-  smoothing을 제공한다.
+- 현재 `graph` leaf는 deterministic padded site 후보를 `delaunator` Delaunay triangulation으로
+  연결하고, triangle circumcenter를 Voronoi corner로 삼는 Voronoi dual graph patch assembly와
+  base graph field smoothing을 제공한다.
 - 현재 `macro_map` leaf는 graph patch 기반 continent/ocean basin ownership, signed macro elevation,
   island/archipelago component, coast/ridge/fault guide annotation을 제공한다. 목표 계약상 이 ownership과
   elevation은 graph base `continentality/elevation_seed`를 source of truth로 resolve하며,
   macro_map은 독자 continent/island noise source를 만들지 않는다.
-- 아직 실제 Delaunay/Voronoi construction, hydrology solve, Voronoi-derived map, Perlin micro relief
-  합성은 구현되지 않았다.
+- 아직 구현되지 않은 것: hydrology solve, noisy boundary realization, Voronoi-derived map,
+  Perlin micro relief 합성.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

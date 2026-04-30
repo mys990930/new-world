@@ -57,7 +57,7 @@
 
 1. Parse required seed and world-block center.
 2. Resolve the preview window from image dimensions and `--world-span-blocks`.
-3. Build a padded Voronoi graph patch through `generate_voronoi_graph_patch(...)`.
+3. Build a padded Delaunay/circumcenter Voronoi dual graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
 5. Generate the RGB pixel buffer with Rayon.
@@ -72,10 +72,10 @@
 
 The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from
 the rendered edge overlay because the overlay is not inferred from nearest-site color changes; it uses
-the graph's explicit `edge.corners` and `VoronoiCorner.position` segment. `graph_voronoi_preview`
-identity mode darkens nearest-site distance ties, so it is useful for seeing owner regions, while
-`macro_map_preview` now exposes the actual graph edge network underneath the highlighted coast/ridge/fault
-guides.
+the graph's explicit `edge.corners` and Delaunay triangle circumcenter `VoronoiCorner.position`
+segment. `graph_voronoi_preview` identity mode darkens nearest-site distance ties and also overlays
+the explicit topology, while `macro_map_preview` exposes the actual graph edge network underneath the
+highlighted coast/ridge/fault guides.
 
 ## Integration Note
 

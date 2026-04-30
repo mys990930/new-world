@@ -2,7 +2,7 @@
 
 ## 역할
 
-`graph`는 graph-first world generation의 Voronoi-style macro graph 계약을 소유한다.
+`graph`는 graph-first world generation의 Delaunay 기반 Voronoi dual macro graph 계약을 소유한다.
 
 이 모듈은 site, corner, edge, graph region을 정의한다. 이 구조는 최종 지형 모양이 아니라
 월드의 거시 의미와 제약을 담는 내부 graph다.
@@ -34,7 +34,7 @@
 
 ## Macro Voronoi Graph
 
-먼저 world-space에 deterministic Voronoi-style macro graph를 만든다.
+먼저 world-space에 deterministic Delaunay/Voronoi dual macro graph를 만든다.
 
 권장 방식:
 
@@ -42,18 +42,26 @@
 - 순수 random point는 clumping이 심하므로 Poisson Disc 또는 jittered grid + 제한된 relaxation을 우선 검토한다.
 - Lloyd relaxation은 polygon 크기를 고르게 만드는 데 유용하지만, 너무 많이 적용하면 grid처럼 규칙적이 된다.
 - 무한 월드에서는 region-local relaxation이 경계 불안정을 만들 수 있으므로, padding을 포함한 patch 단위 안정성 테스트가 필요하다.
-- 최종 graph가 꼭 수학적으로 완전한 Voronoi일 필요는 없다. corner 간격과 polygon shape가 더 균질한 barycentric dual mesh 계열도 후보가 될 수 있다.
+- launch 구현은 deterministic site 후보를 Delaunay triangulation하고, triangle circumcenter를
+  Voronoi corner로 삼는 Voronoi dual을 사용한다. 이후 relaxation이나 variable density가 추가되더라도
+  공개 계약은 site/corner/edge id와 dual topology를 유지한다.
 
 이 단계의 출력은 site, corner, edge, adjacency를 포함한 graph patch다.
 
-현재 구현은 launch 단계의 안정성을 우선해 고정 density jittered grid 기반의 Voronoi-style
-barycentric dual patch를 만든다. 완전한 Delaunay/Voronoi 계산은 아니지만, 전역 site lattice를
-seed와 generator version으로 jitter하고, 2x2 site 평균점을 corner로 삼으며, 인접 site 쌍을 edge로
-연결한다. 따라서 site, corner, edge topology가 실제로 존재하고, 같은 전역 lattice 좌표는 어떤
-patch 요청에서 생성하더라도 같은 id와 위치를 갖는다.
+현재 구현은 launch 단계의 안정성을 위해 고정 density jittered site 후보를 유지하되, graph topology는
+`delaunator` 기반 Delaunay/Voronoi dual로 만든다. 전역 site lattice는 seed와 generator version으로
+jitter되어 deterministic site id와 위치를 제공한다. patch 내부 site point들을 Delaunay triangulation한
+뒤 각 triangle circumcenter를 `VoronoiCorner`로 만들고, shared Delaunay edge의 양쪽 triangle
+circumcenter를 연결해 `VoronoiEdge`를 만든다. 따라서 `VoronoiEdge`는 기존 계약처럼 두 site id와 두
+corner id를 함께 보존하지만, topology는 상하좌우 grid edge가 아니라 Delaunay adjacency를 따른다.
+
+convex hull의 open Delaunay edge는 launch 단계에서 공개 `VoronoiEdge`로 노출하지 않는다. 대신 patch
+site generation에 padding과 site-cell guard를 두어 owner/overlap 영역의 interior edge 안정성을 우선한다.
+같은 전역 site lattice 좌표와 같은 Delaunay triangle site set은 어떤 patch 요청에서 생성하더라도 같은
+id와 위치를 갖는다.
 
 현재 기본 `DEFAULT_SITE_SPACING_BLOCKS`는 192다. 이 프로젝트가 1 block = 0.5m 복셀 스케일을
-사용하면 site 중심 간격은 약 96m이고, 하나의 Voronoi-style polygon은 대략 지름 100m 안팎의
+사용하면 site 중심 간격은 약 96m이고, 하나의 Voronoi dual polygon은 대략 지름 100m 안팎의
 macro semantic cell로 해석한다. 이 값은 대륙 하나의 크기가 아니라 대륙/해안/산맥/하천 후보를
 표현하는 graph 해상도다. 실제 해안선, 능선, 강 폭, biome transition은 이후 noisy boundary,
 field, heightfield 단계에서 block-space로 더 세분화된다.
@@ -88,8 +96,8 @@ apply_base_graph_fields(patch, GraphBaseFieldConfig::default())
 
 `center_world_x/z`는 Euclidean division으로 중심 graph region을 고른다. `owner_regions`는 요청의
 중심 region을 나타내며, 실제 site/corner/edge 후보는 `padding_regions`만큼 확장한 주변 region과
-추가 site-cell guard에서 생성한다. 이 guard는 patch 바깥 boundary edge를 조립하기 위한 내부 계산
-범위다. base field smoothing은 이웃 site를 여러 pass 읽으므로, 현재 구현은 topology guard에
+추가 site-cell guard에서 생성한다. 이 guard는 Delaunay hull/open-edge 영향을 owner/overlap 영역 밖으로
+밀어내기 위한 내부 계산 범위다. base field smoothing은 이웃 site를 여러 pass 읽으므로, 현재 구현은 topology guard에
 기본 smoothing pass 수만큼 site-cell guard를 더해 overlap 영역의 smoothed field가 요청 중심에
 따라 달라지지 않게 한다.
 
@@ -125,8 +133,9 @@ site는 두 값을 함께 가진다.
 위해 `base_fields`를 복사한 convenience field다. 새 code는 raw/smoothed 구분이 필요하면
 `raw_base_fields`와 `base_fields`를 직접 읽는다.
 
-corner도 `raw_base_fields`와 `base_fields`를 가진다. corner 값은 독립 hash가 아니라 surrounding
-site 4개의 raw/smoothed base field를 corner와 site position 사이 거리로 가중 평균해 만든다.
+corner도 `raw_base_fields`와 `base_fields`를 가진다. corner 값은 독립 hash가 아니라 해당
+circumcenter를 공유하는 Delaunay triangle/edge 주변 site의 raw/smoothed base field를 corner와 site
+position 사이 거리로 가중 평균해 만든다.
 `VoronoiCorner.elevation`은 이 단계에서는 hydrology solve 결과가 아니라 `base_fields.elevation_seed`
 를 복사한 base elevation bias다. downhill, water accumulation, lake/sink/outlet 처리는 이후
 hydrology 단계가 별도 layer에서 소유한다.
@@ -257,7 +266,7 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 3. neighboring graph region은 충분한 padding으로 생성되어 ownership 경계를 넘는 site와 edge가 안정적이어야 한다.
 4. negative world coordinate는 Euclidean division을 사용해 모든 사분면에서 region ownership이 안정적이어야 한다.
 5. graph core는 feature-specific state를 직접 끌어안지 않고 id 기반 annotation layer를 허용해야 한다.
-6. 같은 `VoronoiGraphConfig`와 같은 전역 lattice 좌표에서 생성된 site/corner/edge는 요청 중심이 달라도 같은 결과를 가져야 한다.
+6. 같은 `VoronoiGraphConfig`와 같은 전역 lattice 좌표/triangle site set/shared Delaunay edge에서 생성된 site/corner/edge는 요청 중심이 달라도 같은 결과를 가져야 한다.
 7. seed와 generator version은 site jitter, base field seed, edge seed에 반영되어야 한다.
 8. base `continentality`와 `elevation_seed`는 macro_map ownership/elevation의 source of truth가 될 만큼 coherent해야 한다.
 9. 병렬 생성은 최종 정렬/dedup 이후 deterministic해야 한다.
@@ -266,9 +275,9 @@ polygon graph는 빠른 terrain analysis에 유용하다.
 
 ## 현재 구현 상태
 
-- data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Voronoi-style patch 생성이 구현되어 있다.
-- 구현된 patch 생성은 고정 density jittered grid와 barycentric dual topology를 사용한다.
+- data contract와 coordinate helper가 있으며, seed 기반 deterministic padded Delaunay/Voronoi dual patch 생성이 구현되어 있다.
+- 구현된 patch 생성은 고정 density jittered site 후보와 `delaunator` triangulation을 사용한다.
 - pipeline 2단계 base graph field가 구현되어 있으며, site raw seed와 smoothed base field,
   corner 주변 site 기반 base field/elevation seed를 제공한다. `continentality`와 `elevation_seed`는
   장거리 coherent field로 생성되어 macro_map ownership/elevation resolve의 source of truth로 읽힌다.
-- 아직 구현되지 않은 것: Lloyd relaxation, 실제 Delaunay/Voronoi construction, variable density, hydrology routing, noisy boundary realization.
+- 아직 구현되지 않은 것: Lloyd relaxation, variable density, hydrology routing, noisy boundary realization.

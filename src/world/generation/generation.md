@@ -108,8 +108,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 
 현재 구현된 graph-first processing:
 
-- stage 1 padded Voronoi-style graph patch 생성: deterministic jittered grid site, barycentric corner,
-  site/corner-linked edge topology를 rayon 병렬 생성 뒤 id 정렬/dedup한다.
+- stage 1 padded Voronoi graph patch 생성: deterministic jittered world-space site 후보를 만들고,
+  `delaunator` 기반 Delaunay triangulation을 수행한 뒤, 각 triangle circumcenter를 Voronoi corner로
+  삼아 shared Delaunay edge의 양쪽 circumcenter를 연결한다. site/corner/edge 결과는 병렬 계산 뒤
+  id 기준 정렬/dedup으로 deterministic order를 유지한다. convex hull의 open edge는 launch 단계에서
+  padding/guard 밖 경계로 취급하고, 두 triangle을 가진 interior edge를 안정성 우선으로 노출한다.
 - stage 2 base graph field: site raw seed field와 smoothed field를 생성하고, corner field/elevation
   seed를 주변 site 기반으로 안정적으로 계산한다. `continentality`와 `elevation_seed`는 graph preview와
   macro_map이 같은 값을 읽을 수 있도록 장거리 coherent source of truth로 생성한다.

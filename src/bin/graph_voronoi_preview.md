@@ -36,7 +36,8 @@
 
 - `--mode identity` emits one PNG image where:
   - site ownership is shown as a stable color field
-  - approximated Voronoi boundaries are darkened
+  - nearest-site raster boundaries are darkened as a diagnostic fill cue
+  - actual graph topology is overlaid from `VoronoiEdge.corners` corner-to-corner geometry
   - site centers are highlighted
   - graph region cache boundaries are lightly marked
 - single field modes emit one PNG with a numeric color gradient sampled from smoothed `VoronoiSite::base_fields` where applicable:
@@ -69,10 +70,15 @@
    - The preview derives the required padding from the requested image footprint so the visible area has surrounding sites.
 4. Generate the RGB pixel buffer with Rayon via parallel chunks.
 5. Convert that buffer through `image::RgbImage`.
-6. Draw the compact legend overlay directly into the RGB image without external font dependencies.
-7. Encode PNG with the `png` crate so the header is preserved as metadata.
+6. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
+7. Draw the compact legend overlay directly into the RGB image without external font dependencies.
+8. Encode PNG with the `png` crate so the header is preserved as metadata.
 
 The temperature, hydration, continentality, and elevation modes read the graph base-field stage's smoothed `VoronoiSite::base_fields`. Ruggedness remains a site-level graph roughness seed until a later terrain stage derives a richer roughness field.
+
+Identity mode still uses nearest-site raster color fill because it is useful for inspecting site ownership.
+The overlaid edges are the source-of-truth Delaunay/circumcenter Voronoi dual topology, so the darkened
+raster tie lines and the explicit edge overlay are allowed to differ.
 
 ## Example
 

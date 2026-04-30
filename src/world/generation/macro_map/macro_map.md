@@ -82,7 +82,10 @@ ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다.
 island/archipelago 성향은 graph base `continentality`의 양수 component 해석에서만 나온다.
 
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
-coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. 작은 land component는
+coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. launch 구현의
+`distance_to_coast_blocks`는 coast/inlandness 영향 반경 밖에서는 `coast_width_blocks * 4`로 cap해,
+patch guard 바깥의 더 먼 coast 탐색 차이가 overlap 영역의 public macro annotation을 흔들지 않게 한다.
+작은 land component는
 `Island` 또는 `CoastIsland` surface kind로 드러나며, 별도 island noise source에서 만들어지지 않는다.
 `MacroCorner`는 인접 site ownership과 corner base field를 읽어 같은 macro field를 샘플한다.
 `MacroEdge`는 두 site의 macro ownership과 elevation context를 읽어 coast/ridge/fault guide를 붙인다.

@@ -1,3 +1,4 @@
+use delaunator::{EMPTY, Point, Triangulation, triangulate};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -8,7 +9,7 @@ pub const DEFAULT_BASE_FIELD_SMOOTHING_PASSES: u32 = 2;
 pub const DEFAULT_BASE_FIELD_SELF_WEIGHT: f32 = 0.55;
 
 const SITE_JITTER_FRACTION: f64 = 0.35;
-const TOPOLOGY_SITE_GUARD_CELLS: i64 = 1;
+const TOPOLOGY_SITE_GUARD_CELLS: i64 = 3;
 const HASH_SITE: u64 = 0x8f53_7a29_381d_55f7;
 const HASH_SITE_FIELD: u64 = 0xa1b9_f4d2_0c73_17e5;
 const HASH_CONTINENTALITY_FIELD: u64 = 0x92d3_4f11_6b9a_c807;
@@ -245,32 +246,7 @@ pub fn generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> Vorono
         .collect::<Vec<_>>();
     sites.sort_by_key(|site| site.id.0);
 
-    let site_positions = sites
-        .iter()
-        .map(|site| (SiteGridCoord::from_site_id(site.id), site.position))
-        .collect::<HashMap<_, _>>();
-
-    let corner_bounds = CornerGridBounds {
-        min_x: site_grid_bounds.min_x,
-        max_x: site_grid_bounds.max_x - 1,
-        min_z: site_grid_bounds.min_z,
-        max_z: site_grid_bounds.max_z - 1,
-    };
-    let mut corners = corner_grid_coords(corner_bounds)
-        .into_par_iter()
-        .filter_map(|coord| generate_corner(coord, &site_positions))
-        .collect::<Vec<_>>();
-    corners.sort_by_key(|corner| corner.id.0);
-    corners.dedup_by_key(|corner| corner.id.0);
-
-    let corner_ids = corners
-        .iter()
-        .map(|corner| (CornerGridCoord::from_corner_id(corner.id), corner.id))
-        .collect::<HashMap<_, _>>();
-
-    let mut edges = generate_edges(site_grid_bounds, &corner_ids, request.config);
-    edges.sort_by_key(|edge| edge.id.0);
-    edges.dedup_by_key(|edge| edge.id.0);
+    let (corners, edges) = generate_delaunay_voronoi_dual(&sites, request.config);
 
     let mut patch = VoronoiGraphPatch {
         owner_regions,
@@ -308,7 +284,7 @@ pub fn apply_base_graph_fields(patch: &mut VoronoiGraphPatch, config: GraphBaseF
             site.continentality = fields.continentality;
         });
 
-    assign_corner_base_fields(&mut patch.corners, &patch.sites);
+    assign_corner_base_fields(&mut patch.corners, &patch.sites, &patch.edges);
 }
 
 pub fn graph_region_for_world_block(
@@ -340,44 +316,10 @@ impl SiteGridCoord {
     fn site_id(self) -> VoronoiSiteId {
         VoronoiSiteId(pack_grid_coord(self.x, self.z))
     }
-
-    fn from_site_id(id: VoronoiSiteId) -> Self {
-        let (x, z) = unpack_grid_coord(id.0);
-        Self { x, z }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct CornerGridCoord {
-    x: i32,
-    z: i32,
-}
-
-impl CornerGridCoord {
-    const fn new(x: i32, z: i32) -> Self {
-        Self { x, z }
-    }
-
-    fn corner_id(self) -> VoronoiCornerId {
-        VoronoiCornerId(pack_grid_coord(self.x, self.z))
-    }
-
-    fn from_corner_id(id: VoronoiCornerId) -> Self {
-        let (x, z) = unpack_grid_coord(id.0);
-        Self { x, z }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct SiteGridBounds {
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CornerGridBounds {
     min_x: i32,
     max_x: i32,
     min_z: i32,
@@ -438,16 +380,6 @@ fn site_grid_bounds_for_area(area: GraphRegionArea, config: VoronoiGraphConfig) 
 fn site_grid_coords(bounds: SiteGridBounds) -> Vec<SiteGridCoord> {
     (bounds.min_z..=bounds.max_z)
         .flat_map(|z| (bounds.min_x..=bounds.max_x).map(move |x| SiteGridCoord::new(x, z)))
-        .collect()
-}
-
-fn corner_grid_coords(bounds: CornerGridBounds) -> Vec<CornerGridCoord> {
-    if bounds.min_x > bounds.max_x || bounds.min_z > bounds.max_z {
-        return Vec::new();
-    }
-
-    (bounds.min_z..=bounds.max_z)
-        .flat_map(|z| (bounds.min_x..=bounds.max_x).map(move |x| CornerGridCoord::new(x, z)))
         .collect()
 }
 
@@ -604,29 +536,6 @@ fn lerp(a: f32, b: f32, amount: f32) -> f32 {
     a + (b - a) * amount
 }
 
-fn generate_corner(
-    coord: CornerGridCoord,
-    site_positions: &HashMap<SiteGridCoord, WorldPlanePoint>,
-) -> Option<VoronoiCorner> {
-    let a = site_positions.get(&SiteGridCoord::new(coord.x, coord.z))?;
-    let b = site_positions.get(&SiteGridCoord::new(coord.x + 1, coord.z))?;
-    let c = site_positions.get(&SiteGridCoord::new(coord.x, coord.z + 1))?;
-    let d = site_positions.get(&SiteGridCoord::new(coord.x + 1, coord.z + 1))?;
-    let position = WorldPlanePoint::new(
-        (a.x + b.x + c.x + d.x) * 0.25,
-        (a.z + b.z + c.z + d.z) * 0.25,
-    );
-
-    Some(VoronoiCorner {
-        id: coord.corner_id(),
-        position,
-        raw_base_fields: GraphBaseFields::default(),
-        base_fields: GraphBaseFields::default(),
-        elevation: 0.0,
-        water_accumulation: 0.0,
-    })
-}
-
 fn site_adjacency(sites: &[VoronoiSite], edges: &[VoronoiEdge]) -> Vec<Vec<usize>> {
     let site_indices = sites
         .iter()
@@ -681,21 +590,39 @@ fn smooth_base_field_pass(
         .collect()
 }
 
-fn assign_corner_base_fields(corners: &mut [VoronoiCorner], sites: &[VoronoiSite]) {
+fn assign_corner_base_fields(
+    corners: &mut [VoronoiCorner],
+    sites: &[VoronoiSite],
+    edges: &[VoronoiEdge],
+) {
     let site_indices = sites
         .iter()
         .enumerate()
-        .map(|(index, site)| (SiteGridCoord::from_site_id(site.id), index))
+        .map(|(index, site)| (site.id, index))
         .collect::<HashMap<_, _>>();
+    let corner_sites = corner_site_adjacency(corners, edges);
 
     corners.par_iter_mut().for_each(|corner| {
-        let coord = CornerGridCoord::from_corner_id(corner.id);
-        let raw_base_fields =
-            corner_base_fields_from_sites(corner.position, coord, &site_indices, sites, true)
-                .unwrap_or_default();
-        let base_fields =
-            corner_base_fields_from_sites(corner.position, coord, &site_indices, sites, false)
-                .unwrap_or(raw_base_fields);
+        let adjacent_sites = corner_sites
+            .get(&corner.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let raw_base_fields = corner_base_fields_from_sites(
+            corner.position,
+            adjacent_sites,
+            &site_indices,
+            sites,
+            true,
+        )
+        .unwrap_or_default();
+        let base_fields = corner_base_fields_from_sites(
+            corner.position,
+            adjacent_sites,
+            &site_indices,
+            sites,
+            false,
+        )
+        .unwrap_or(raw_base_fields);
 
         corner.raw_base_fields = raw_base_fields;
         corner.base_fields = base_fields;
@@ -703,24 +630,44 @@ fn assign_corner_base_fields(corners: &mut [VoronoiCorner], sites: &[VoronoiSite
     });
 }
 
+fn corner_site_adjacency(
+    corners: &[VoronoiCorner],
+    edges: &[VoronoiEdge],
+) -> HashMap<VoronoiCornerId, Vec<VoronoiSiteId>> {
+    let mut corner_site_ids = corners
+        .iter()
+        .map(|corner| (corner.id, Vec::<VoronoiSiteId>::new()))
+        .collect::<HashMap<_, _>>();
+
+    for edge in edges {
+        for corner in edge.corners {
+            let Some(adjacent) = corner_site_ids.get_mut(&corner) else {
+                continue;
+            };
+            adjacent.extend(edge.sites);
+        }
+    }
+
+    corner_site_ids.par_iter_mut().for_each(|(_, adjacent)| {
+        adjacent.sort_by_key(|site| site.0);
+        adjacent.dedup();
+    });
+
+    corner_site_ids
+}
+
 fn corner_base_fields_from_sites(
     position: WorldPlanePoint,
-    coord: CornerGridCoord,
-    site_indices: &HashMap<SiteGridCoord, usize>,
+    adjacent: &[VoronoiSiteId],
+    site_indices: &HashMap<VoronoiSiteId, usize>,
     sites: &[VoronoiSite],
     use_raw_fields: bool,
 ) -> Option<GraphBaseFields> {
-    let adjacent = [
-        SiteGridCoord::new(coord.x, coord.z),
-        SiteGridCoord::new(coord.x + 1, coord.z),
-        SiteGridCoord::new(coord.x, coord.z + 1),
-        SiteGridCoord::new(coord.x + 1, coord.z + 1),
-    ];
     let mut total_weight = 0.0;
     let mut sum = GraphBaseFields::default();
 
-    for site_coord in adjacent {
-        let site = sites.get(*site_indices.get(&site_coord)?)?;
+    for site_id in adjacent {
+        let site = sites.get(*site_indices.get(site_id)?)?;
         let dx = position.x - site.position.x;
         let dz = position.z - site.position.z;
         let distance_squared = dx.mul_add(dx, dz * dz).max(1.0);
@@ -775,53 +722,124 @@ fn blend_base_fields(
     )
 }
 
-fn generate_edges(
-    site_bounds: SiteGridBounds,
-    corner_ids: &HashMap<CornerGridCoord, VoronoiCornerId>,
+fn generate_delaunay_voronoi_dual(
+    sites: &[VoronoiSite],
+    config: VoronoiGraphConfig,
+) -> (Vec<VoronoiCorner>, Vec<VoronoiEdge>) {
+    let points = sites
+        .iter()
+        .map(|site| Point {
+            x: f64::from(site.position.x),
+            y: f64::from(site.position.z),
+        })
+        .collect::<Vec<_>>();
+    let triangulation = triangulate(&points);
+    let mut corners = (0..triangulation.triangles.len() / 3)
+        .into_par_iter()
+        .filter_map(|triangle_index| triangle_corner(triangle_index, &triangulation, sites, config))
+        .collect::<Vec<_>>();
+    corners.sort_by_key(|corner| corner.id.0);
+    corners.dedup_by_key(|corner| corner.id.0);
+
+    let corner_ids = (0..triangulation.triangles.len() / 3)
+        .filter_map(|triangle_index| {
+            let triangle_sites = triangle_site_ids(triangle_index, &triangulation, sites)?;
+            Some((triangle_index, triangle_corner_id(triangle_sites, config)))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut edges = delaunay_voronoi_edges(&triangulation, sites, &corner_ids, config);
+    edges.sort_by_key(|edge| edge.id.0);
+    edges.dedup_by_key(|edge| edge.id.0);
+
+    (corners, edges)
+}
+
+fn triangle_corner(
+    triangle_index: usize,
+    triangulation: &Triangulation,
+    sites: &[VoronoiSite],
+    config: VoronoiGraphConfig,
+) -> Option<VoronoiCorner> {
+    let triangle_sites = triangle_site_ids(triangle_index, triangulation, sites)?;
+    let a = sites[triangulation.triangles[triangle_index * 3]].position;
+    let b = sites[triangulation.triangles[triangle_index * 3 + 1]].position;
+    let c = sites[triangulation.triangles[triangle_index * 3 + 2]].position;
+    let position = circumcenter(a, b, c)?;
+
+    Some(VoronoiCorner {
+        id: triangle_corner_id(triangle_sites, config),
+        position,
+        raw_base_fields: GraphBaseFields::default(),
+        base_fields: GraphBaseFields::default(),
+        elevation: 0.0,
+        water_accumulation: 0.0,
+    })
+}
+
+fn triangle_site_ids(
+    triangle_index: usize,
+    triangulation: &Triangulation,
+    sites: &[VoronoiSite],
+) -> Option<[VoronoiSiteId; 3]> {
+    let offset = triangle_index.checked_mul(3)?;
+    let mut ids = [
+        sites.get(*triangulation.triangles.get(offset)?)?.id,
+        sites.get(*triangulation.triangles.get(offset + 1)?)?.id,
+        sites.get(*triangulation.triangles.get(offset + 2)?)?.id,
+    ];
+    ids.sort_by_key(|site| site.0);
+    Some(ids)
+}
+
+fn triangle_corner_id(sites: [VoronoiSiteId; 3], config: VoronoiGraphConfig) -> VoronoiCornerId {
+    VoronoiCornerId(graph_hash_u64s(
+        config,
+        HASH_SITE ^ 0x6a09_e667_f3bc_c909,
+        &[sites[0].0, sites[1].0, sites[2].0],
+    ))
+}
+
+fn delaunay_voronoi_edges(
+    triangulation: &Triangulation,
+    sites: &[VoronoiSite],
+    corner_ids: &HashMap<usize, VoronoiCornerId>,
     config: VoronoiGraphConfig,
 ) -> Vec<VoronoiEdge> {
-    let horizontal = (site_bounds.min_z..=site_bounds.max_z)
-        .into_par_iter()
-        .flat_map_iter(|z| {
-            (site_bounds.min_x..site_bounds.max_x).filter_map(move |x| {
-                let lower = *corner_ids.get(&CornerGridCoord::new(x, z - 1))?;
-                let upper = *corner_ids.get(&CornerGridCoord::new(x, z))?;
-                Some(make_edge(
-                    SiteGridCoord::new(x, z),
-                    SiteGridCoord::new(x + 1, z),
-                    [lower, upper],
-                    config,
-                ))
-            })
-        });
-
-    let vertical = (site_bounds.min_z..site_bounds.max_z)
-        .into_par_iter()
-        .flat_map_iter(|z| {
-            (site_bounds.min_x..=site_bounds.max_x).filter_map(move |x| {
-                let left = *corner_ids.get(&CornerGridCoord::new(x - 1, z))?;
-                let right = *corner_ids.get(&CornerGridCoord::new(x, z))?;
-                Some(make_edge(
-                    SiteGridCoord::new(x, z),
-                    SiteGridCoord::new(x, z + 1),
-                    [left, right],
-                    config,
-                ))
-            })
-        });
-
-    horizontal.chain(vertical).collect()
+    triangulation
+        .halfedges
+        .par_iter()
+        .enumerate()
+        .filter_map(|(edge_index, &opposite)| {
+            if opposite == EMPTY || edge_index > opposite {
+                return None;
+            }
+            let triangle_index = edge_index / 3;
+            let opposite_triangle_index = opposite / 3;
+            let a = sites[triangulation.triangles[edge_index]].id;
+            let b = sites[triangulation.triangles[next_halfedge(edge_index)]].id;
+            let corners = [
+                *corner_ids.get(&triangle_index)?,
+                *corner_ids.get(&opposite_triangle_index)?,
+            ];
+            Some(make_edge(a, b, corners, config))
+        })
+        .collect()
 }
 
 fn make_edge(
-    a: SiteGridCoord,
-    b: SiteGridCoord,
-    corners: [VoronoiCornerId; 2],
+    a: VoronoiSiteId,
+    b: VoronoiSiteId,
+    mut corners: [VoronoiCornerId; 2],
     config: VoronoiGraphConfig,
 ) -> VoronoiEdge {
-    let mut sites = [a.site_id(), b.site_id()];
+    let mut sites = [a, b];
     sites.sort_by_key(|site| site.0);
-    let boundary_curve_seed = graph_hash(config, HASH_EDGE, a.x, a.z, edge_orientation(a, b));
+    corners.sort_by_key(|corner| corner.0);
+    let boundary_curve_seed = graph_hash_u64s(
+        config,
+        HASH_EDGE,
+        &[sites[0].0, sites[1].0, corners[0].0, corners[1].0],
+    );
 
     VoronoiEdge {
         id: VoronoiEdgeId(boundary_curve_seed),
@@ -832,8 +850,33 @@ fn make_edge(
     }
 }
 
-fn edge_orientation(a: SiteGridCoord, b: SiteGridCoord) -> i32 {
-    if a.z == b.z { 0 } else { 1 }
+fn next_halfedge(edge: usize) -> usize {
+    if edge % 3 == 2 { edge - 2 } else { edge + 1 }
+}
+
+fn circumcenter(
+    a: WorldPlanePoint,
+    b: WorldPlanePoint,
+    c: WorldPlanePoint,
+) -> Option<WorldPlanePoint> {
+    let ax = f64::from(a.x);
+    let ay = f64::from(a.z);
+    let bx = f64::from(b.x);
+    let by = f64::from(b.z);
+    let cx = f64::from(c.x);
+    let cy = f64::from(c.z);
+    let d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+    if d.abs() <= f64::EPSILON {
+        return None;
+    }
+
+    let ax2ay2 = ax * ax + ay * ay;
+    let bx2by2 = bx * bx + by * by;
+    let cx2cy2 = cx * cx + cy * cy;
+    let x = (ax2ay2 * (by - cy) + bx2by2 * (cy - ay) + cx2cy2 * (ay - by)) / d;
+    let z = (ax2ay2 * (cx - bx) + bx2by2 * (ax - cx) + cx2cy2 * (bx - ax)) / d;
+
+    (x.is_finite() && z.is_finite()).then(|| WorldPlanePoint::new(x as f32, z as f32))
 }
 
 fn graph_region_for_world_plane(x: f64, z: f64, region_size_blocks: i32) -> GraphRegionCoord {
@@ -849,6 +892,16 @@ fn graph_hash(config: VoronoiGraphConfig, namespace: u64, x: i32, z: i32, extra:
     state = splitmix64(state ^ u64::from(zigzag_i32(x)));
     state = splitmix64(state ^ u64::from(zigzag_i32(z)));
     splitmix64(state ^ u64::from(zigzag_i32(extra)))
+}
+
+fn graph_hash_u64s(config: VoronoiGraphConfig, namespace: u64, values: &[u64]) -> u64 {
+    let mut state = splitmix64(config.seed ^ namespace);
+    state = splitmix64(state ^ u64::from(config.generator_version));
+    state = splitmix64(state ^ u64::from(config.site_spacing_blocks as u32));
+    for &value in values {
+        state = splitmix64(state ^ value);
+    }
+    state
 }
 
 fn splitmix64(mut value: u64) -> u64 {
@@ -887,19 +940,8 @@ fn pack_grid_coord(x: i32, z: i32) -> u64 {
     (u64::from(zigzag_i32(x)) << 32) | u64::from(zigzag_i32(z))
 }
 
-fn unpack_grid_coord(value: u64) -> (i32, i32) {
-    (
-        unzigzag_i32((value >> 32) as u32),
-        unzigzag_i32(value as u32),
-    )
-}
-
 fn zigzag_i32(value: i32) -> u32 {
     ((value << 1) ^ (value >> 31)) as u32
-}
-
-fn unzigzag_i32(value: u32) -> i32 {
-    ((value >> 1) as i32) ^ -((value & 1) as i32)
 }
 
 fn i32_from_i64(value: i64) -> i32 {
@@ -986,17 +1028,40 @@ mod tests {
         let corner = patch
             .corners
             .iter()
-            .find(|corner| {
-                let coord = CornerGridCoord::from_corner_id(corner.id);
-                coord.x == 0 && coord.z == 0
-            })
-            .expect("test patch should contain the origin corner");
+            .find(|corner| corner_neighbor_sites(&patch, corner.id).len() >= 3)
+            .expect("test patch should contain an interior Delaunay triangle corner");
         let expected_raw = expected_corner_fields(&patch, *corner, true);
         let expected_smoothed = expected_corner_fields(&patch, *corner, false);
 
         assert_base_fields_close(corner.raw_base_fields, expected_raw);
         assert_base_fields_close(corner.base_fields, expected_smoothed);
         assert_close(corner.elevation, corner.base_fields.elevation_seed);
+    }
+
+    #[test]
+    fn graph_edges_use_delaunay_voronoi_dual_not_square_grid_only_valence() {
+        let patch = generate_voronoi_graph_patch(test_request(512, 0, 0));
+        let adjacency = site_adjacency(&patch.sites, &patch.edges);
+        let diagonal_or_oblique_edges = patch
+            .edges
+            .iter()
+            .filter(|edge| {
+                let [a, b] = edge_sites(&patch, edge);
+                let dx = (a.position.x - b.position.x).abs();
+                let dz = (a.position.z - b.position.z).abs();
+                dx > DEFAULT_SITE_SPACING_BLOCKS as f32 * 0.35
+                    && dz > DEFAULT_SITE_SPACING_BLOCKS as f32 * 0.35
+            })
+            .count();
+
+        assert!(
+            adjacency.iter().any(|neighbors| neighbors.len() >= 5),
+            "Delaunay center graph should include non-grid valence"
+        );
+        assert!(
+            diagonal_or_oblique_edges > patch.edges.len() / 8,
+            "Delaunay edges should not collapse to only horizontal/vertical lattice adjacencies"
+        );
     }
 
     #[test]
@@ -1085,6 +1150,21 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_center_requests_keep_overlapping_internal_edges_stable() {
+        let left = generate_voronoi_graph_patch(test_request(89, 0, 0));
+        let right =
+            generate_voronoi_graph_patch(test_request(89, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, 0));
+        let overlap_region = GraphRegionCoord::new(1, 0);
+        let left_sites = sites_in_region_by_id(&left, overlap_region);
+        let right_sites = sites_in_region_by_id(&right, overlap_region);
+        let left_edges = internal_edges_by_id(&left, &left_sites);
+        let right_edges = internal_edges_by_id(&right, &right_sites);
+
+        assert!(!left_edges.is_empty());
+        assert_eq!(left_edges, right_edges);
+    }
+
+    #[test]
     fn negative_coordinate_request_generates_negative_region_patch() {
         let patch = generate_voronoi_graph_patch(test_request(11, -1, -1));
 
@@ -1170,6 +1250,18 @@ mod tests {
                     },
                 )
             })
+            .collect()
+    }
+
+    fn internal_edges_by_id(
+        patch: &VoronoiGraphPatch,
+        sites: &HashMap<VoronoiSiteId, WorldPlanePoint>,
+    ) -> HashMap<VoronoiEdgeId, VoronoiEdge> {
+        patch
+            .edges
+            .iter()
+            .filter(|edge| sites.contains_key(&edge.sites[0]) && sites.contains_key(&edge.sites[1]))
+            .map(|edge| (edge.id, *edge))
             .collect()
     }
 
@@ -1292,17 +1384,42 @@ mod tests {
             .sites
             .iter()
             .enumerate()
-            .map(|(index, site)| (SiteGridCoord::from_site_id(site.id), index))
+            .map(|(index, site)| (site.id, index))
             .collect::<HashMap<_, _>>();
+        let adjacent = corner_neighbor_sites(patch, corner.id);
 
         corner_base_fields_from_sites(
             corner.position,
-            CornerGridCoord::from_corner_id(corner.id),
+            &adjacent,
             &site_indices,
             &patch.sites,
             use_raw_fields,
         )
-        .expect("corner should have all four surrounding sites")
+        .expect("corner should have surrounding Delaunay sites")
+    }
+
+    fn corner_neighbor_sites(
+        patch: &VoronoiGraphPatch,
+        corner_id: VoronoiCornerId,
+    ) -> Vec<VoronoiSiteId> {
+        let mut sites = patch
+            .edges
+            .iter()
+            .filter(|edge| edge.corners.contains(&corner_id))
+            .flat_map(|edge| edge.sites)
+            .collect::<Vec<_>>();
+        sites.sort_by_key(|site| site.0);
+        sites.dedup();
+        sites
+    }
+
+    fn edge_sites<'a>(patch: &'a VoronoiGraphPatch, edge: &VoronoiEdge) -> [&'a VoronoiSite; 2] {
+        let sites = patch
+            .sites
+            .iter()
+            .map(|site| (site.id, site))
+            .collect::<HashMap<_, _>>();
+        [sites[&edge.sites[0]], sites[&edge.sites[1]]]
     }
 
     fn assert_base_fields_close(actual: GraphBaseFields, expected: GraphBaseFields) {

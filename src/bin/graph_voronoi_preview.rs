@@ -251,6 +251,52 @@ impl PreviewWindow {
         self.min_z() + (pixel_z as f32 + 0.5) * self.world_span_z / self.height as f32
     }
 
+    fn world_segment_to_pixels(
+        self,
+        a: WorldPlanePoint,
+        b: WorldPlanePoint,
+    ) -> Option<((i32, i32), (i32, i32))> {
+        let (a, b) = self.clip_world_segment(a, b)?;
+        Some((
+            self.world_to_pixel_clamped(a),
+            self.world_to_pixel_clamped(b),
+        ))
+    }
+
+    fn clip_world_segment(
+        self,
+        a: WorldPlanePoint,
+        b: WorldPlanePoint,
+    ) -> Option<(WorldPlanePoint, WorldPlanePoint)> {
+        let dx = b.x - a.x;
+        let dz = b.z - a.z;
+        let mut enter = 0.0;
+        let mut exit = 1.0;
+
+        if !clip_segment_axis(-dx, a.x - self.min_x(), &mut enter, &mut exit)
+            || !clip_segment_axis(dx, self.max_x() - a.x, &mut enter, &mut exit)
+            || !clip_segment_axis(-dz, a.z - self.min_z(), &mut enter, &mut exit)
+            || !clip_segment_axis(dz, self.max_z() - a.z, &mut enter, &mut exit)
+        {
+            return None;
+        }
+
+        Some((
+            WorldPlanePoint::new(a.x + dx * enter, a.z + dz * enter),
+            WorldPlanePoint::new(a.x + dx * exit, a.z + dz * exit),
+        ))
+    }
+
+    fn world_to_pixel_clamped(self, point: WorldPlanePoint) -> (i32, i32) {
+        let x = ((point.x - self.min_x()) / self.world_span_x * self.width as f32 - 0.5)
+            .round()
+            .clamp(0.0, self.width.saturating_sub(1) as f32) as i32;
+        let y = ((point.z - self.min_z()) / self.world_span_z * self.height as f32 - 0.5)
+            .round()
+            .clamp(0.0, self.height.saturating_sub(1) as f32) as i32;
+        (x, y)
+    }
+
     fn graph_area(self, region_size_blocks: i32) -> Result<GraphRegionArea, Box<dyn Error>> {
         let min = graph_region_for_world_block(
             self.min_x().floor() as i32,
@@ -264,6 +310,26 @@ impl PreviewWindow {
         );
         GraphRegionArea::new(min, max).ok_or_else(|| cli_error("invalid graph preview area"))
     }
+}
+
+fn clip_segment_axis(p: f32, q: f32, enter: &mut f32, exit: &mut f32) -> bool {
+    if p.abs() <= f32::EPSILON {
+        return q >= 0.0;
+    }
+
+    let t = q / p;
+    if p < 0.0 {
+        if t > *exit {
+            return false;
+        }
+        *enter = (*enter).max(t);
+    } else {
+        if t < *enter {
+            return false;
+        }
+        *exit = (*exit).min(t);
+    }
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -368,6 +434,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         let mut image = render_preview(window, &graph, config.region_size_blocks, mode)?;
+        draw_graph_topology_overlay(&mut image, window, &graph, mode);
         draw_legend_overlay(&mut image, mode);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((mode, output, image.width(), image.height()));
@@ -833,6 +900,90 @@ fn color_from_hash(hash: u64) -> [u8; 3] {
     [r, g, b]
 }
 
+fn draw_graph_topology_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    graph: &PreviewGraph,
+    mode: PreviewMode,
+) {
+    let corners = graph
+        .patch
+        .corners
+        .iter()
+        .map(|corner| (corner.id, corner.position))
+        .collect::<HashMap<_, _>>();
+    let edge_amount = match mode {
+        PreviewMode::Identity => 0.76,
+        _ => 0.46,
+    };
+
+    for edge in &graph.patch.edges {
+        let Some(a) = corners.get(&edge.corners[0]).copied() else {
+            continue;
+        };
+        let Some(b) = corners.get(&edge.corners[1]).copied() else {
+            continue;
+        };
+        let Some((start, end)) = window.world_segment_to_pixels(a, b) else {
+            continue;
+        };
+        draw_line(image, start, end, [12, 17, 24], edge_amount, 0);
+        if mode == PreviewMode::Identity {
+            draw_line(image, start, end, [226, 235, 220], 0.22, 0);
+        }
+    }
+
+    let corner_radius = if mode == PreviewMode::Identity { 1 } else { 0 };
+    for corner in &graph.patch.corners {
+        let point = window.world_to_pixel_clamped(corner.position);
+        draw_disc(image, point, corner_radius, [246, 242, 190], 0.72);
+    }
+}
+
+fn draw_line(
+    image: &mut RgbImage,
+    start: (i32, i32),
+    end: (i32, i32),
+    color: [u8; 3],
+    amount: f32,
+    width: i32,
+) {
+    let (mut x0, mut y0) = start;
+    let (x1, y1) = end;
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    loop {
+        draw_disc(image, (x0, y0), width, color, amount);
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn draw_disc(image: &mut RgbImage, center: (i32, i32), radius: i32, color: [u8; 3], amount: f32) {
+    let (cx, cy) = center;
+    for oy in -radius..=radius {
+        for ox in -radius..=radius {
+            if ox * ox + oy * oy <= radius * radius {
+                blend_pixel_i32(image, cx + ox, cy + oy, color, amount);
+            }
+        }
+    }
+}
+
 fn region_grid_strength(
     world_x: f32,
     world_z: f32,
@@ -925,6 +1076,13 @@ fn blend_rect(
             blend_pixel(image, px, py, color, amount);
         }
     }
+}
+
+fn blend_pixel_i32(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3], amount: f32) {
+    if x < 0 || y < 0 {
+        return;
+    }
+    blend_pixel(image, x as u32, y as u32, color, amount);
 }
 
 fn draw_gradient_bar(
@@ -1264,6 +1422,38 @@ mod tests {
         draw_legend_overlay(&mut image, PreviewMode::Temperature);
 
         assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(96 * 52));
+    }
+
+    #[test]
+    fn graph_topology_overlay_changes_image_pixels() {
+        let meta = WorldMeta::new(42);
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: 0,
+            center_z: 0,
+            width: 160,
+            height: 90,
+            world_span_blocks: 1024,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            stage: DEFAULT_STAGE.to_string(),
+            mode: PreviewModeSelection::Single(PreviewMode::Identity),
+            output: None,
+        };
+        let window = config.window();
+        let area = window.graph_area(config.region_size_blocks).unwrap();
+        let graph = build_graph_patch_for_preview(&meta, &config, area).unwrap();
+        let mut image =
+            RgbImage::from_pixel(window.width, window.height, image::Rgb([80, 120, 90]));
+        let before = image.as_raw().clone();
+
+        draw_graph_topology_overlay(&mut image, window, &graph, PreviewMode::Identity);
+
+        assert_ne!(
+            image.as_raw(),
+            &before,
+            "overlay should expose explicit corner-to-corner graph topology"
+        );
     }
 
     #[test]
