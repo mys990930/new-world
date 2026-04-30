@@ -146,7 +146,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 
 - `generation/generation.md`: graph-first generation 총괄, 단계 경계, preview 계약
 - `generation/graph/graph.md`: Voronoi graph ownership과 graph-region coordinate 계약
-- `generation/macro_map/macro_map.md`: 대륙/바다, macro elevation, 산맥/ridge/fault/coast guide
+- `generation/macro_map/macro_map.md`: 대륙/바다, macro elevation, ridge/fault/coast guide와 mountainness/rugged context
 - `generation/hydrology/hydrology.md`: graph-first watershed, river, lake, local minima 계약
 - `generation/boundary/boundary.md`: noisy boundary와 feature별 boundary realization
 - `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약

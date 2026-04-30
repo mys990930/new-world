@@ -36,7 +36,7 @@
 1. padded Voronoi graph
 2. macro-friendly base graph fields
 3. graph-field-based macro ownership/elevation resolve
-4. ridge/fault/mountain guide selection
+4. ridge/fault guide selection
 5. coast edge guide selection
 6. hydrology solve
 7. noisy boundary realization
@@ -56,7 +56,7 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - base `continentality`와 `elevation_seed`는 macro_map ownership/elevation resolve의 source of truth다.
 - macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 해석한다.
 - continent/ocean/island ownership과 macro elevation은 Perlin보다 먼저다.
-- mountain/ridge/fault edge guide와 coast edge guide는 hydrology보다 먼저다.
+- ridge/fault edge guide와 coast edge guide는 hydrology보다 먼저다. mountainness/rugged context는 이 guide를 고르는 입력이다.
 - hydrology는 final heightfield와 voxel fill보다 먼저다.
 - hydrology는 potential river guide가 아니라 selected river chain, flow accumulation, lake/sink/outlet resolution을 만든다.
 - noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.

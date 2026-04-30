@@ -38,7 +38,7 @@ macro elevation은 graph 기반으로 먼저 생성되고, Perlin은 그 위에 
 height =
     voronoi_macro_elevation
   + continent_ocean_gradient
-  + edge_mountain_ridge_field
+  + edge_ridge_field
   + edge_fault_plateau_field
   + meso_feature_height_delta
   - edge_hydrology_valley_field
@@ -52,7 +52,7 @@ height =
 ## 생성 순서
 
 1. graph base `continentality/elevation_seed`를 macro_map에서 resolve해 continent/ocean/island ownership과 signed macro elevation을 만든다.
-2. Voronoi edge 기반 mountain/ridge/fault/plateau guide와 coast guide를 먼저 정한다.
+2. Voronoi edge 기반 ridge/fault/plateau guide와 coast guide를 먼저 정한다. ridge/fault guide 선택은 macro_map의 mountainness/rugged context를 읽는다.
 3. 이 edge guide와 macro elevation을 바탕으로 hydrology solve를 실행해 selected river, lake/sink/outlet, watershed, valley constraint를 확정한다.
 4. selected river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
 5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.

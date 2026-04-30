@@ -7,7 +7,7 @@ use super::graph::{
 };
 
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
-pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.32;
+pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.28;
 pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
 pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.0;
 
@@ -118,7 +118,6 @@ pub struct MacroCorner {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroEdgeGuide {
     pub is_coast: bool,
-    pub is_mountain_candidate: bool,
     pub is_ridge_candidate: bool,
     pub is_river_candidate: bool,
     pub is_fault_candidate: bool,
@@ -170,12 +169,6 @@ impl GraphMacroMap {
         self.edges
             .iter()
             .filter(|edge| edge.guide.is_ridge_candidate)
-    }
-
-    pub fn mountain_candidate_edges(&self) -> impl Iterator<Item = &MacroEdge> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.guide.is_mountain_candidate)
     }
 
     pub fn fault_candidate_edges(&self) -> impl Iterator<Item = &MacroEdge> {
@@ -493,10 +486,10 @@ fn macro_field_sample_from_context(
     let coastness = (1.0 - distance_to_coast_blocks / config.coast_width_blocks).clamp(0.0, 1.0);
     let inlandness = (distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
     let elevation_seed = fields.elevation_seed;
-    let highland_signal = elevation_seed * 0.56
-        + continentality.max(0.0) * 0.26
-        + inlandness * 0.12
-        + context.ruggedness * 0.06;
+    let highland_signal = elevation_seed * 0.50
+        + continentality.max(0.0) * 0.24
+        + inlandness * 0.14
+        + context.ruggedness * 0.12;
     let mountainness = if context.is_land_owned {
         smoothstep(0.18, 0.78, highland_signal)
     } else {
@@ -504,9 +497,9 @@ fn macro_field_sample_from_context(
     };
     let ridgeness = if context.is_land_owned {
         smoothstep(
-            0.42,
-            0.88,
-            highland_signal * 0.62 + context.ruggedness * 0.22 + mountainness * 0.16,
+            0.34,
+            0.82,
+            highland_signal * 0.56 + context.ruggedness * 0.28 + mountainness * 0.16,
         )
     } else {
         0.0
@@ -708,45 +701,47 @@ fn macro_edge_guide(
     let average_coastness = (a.coastness + b.coastness) * 0.5;
     let minimum_inland_distance = a.distance_to_coast_blocks.min(b.distance_to_coast_blocks);
     let inlandness = (minimum_inland_distance / (config.coast_width_blocks * 2.5)).clamp(0.0, 1.0);
+    let average_mountainness = (a.mountainness + b.mountainness) * 0.5;
+    let average_ruggedness = (a.ridgeness + b.ridgeness) * 0.5;
     let mountainness = if same_land_component {
-        (((a.mountainness + b.mountainness) * 0.5) * 0.58
-            + ((a.ridgeness + b.ridgeness) * 0.5) * 0.22
-            + smoothstep(0.20, 0.70, average_elevation) * 0.12
-            + inlandness * 0.08)
+        (average_mountainness * 0.48
+            + average_ruggedness * 0.24
+            + smoothstep(0.12, 0.58, average_elevation) * 0.14
+            + inlandness * 0.14)
             .clamp(0.0, 1.0)
     } else {
         0.0
     };
     let drainage_divide_potential = if same_land_component {
-        (mountainness * 0.40
-            + ((a.ridgeness + b.ridgeness) * 0.5) * 0.24
+        (mountainness * 0.34
+            + average_ruggedness * 0.24
             + (1.0 - ((a.basinness + b.basinness) * 0.5)) * 0.18
-            + inlandness * 0.12
-            + smoothstep(0.04, 0.24, elevation_slope) * 0.06)
+            + inlandness * 0.14
+            + smoothstep(0.015, 0.16, elevation_slope) * 0.10)
             .clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let gradient_score = smoothstep(0.025, 0.18, elevation_slope);
+    let gradient_score = smoothstep(0.012, 0.14, elevation_slope);
     let ridgeness = if same_land_component {
-        (((a.ridgeness + b.ridgeness) * 0.5) * 0.34
-            + mountainness * 0.24
-            + drainage_divide_potential * 0.22
-            + gradient_score * 0.14
-            + inlandness * 0.06)
+        (average_ruggedness * 0.30
+            + mountainness * 0.20
+            + drainage_divide_potential * 0.24
+            + gradient_score * 0.16
+            + inlandness * 0.10)
             .clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let is_mountain_candidate = same_land_component
-        && mountainness >= 0.20
+    let has_ridge_context = same_land_component
+        && mountainness >= 0.16
         && average_elevation > 0.05
-        && average_coastness < 0.72
-        && inlandness >= 0.18;
-    let is_ridge_candidate = is_mountain_candidate
+        && average_coastness < 0.80
+        && inlandness >= 0.12;
+    let is_ridge_candidate = has_ridge_context
         && ridgeness >= config.ridge_candidate_threshold
-        && gradient_score >= 0.04
-        && drainage_divide_potential >= 0.26;
+        && gradient_score >= 0.01
+        && drainage_divide_potential >= 0.22;
     let is_fault_candidate = same_land_component
         && elevation_slope > 0.06
         && mountainness >= 0.20
@@ -755,7 +750,6 @@ fn macro_edge_guide(
 
     MacroEdgeGuide {
         is_coast,
-        is_mountain_candidate,
         is_ridge_candidate,
         is_river_candidate: false,
         is_fault_candidate,
@@ -771,7 +765,6 @@ fn macro_edge_guide(
 fn empty_edge_guide() -> MacroEdgeGuide {
     MacroEdgeGuide {
         is_coast: false,
-        is_mountain_candidate: false,
         is_ridge_candidate: false,
         is_river_candidate: false,
         is_fault_candidate: false,

@@ -77,8 +77,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - continent/ocean/island의 source of truth는 graph의 smoothed `continentality`와 연결 component 해석이다.
    - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
    - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를 합성해 만든다.
-4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault/mountain edge guide를 선정한다.
-   - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness, drainage divide 가능성을 함께 만족해야 한다.
+4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault edge guide를 선정한다.
+   - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness/mountainness context, drainage divide 가능성을 함께 만족해야 한다.
 5. land/ocean ownership 경계에서 coast edge guide를 선정한다.
    - coast는 signed elevation 부호만으로 찾지 않고, connected ocean basin과 land ownership의 경계를 우선한다.
 6. macro elevation, ridge/coast guide, graph topology를 읽어 hydrology를 푼다.
@@ -115,12 +115,12 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   macro_map이 같은 값을 읽을 수 있도록 장거리 coherent source of truth로 생성한다.
 - stage 3/4/5 macro map: 목표 계약상 `macro_map`은 graph patch의 smoothed `continentality`와
   `elevation_seed`를 resolve해 continent/ocean/island ownership, signed macro elevation, coastness,
-  mountainness/ridgeness, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
+  mountainness/rugged context, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
   독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 graph base
   `continentality`를 land/ocean ownership의 source of truth로 읽고, graph adjacency component와
   coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. stage 4 guide는
-  같은 land component 내부성, signed elevation gradient, inlandness, mountain/rugged context,
-  drainage divide potential을 함께 읽어 mountain/ridge/fault edge candidate를 선택한다.
+  같은 land component 내부성, signed elevation gradient, inlandness, mountainness/rugged context,
+  drainage divide potential을 함께 읽어 ridge/fault edge candidate를 선택한다.
 - stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 이 단계의
   river는 후보 surface가 아니라 downhill/local-minimum/outlet 정책을 통과한 결과여야 한다.
 

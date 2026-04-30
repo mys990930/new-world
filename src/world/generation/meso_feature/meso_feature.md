@@ -40,7 +40,7 @@ meso feature planning은 아래 정보가 준비된 뒤 실행한다.
 - padded Voronoi graph
 - base graph field
 - continent/ocean macro elevation
-- ridge/fault/mountain/coast edge guide
+- ridge/fault/coast edge guide, plus mountainness/rugged context fields
 - hydrology solve와 selected river chain
 - noisy boundary realization
 - Voronoi-derived macro field/noise map

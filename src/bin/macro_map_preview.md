@@ -3,7 +3,7 @@
 ## Role
 
 - Render a deterministic top-down PNG composite for the graph-field-resolved macro map stage.
-- Show separated ocean, island/coast, inland elevation, peak whitening, and ridge/coast candidate edge overlays in one image.
+- Show separated ocean, island/coast, inland elevation, peak whitening, and ridge/fault/coast candidate edge overlays in one image.
 - Keep default filenames short while preserving detailed settings in PNG metadata.
 
 ## Inputs
@@ -39,10 +39,11 @@
   - inland land and island components use green-to-upland colors.
   - high elevation approaches white, and peak colors are white.
   - ridge candidate edges are white overlays.
+  - fault candidate edges are red overlays.
   - coast candidate edges are sandy overlays.
   - selected river chains are not drawn in this stage; hydrology owns that preview surface.
 - A compact in-image legend with an elevation color bar and overlay keys.
-- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site count, candidate edge count, sea level, and source notes.
+- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site count, candidate edge count, coast/ridge/fault edge counts, sea level, and source notes.
 
 ## Output Path Rules
 
@@ -61,7 +62,7 @@
 5. Generate the RGB pixel buffer with Rayon.
 6. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
-   projecting it onto pixel centers. Stage 3 draws graph-derived coast and ridge guide overlays;
+   projecting it onto pixel centers. Stage 3 draws graph-derived coast, ridge, and fault guide overlays;
    selected river chains are reserved for the later hydrology preview.
 7. Draw the compact legend and encode PNG metadata.
 

@@ -3,7 +3,7 @@
 ## 역할
 
 `macro_map`은 graph base field를 해석해 대륙/바다/섬 ownership, resolved macro elevation,
-산맥/능선/단층/해안 guide를 만드는 annotation layer다.
+능선/단층/해안 guide를 만드는 annotation layer다.
 
 이 모듈의 출력은 최종 heightfield가 아니다. `macro_map`은 독자적인 continent/island noise source를
 만들지 않고, graph stage가 제공한 smoothed `continentality`와 `elevation_seed`를 source of truth로
@@ -17,7 +17,7 @@ context를 resolve한다.
 - graph base `continentality`를 읽어 continent, ocean basin, island/archipelago ownership resolve
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
 - graph base `elevation_seed`, continentality, coast distance, basinness를 합성한 signed macro elevation resolve
-- edge 기반 mountain/ridge/fault guide 선택
+- edge 기반 ridge/fault guide 선택. mountainness/rugged context는 public edge guide가 아니라 점수 입력이다.
 - land/ocean ownership 경계 기반 coast guide 선택
 - ridge/fault/coast guide를 broad field로 확산
 - hydrology가 읽을 drainage divide, basin, outlet 후보 제공
@@ -62,7 +62,6 @@ MacroSurfaceKind::{
 }
 MacroEdgeGuide {
     is_coast,
-    is_mountain_candidate,
     is_ridge_candidate,
     is_river_candidate,
     is_fault_candidate,
@@ -165,7 +164,7 @@ macro elevation resolve 순서:
 2. connected component를 resolve해 continent, ocean basin, island/archipelago ownership을 정한다.
 3. graph base `elevation_seed`, `continentality`, coast distance, basinness를 합성한다.
 4. signed macro elevation을 만들되, ownership과 sea level contract를 함께 저장한다.
-5. edge 기반 mountain/ridge/fault/plateau 후보를 먼저 정한다.
+5. edge 기반 ridge/fault/plateau 후보를 먼저 정한다.
 6. coast는 signed macro elevation 경계가 아니라 land ownership과 connected-ocean basin 경계에서 우선 찾는다.
 7. ridge/fault/coast skeleton을 broad field로 확산한다.
 8. hydrology가 사용할 divide, basin, outlet 후보를 annotation한다.
@@ -188,18 +187,18 @@ elevation edge만 고르면 높은 평원도 ridge가 되어버린다. ridge는 
 - land component 내부 위치와 coast distance를 이용해 broad mountainness field 생성
 - ruggedness와 elevation bias로 ridge 주변 local relief 강화
 
-현재 launch 구현의 mountain/ridge/fault 후보는 같은 land component 내부 edge만 대상으로 한다.
+현재 launch 구현의 ridge/fault 후보는 같은 land component 내부 edge만 대상으로 한다.
 단순히 signed macro elevation이 높은 두 site를 잇는 edge는 ridge가 아니다. edge guide는 두 site의
 signed macro elevation gradient, inlandness/coast distance, mountainness/ridgeness, 낮은 basinness,
 drainage divide 가능성을 함께 점수화한다.
 
-- mountain candidate는 같은 land component 내부의 inland highland envelope다.
-- ridge candidate는 mountain candidate 중 elevation gradient와 drainage divide potential을 함께
-  만족하는 skeleton이다.
+- mountainness는 같은 land component 내부의 inland highland/rugged envelope를 나타내는 scalar context다.
+- ridge candidate는 mountainness/rugged context, signed elevation gradient, inlandness, 낮은 basinness,
+  drainage divide potential을 함께 만족하는 public edge guide다.
 - fault candidate는 같은 land component 내부에서 signed elevation gradient가 크고 산악성이 있는
   edge다.
 
-이 단계의 ridge/fault/mountain은 최종 능선 mesh가 아니라 hydrology와 Voronoi-derived macro field가
+이 단계의 ridge/fault guide는 최종 능선 mesh가 아니라 hydrology와 Voronoi-derived macro field가
 읽을 skeleton이다.
 
 산맥은 hydrology보다 먼저 정해져야 한다. 대륙 내부의 큰 산맥과 ridge는 분수계와 강의 방향을
@@ -245,10 +244,10 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 1. 대륙/바다 ownership은 chunk 생성 순서와 독립적이어야 한다.
 2. 대륙성은 target land ratio가 아니라 graph base `continentality`의 coherence와 connected component 정책으로 보장한다.
 3. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
-4. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
+4. ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
 5. macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 resolve해야 한다.
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
-7. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
+7. graph-derived ridge/fault/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
 8. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
 9. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
 
@@ -262,8 +261,8 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
   `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
-- edge guide는 coast, mountain candidate, ridge candidate, fault candidate를 포함한다. ridge는
+- edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는
   단순 high elevation edge가 아니라 같은 land component 내부성, signed elevation gradient,
-  inlandness, mountain/rugged context, drainage divide potential을 함께 만족해야 한다.
+  inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.
   stage 3 macro_map은 hydrology 전 river candidate corridor를 선택하지 않으며, selected river chain,
   flow accumulation, lake/sink/outlet carve는 hydrology stage가 확정한다.

@@ -35,7 +35,7 @@
 2. graph region ownership preview
 3. graph-field-resolved continent/ocean/island ownership preview
 4. graph-field-resolved macro elevation preview
-5. mountain/ridge/fault edge and coast edge preview
+5. ridge/fault edge and coast edge preview
 6. dominant site map
 7. blended influence map
 8. elevation/corner downhill arrow map
@@ -129,15 +129,14 @@
 - 기본 출력 파일명은 `s<seed>_x<center-x>_z<center-z>.png`처럼 seed와 center만 담는다.
 - 단일 PNG에서 ocean/lake는 파란색, coast는 sandy color, 내륙은 초록 계열, 고지대는 회백색,
   가장 높은 peak는 흰색으로 표현한다.
-- ridge candidate edge는 흰색, fault candidate edge는 붉은색, mountain candidate edge는 ochre,
-  coast candidate edge는 sandy color overlay로 표시한다.
+- ridge candidate edge는 흰색, fault candidate edge는 붉은색, coast candidate edge는 sandy color overlay로 표시한다.
 - stage 3 macro_map preview는 selected river나 pre-hydrology river corridor를 표시하지 않는다.
   selected river overlay는 hydrology preview가 확정한다.
-- 작은 legend overlay는 elevation gradient와 ridge/fault/mountain/coast edge key를 포함한다.
+- 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
-  candidate edge count, coast/mountain/ridge/fault edge count, sea level, stage 4 guide input note,
+  candidate edge count, coast/ridge/fault edge count, sea level, stage 4 guide input note,
   source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
@@ -153,7 +152,7 @@
   continent/island field 없이 graph base field를 source of truth로 사용한다.
 - lake/coast, ridge/fault 후보 의미는 `macro_map` 모듈이 소유한다. selected river 의미는 hydrology
   모듈이 소유한다.
-- coast/ridge/fault/mountain candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
+- coast/ridge/fault candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.

@@ -223,7 +223,6 @@ struct NearestSite {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EdgeKind {
     Coast,
-    Mountain,
     Ridge,
     Fault,
 }
@@ -252,7 +251,6 @@ struct PreviewHeader {
     site_count: usize,
     edge_count: usize,
     coast_edge_count: usize,
-    mountain_edge_count: usize,
     ridge_edge_count: usize,
     fault_edge_count: usize,
     macro_source: &'static str,
@@ -285,7 +283,6 @@ impl PreviewHeader {
             format!("site_count={}", self.site_count),
             format!("candidate_edge_count={}", self.edge_count),
             format!("coast_edge_count={}", self.coast_edge_count),
-            format!("mountain_edge_count={}", self.mountain_edge_count),
             format!("ridge_edge_count={}", self.ridge_edge_count),
             format!("fault_edge_count={}", self.fault_edge_count),
             format!("sea_level={SEA_LEVEL}"),
@@ -308,11 +305,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .edge_samples
         .iter()
         .filter(|edge| edge.kind == EdgeKind::Coast)
-        .count();
-    let mountain_edge_count = graph
-        .edge_samples
-        .iter()
-        .filter(|edge| edge.kind == EdgeKind::Mountain)
         .count();
     let ridge_edge_count = graph
         .edge_samples
@@ -341,7 +333,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         site_count: graph.patch.sites.len(),
         edge_count: graph.edge_samples.len(),
         coast_edge_count,
-        mountain_edge_count,
         ridge_edge_count,
         fault_edge_count,
         macro_source: "world_generation_macro_map",
@@ -371,11 +362,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area.min.x, graph_area.max.x, graph_area.min.z, graph_area.max.z
     );
     println!(
-        "sites: {}, candidate edges: {} (coast {}, mountain {}, ridge {}, fault {})",
+        "sites: {}, candidate edges: {} (coast {}, ridge {}, fault {})",
         graph.patch.sites.len(),
         graph.edge_samples.len(),
         coast_edge_count,
-        mountain_edge_count,
         ridge_edge_count,
         fault_edge_count
     );
@@ -562,13 +552,6 @@ fn macro_edge_sample(edge: MacroEdge) -> Option<MacroEdgeSample> {
             strength: edge.guide.ridgeness,
         });
     }
-    if edge.guide.is_mountain_candidate {
-        return Some(MacroEdgeSample {
-            edge,
-            kind: EdgeKind::Mountain,
-            strength: edge.guide.mountainness,
-        });
-    }
     None
 }
 
@@ -582,9 +565,8 @@ fn macro_map_config_for_preview(meta: &WorldMeta, config: &PreviewConfig) -> Mac
 fn edge_kind_draw_order(kind: EdgeKind) -> u8 {
     match kind {
         EdgeKind::Coast => 0,
-        EdgeKind::Mountain => 1,
-        EdgeKind::Ridge => 2,
-        EdgeKind::Fault => 3,
+        EdgeKind::Ridge => 1,
+        EdgeKind::Fault => 2,
     }
 }
 
@@ -765,13 +747,11 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
         };
         let color = match sample.kind {
             EdgeKind::Coast => [236, 213, 128],
-            EdgeKind::Mountain => [207, 176, 93],
             EdgeKind::Ridge => [247, 248, 242],
             EdgeKind::Fault => [231, 92, 88],
         };
         let width = match sample.kind {
             EdgeKind::Coast => 1,
-            EdgeKind::Mountain => 1,
             EdgeKind::Ridge => 2,
             EdgeKind::Fault => 2,
         };
@@ -837,7 +817,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     };
     let margin = 8 * scale;
     let panel_width = (160 * scale).min(image.width());
-    let panel_height = (78 * scale).min(image.height());
+    let panel_height = (66 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -875,7 +855,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         scale,
     );
 
-    let key_y = y + panel_height.saturating_sub(30 * scale);
+    let key_y = y + panel_height.saturating_sub(18 * scale);
     draw_key(image, bar_x, key_y, [247, 248, 242], "RIDGE", scale);
     draw_key(
         image,
@@ -888,14 +868,6 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     draw_key(
         image,
         bar_x,
-        key_y + 13 * scale,
-        [207, 176, 93],
-        "MTN",
-        scale,
-    );
-    draw_key(
-        image,
-        bar_x + 68 * scale,
         key_y + 13 * scale,
         [236, 213, 128],
         "COAST",
@@ -1186,6 +1158,40 @@ mod tests {
     }
 
     #[test]
+    fn preview_header_metadata_exposes_ridge_fault_but_not_mountain_edges() {
+        let header = PreviewHeader {
+            seed: 42,
+            generator_version: 11,
+            stage: DEFAULT_STAGE.to_string(),
+            center_x: 0,
+            center_z: 0,
+            width: 640,
+            height: 360,
+            world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            land_bias: 0.0,
+            graph_area: GraphRegionArea::new(
+                GraphRegionCoord::new(0, 0),
+                GraphRegionCoord::new(0, 0),
+            )
+            .unwrap(),
+            site_count: 3,
+            edge_count: 2,
+            coast_edge_count: 1,
+            ridge_edge_count: 1,
+            fault_edge_count: 0,
+            macro_source: "world_generation_macro_map",
+        };
+
+        let metadata = header.to_metadata_text();
+
+        assert!(metadata.contains("ridge_edge_count=1"));
+        assert!(metadata.contains("fault_edge_count=0"));
+        assert!(!metadata.contains("mountain_edge_count"));
+    }
+
+    #[test]
     fn elevation_gradient_reaches_ocean_and_peak_colors() {
         assert_eq!(
             gradient_color(0.0, &[(0.0, [18, 54, 112]), (1.0, [248, 249, 242])]),
@@ -1282,5 +1288,41 @@ mod tests {
         assert_eq!(left.patch.sites, right.patch.sites);
         assert_eq!(left.site_samples, right.site_samples);
         assert_eq!(left.edge_samples, right.edge_samples);
+    }
+
+    #[test]
+    fn default_preview_span_has_diagnosable_ridge_guides() {
+        let meta = WorldMeta::new(42);
+        let mut config = test_config();
+        config.center_x = 0;
+        config.center_z = 0;
+        config.width = 640;
+        config.height = 360;
+        config.world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
+        let area = config
+            .window()
+            .graph_area(config.region_size_blocks)
+            .unwrap();
+
+        let graph = build_macro_map_for_preview(&meta, &config, area).unwrap();
+        let ridge_count = graph
+            .edge_samples
+            .iter()
+            .filter(|sample| sample.kind == EdgeKind::Ridge)
+            .count();
+        let fault_count = graph
+            .edge_samples
+            .iter()
+            .filter(|sample| sample.kind == EdgeKind::Fault)
+            .count();
+
+        assert!(
+            ridge_count >= 128,
+            "default macro preview should expose visible ridge guides, got {ridge_count}"
+        );
+        assert!(
+            ridge_count > fault_count,
+            "ridge guides should be more common than sharper fault guides: ridge={ridge_count} fault={fault_count}"
+        );
     }
 }
