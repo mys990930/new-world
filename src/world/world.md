@@ -93,6 +93,10 @@ VoronoiGraphPatchRequest::new(config, center_world_x, center_world_z) -> Voronoi
 generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> VoronoiGraphPatch
 apply_base_graph_fields(patch: &mut VoronoiGraphPatch, config: GraphBaseFieldConfig)
 VoronoiGraphPatch::site(id: VoronoiSiteId) -> Option<&VoronoiSite>
+MacroMapConfig::new(seed: u64, generator_version: u32) -> MacroMapConfig
+generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> GraphMacroMap
+GraphMacroMap::coast_edges() -> impl Iterator<Item = &MacroEdge>
+GraphMacroMap::river_candidate_edges() -> impl Iterator<Item = &MacroEdge>
 
 normalize_influences(influences: &mut [GraphInfluence])
 ContinuousFieldSample::clamped(self) -> ContinuousFieldSample
@@ -163,6 +167,8 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - 새 graph-first 모듈은 `src/world/generation` 아래의 scaffold contract 단계다.
 - 현재 `graph` leaf는 deterministic padded Voronoi-style graph patch assembly와 base graph field
   smoothing을 제공한다.
-- 아직 실제 Delaunay/Voronoi construction, macro elevation, hydrology solve, Voronoi-derived map,
-  Perlin micro relief 합성은 구현되지 않았다.
+- 현재 `macro_map` leaf는 graph patch 기반 continent/ocean basin ownership, signed macro elevation,
+  coast/ridge/fault/river-candidate edge guide annotation을 제공한다.
+- 아직 실제 Delaunay/Voronoi construction, hydrology solve, Voronoi-derived map, Perlin micro relief
+  합성은 구현되지 않았다.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

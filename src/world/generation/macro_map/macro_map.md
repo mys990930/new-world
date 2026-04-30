@@ -15,7 +15,7 @@ gradient map을 만든다.
 - continent와 ocean basin ownership 정의
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
 - Voronoi graph 기반 macro elevation 생성
-- edge 기반 mountain/ridge/fault/plateau/coast guide 선택
+- edge 기반 mountain/ridge/fault/coast/river-candidate guide 선택
 - ridge/fault/coast guide를 broad field로 확산
 - hydrology가 읽을 drainage divide, basin, outlet 후보 제공
 
@@ -23,11 +23,45 @@ gradient map을 만든다.
 
 ## 비책임
 
-- river routing 확정
+- river routing 확정. `macro_map`의 river는 hydrology 전 단계 후보 annotation일 뿐이다.
 - noisy boundary curve 생성
 - Perlin micro relief 합성
 - final surface material 선택
 - voxel fill
+
+---
+
+## 공개 API
+
+현재 구현은 graph patch를 입력으로 받아 site/corner/edge annotation layer를 만든다. graph core에는
+macro state를 직접 쓰지 않고, id 기반 별도 table을 반환한다.
+
+```rust
+MacroMapConfig::new(seed, generator_version) -> MacroMapConfig
+generate_macro_map(&VoronoiGraphPatch, MacroMapConfig) -> GraphMacroMap
+
+GraphMacroMap {
+    sites: Vec<MacroSite>,
+    corners: Vec<MacroCorner>,
+    edges: Vec<MacroEdge>,
+}
+
+MacroSurfaceKind::{Continent, OceanBasin, CoastLand, CoastOcean, LakeCandidate, WetlandCandidate}
+MacroEdgeGuide {
+    is_coast,
+    is_ridge_candidate,
+    is_river_candidate,
+    is_fault_candidate,
+    coastness,
+    ridgeness,
+    river_potential,
+}
+```
+
+`MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
+coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. `MacroCorner`는 corner
+position에서 같은 macro field를 샘플한다. `MacroEdge`는 두 site의 macro ownership과 elevation
+context를 읽어 hydrology 이전 guide를 붙인다.
 
 ---
 
@@ -76,6 +110,12 @@ launch 정책은 아래처럼 잡는다.
 무한 월드에서는 전체 land cell 수와 ocean cell 수를 전역으로 세어 제약할 수 없다. 대신
 deterministic super-region ownership, 충분한 padding, component pruning/assimilation 규칙으로
 요청 영역마다 같은 대륙성이 재현되게 만든다.
+
+현재 launch 구현은 coarse super-cell checker core field를 seed/generator version으로 phase/jitter
+시켜 continent core와 ocean basin center를 만든다. site/corner는 가까운 continent core와 ocean
+basin center까지의 거리, stage 2 base continentality/elevation seed를 합성해 ownership과 signed
+macro elevation을 얻는다. 이 구현은 global target ratio를 세지 않으며, 같은 world-space position은
+어떤 padded patch에서 샘플해도 같은 macro annotation을 받는다.
 
 ---
 
@@ -158,6 +198,18 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 2. 대륙성은 target land ratio가 아니라 continent/ocean basin ownership과 connected component 정책으로 보장한다.
 3. macro elevation은 Perlin micro relief보다 먼저 계산되어야 한다.
 4. mountain/ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
-5. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
-6. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-7. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+5. river guide는 routing 결과가 아니라 hydrology가 읽을 후보 annotation이다.
+6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
+7. graph-derived mountain/ridge/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
+8. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+
+---
+
+## 현재 구현 상태
+
+- `src/world/generation/macro_map/mod.rs`가 `pub mod macro_map`으로 연결되어 있다.
+- `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
+- continent/ocean ownership은 target ratio가 아니라 deterministic super-cell core/basin field와 base graph field 합성으로 정한다.
+- signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
+- site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
+- edge guide는 coast, ridge candidate, fault candidate, hydrology 전 river candidate를 포함한다.

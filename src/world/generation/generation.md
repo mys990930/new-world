@@ -98,10 +98,13 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   site/corner-linked edge topology를 rayon 병렬 생성 뒤 id 정렬/dedup한다.
 - stage 2 base graph field: site raw seed field와 smoothed field를 생성하고, corner field/elevation
   seed를 주변 site 기반으로 안정적으로 계산한다.
+- stage 3/4 macro map: `generate_macro_map`이 graph patch를 입력으로 받아 continent/ocean basin
+  ownership, signed macro elevation, coastness, mountainness/ridgeness, basinness, coast/ridge/fault/river-candidate
+  edge guide를 별도 annotation layer로 생성한다. river guide는 routing 확정이 아니라 hydrology 전
+  후보 surface다.
 
 문서화된 다음 leaf:
 
-- `macro_map/macro_map.md`: continent/ocean ownership, Voronoi macro elevation, mountain/ridge/fault/coast guide
 - `boundary/boundary.md`: noisy coast/river/biome/fault boundary realization
 - `meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `heightfield/heightfield.md`: Voronoi-derived macro map과 Perlin micro relief 합성

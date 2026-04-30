@@ -104,6 +104,52 @@
 
 ---
 
+## `macro_map_preview` CLI 계약
+
+`macro_map_preview`는 graph-first pipeline의 continent/ocean macro map stage를 chunk 생성 없이
+검사하는 topdown composite preview binary다.
+
+### 입력
+
+- 필수 positional 인자: `<seed> <center-x> <center-z>`
+  - `center-x`, `center-z`는 world-block 좌표다.
+- 선택 인자:
+  - `--width <u32>`: 기본 `3840`
+  - `--height <u32>`: 기본 `2160`
+  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `8192`
+  - `--region-size-blocks <i32>`: graph cache region 크기, 기본 `DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
+  - `--site-spacing-blocks <i32>`: preview site 간격, 기본 `DEFAULT_SITE_SPACING_BLOCKS`
+  - `--stage macro_map`
+  - `--output <path>`
+
+### 출력
+
+- 기본 출력은 `target/macro-map-preview/` 아래 PNG다.
+- 기본 출력 파일명은 `s<seed>_x<center-x>_z<center-z>.png`처럼 seed와 center만 담는다.
+- 단일 PNG에서 ocean/lake는 파란색, coast는 sandy color, 내륙은 초록 계열, 고지대는 회백색,
+  가장 높은 peak는 흰색으로 표현한다.
+- ridge candidate edge는 흰색, river candidate edge는 파란색, coast candidate edge는 sandy color
+  overlay로 표시한다.
+- 작은 legend overlay는 elevation gradient와 river/ridge/coast edge key를 포함한다.
+- width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
+  metadata에만 기록한다.
+- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
+  candidate edge count, sea level, source note를 함께 기록한다.
+- 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
+  디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
+- 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
+
+### 현재 구현 상태
+
+- `macro_map_preview`는 `world::generation::graph::generate_voronoi_graph_patch(...)`로 graph patch를
+  만들고, `world::generation::generate_macro_map(&patch, MacroMapConfig::new(...))`로 macro map을
+  생성한다.
+- continent/ocean ownership, signed elevation, lake/coast, ridge/river 후보 의미는
+  `macro_map` 모듈이 소유한다.
+- 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
+
+---
+
 ## Determinism
 
 - 같은 seed, generator version, area, stage input은 같은 preview를 만든다.
