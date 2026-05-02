@@ -89,10 +89,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 이 단계는 potential guide가 아니라 selected hydrology result를 만든다.
    - downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation을 계산한다.
    - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
-   - lake로 끝나는 chain과 downstream에서 lake/wetland candidate component를 처음 만나는 chain은
-     ocean outlet chain과 같은 크기로 취급하지 않는다. raw accumulation은 보존하되, lake
-     면적/capacity에 비례해 lake별 top-N incoming chain, lake 접근부 visible segment, 표시/폭 계산용
-     discharge를 제한한다. 기본 lake terminal/approach display discharge는 ocean outlet trunk보다
+   - lake로 끝나는 chain과 lake/wetland candidate component로 처음 들어가는 inlet chain은 ocean outlet
+     chain과 같은 크기로 취급하지 않는다. raw accumulation은 보존하되, lake 면적/capacity에 비례해
+     lake별 top-N incoming chain, lake 유입부 visible segment, 표시/폭 계산용 discharge를 제한한다.
+     기본 lake terminal/inlet display discharge는 ocean outlet trunk보다
      확연히 낮은 cap을 가진다.
 7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
 8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
@@ -130,7 +130,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   mountainness/rugged context, basinness, coast/ridge/fault guide를 별도 annotation layer로 생성한다.
   독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 graph base
   `continentality`를 land/ocean ownership의 source of truth로 읽고, graph adjacency component와
-  coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. stage 4 guide는
+  coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. 음수 water component도
+  connectivity를 읽어 patch/open boundary에 닿으면 ocean, 고립되어 있으면 inland lake candidate로
+  분류한다. stage 4 guide는
   같은 land component 내부성, signed elevation gradient, inlandness, mountainness/rugged context,
   drainage divide potential을 함께 읽어 ridge/fault edge candidate를 선택한다.
 - stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 현재
@@ -184,8 +186,8 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 
 - river segment는 downstream progress를 가진다.
 - flow accumulation은 합류 후 증가한다.
-- lake terminal/approach river는 raw flow ledger와 selected/display discharge를 구분하고, lake
-  capacity에 따라 incoming chain 수, visible approach segment 수, selected flow가 제한되어야 한다.
+- lake terminal/inlet river는 raw flow ledger와 selected/display discharge를 구분하고, lake
+  capacity에 따라 incoming chain 수, visible inlet segment 수, selected flow가 제한되어야 한다.
 - selected river는 lake/sink/outlet 처리 없이 끊기지 않는다.
 - local minima는 lake, sink, outlet carve 중 하나로 명시된다.
 - river width는 flow와 안정적으로 연결된다.

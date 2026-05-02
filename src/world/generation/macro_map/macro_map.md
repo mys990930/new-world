@@ -108,7 +108,7 @@ water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의
 - continent: 큰 land mass와 그 내부 macro elevation / drainage ownership
 - island / archipelago: graph base `continentality`가 만든 land component 중 큰 continent에 속하지
   않는 작은 양수 component
-- lake: land 내부의 local minimum 또는 basin fill로 생긴 고립 물
+- lake: land 내부의 local minimum, basin fill, 또는 open ocean component와 연결되지 않은 내륙 물
 - wetland/marsh: 얕은 물, 높은 hydration, 낮은 slope가 겹친 지역
 - coast: ocean과 land 사이의 transition band
 - beach/cliff/rocky shore: coast의 slope, exposure, material policy에 따른 표면 표현
@@ -136,6 +136,9 @@ launch 정책은 아래처럼 잡는다.
 - graph base field stage가 대륙성/해양성 site가 뭉치는 `continentality`를 먼저 만든다.
 - macro_map은 `continentality >= threshold`를 초기 land mask로 보고 connected component를 resolve한다.
 - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
+- 음수 `continentality` water component라도 patch/open boundary에 닿지 않고 land component 안에 고립되어
+  있으면 `OceanBasin`이 아니라 `LakeCandidate` 또는 `WetlandCandidate`로 분류한다.
+- patch/open boundary에 닿는 water component와 connected ocean basin은 ocean으로 유지한다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
@@ -252,9 +255,11 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 4. ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
 5. macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 resolve해야 한다.
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
-7. graph-derived ridge/fault/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-8. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
-9. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+7. 내륙 water component는 signed elevation이 음수여도 connected ocean basin이 아니면 lake/wetland
+   후보로 유지해야 한다.
+8. graph-derived ridge/fault/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
+9. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
+10. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
 
 ---
 
@@ -264,6 +269,8 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
 - continent/ocean ownership은 graph base `continentality`를 source of truth로 읽고, `land_bias`와
   `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
+- ocean/lake ownership은 water component connectivity를 함께 읽는다. patch/open boundary에 연결된
+  water component는 ocean이고, 고립된 내륙 water component는 lake candidate로 surface kind를 바꾼다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는

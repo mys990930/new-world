@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::fs::File;
@@ -250,6 +250,14 @@ struct PreviewHydrologyStats {
     max_ocean_raw_flow: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PreviewSurfaceStats {
+    lake_component_count: usize,
+    inland_water_site_count: usize,
+    ocean_component_count: usize,
+    ocean_site_count: usize,
+}
+
 #[derive(Debug, Clone)]
 struct PreviewHeader {
     seed: u64,
@@ -273,6 +281,7 @@ struct PreviewHeader {
     lake_node_count: usize,
     sink_node_count: usize,
     outlet_node_count: usize,
+    surface_stats: PreviewSurfaceStats,
     hydrology_stats: PreviewHydrologyStats,
     macro_source: &'static str,
 }
@@ -310,6 +319,19 @@ impl PreviewHeader {
             format!("lake_node_count={}", self.lake_node_count),
             format!("sink_node_count={}", self.sink_node_count),
             format!("outlet_node_count={}", self.outlet_node_count),
+            format!(
+                "lake_component_count={}",
+                self.surface_stats.lake_component_count
+            ),
+            format!(
+                "inland_water_site_count={}",
+                self.surface_stats.inland_water_site_count
+            ),
+            format!(
+                "ocean_component_count={}",
+                self.surface_stats.ocean_component_count
+            ),
+            format!("ocean_site_count={}", self.surface_stats.ocean_site_count),
             format!(
                 "lake_terminal_river_segment_count={}",
                 self.hydrology_stats.lake_terminal_segment_count
@@ -397,6 +419,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter(|node| node.kind == GraphDrainageNodeKind::CoastOutlet)
         .count();
     let hydrology_stats = preview_hydrology_stats(&graph.hydrology);
+    let surface_stats = preview_surface_stats(&graph, window);
 
     let header = PreviewHeader {
         seed: config.seed,
@@ -420,6 +443,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         lake_node_count,
         sink_node_count,
         outlet_node_count,
+        surface_stats,
         hydrology_stats,
         macro_source: "world_generation_macro_map",
     };
@@ -460,6 +484,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         lake_node_count,
         sink_node_count,
         outlet_node_count
+    );
+    println!(
+        "surface stats: lake components {}, inland water sites {}, ocean components {}, ocean sites {}",
+        surface_stats.lake_component_count,
+        surface_stats.inland_water_site_count,
+        surface_stats.ocean_component_count,
+        surface_stats.ocean_site_count
     );
     println!(
         "river terminal stats: lake terminal segments {}, lake-capped segments {}, ocean segments {}, max lake terminal display/raw {:.2}/{:.2}, max lake-capped display/raw {:.2}/{:.2}, max ocean display/raw {:.2}/{:.2}",
@@ -1002,6 +1033,46 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
     stats
 }
 
+fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> PreviewSurfaceStats {
+    let mut lake_components = HashSet::new();
+    let mut ocean_components = HashSet::new();
+    let mut inland_water_site_count = 0;
+    let mut ocean_site_count = 0;
+
+    for site in graph.site_samples.values() {
+        if site.position.x < window.min_x()
+            || site.position.x > window.max_x()
+            || site.position.z < window.min_z()
+            || site.position.z > window.max_z()
+        {
+            continue;
+        }
+
+        match site.surface_kind {
+            MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate => {
+                inland_water_site_count += 1;
+                if let Some(component) = site.continent {
+                    lake_components.insert(component);
+                }
+            }
+            MacroSurfaceKind::OceanBasin | MacroSurfaceKind::CoastOcean => {
+                ocean_site_count += 1;
+                if let Some(component) = site.ocean_basin {
+                    ocean_components.insert(component);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    PreviewSurfaceStats {
+        lake_component_count: lake_components.len(),
+        inland_water_site_count,
+        ocean_component_count: ocean_components.len(),
+        ocean_site_count,
+    }
+}
+
 fn terminal_resolution(
     start: VoronoiCornerId,
     corners: &HashMap<VoronoiCornerId, &new_world::world::generation::GraphHydrologyCorner>,
@@ -1506,6 +1577,12 @@ mod tests {
             lake_node_count: 1,
             sink_node_count: 0,
             outlet_node_count: 2,
+            surface_stats: PreviewSurfaceStats {
+                lake_component_count: 2,
+                inland_water_site_count: 12,
+                ocean_component_count: 1,
+                ocean_site_count: 44,
+            },
             hydrology_stats: PreviewHydrologyStats {
                 lake_terminal_segment_count: 1,
                 ocean_terminal_segment_count: 2,
@@ -1525,6 +1602,8 @@ mod tests {
         assert!(metadata.contains("ridge_edge_count=1"));
         assert!(metadata.contains("fault_edge_count=0"));
         assert!(metadata.contains("river_segment_count=3"));
+        assert!(metadata.contains("lake_component_count=2"));
+        assert!(metadata.contains("inland_water_site_count=12"));
         assert!(metadata.contains("lake_terminal_river_segment_count=1"));
         assert!(metadata.contains("lake_capped_river_segment_count=1"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
@@ -1711,5 +1790,28 @@ mod tests {
             ridge_count > fault_count,
             "ridge guides should be more common than sharper fault guides: ridge={ridge_count} fault={fault_count}"
         );
+    }
+
+    #[test]
+    fn seed_42_default_preview_reports_inland_lake_components() {
+        let meta = WorldMeta::new(42);
+        let mut config = test_config();
+        config.center_x = 0;
+        config.center_z = 0;
+        config.width = 640;
+        config.height = 360;
+        config.world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
+        let window = config.window();
+        let area = window.graph_area(config.region_size_blocks).unwrap();
+
+        let graph = build_macro_map_for_preview(&meta, &config, area).unwrap();
+        let surface_stats = preview_surface_stats(&graph, window);
+
+        assert!(
+            surface_stats.lake_component_count >= 2,
+            "seed 42 default window should report at least two lake components, got {:?}",
+            surface_stats
+        );
+        assert!(surface_stats.ocean_component_count > 0);
     }
 }

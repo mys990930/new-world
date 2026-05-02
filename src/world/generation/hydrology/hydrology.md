@@ -104,25 +104,27 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
 
 launch 구현은 아래의 보수적인 정책을 사용한다.
 
-- terminal outlet은 ocean/coast corner 또는 coast guide와 인접한 corner다.
+- terminal outlet은 connected ocean/coast corner 또는 coast guide와 인접한 corner다. signed macro
+  elevation이 음수라는 이유만으로 ocean outlet이 되지는 않는다.
 - 일반 corner는 인접 corner 중 더 낮은 elevation 또는 ocean/coast terminal을 downhill target으로 고른다.
 - 더 낮은 이웃이 없는 graph-stage local minimum은 spill path search를 수행한다.
+- local minimum이 `LakeCandidate` 또는 `WetlandCandidate` 위에 있으면 ocean으로 carve하기 전에
+  explicit lake resolution을 우선 적용한다.
 - spill path가 ocean/coast terminal까지 닿으면 outlet carve로 downstream edge chain을 만든다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
 - selected river는 threshold를 넘은 headwater에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
 - ocean outlet으로 이어지는 river는 raw flow accumulation을 기준으로 넓어질 수 있다.
-- lake로 끝나는 river뿐 아니라, ocean으로 이어지더라도 downstream에서 lake/wetland candidate
-  component를 처음 만나는 river는 raw flow accumulation을 보존하되 lake 면적에서 파생한 capacity를
-  기준으로 selected incoming chain 수, visible approach segment 수, 표시/폭 계산용 discharge를 강하게
-  제한한다. 기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,
+- lake로 끝나는 river와 lake/wetland component로 처음 들어가는 inlet river는 raw flow accumulation을
+  보존하되 lake 면적에서 파생한 capacity를 기준으로 selected incoming chain 수, visible inlet segment
+  수, 표시/폭 계산용 discharge를 제한한다. 기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,
   `max_lake_terminal_chains = min(3, 1 + floor(area_units / 24))`를 적용한다. 작은 lake는 1개
   이하의 feeder chain만 보이고, 큰 lake도 ocean outlet river network처럼 많은 지류를 먹지 않는다.
-- lake terminal/approach chain은 일반 river threshold의 5배 이상 또는 lake display cap의 2배 이상 raw flow를
-  가져야 선택된다. 선택되더라도 visible segment는 lake 접근부 `2 + floor(area_units / 16)`개,
+- lake terminal/inlet chain은 일반 river threshold의 5배 이상 또는 lake display cap의 2배 이상 raw flow를
+  가져야 선택된다. 선택되더라도 visible segment는 lake 유입부 `2 + floor(area_units / 16)`개,
   최대 6개로 제한한다. 이는 raw upstream ledger가 커도 preview와 초기 geometry가 lake 주변에
   짧고 작은 feeder로 보이게 하기 위한 launch 정책이다.
-- lake terminal/approach display discharge는 `min(16, 4 + area_units * 0.35)`로 cap된다. raw accumulation은
+- lake terminal/inlet display discharge는 `min(16, 4 + area_units * 0.35)`로 cap된다. raw accumulation은
   `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는 cap 적용 후의
   `flow_accumulation`을 사용한다. 따라서 lake terminal river는 일반 ocean outlet trunk보다
   확연히 얇고 적어야 한다.
@@ -219,9 +221,9 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   launch 구현은 강 연속성을 우선해 ocean/coast까지 spill path가 있으면 outlet carve를 선택한다.
 - selected river segment는 downstream chain을 따라 terminal outlet 또는 explicit sink/lake resolution까지
   이어지도록 선택된다.
-- selected river selection은 ocean outlet chain과 lake terminal/approach chain을 구분한다. lake
-  terminal/approach chain은 lake candidate footprint에서 산정한 capacity에 따라 더 높은 threshold,
-  lake별 top-N incoming chain, visible approach segment 제한, selected/display discharge cap을
+- selected river selection은 ocean outlet chain과 lake terminal/inlet chain을 구분한다. lake
+  terminal/inlet chain은 lake candidate footprint에서 산정한 capacity에 따라 더 높은 threshold,
+  lake별 top-N incoming chain, visible inlet segment 제한, selected/display discharge cap을
   적용한다. raw corner accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,

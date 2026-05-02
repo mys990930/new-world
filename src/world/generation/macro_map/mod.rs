@@ -240,6 +240,7 @@ struct SiteContext {
     ruggedness: f32,
     is_land_owned: bool,
     is_island_owned: bool,
+    is_inland_water: bool,
     component_id: u64,
     graph_distance_to_coast: u32,
     spacing_blocks: f32,
@@ -278,6 +279,7 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
     let components = connected_components(&patch.sites, &adjacency, &land_mask);
     let coast_distances = graph_distances_to_coast(&adjacency, &land_mask);
     let component_sizes = component_sizes(&components);
+    let boundary_components = component_touches_patch_boundary(&patch.sites, &components);
     let largest_land_component = components
         .iter()
         .enumerate()
@@ -297,6 +299,11 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
         .map(|(index, site)| {
             let component = components[index];
             let component_size = component_sizes.get(&component).copied().unwrap_or(0);
+            let is_inland_water = !land_mask[index]
+                && !boundary_components
+                    .get(&component)
+                    .copied()
+                    .unwrap_or(false);
             SiteContext {
                 base_fields: site.base_fields,
                 ruggedness: site.ruggedness,
@@ -304,6 +311,7 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
                 is_island_owned: land_mask[index]
                     && Some(component) != largest_land_component
                     && component_size <= island_size_limit,
+                is_inland_water,
                 component_id: component,
                 graph_distance_to_coast: coast_distances[index],
                 spacing_blocks,
@@ -318,6 +326,37 @@ fn component_sizes(components: &[u64]) -> HashMap<u64, usize> {
         *sizes.entry(component).or_insert(0) += 1;
     }
     sizes
+}
+
+fn component_touches_patch_boundary(
+    sites: &[super::graph::VoronoiSite],
+    components: &[u64],
+) -> HashMap<u64, bool> {
+    let Some(min_x) = sites.iter().map(|site| site.owner_region.x).min() else {
+        return HashMap::new();
+    };
+    let Some(max_x) = sites.iter().map(|site| site.owner_region.x).max() else {
+        return HashMap::new();
+    };
+    let Some(min_z) = sites.iter().map(|site| site.owner_region.z).min() else {
+        return HashMap::new();
+    };
+    let Some(max_z) = sites.iter().map(|site| site.owner_region.z).max() else {
+        return HashMap::new();
+    };
+
+    let mut touches = HashMap::new();
+    for (site, &component) in sites.iter().zip(components) {
+        let is_boundary = site.owner_region.x == min_x
+            || site.owner_region.x == max_x
+            || site.owner_region.z == min_z
+            || site.owner_region.z == max_z;
+        touches
+            .entry(component)
+            .and_modify(|value| *value |= is_boundary)
+            .or_insert(is_boundary);
+    }
+    touches
 }
 
 fn is_land_base(fields: GraphBaseFields, config: MacroMapConfig) -> bool {
@@ -431,25 +470,24 @@ fn macro_site_from_context(
     config: MacroMapConfig,
 ) -> MacroSite {
     let sample = macro_field_sample_from_context(context, config);
+    let macro_land_side = sample.surface_kind.is_land_owned();
     MacroSite {
         id,
         owner_region,
         position,
         surface_kind: sample.surface_kind,
-        continent: context
-            .is_land_owned
-            .then_some(MacroContinentId(context.component_id)),
-        ocean_basin: (!context.is_land_owned).then_some(MacroOceanBasinId(context.component_id)),
+        continent: macro_land_side.then_some(MacroContinentId(context.component_id)),
+        ocean_basin: (!macro_land_side).then_some(MacroOceanBasinId(context.component_id)),
         signed_macro_elevation: sample.signed_macro_elevation,
         continentality: sample.continentality,
         coastness: sample.coastness,
         distance_to_coast_blocks: sample.distance_to_coast_blocks,
-        distance_to_continent_core_blocks: if context.is_land_owned {
+        distance_to_continent_core_blocks: if macro_land_side {
             sample.distance_to_coast_blocks
         } else {
             0.0
         },
-        distance_to_ocean_basin_blocks: if context.is_land_owned {
+        distance_to_ocean_basin_blocks: if macro_land_side {
             sample.distance_to_coast_blocks
         } else {
             sample.distance_to_coast_blocks
@@ -535,6 +573,7 @@ fn macro_field_sample_from_context(
         surface_kind: surface_kind(
             context.is_land_owned,
             context.is_island_owned,
+            context.is_inland_water,
             coastness,
             basinness,
             signed_macro_elevation,
@@ -590,10 +629,31 @@ fn macro_corner(
             .count();
         land_count * 2 >= adjacent_sites.len()
     };
+    let lake_neighbor_count = adjacent_sites
+        .iter()
+        .filter(|site| {
+            matches!(
+                site.surface_kind,
+                MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+            )
+        })
+        .count();
+    let is_inland_water =
+        !adjacent_sites.is_empty() && lake_neighbor_count * 2 >= adjacent_sites.len();
+    let base_is_land_owned = is_land_owned && !is_inland_water;
     let component_site = adjacent_sites
         .iter()
         .copied()
-        .filter(|site| site.surface_kind.is_land_owned() == is_land_owned)
+        .filter(|site| {
+            if is_inland_water {
+                matches!(
+                    site.surface_kind,
+                    MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+                )
+            } else {
+                site.surface_kind.is_land_owned() == is_land_owned
+            }
+        })
         .min_by_key(|site| site.id.0);
     let is_island_owned = component_site.is_some_and(|site| {
         matches!(
@@ -613,8 +673,9 @@ fn macro_corner(
             .map(|site| site.ridgeness)
             .sum::<f32>()
             / adjacent_sites.len().max(1) as f32,
-        is_land_owned,
+        is_land_owned: base_is_land_owned,
         is_island_owned,
+        is_inland_water,
         component_id: component_site
             .and_then(|site| {
                 site.continent
@@ -628,13 +689,14 @@ fn macro_corner(
         spacing_blocks: DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS,
     };
     let sample = macro_field_sample_from_context(context, config);
+    let macro_land_side = sample.surface_kind.is_land_owned();
 
     MacroCorner {
         id: corner.id,
         position: corner.position,
         surface_kind: sample.surface_kind,
-        continent: is_land_owned.then_some(MacroContinentId(context.component_id)),
-        ocean_basin: (!is_land_owned).then_some(MacroOceanBasinId(context.component_id)),
+        continent: macro_land_side.then_some(MacroContinentId(context.component_id)),
+        ocean_basin: (!macro_land_side).then_some(MacroOceanBasinId(context.component_id)),
         signed_macro_elevation: sample.signed_macro_elevation,
         continentality: sample.continentality,
         coastness: sample.coastness,
@@ -648,11 +710,14 @@ fn macro_corner(
 fn surface_kind(
     is_land_owned: bool,
     is_island_owned: bool,
+    is_inland_water: bool,
     coastness: f32,
     basinness: f32,
     signed_macro_elevation: f32,
 ) -> MacroSurfaceKind {
-    if is_land_owned {
+    if is_inland_water {
+        MacroSurfaceKind::LakeCandidate
+    } else if is_land_owned {
         if coastness >= 0.55 {
             if is_island_owned {
                 MacroSurfaceKind::CoastIsland
@@ -818,7 +883,7 @@ mod tests {
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
         VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn macro_map_generation_is_deterministic() {
@@ -879,12 +944,51 @@ mod tests {
         for site in &patch.sites {
             let macro_site = macro_sites[&site.id];
             let graph_land = site.base_fields.continentality + config.land_bias >= 0.0;
-            assert_eq!(macro_site.surface_kind.is_land_owned(), graph_land);
+            if graph_land {
+                assert!(macro_site.surface_kind.is_land_owned());
+            } else {
+                assert!(
+                    macro_site.surface_kind.is_ocean_owned()
+                        || matches!(
+                            macro_site.surface_kind,
+                            MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+                        )
+                );
+            }
             assert_close(
                 macro_site.continentality,
                 clamp_signed(site.base_fields.continentality + config.land_bias),
             );
         }
+    }
+
+    #[test]
+    fn inland_water_components_resolve_as_lake_candidates() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let default_window_lakes = map
+            .sites
+            .iter()
+            .filter(|site| site.position.x >= -16_384.0)
+            .filter(|site| site.position.x <= 16_384.0)
+            .filter(|site| site.position.z >= -9_216.0)
+            .filter(|site| site.position.z <= 9_216.0)
+            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::LakeCandidate))
+            .filter_map(|site| site.continent)
+            .collect::<HashSet<_>>();
+
+        assert!(
+            default_window_lakes.len() >= 2,
+            "seed 42 default macro preview window should expose at least two inland lake components, got {}",
+            default_window_lakes.len()
+        );
+        assert!(
+            map.sites
+                .iter()
+                .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::LakeCandidate))
+                .all(|site| site.ocean_basin.is_none()),
+            "inland lake candidates must not retain ocean basin ownership"
+        );
     }
 
     #[test]
@@ -1050,6 +1154,24 @@ mod tests {
                 region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
                 site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
                 padding_regions: 1,
+            },
+            center_world_x,
+            center_world_z,
+        )
+    }
+
+    fn preview_like_request(
+        seed: u64,
+        center_world_x: i32,
+        center_world_z: i32,
+    ) -> VoronoiGraphPatchRequest {
+        VoronoiGraphPatchRequest::new(
+            VoronoiGraphConfig {
+                seed,
+                generator_version: 11,
+                region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+                site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+                padding_regions: 17,
             },
             center_world_x,
             center_world_z,
