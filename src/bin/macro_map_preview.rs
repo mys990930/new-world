@@ -298,7 +298,7 @@ impl PreviewHeader {
             format!("outlet_node_count={}", self.outlet_node_count),
             format!("sea_level={SEA_LEVEL}"),
             "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
-            "stage6_hydrology=selected_downhill_watershed_flow_accumulation_lake_sink_outlet".to_string(),
+            "stage6_hydrology=selected_downhill_watershed_raw_flow_selected_discharge_lake_sink_outlet".to_string(),
             format!("macro_source={}", self.macro_source),
             "world_api=new_world::world::generation::generate_macro_map(patch, config)".to_string(),
         ]

@@ -89,6 +89,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 이 단계는 potential guide가 아니라 selected hydrology result를 만든다.
    - downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation을 계산한다.
    - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
+   - lake로 끝나는 chain은 ocean outlet chain과 같은 크기로 취급하지 않는다. raw accumulation은
+     보존하되, lake 면적/capacity에 비례해 selected incoming chain 수와 표시/폭 계산용 discharge를
+     제한한다.
 7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
 8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
@@ -179,6 +182,8 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 
 - river segment는 downstream progress를 가진다.
 - flow accumulation은 합류 후 증가한다.
+- lake terminal river는 raw flow ledger와 selected/display discharge를 구분하고, lake capacity에 따라
+  incoming chain 수와 selected flow가 제한되어야 한다.
 - selected river는 lake/sink/outlet 처리 없이 끊기지 않는다.
 - local minima는 lake, sink, outlet carve 중 하나로 명시된다.
 - river width는 flow와 안정적으로 연결된다.

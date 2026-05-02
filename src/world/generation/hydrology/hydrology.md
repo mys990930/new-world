@@ -39,7 +39,8 @@ hydrology 단계는 아래를 계산한다.
 - downhill neighbor
 - sink / lake / outlet
 - watershed id
-- flow accumulation
+- raw flow accumulation
+- selected/display discharge
 - selected river segment
 - river role: headwater, tributary, trunk, floodplain, outlet
 - downstream progress
@@ -83,6 +84,9 @@ GraphHydrologyCorner {
 `GraphRiverSegment`는 potential guide가 아니라 selected river result다. preview와 이후
 heightfield는 이 segment만 강으로 해석해야 한다. macro_map의 ridge/fault/coast guide는 이 단계의
 입력일 뿐이며, pre-hydrology river candidate와 혼동하면 안 된다.
+corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation이며, river segment는
+`raw_flow_accumulation`과 정책 적용 후의 `flow_accumulation`을 함께 가진다. preview의 강 두께와
+초기 river width는 segment의 정책 적용 후 `flow_accumulation`을 사용한다.
 
 ---
 
@@ -94,7 +98,7 @@ heightfield는 이 segment만 강으로 해석해야 한다. macro_map의 ridge/
 4. graph-stage local minimum을 찾는다.
 5. local minimum을 lake로 유지할지, sink로 둘지, outlet을 carve할지 결정한다.
 6. watershed와 flow accumulation을 계산한다.
-7. 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
+7. terminal 정책을 적용해 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
 8. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
 9. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
 
@@ -107,12 +111,18 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
 - selected river는 threshold를 넘은 headwater에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
+- ocean outlet으로 이어지는 river는 raw flow accumulation을 기준으로 넓어질 수 있다.
+- lake로 끝나는 river는 raw flow accumulation을 보존하되, lake 면적에서 파생한 capacity를 기준으로
+  selected incoming chain 수와 표시/폭 계산용 discharge를 제한한다. 작은 lake는 적은 수의 작은
+  river만 받아야 하고, 큰 lake는 더 많은 incoming chain을 허용할 수 있지만 ocean outlet river보다
+  과도하게 커지지 않도록 cap을 유지한다.
 
 최종 river geometry는 raw edge segment가 아니다.
 
 - edge chain을 spline으로 잇는다.
 - edge guard quadrilateral 안에서 noisy line을 만든다.
 - river width, floodplain, gravel bar, wetland는 flow와 local slope에 따라 조절한다.
+- lake terminal river의 width는 raw accumulation이 아니라 lake capacity가 적용된 selected discharge를 우선 사용한다.
 - confluence는 각진 snapping이 보이지 않도록 downstream smoothing을 적용한다.
 
 ---
@@ -185,6 +195,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 6. Perlin 이후 micro depression은 macro river routing을 새로 정의하지 않는다.
 7. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
 8. final river geometry는 raw straight edge가 아니라 spline/domain-warped realization을 사용해야 한다.
+9. lake terminal river는 lake 면적/capacity에 비례해서 선택되어야 하며, raw accumulation이 커도
+   selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
 
 ---
 
@@ -197,6 +209,10 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   launch 구현은 강 연속성을 우선해 ocean/coast까지 spill path가 있으면 outlet carve를 선택한다.
 - selected river segment는 downstream chain을 따라 terminal outlet 또는 explicit sink/lake resolution까지
   이어지도록 선택된다.
+- selected river selection은 ocean outlet chain과 lake terminal chain을 구분한다. lake terminal chain은
+  lake candidate footprint에서 산정한 capacity에 따라 더 높은 threshold, incoming chain 수 제한,
+  selected/display discharge cap을 적용한다. raw corner accumulation은 보존하고 segment의
+  `raw_flow_accumulation`에 기록한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
   noisy river spline realization, valley carve와 heightfield coupling.

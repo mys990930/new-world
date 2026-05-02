@@ -7,11 +7,17 @@ use super::macro_map::{GraphMacroMap, MacroCorner, MacroSurfaceKind};
 
 pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 10.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
+pub const DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER: f32 = 2.4;
+pub const DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA: f32 = 2.75;
+pub const DEFAULT_LAKE_DISCHARGE_CAP_FLOOR: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HydrologyConfig {
     pub river_flow_threshold: f32,
     pub headwater_elevation: f32,
+    pub lake_river_flow_threshold_multiplier: f32,
+    pub lake_discharge_cap_per_area: f32,
+    pub lake_discharge_cap_floor: f32,
 }
 
 impl Default for HydrologyConfig {
@@ -19,6 +25,9 @@ impl Default for HydrologyConfig {
         Self {
             river_flow_threshold: DEFAULT_RIVER_FLOW_THRESHOLD,
             headwater_elevation: DEFAULT_HEADWATER_ELEVATION,
+            lake_river_flow_threshold_multiplier: DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER,
+            lake_discharge_cap_per_area: DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
+            lake_discharge_cap_floor: DEFAULT_LAKE_DISCHARGE_CAP_FLOOR,
         }
     }
 }
@@ -91,6 +100,7 @@ pub struct GraphRiverSegment {
     pub to: GraphDrainageNodeId,
     pub watershed: WatershedId,
     pub role: GraphHydrologyRole,
+    pub raw_flow_accumulation: f32,
     pub flow_accumulation: f32,
     pub downstream_progress: f32,
 }
@@ -189,14 +199,21 @@ pub fn solve_hydrology(
         resolve_downstream(&elevations, &terminals, &lake_candidates, &adjacency);
     let watersheds = resolve_watersheds(&downstream, &resolutions);
     let flow_accumulation = resolve_flow_accumulation(&downstream, &terminals, macro_map, patch);
+    let terminal_indices = resolve_terminal_indices(&downstream);
+    let lake_policies =
+        resolve_lake_terminal_policies(&terminal_indices, &lake_candidates, &resolutions, config);
     let selected = select_river_paths(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
         &elevations,
         &terminals,
+        &terminal_indices,
+        &lake_policies,
         config,
     );
+    let selected_flow_accumulation =
+        resolve_selected_flow_accumulation(&flow_accumulation, &terminal_indices, &lake_policies);
     let node_kinds = resolve_node_kinds(&selected, &downstream, &terminals, &resolutions);
     let nodes = build_nodes(patch, &watersheds, &node_kinds);
     let segments = build_segments(
@@ -204,6 +221,7 @@ pub fn solve_hydrology(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
+        &selected_flow_accumulation,
         &elevations,
         &watersheds,
         patch,
@@ -248,6 +266,19 @@ fn validate_hydrology_config(config: HydrologyConfig) {
     assert!(
         config.headwater_elevation.is_finite(),
         "headwater_elevation must be finite"
+    );
+    assert!(
+        config.lake_river_flow_threshold_multiplier.is_finite()
+            && config.lake_river_flow_threshold_multiplier >= 1.0,
+        "lake_river_flow_threshold_multiplier must be finite and >= 1.0"
+    );
+    assert!(
+        config.lake_discharge_cap_per_area.is_finite() && config.lake_discharge_cap_per_area > 0.0,
+        "lake_discharge_cap_per_area must be positive and finite"
+    );
+    assert!(
+        config.lake_discharge_cap_floor.is_finite() && config.lake_discharge_cap_floor > 0.0,
+        "lake_discharge_cap_floor must be positive and finite"
     );
 }
 
@@ -537,6 +568,54 @@ fn downstream_outlet(start: usize, downstream: &[Option<usize>]) -> usize {
     current
 }
 
+fn resolve_terminal_indices(downstream: &[Option<usize>]) -> Vec<usize> {
+    (0..downstream.len())
+        .into_par_iter()
+        .map(|index| downstream_outlet(index, downstream))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LakeTerminalPolicy {
+    max_incoming_chains: usize,
+    discharge_cap: f32,
+}
+
+fn resolve_lake_terminal_policies(
+    terminal_indices: &[usize],
+    lake_candidates: &[bool],
+    resolutions: &[GraphLocalMinimumResolution],
+    config: HydrologyConfig,
+) -> Vec<Option<LakeTerminalPolicy>> {
+    let mut lake_area_units = vec![0_u32; terminal_indices.len()];
+
+    for (index, &terminal) in terminal_indices.iter().enumerate() {
+        if resolutions[terminal] != GraphLocalMinimumResolution::Lake {
+            continue;
+        }
+        let contribution = if lake_candidates[index] { 1 } else { 0 };
+        lake_area_units[terminal] = lake_area_units[terminal].saturating_add(contribution);
+    }
+
+    let mut policies = vec![None; terminal_indices.len()];
+    for (index, &area_units) in lake_area_units.iter().enumerate() {
+        if resolutions[index] != GraphLocalMinimumResolution::Lake {
+            continue;
+        }
+        let area_units = area_units.max(1);
+        let area_scale = (area_units as f32).sqrt();
+        let max_incoming_chains = area_scale.ceil().max(1.0) as usize;
+        let discharge_cap =
+            config.lake_discharge_cap_floor + area_scale * config.lake_discharge_cap_per_area;
+        policies[index] = Some(LakeTerminalPolicy {
+            max_incoming_chains,
+            discharge_cap,
+        });
+    }
+
+    policies
+}
+
 fn resolve_flow_accumulation(
     downstream: &[Option<usize>],
     terminals: &[bool],
@@ -600,14 +679,23 @@ fn select_river_paths(
     flow: &[f32],
     elevations: &[f32],
     terminals: &[bool],
+    terminal_indices: &[usize],
+    lake_policies: &[Option<LakeTerminalPolicy>],
     config: HydrologyConfig,
 ) -> Vec<bool> {
     let mut selected = vec![false; downstream.len()];
+    let mut selected_lake_chains = vec![0_usize; downstream.len()];
     let mut candidates = flow
         .iter()
         .enumerate()
         .filter_map(|(index, &amount)| {
-            (amount >= config.river_flow_threshold
+            let terminal = terminal_indices[index];
+            let threshold = if lake_policies[terminal].is_some() {
+                config.river_flow_threshold * config.lake_river_flow_threshold_multiplier
+            } else {
+                config.river_flow_threshold
+            };
+            (amount >= threshold
                 && elevations[index] >= config.headwater_elevation
                 && downstream_edges[index].is_some()
                 && !terminals[index])
@@ -615,9 +703,21 @@ fn select_river_paths(
         })
         .collect::<Vec<_>>();
 
-    candidates.sort_unstable();
+    candidates.sort_by(|&left, &right| {
+        flow[right]
+            .total_cmp(&flow[left])
+            .then_with(|| left.cmp(&right))
+    });
 
     for start in candidates {
+        let terminal = terminal_indices[start];
+        if let Some(policy) = lake_policies[terminal] {
+            if selected_lake_chains[terminal] >= policy.max_incoming_chains {
+                continue;
+            }
+            selected_lake_chains[terminal] += 1;
+        }
+
         let mut current = start;
         let mut guard = 0;
         while let Some(next) = downstream[current] {
@@ -636,6 +736,25 @@ fn select_river_paths(
     }
 
     selected
+}
+
+fn resolve_selected_flow_accumulation(
+    raw_flow: &[f32],
+    terminal_indices: &[usize],
+    lake_policies: &[Option<LakeTerminalPolicy>],
+) -> Vec<f32> {
+    raw_flow
+        .par_iter()
+        .enumerate()
+        .map(|(index, &flow)| {
+            let terminal = terminal_indices[index];
+            if let Some(policy) = lake_policies[terminal] {
+                flow.min(policy.discharge_cap)
+            } else {
+                flow
+            }
+        })
+        .collect()
 }
 
 fn resolve_node_kinds(
@@ -701,6 +820,7 @@ fn build_segments(
     downstream: &[Option<usize>],
     downstream_edges: &[Option<VoronoiEdgeId>],
     flow: &[f32],
+    selected_flow: &[f32],
     elevations: &[f32],
     watersheds: &[WatershedId],
     patch: &VoronoiGraphPatch,
@@ -714,7 +834,6 @@ fn build_segments(
             }
             let target = downstream[index]?;
             let edge = downstream_edges[index]?;
-            let role = river_role(flow[index]);
             let drop = elevations[index] - elevations[target];
             Some(GraphRiverSegment {
                 id: GraphRiverSegmentId(splitmix64(
@@ -724,8 +843,9 @@ fn build_segments(
                 from: node_id(patch.corners[index].id),
                 to: node_id(patch.corners[target].id),
                 watershed: watersheds[index],
-                role,
-                flow_accumulation: flow[index],
+                role: river_role(selected_flow[index]),
+                raw_flow_accumulation: flow[index],
+                flow_accumulation: selected_flow[index],
                 downstream_progress: drop.max(0.005),
             })
         })
@@ -781,6 +901,7 @@ mod tests {
                     to: GraphDrainageNodeId(2),
                     watershed: WatershedId(1),
                     role: GraphHydrologyRole::Trunk,
+                    raw_flow_accumulation: 12.0,
                     flow_accumulation: 12.0,
                     downstream_progress: 0.4,
                 },
@@ -791,6 +912,7 @@ mod tests {
                     to: GraphDrainageNodeId(4),
                     watershed: WatershedId(1),
                     role: GraphHydrologyRole::Tributary,
+                    raw_flow_accumulation: 3.0,
                     flow_accumulation: 3.0,
                     downstream_progress: 0.2,
                 },
@@ -876,6 +998,83 @@ mod tests {
         {
             assert_ne!(corner.resolution, GraphLocalMinimumResolution::None);
         }
+    }
+
+    #[test]
+    fn lake_terminal_policy_limits_selected_incoming_chains_by_area() {
+        let downstream = vec![Some(3), Some(3), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(10)),
+            Some(VoronoiEdgeId(11)),
+            Some(VoronoiEdgeId(12)),
+            None,
+        ];
+        let flow = vec![42.0, 40.0, 38.0, 120.0];
+        let elevations = vec![0.8, 0.7, 0.6, 0.1];
+        let terminals = vec![false, false, false, false];
+        let terminal_indices = resolve_terminal_indices(&downstream);
+        let lake_candidates = vec![false, false, false, true];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::Lake,
+        ];
+        let config = HydrologyConfig::default();
+        let lake_policies = resolve_lake_terminal_policies(
+            &terminal_indices,
+            &lake_candidates,
+            &resolutions,
+            config,
+        );
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &terminals,
+            &terminal_indices,
+            &lake_policies,
+            config,
+        );
+
+        let incoming_to_lake = selected[..3].iter().filter(|&&selected| selected).count();
+        assert_eq!(
+            incoming_to_lake, 1,
+            "a tiny lake should accept only one selected incoming river chain"
+        );
+    }
+
+    #[test]
+    fn lake_terminal_policy_caps_selected_flow_but_keeps_raw_accumulation() {
+        let raw_flow = vec![75.0, 120.0, 220.0, 300.0];
+        let terminal_indices = vec![3, 3, 3, 3];
+        let lake_candidates = vec![true, false, true, true];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::Lake,
+        ];
+        let config = HydrologyConfig::default();
+        let lake_policies = resolve_lake_terminal_policies(
+            &terminal_indices,
+            &lake_candidates,
+            &resolutions,
+            config,
+        );
+
+        let selected_flow =
+            resolve_selected_flow_accumulation(&raw_flow, &terminal_indices, &lake_policies);
+        let policy = lake_policies[3].expect("lake terminal should have policy");
+
+        assert!(policy.discharge_cap < raw_flow[2]);
+        assert_eq!(selected_flow[2], policy.discharge_cap);
+        assert_eq!(
+            raw_flow[2], 220.0,
+            "raw hydrology ledger should remain unchanged"
+        );
     }
 
     fn test_inputs(seed: u64) -> (VoronoiGraphPatch, GraphMacroMap) {
