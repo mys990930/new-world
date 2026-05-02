@@ -144,14 +144,18 @@
 - selected river segment는 실제 graph corner-to-corner edge를 따라 cyan/blue line으로 표시하고,
   segment의 selected/display `flow_accumulation`이 클수록 더 두껍게 그린다. hydrology raw corner
   accumulation과 lake capacity가 적용된 selected discharge가 다를 수 있으며, lake terminal river는
-  ocean outlet river보다 보수적인 두께 cap을 가진다.
+  ocean outlet river보다 보수적인 두께 cap을 가진다. lake terminal/approach는 hydrology 단계에서
+  chain 수와 lake 접근부 visible segment 수도 제한되므로, preview에는 cap 적용 후 남은 selected
+  segment만 표시되어야 한다.
 - lake/sink/outlet node는 작은 marker로 표시한다.
 - 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
   candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
-  node count, sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
+  node count, lake/ocean terminal river segment count, lake-capped segment count, lake/ocean max
+  display/raw flow, sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note,
+  source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.

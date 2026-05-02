@@ -11,11 +11,11 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNodeKind,
-    GraphHydrologyGraph, GraphRegionArea, GraphRegionCoord, GraphRiverSegment, HydrologyConfig,
-    MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, VoronoiCornerId, VoronoiEdge,
-    VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId,
-    WorldPlanePoint, generate_macro_map, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    GraphHydrologyGraph, GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord,
+    GraphRiverSegment, HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind,
+    VoronoiCornerId, VoronoiEdge, VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch,
+    VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint, generate_macro_map,
+    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -237,6 +237,19 @@ struct MacroEdgeSample {
     strength: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct PreviewHydrologyStats {
+    lake_terminal_segment_count: usize,
+    lake_capped_segment_count: usize,
+    ocean_terminal_segment_count: usize,
+    max_lake_display_flow: f32,
+    max_lake_capped_display_flow: f32,
+    max_ocean_display_flow: f32,
+    max_lake_raw_flow: f32,
+    max_lake_capped_raw_flow: f32,
+    max_ocean_raw_flow: f32,
+}
+
 #[derive(Debug, Clone)]
 struct PreviewHeader {
     seed: u64,
@@ -260,6 +273,7 @@ struct PreviewHeader {
     lake_node_count: usize,
     sink_node_count: usize,
     outlet_node_count: usize,
+    hydrology_stats: PreviewHydrologyStats,
     macro_source: &'static str,
 }
 
@@ -296,6 +310,42 @@ impl PreviewHeader {
             format!("lake_node_count={}", self.lake_node_count),
             format!("sink_node_count={}", self.sink_node_count),
             format!("outlet_node_count={}", self.outlet_node_count),
+            format!(
+                "lake_terminal_river_segment_count={}",
+                self.hydrology_stats.lake_terminal_segment_count
+            ),
+            format!(
+                "ocean_terminal_river_segment_count={}",
+                self.hydrology_stats.ocean_terminal_segment_count
+            ),
+            format!(
+                "lake_capped_river_segment_count={}",
+                self.hydrology_stats.lake_capped_segment_count
+            ),
+            format!(
+                "max_lake_display_flow={:.3}",
+                self.hydrology_stats.max_lake_display_flow
+            ),
+            format!(
+                "max_lake_capped_display_flow={:.3}",
+                self.hydrology_stats.max_lake_capped_display_flow
+            ),
+            format!(
+                "max_ocean_display_flow={:.3}",
+                self.hydrology_stats.max_ocean_display_flow
+            ),
+            format!(
+                "max_lake_raw_flow={:.3}",
+                self.hydrology_stats.max_lake_raw_flow
+            ),
+            format!(
+                "max_lake_capped_raw_flow={:.3}",
+                self.hydrology_stats.max_lake_capped_raw_flow
+            ),
+            format!(
+                "max_ocean_raw_flow={:.3}",
+                self.hydrology_stats.max_ocean_raw_flow
+            ),
             format!("sea_level={SEA_LEVEL}"),
             "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
             "stage6_hydrology=selected_downhill_watershed_raw_flow_selected_discharge_lake_sink_outlet".to_string(),
@@ -346,6 +396,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .filter(|node| node.kind == GraphDrainageNodeKind::CoastOutlet)
         .count();
+    let hydrology_stats = preview_hydrology_stats(&graph.hydrology);
 
     let header = PreviewHeader {
         seed: config.seed,
@@ -369,6 +420,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         lake_node_count,
         sink_node_count,
         outlet_node_count,
+        hydrology_stats,
         macro_source: "world_generation_macro_map",
     };
 
@@ -408,6 +460,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         lake_node_count,
         sink_node_count,
         outlet_node_count
+    );
+    println!(
+        "river terminal stats: lake terminal segments {}, lake-capped segments {}, ocean segments {}, max lake terminal display/raw {:.2}/{:.2}, max lake-capped display/raw {:.2}/{:.2}, max ocean display/raw {:.2}/{:.2}",
+        hydrology_stats.lake_terminal_segment_count,
+        hydrology_stats.lake_capped_segment_count,
+        hydrology_stats.ocean_terminal_segment_count,
+        hydrology_stats.max_lake_display_flow,
+        hydrology_stats.max_lake_raw_flow,
+        hydrology_stats.max_lake_capped_display_flow,
+        hydrology_stats.max_lake_capped_raw_flow,
+        hydrology_stats.max_ocean_display_flow,
+        hydrology_stats.max_ocean_raw_flow
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -887,6 +951,86 @@ fn river_width(flow: f32) -> i32 {
     }
 }
 
+fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyStats {
+    let nodes = hydrology
+        .nodes
+        .iter()
+        .map(|node| (node.id, node.corner))
+        .collect::<HashMap<_, _>>();
+    let corners = hydrology
+        .corners
+        .iter()
+        .map(|corner| (corner.id, corner))
+        .collect::<HashMap<_, _>>();
+    let mut stats = PreviewHydrologyStats::default();
+
+    for segment in &hydrology.segments {
+        if segment.raw_flow_accumulation > segment.flow_accumulation + 0.001 {
+            stats.lake_capped_segment_count += 1;
+            stats.max_lake_capped_display_flow = stats
+                .max_lake_capped_display_flow
+                .max(segment.flow_accumulation);
+            stats.max_lake_capped_raw_flow = stats
+                .max_lake_capped_raw_flow
+                .max(segment.raw_flow_accumulation);
+        }
+
+        let Some(&corner_id) = nodes.get(&segment.to) else {
+            continue;
+        };
+        match terminal_resolution(corner_id, &corners) {
+            Some(GraphLocalMinimumResolution::Lake) => {
+                stats.lake_terminal_segment_count += 1;
+                stats.max_lake_display_flow =
+                    stats.max_lake_display_flow.max(segment.flow_accumulation);
+                stats.max_lake_raw_flow =
+                    stats.max_lake_raw_flow.max(segment.raw_flow_accumulation);
+            }
+            Some(
+                GraphLocalMinimumResolution::OceanOutlet | GraphLocalMinimumResolution::OutletCarve,
+            ) => {
+                stats.ocean_terminal_segment_count += 1;
+                stats.max_ocean_display_flow =
+                    stats.max_ocean_display_flow.max(segment.flow_accumulation);
+                stats.max_ocean_raw_flow =
+                    stats.max_ocean_raw_flow.max(segment.raw_flow_accumulation);
+            }
+            _ => {}
+        }
+    }
+
+    stats
+}
+
+fn terminal_resolution(
+    start: VoronoiCornerId,
+    corners: &HashMap<VoronoiCornerId, &new_world::world::generation::GraphHydrologyCorner>,
+) -> Option<GraphLocalMinimumResolution> {
+    let mut current = start;
+    let mut guard = 0;
+
+    loop {
+        let corner = corners.get(&current).copied()?;
+        if matches!(
+            corner.resolution,
+            GraphLocalMinimumResolution::OceanOutlet
+                | GraphLocalMinimumResolution::OutletCarve
+                | GraphLocalMinimumResolution::Lake
+                | GraphLocalMinimumResolution::Sink
+        ) {
+            return Some(corner.resolution);
+        }
+        let Some(next) = corner.downstream else {
+            return Some(corner.resolution);
+        };
+        current = next;
+        guard += 1;
+        if guard > corners.len() {
+            return None;
+        }
+    }
+}
+
 fn draw_disc(image: &mut RgbImage, x: i32, y: i32, radius: i32, color: [u8; 3], amount: f32) {
     for oy in -radius..=radius {
         for ox in -radius..=radius {
@@ -1362,6 +1506,17 @@ mod tests {
             lake_node_count: 1,
             sink_node_count: 0,
             outlet_node_count: 2,
+            hydrology_stats: PreviewHydrologyStats {
+                lake_terminal_segment_count: 1,
+                ocean_terminal_segment_count: 2,
+                max_lake_display_flow: 8.0,
+                max_lake_capped_display_flow: 8.0,
+                max_ocean_display_flow: 80.0,
+                max_lake_raw_flow: 120.0,
+                max_lake_capped_raw_flow: 120.0,
+                max_ocean_raw_flow: 160.0,
+                lake_capped_segment_count: 1,
+            },
             macro_source: "world_generation_macro_map",
         };
 
@@ -1370,6 +1525,9 @@ mod tests {
         assert!(metadata.contains("ridge_edge_count=1"));
         assert!(metadata.contains("fault_edge_count=0"));
         assert!(metadata.contains("river_segment_count=3"));
+        assert!(metadata.contains("lake_terminal_river_segment_count=1"));
+        assert!(metadata.contains("lake_capped_river_segment_count=1"));
+        assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
 

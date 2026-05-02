@@ -47,11 +47,15 @@
     corner-to-corner edge chains.
   - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
     not `raw_flow_accumulation`; lake terminal discharge caps are therefore visible in the preview.
+  - lake terminal/approach selection is already reduced by hydrology before rendering: per-lake
+    top-N chain limits, short visible approach segments, and lake-area discharge caps all affect
+    the displayed segment set.
   - lake, sink, and outlet drainage nodes are marked with small overlay dots.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
+  lake/ocean terminal segment counts, lake-capped segment count, lake/ocean max display/raw flow,
   sea level, and source notes.
 
 ## Output Path Rules
