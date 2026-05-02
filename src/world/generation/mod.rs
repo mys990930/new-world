@@ -25,8 +25,10 @@ pub use graph::{
 };
 #[allow(unused_imports)]
 pub use hydrology::{
-    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph,
-    GraphHydrologyRole, GraphRiverSegment, GraphRiverSegmentId, WatershedId,
+    DEFAULT_HEADWATER_ELEVATION, DEFAULT_RIVER_FLOW_THRESHOLD, GraphDrainageNode,
+    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner, GraphHydrologyGraph,
+    GraphHydrologyRole, GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId,
+    HydrologyConfig, WatershedId, solve_hydrology,
 };
 #[allow(unused_imports)]
 pub use macro_map::{

@@ -3,7 +3,8 @@
 ## Role
 
 - Render a deterministic top-down PNG composite for the graph-field-resolved macro map stage.
-- Show separated ocean, island/coast, inland elevation, peak whitening, and ridge/fault/coast candidate edge overlays in one image.
+- Show separated ocean, island/coast, inland elevation, peak whitening, ridge/fault/coast candidate
+  edge overlays, and stage 6 selected hydrology overlays in one image.
 - Keep default filenames short while preserving detailed settings in PNG metadata.
 
 ## Inputs
@@ -42,9 +43,15 @@
   - ridge candidate edges are white overlays.
   - fault candidate edges are red overlays.
   - coast candidate edges are sandy overlays.
-  - selected river chains are not drawn in this stage; hydrology owns that preview surface.
+  - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
+    corner-to-corner edge chains.
+  - river width follows flow accumulation.
+  - lake, sink, and outlet drainage nodes are marked with small overlay dots.
 - A compact in-image legend with an elevation color bar and overlay keys.
-- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage, center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site count, candidate edge count, coast/ridge/fault edge counts, sea level, and source notes.
+- A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
+  center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
+  count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
+  sea level, and source notes.
 
 ## Output Path Rules
 
@@ -60,15 +67,16 @@
 3. Build a padded Delaunay/circumcenter Voronoi dual graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
-5. Generate the RGB pixel buffer with Rayon.
-6. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph
+5. Solve selected hydrology through `solve_hydrology(&patch, &macro_map, HydrologyConfig::default())`.
+6. Generate the RGB pixel buffer with Rayon.
+7. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph
    patch's `VoronoiCorner.position` values, clipping the world-space segment to the preview window,
    and projecting it onto pixel centers.
-7. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
+8. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
-   projecting it onto pixel centers. Stage 3 draws graph-derived coast, ridge, and fault guide overlays;
-   selected river chains are reserved for the later hydrology preview.
-8. Draw the compact legend and encode PNG metadata.
+   projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.
+9. Draw selected river chains and lake/sink/outlet drainage node markers from hydrology results.
+10. Draw the compact legend and encode PNG metadata.
 
 The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from
 the rendered edge overlay because the overlay is not inferred from nearest-site color changes; it uses
@@ -83,11 +91,14 @@ The binary uses the public macro map API exposed by `world::generation::macro_ma
 
 ```rust
 new_world::world::generation::generate_macro_map(&patch, MacroMapConfig::new(seed, generator_version))
+new_world::world::generation::solve_hydrology(&patch, &macro_map, HydrologyConfig::default())
 ```
 
 Goal contract: this preview should show how graph base `continentality/elevation_seed` resolves into
-continent/ocean/island ownership, macro elevation, coast, and ridge/fault guide. The graph
-continentality and elevation maps should visibly match the macro map's land/ocean and high/low patterns.
+continent/ocean/island ownership, macro elevation, coast, ridge/fault guide, and selected hydrology.
+The graph continentality and elevation maps should visibly match the macro map's land/ocean and
+high/low patterns, and selected rivers should follow continuous downstream chains to ocean/coast or
+explicit lake/sink resolution.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

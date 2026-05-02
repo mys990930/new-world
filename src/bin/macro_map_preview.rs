@@ -10,10 +10,12 @@ use rayon::prelude::*;
 
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
-    GraphRegionCoord, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint,
-    generate_macro_map, generate_voronoi_graph_patch, graph_region_for_world_block,
+    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNodeKind,
+    GraphHydrologyGraph, GraphRegionArea, GraphRegionCoord, GraphRiverSegment, HydrologyConfig,
+    MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, VoronoiCornerId, VoronoiEdge,
+    VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId,
+    WorldPlanePoint, generate_macro_map, generate_voronoi_graph_patch,
+    graph_region_for_world_block, solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -211,6 +213,7 @@ struct PreviewGraph {
     site_grid: HashMap<SiteGridCoord, usize>,
     site_samples: HashMap<VoronoiSiteId, MacroSite>,
     edge_samples: Vec<MacroEdgeSample>,
+    hydrology: GraphHydrologyGraph,
     spacing: f32,
 }
 
@@ -253,6 +256,10 @@ struct PreviewHeader {
     coast_edge_count: usize,
     ridge_edge_count: usize,
     fault_edge_count: usize,
+    river_segment_count: usize,
+    lake_node_count: usize,
+    sink_node_count: usize,
+    outlet_node_count: usize,
     macro_source: &'static str,
 }
 
@@ -285,8 +292,13 @@ impl PreviewHeader {
             format!("coast_edge_count={}", self.coast_edge_count),
             format!("ridge_edge_count={}", self.ridge_edge_count),
             format!("fault_edge_count={}", self.fault_edge_count),
+            format!("river_segment_count={}", self.river_segment_count),
+            format!("lake_node_count={}", self.lake_node_count),
+            format!("sink_node_count={}", self.sink_node_count),
+            format!("outlet_node_count={}", self.outlet_node_count),
             format!("sea_level={SEA_LEVEL}"),
             "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
+            "stage6_hydrology=selected_downhill_watershed_flow_accumulation_lake_sink_outlet".to_string(),
             format!("macro_source={}", self.macro_source),
             "world_api=new_world::world::generation::generate_macro_map(patch, config)".to_string(),
         ]
@@ -316,6 +328,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .filter(|edge| edge.kind == EdgeKind::Fault)
         .count();
+    let lake_node_count = graph
+        .hydrology
+        .nodes
+        .iter()
+        .filter(|node| node.kind == GraphDrainageNodeKind::Lake)
+        .count();
+    let sink_node_count = graph
+        .hydrology
+        .nodes
+        .iter()
+        .filter(|node| node.kind == GraphDrainageNodeKind::Sink)
+        .count();
+    let outlet_node_count = graph
+        .hydrology
+        .nodes
+        .iter()
+        .filter(|node| node.kind == GraphDrainageNodeKind::CoastOutlet)
+        .count();
 
     let header = PreviewHeader {
         seed: config.seed,
@@ -335,12 +365,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         coast_edge_count,
         ridge_edge_count,
         fault_edge_count,
+        river_segment_count: graph.hydrology.segments.len(),
+        lake_node_count,
+        sink_node_count,
+        outlet_node_count,
         macro_source: "world_generation_macro_map",
     };
 
     let mut image = render_preview(window, &graph)?;
     draw_base_voronoi_edges(&mut image, window, &graph);
     draw_candidate_edges(&mut image, window, &graph);
+    draw_hydrology(&mut image, window, &graph);
     draw_legend_overlay(&mut image);
     write_png_with_metadata(&image, &output, &header)?;
 
@@ -363,12 +398,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area.min.x, graph_area.max.x, graph_area.min.z, graph_area.max.z
     );
     println!(
-        "sites: {}, candidate edges: {} (coast {}, ridge {}, fault {})",
+        "sites: {}, candidate edges: {} (coast {}, ridge {}, fault {}), rivers: {}, lakes: {}, sinks: {}, outlets: {}",
         graph.patch.sites.len(),
         graph.edge_samples.len(),
         coast_edge_count,
         ridge_edge_count,
-        fault_edge_count
+        fault_edge_count,
+        graph.hydrology.segments.len(),
+        lake_node_count,
+        sink_node_count,
+        outlet_node_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -489,6 +528,7 @@ fn build_macro_map_for_preview(
     }
 
     let macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
+    let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
     let site_samples = macro_map
         .sites
         .iter()
@@ -506,6 +546,7 @@ fn build_macro_map_for_preview(
         site_grid,
         site_samples,
         edge_samples,
+        hydrology,
         spacing,
     })
 }
@@ -768,6 +809,90 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
     }
 }
 
+fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
+    let patch_edges = graph
+        .patch
+        .edges
+        .iter()
+        .map(|edge| (edge.id, *edge))
+        .collect::<HashMap<VoronoiEdgeId, _>>();
+    let corners = graph
+        .patch
+        .corners
+        .iter()
+        .map(|corner| (corner.id, corner.position))
+        .collect::<HashMap<_, _>>();
+
+    for segment in &graph.hydrology.segments {
+        draw_river_segment(image, window, segment, &patch_edges, &corners);
+    }
+
+    for node in &graph.hydrology.nodes {
+        let color = match node.kind {
+            GraphDrainageNodeKind::Lake => [82, 190, 226],
+            GraphDrainageNodeKind::Sink => [128, 75, 178],
+            GraphDrainageNodeKind::CoastOutlet => [47, 219, 235],
+            _ => continue,
+        };
+        let (x, y) = window.world_to_pixel_clamped(node.position);
+        let radius = match node.kind {
+            GraphDrainageNodeKind::Lake => 3,
+            GraphDrainageNodeKind::Sink => 3,
+            GraphDrainageNodeKind::CoastOutlet => 2,
+            _ => 2,
+        };
+        draw_disc(image, x, y, radius + 1, [5, 12, 18], 0.45);
+        draw_disc(image, x, y, radius, color, 0.78);
+    }
+}
+
+fn draw_river_segment(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    segment: &GraphRiverSegment,
+    patch_edges: &HashMap<VoronoiEdgeId, VoronoiEdge>,
+    corners: &HashMap<VoronoiCornerId, WorldPlanePoint>,
+) {
+    let Some(edge) = patch_edges.get(&segment.edge) else {
+        return;
+    };
+    let Some(a) = corners.get(&edge.corners[0]).copied() else {
+        return;
+    };
+    let Some(b) = corners.get(&edge.corners[1]).copied() else {
+        return;
+    };
+    let Some((start, end)) = window.world_segment_to_pixels(a, b) else {
+        return;
+    };
+    let width = river_width(segment.flow_accumulation);
+    let amount = (0.62 + segment.flow_accumulation.sqrt() * 0.035).clamp(0.68, 0.98);
+    draw_line(image, start, end, [4, 12, 22], 0.50, width + 1);
+    draw_line(image, start, end, [41, 211, 239], amount, width);
+}
+
+fn river_width(flow: f32) -> i32 {
+    if flow >= 80.0 {
+        4
+    } else if flow >= 36.0 {
+        3
+    } else if flow >= 18.0 {
+        2
+    } else {
+        1
+    }
+}
+
+fn draw_disc(image: &mut RgbImage, x: i32, y: i32, radius: i32, color: [u8; 3], amount: f32) {
+    for oy in -radius..=radius {
+        for ox in -radius..=radius {
+            if ox * ox + oy * oy <= radius * radius {
+                blend_pixel_i32(image, x + ox, y + oy, color, amount);
+            }
+        }
+    }
+}
+
 fn draw_base_voronoi_edges(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
     let corners = graph
         .patch
@@ -841,7 +966,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     };
     let margin = 8 * scale;
     let panel_width = (160 * scale).min(image.width());
-    let panel_height = (66 * scale).min(image.height());
+    let panel_height = (82 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -879,7 +1004,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         scale,
     );
 
-    let key_y = y + panel_height.saturating_sub(18 * scale);
+    let key_y = y + panel_height.saturating_sub(34 * scale);
     draw_key(image, bar_x, key_y, [247, 248, 242], "RIDGE", scale);
     draw_key(
         image,
@@ -895,6 +1020,30 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         key_y + 13 * scale,
         [236, 213, 128],
         "COAST",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 68 * scale,
+        key_y + 13 * scale,
+        [41, 211, 239],
+        "RIVER",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x,
+        key_y + 26 * scale,
+        [82, 190, 226],
+        "LAKE",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 68 * scale,
+        key_y + 26 * scale,
+        [128, 75, 178],
+        "SINK",
         scale,
     );
 }
@@ -1205,6 +1354,10 @@ mod tests {
             coast_edge_count: 1,
             ridge_edge_count: 1,
             fault_edge_count: 0,
+            river_segment_count: 3,
+            lake_node_count: 1,
+            sink_node_count: 0,
+            outlet_node_count: 2,
             macro_source: "world_generation_macro_map",
         };
 
@@ -1212,6 +1365,7 @@ mod tests {
 
         assert!(metadata.contains("ridge_edge_count=1"));
         assert!(metadata.contains("fault_edge_count=0"));
+        assert!(metadata.contains("river_segment_count=3"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
 

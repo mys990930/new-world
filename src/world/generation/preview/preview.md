@@ -137,14 +137,19 @@
 - 모든 graph Voronoi edge는 실제 graph corner-to-corner segment를 기준으로 희미한 base overlay로
   표시한다.
 - ridge candidate edge는 흰색, fault candidate edge는 붉은색, coast candidate edge는 sandy color overlay로 표시한다.
-- stage 3 macro_map preview는 selected river나 pre-hydrology river corridor를 표시하지 않는다.
-  selected river overlay는 hydrology preview가 확정한다.
+- macro_map preview는 macro_map fill과 stage 4/5 guide를 기본 layer로 표시하고, stage 6 hydrology가
+  구현된 뒤에는 같은 composite 위에 selected river result를 추가 overlay한다.
+- selected river는 hydrology가 확정한 `GraphRiverSegment`만 표시한다. pre-hydrology river candidate나
+  macro_map river potential은 표시하지 않는다.
+- selected river segment는 실제 graph corner-to-corner edge를 따라 cyan/blue line으로 표시하고,
+  flow accumulation이 클수록 더 두껍게 그린다.
+- lake/sink/outlet node는 작은 marker로 표시한다.
 - 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
-  candidate edge count, coast/ridge/fault edge count, sea level, stage 4 guide input note,
-  source note를 함께 기록한다.
+  candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
+  node count, sea level, stage 4 guide input note, stage 6 hydrology note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
@@ -166,6 +171,8 @@
 - coast/ridge/fault candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
+- hydrology overlay도 같은 실제 graph corner segment를 사용한다. 따라서 selected river는 raw
+  nearest-site raster boundary가 아니라 hydrology가 선택한 Voronoi edge chain 위에 놓인다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
 
 ---

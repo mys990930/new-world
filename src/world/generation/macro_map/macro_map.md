@@ -91,6 +91,8 @@ patch guard 바깥의 더 먼 coast 탐색 차이가 overlap 영역의 public ma
 `MacroEdge`는 두 site의 macro ownership과 elevation context를 읽어 coast/ridge/fault guide를 붙인다.
 stage 3 macro_map은 river corridor를 선택하지 않는다. selected river chain, flow accumulation,
 lake/sink/outlet carve는 hydrology 단계가 확정한다.
+현재 구현에서도 `MacroEdgeGuide.is_river_candidate`는 selected river 의미로 사용하지 않는다.
+selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source of truth다.
 
 ---
 
@@ -269,3 +271,5 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
   inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.
   stage 3 macro_map은 hydrology 전 river candidate corridor를 선택하지 않으며, selected river chain,
   flow accumulation, lake/sink/outlet carve는 hydrology stage가 확정한다.
+- hydrology 구현은 macro_map의 signed elevation, coast guide, ridge/fault context를 입력으로 읽지만,
+  macro_map이 river 연속성이나 outlet 정책을 소유하지는 않는다.

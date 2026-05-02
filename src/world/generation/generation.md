@@ -19,6 +19,8 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 - graph는 게임플레이와 월드 일관성에 필요한 제약을 담는다.
 - noise는 제약으로 고정할 필요가 없는 자연스러운 변주를 만든다.
 - chunk는 저장과 출력 window일 뿐, 지형 정체성의 소유자가 아니다.
+- runtime chunk fill은 graph/macro/hydrology를 청크마다 새로 만들지 않고, world-owned generation
+  cache를 읽어 column/voxel 결과만 합성한다.
 - polygon 경계는 후보선이자 소유권 경계일 수 있지만, 그대로 보이는 선이어서는 안 된다.
 - 이 프로젝트는 큰 대륙과 바다, 대륙 내부 산맥과 강을 목표로 하되, ocean basin 안에 크고 작은
   섬과 archipelago도 deterministic feature로 허용한다.
@@ -41,6 +43,8 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 - graph region, site, corner, edge 기반의 deterministic 생성 계약
 - graph base field 기반 대륙/바다/섬 ownership, macro elevation, 산맥/능선/단층/해안 guide의 생성 순서 정의
 - edge 기반 hydrology, watershed, selected river chain의 생성 순서 정의
+- graph region cache, macro map cache, hydrology/heightfield cache가 chunk fill hot path보다 먼저
+  생성되고 공유되는 런타임 계약 정의
 - noisy boundary, meso feature, continuous field, heightfield synthesis, surface plan, voxel fill 단계 경계 정의
 - 각 단계 이후 topdown preview binary가 접근할 수 있는 stage surface 정의
 - 기존 legacy generation API의 임시 호환 re-export
@@ -124,8 +128,14 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. stage 4 guide는
   같은 land component 내부성, signed elevation gradient, inlandness, mountainness/rugged context,
   drainage divide potential을 함께 읽어 ridge/fault edge candidate를 선택한다.
-- stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 이 단계의
-  river는 후보 surface가 아니라 downhill/local-minimum/outlet 정책을 통과한 결과여야 한다.
+- stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 현재
+  구현은 corner downhill, graph-stage local minimum, outlet carve, watershed, flow accumulation,
+  selected river segment를 계산한다. 이 단계의 river는 후보 surface가 아니라
+  downhill/local-minimum/outlet 정책을 통과한 결과다.
+
+런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
+contract에 따라 graph region cache, macro map cache, hydrology/boundary/heightfield cache를 worker에서
+준비하고, chunk generation은 필요한 world-space column/window만 sample해 `ChunkData`를 채운다.
 
 문서화된 다음 leaf:
 
@@ -217,3 +227,5 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 8. material, water, vegetation은 직접 `ChunkData`를 수정하지 않고 plan으로 합쳐진 뒤 voxel fill에서 반영된다.
 9. 각 stage는 topdown preview binary로 진단 가능해야 한다.
 10. legacy generation re-export는 migration bridge이며, 새 graph-first 책임을 legacy 쪽으로 늘리지 않는다.
+11. Delaunay/Voronoi graph construction과 macro ownership resolve는 chunk fill hot path에서 반복하지 않고,
+    world-owned generation cache miss에서만 실행해야 한다.

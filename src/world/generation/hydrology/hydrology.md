@@ -52,6 +52,40 @@ Amit의 mapgen2에서는 mountain corner에서 시작해 downhill 방향을 따�
 
 ---
 
+## 공개 API
+
+현재 구현은 graph patch와 macro map을 입력으로 받아 별도 hydrology annotation layer를 만든다.
+graph core와 macro_map에는 selected river state를 직접 쓰지 않고, corner/edge id 기반 table로
+결과를 반환한다.
+
+```rust
+HydrologyConfig::default() -> HydrologyConfig
+solve_hydrology(&VoronoiGraphPatch, &GraphMacroMap, HydrologyConfig) -> GraphHydrologyGraph
+
+GraphHydrologyGraph {
+    corners: Vec<GraphHydrologyCorner>,
+    nodes: Vec<GraphDrainageNode>,
+    segments: Vec<GraphRiverSegment>,
+}
+
+GraphHydrologyCorner {
+    id,
+    elevation,
+    downstream,
+    downstream_edge,
+    watershed,
+    flow_accumulation,
+    is_local_minimum,
+    resolution,
+}
+```
+
+`GraphRiverSegment`는 potential guide가 아니라 selected river result다. preview와 이후
+heightfield는 이 segment만 강으로 해석해야 한다. macro_map의 ridge/fault/coast guide는 이 단계의
+입력일 뿐이며, pre-hydrology river candidate와 혼동하면 안 된다.
+
+---
+
 ## 처리 순서
 
 1. macro_map의 resolved ownership/elevation, ridge guide, coast guide를 읽는다.
@@ -63,6 +97,16 @@ Amit의 mapgen2에서는 mountain corner에서 시작해 downhill 방향을 따�
 7. 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
 8. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
 9. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
+
+launch 구현은 아래의 보수적인 정책을 사용한다.
+
+- terminal outlet은 ocean/coast corner 또는 coast guide와 인접한 corner다.
+- 일반 corner는 인접 corner 중 더 낮은 elevation 또는 ocean/coast terminal을 downhill target으로 고른다.
+- 더 낮은 이웃이 없는 graph-stage local minimum은 spill path search를 수행한다.
+- spill path가 ocean/coast terminal까지 닿으면 outlet carve로 downstream edge chain을 만든다.
+- spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
+- flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
+- selected river는 threshold를 넘은 headwater에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
 
 최종 river geometry는 raw edge segment가 아니다.
 
@@ -146,5 +190,13 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 
 ## 현재 구현 상태
 
-- 현재는 graph data contract scaffold 단계다.
-- future work는 continuous field와 macro elevation 이후, heightfield synthesis 이전에 watershed routing을 풀어야 한다.
+- `src/world/generation/hydrology/mod.rs`가 `pub mod hydrology`로 연결되어 있다.
+- `solve_hydrology`는 macro corner elevation, coast guide, graph corner adjacency를 읽어 downhill,
+  graph-stage local minimum, outlet carve, watershed, flow accumulation, selected river segment를 만든다.
+- local minimum은 `OceanOutlet`, `OutletCarve`, `Lake`, `Sink` 중 하나의 resolution으로 명시된다.
+  launch 구현은 강 연속성을 우선해 ocean/coast까지 spill path가 있으면 outlet carve를 선택한다.
+- selected river segment는 downstream chain을 따라 terminal outlet 또는 explicit sink/lake resolution까지
+  이어지도록 선택된다.
+- preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
+- 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
+  noisy river spline realization, valley carve와 heightfield coupling.

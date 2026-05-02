@@ -66,6 +66,7 @@
 
 - graph region, site, corner, edge id와 patch
 - graph base `continentality/elevation_seed`와 macro ownership/elevation resolve annotation
+- graph region cache, macro map cache, hydrology/boundary/heightfield cache key와 cached stage output
 - continuous blended field sample
 - hydrology watershed, drainage node, river segment
 - generation stage, generation config, column synthesis request/result
@@ -139,6 +140,8 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 6. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
 7. 각 generation stage는 topdown preview binary로 검토 가능해야 한다.
 8. legacy API는 migration bridge이며, 새 기능은 가능한 한 graph-first generation 모듈에 추가한다.
+9. 실시간 chunk fill은 graph/macro/hydrology stage를 chunk마다 재계산하지 않고, world-owned
+   generation cache를 읽어야 한다.
 
 ---
 
@@ -173,6 +176,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   island/archipelago component, coast/ridge/fault guide annotation을 제공한다. 목표 계약상 이 ownership과
   elevation은 graph base `continentality/elevation_seed`를 source of truth로 resolve하며,
   macro_map은 독자 continent/island noise source를 만들지 않는다.
-- 아직 구현되지 않은 것: hydrology solve, noisy boundary realization, Voronoi-derived map,
-  Perlin micro relief 합성.
+- 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
+  flow accumulation, selected river segment scaffold를 제공한다.
+- 아직 구현되지 않은 것: noisy boundary realization, Voronoi-derived map, Perlin micro relief 합성.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

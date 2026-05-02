@@ -67,6 +67,70 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 
 ---
 
+## Runtime Cache Contract
+
+Delaunay/Voronoi graph와 그 위의 macro annotation은 청크가 요청될 때마다 즉석에서 새로 만들면
+안 된다. chunk는 지형 정체성의 소유자가 아니라 저장/출력 window이므로, 실시간 chunk generation
+path는 이미 계산된 world-owned generation cache를 읽어 column/voxel 결과만 합성해야 한다.
+
+런타임 생성은 아래 계층을 따른다.
+
+```text
+graph region cache
+-> macro map cache
+-> hydrology / boundary / heightfield cache
+-> chunk generation samples column/window data
+-> voxel fill writes ChunkData
+```
+
+### Graph Region Cache
+
+graph region cache는 seed, generator version, graph region coordinate, graph config를 key로 하는
+world-owned cache다. Delaunay triangulation과 Voronoi corner/edge assembly는 graph region cache
+miss에서만 worker thread가 수행한다.
+
+청크 생성 path의 불변식:
+
+- chunk 하나를 채우기 위해 Delaunay triangulation을 반복 실행하지 않는다.
+- 여러 chunk가 같은 graph region 또는 overlapping padded graph patch를 공유한다.
+- padded graph patch의 authoritative interior만 downstream stage가 신뢰한다.
+- hull/open Voronoi edge와 guard 영역은 cache 내부 안정성 장치이며, chunk-visible terrain identity가 아니다.
+
+### Stage Cache Chain
+
+각 stage cache는 이전 stage output을 읽어 deterministic annotation을 만든다.
+
+- `GraphRegionCache`: site/corner/edge topology와 base graph field
+- `MacroMapCache`: continent/ocean/island ownership, signed macro elevation, ridge/fault/coast guide
+- `HydrologyCache`: selected river chain, watershed, lake/sink/outlet resolution
+- `BoundaryCache`: selected visible edge의 noisy realization
+- `HeightfieldCache`: chunk column sampling이 읽을 height/water/constraint field
+
+초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
+계약은 “chunk fill이 graph/macro/hydrology를 생성하지 않고 읽는다”는 방향을 유지해야 한다.
+
+### Job Boundary
+
+`jobs`는 cache miss를 worker thread에서 실행할 수 있지만, stage order나 terrain meaning을 소유하지
+않는다. 어떤 cache가 필요하고, 어떤 key와 padding으로 생성해야 하는지는 `world::generation`의
+문서와 타입 계약이 소유한다. app/ECS는 chunk visibility와 요청 우선순위를 정할 수 있지만, graph
+region cache의 내부 의미를 직접 결정하지 않는다.
+
+### Performance Budget
+
+실시간 chunk generation 기준에서 목표는 아래와 같다.
+
+- chunk fill hot path: Delaunay triangulation 0회
+- graph region cache miss: worker에서 Delaunay triangulation 1회
+- 같은 graph/macro region을 참조하는 chunk들은 cached stage output 공유
+- preview처럼 큰 world window를 한 번에 triangulate하는 경로는 diagnostic binary에 한정
+- cache eviction은 메모리 예산을 보되, eviction 후 재생성해도 같은 seed/config/key에서 같은 결과를 내야 함
+
+이 계약을 어기면 플레이어 이동 중 같은 graph patch를 chunk마다 반복 계산해 latency spike가 생길 수
+있다.
+
+---
+
 ## 불변식
 
 1. chunk coordinate는 output window만 고르며 macro terrain identity를 정의하지 않는다.
@@ -74,6 +138,8 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 3. sea-level contract는 `WorldMeta.generator_version`이 의도적으로 바꾸기 전까지 world-space `y = 0`을 유지한다.
 4. stage output은 preview와 test가 같은 deterministic 입력으로 재현할 수 있어야 한다.
 5. 모든 stage는 독립 topdown preview 대상이어야 한다.
+6. chunk fill hot path는 graph triangulation이나 macro ownership resolve를 반복 수행하지 않고,
+   world-owned generation cache를 읽어야 한다.
 
 ---
 
