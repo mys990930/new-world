@@ -45,7 +45,8 @@
   - coast candidate edges are sandy overlays.
   - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
     corner-to-corner edge chains.
-  - river width follows flow accumulation.
+  - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
+    not `raw_flow_accumulation`; lake terminal discharge caps are therefore visible in the preview.
   - lake, sink, and outlet drainage nodes are marked with small overlay dots.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,

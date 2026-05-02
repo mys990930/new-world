@@ -866,9 +866,13 @@ fn draw_river_segment(
         return;
     };
     let width = river_width(segment.flow_accumulation);
-    let amount = (0.62 + segment.flow_accumulation.sqrt() * 0.035).clamp(0.68, 0.98);
+    let amount = river_amount(segment.flow_accumulation);
     draw_line(image, start, end, [4, 12, 22], 0.50, width + 1);
     draw_line(image, start, end, [41, 211, 239], amount, width);
+}
+
+fn river_amount(flow: f32) -> f32 {
+    (0.62 + flow.sqrt() * 0.035).clamp(0.68, 0.98)
 }
 
 fn river_width(flow: f32) -> i32 {
@@ -1388,6 +1392,33 @@ mod tests {
         draw_legend_overlay(&mut image);
 
         assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(180 * 90));
+    }
+
+    #[test]
+    fn river_preview_style_uses_selected_display_flow() {
+        let segment = GraphRiverSegment {
+            id: new_world::world::generation::GraphRiverSegmentId(1),
+            edge: VoronoiEdgeId(1),
+            from: new_world::world::generation::GraphDrainageNodeId(1),
+            to: new_world::world::generation::GraphDrainageNodeId(2),
+            watershed: new_world::world::generation::WatershedId(1),
+            role: new_world::world::generation::GraphHydrologyRole::Headwater,
+            raw_flow_accumulation: 160.0,
+            flow_accumulation: 12.0,
+            downstream_progress: 0.2,
+        };
+
+        assert_eq!(
+            river_width(segment.flow_accumulation),
+            1,
+            "preview width should use capped selected/display flow"
+        );
+        assert_eq!(
+            river_width(segment.raw_flow_accumulation),
+            4,
+            "raw hydrology ledger would draw much wider and must not drive preview width"
+        );
+        assert_eq!(river_amount(segment.flow_accumulation), river_amount(12.0));
     }
 
     #[test]
