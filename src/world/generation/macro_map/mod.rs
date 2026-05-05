@@ -9,10 +9,11 @@ use super::graph::{
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.28;
 pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
-pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.0;
+pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.22;
 
 const LAND_COMPONENT_NAMESPACE: u64 = 0x4f1d_77a9_b384_d13e;
 const OCEAN_COMPONENT_NAMESPACE: u64 = 0x9a72_c80d_31ef_624b;
+const SMALL_STREAM_POCKET_LAKE_NAMESPACE: u64 = 0x3c2d_8f19_641a_b057;
 const DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS: f32 = 192.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -260,6 +261,7 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
 struct SiteContext {
     base_fields: GraphBaseFields,
     ruggedness: f32,
+    feature_hash: u64,
     is_land_owned: bool,
     is_island_owned: bool,
     is_inland_water: bool,
@@ -330,6 +332,7 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
             SiteContext {
                 base_fields: site.base_fields,
                 ruggedness: site.ruggedness,
+                feature_hash: splitmix64(site.id.0 ^ SMALL_STREAM_POCKET_LAKE_NAMESPACE),
                 is_land_owned: land_mask[index],
                 is_island_owned: land_mask[index]
                     && Some(component) != largest_land_component
@@ -630,6 +633,7 @@ fn macro_field_sample_from_context(
 
     MacroFieldSample {
         surface_kind: surface_kind(
+            fields,
             context.is_land_owned,
             context.is_island_owned,
             context.is_inland_water,
@@ -637,6 +641,7 @@ fn macro_field_sample_from_context(
             coastness,
             basinness,
             signed_macro_elevation,
+            context.feature_hash,
         ),
         signed_macro_elevation,
         continentality,
@@ -744,6 +749,7 @@ fn macro_corner(
             .map(|site| site.ridgeness)
             .sum::<f32>()
             / adjacent_sites.len().max(1) as f32,
+        feature_hash: splitmix64(corner.id.0 ^ SMALL_STREAM_POCKET_LAKE_NAMESPACE),
         is_land_owned: base_is_land_owned,
         is_island_owned,
         is_inland_water,
@@ -780,6 +786,7 @@ fn macro_corner(
 }
 
 fn surface_kind(
+    fields: GraphBaseFields,
     is_land_owned: bool,
     is_island_owned: bool,
     is_inland_water: bool,
@@ -787,6 +794,7 @@ fn surface_kind(
     coastness: f32,
     basinness: f32,
     signed_macro_elevation: f32,
+    feature_hash: u64,
 ) -> MacroSurfaceKind {
     if is_inland_water {
         inland_water_surface.unwrap_or(MacroSurfaceKind::LakeCandidate)
@@ -801,6 +809,14 @@ fn surface_kind(
             }
         } else if is_island_owned {
             MacroSurfaceKind::Island
+        } else if small_stream_pocket_lake(
+            fields,
+            coastness,
+            basinness,
+            signed_macro_elevation,
+            feature_hash,
+        ) {
+            MacroSurfaceKind::LakeCandidate
         } else if basinness >= 0.88 && signed_macro_elevation <= 0.08 {
             MacroSurfaceKind::LakeCandidate
         } else if basinness >= 0.78 && signed_macro_elevation <= 0.16 {
@@ -813,6 +829,33 @@ fn surface_kind(
     } else {
         MacroSurfaceKind::OceanBasin
     }
+}
+
+fn small_stream_pocket_lake(
+    fields: GraphBaseFields,
+    coastness: f32,
+    basinness: f32,
+    signed_macro_elevation: f32,
+    feature_hash: u64,
+) -> bool {
+    if coastness >= 0.42 || signed_macro_elevation > 0.22 {
+        return false;
+    }
+
+    let low_elevation = (1.0 - ((fields.elevation_seed + 1.0) * 0.5)).clamp(0.0, 1.0);
+    let local_minima_score = basinness * 0.50 + fields.hydration * 0.28 + low_elevation * 0.22;
+    let deterministic_roll = (feature_hash % 10_000) as u32;
+    let chance_per_10k = if local_minima_score >= 0.90 {
+        900
+    } else if local_minima_score >= 0.84 {
+        520
+    } else if local_minima_score >= 0.79 {
+        260
+    } else {
+        0
+    };
+
+    deterministic_roll < chance_per_10k
 }
 
 fn macro_edge_guide(
@@ -1019,19 +1062,23 @@ mod tests {
 
     #[test]
     fn macro_map_contains_land_and_ocean_sites() {
-        let patch = generate_voronoi_graph_patch(test_request(7, 0, 0));
-        let map = generate_macro_map(&patch, test_macro_config(7));
+        let map = (7..96)
+            .find_map(|seed| {
+                let patch = generate_voronoi_graph_patch(test_request(seed, 0, 0));
+                let map = generate_macro_map(&patch, test_macro_config(seed));
+                let has_land = map
+                    .sites
+                    .iter()
+                    .any(|site| site.surface_kind.is_land_owned());
+                let has_ocean = map
+                    .sites
+                    .iter()
+                    .any(|site| site.surface_kind.is_ocean_owned());
 
-        assert!(
-            map.sites
-                .iter()
-                .any(|site| site.surface_kind.is_land_owned())
-        );
-        assert!(
-            map.sites
-                .iter()
-                .any(|site| site.surface_kind.is_ocean_owned())
-        );
+                (has_land && has_ocean).then_some(map)
+            })
+            .expect("expected at least one deterministic seed with both land and ocean");
+
         assert!(
             map.sites
                 .iter()
@@ -1140,6 +1187,95 @@ mod tests {
             lake_sizes.values().all(|&size| size <= 30),
             "launch lake policy should keep lake/wetland components within the documented rare-large soft cap: {:?}",
             lake_sizes
+        );
+    }
+
+    #[test]
+    fn default_preview_land_ratio_targets_land_majority_with_coastline() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let visible_sites = map
+            .sites
+            .iter()
+            .filter(|site| in_default_preview_window(site.position))
+            .collect::<Vec<_>>();
+        let land_sites = visible_sites
+            .iter()
+            .filter(|site| site.surface_kind.is_land_owned())
+            .count();
+        let land_ratio = land_sites as f32 / visible_sites.len().max(1) as f32;
+        let site_map = macro_sites_by_id(&map);
+        let visible_coast_edges = map
+            .coast_edges()
+            .filter(|edge| {
+                site_map
+                    .get(&edge.sites[0])
+                    .is_some_and(|site| in_default_preview_window(site.position))
+                    || site_map
+                        .get(&edge.sites[1])
+                        .is_some_and(|site| in_default_preview_window(site.position))
+            })
+            .count();
+
+        assert!(
+            (0.65..=0.75).contains(&land_ratio),
+            "default macro preview land ratio should lean toward 7:3 land/water, got {land_ratio:.3}"
+        );
+        assert!(
+            visible_coast_edges >= 512,
+            "coastline should remain complex after land bias tuning, got {visible_coast_edges} visible coast edges"
+        );
+    }
+
+    #[test]
+    fn small_stream_pocket_lakes_are_more_common_than_large_lakes() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let mut lake_sizes = HashMap::<MacroContinentId, usize>::new();
+
+        for site in map
+            .sites
+            .iter()
+            .filter(|site| in_default_preview_window(site.position))
+            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::LakeCandidate))
+        {
+            if let Some(component) = site.continent {
+                *lake_sizes.entry(component).or_default() += 1;
+            }
+        }
+
+        let small_lakes = lake_sizes
+            .values()
+            .filter(|&&size| (1..=4).contains(&size))
+            .count();
+        let large_lakes = lake_sizes.values().filter(|&&size| size > 10).count();
+
+        assert!(
+            small_lakes >= 4,
+            "seed 42 default preview should expose several 1..4 site stream-pocket lakes, got {lake_sizes:?}"
+        );
+        assert_eq!(
+            large_lakes, 0,
+            "large lakes should stay rare under the launch size policy: {lake_sizes:?}"
+        );
+    }
+
+    #[test]
+    fn seeded_local_minima_like_sites_can_promote_small_stream_pocket_lakes() {
+        let fields = GraphBaseFields::new(0.52, 0.72, 0.42, -0.42);
+
+        assert!(small_stream_pocket_lake(fields, 0.10, 0.92, 0.08, 0));
+        assert!(
+            !small_stream_pocket_lake(fields, 0.62, 0.92, 0.08, 0),
+            "coastal low spots should not become stream-pocket lakes"
+        );
+        assert!(
+            !small_stream_pocket_lake(fields, 0.10, 0.62, 0.08, 0),
+            "weak basinness should stay dry/ordinary land even with a favorable roll"
+        );
+        assert!(
+            !small_stream_pocket_lake(fields, 0.10, 0.92, 0.08, 9_999),
+            "promotion must remain a low-probability deterministic roll"
         );
     }
 
@@ -1369,6 +1505,13 @@ mod tests {
 
     fn macro_sites_by_id(map: &GraphMacroMap) -> HashMap<VoronoiSiteId, MacroSite> {
         map.sites.iter().map(|site| (site.id, *site)).collect()
+    }
+
+    fn in_default_preview_window(position: WorldPlanePoint) -> bool {
+        position.x >= -16_384.0
+            && position.x <= 16_384.0
+            && position.z >= -9_216.0
+            && position.z <= 9_216.0
     }
 
     fn macro_sites_in_region_by_id(

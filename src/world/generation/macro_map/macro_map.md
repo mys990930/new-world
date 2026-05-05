@@ -84,6 +84,10 @@ MacroLakeEdgeClass::{
 `MacroMapConfig`는 land/ocean 비율을 진단하고 조율하기 위한 공개 tuning handle을 가진다.
 `land_bias`는 continent/ocean ownership 합성값에 더해지는 signed offset이며, 양수일수록 land
 ownership이 늘고 음수일수록 ocean basin ownership이 늘어난다.
+launch 기본값은 `DEFAULT_MACRO_LAND_BIAS = 0.22`이며, 기본 preview window에서 대략
+land:water = 7:3에 가까운 비율을 목표로 한다. 이 값은 graph base `continentality`의 coherent
+field를 새로 만들지 않고 threshold를 이동하는 tuning handle이다. 따라서 coastline 복잡도는
+여전히 graph continentality/elevation field의 장거리 등고선과 connected component resolve가 만든다.
 
 이전 transition 구현에 있던 `island_strength`와 super-cell continent/island source는 제거한다.
 island/archipelago 성향은 graph base `continentality`의 양수 component 해석에서만 나온다.
@@ -157,6 +161,11 @@ launch 정책은 아래처럼 잡는다.
   동시에 맞을 때만 드물게 허용한다. 그 외 큰 폐쇄 저지대는 wetland 또는 dry basin으로 흡수한다.
   이 값은 launch tuning용 soft cap이며, 이후 heightfield/water level solve가 들어오면 component
   내부 일부만 수면으로 남기는 방식으로 더 정교화한다.
+- 1~4 site/cell 규모의 작은 stream-pocket lake는 큰 호수 억제 정책과 별개로 낮은 확률로 허용한다.
+  이 후보는 land-owned 저지대 안에서 `basinness`, hydration, 낮은 `elevation_seed`, 낮은 coastness,
+  site/corner id 기반 deterministic roll을 함께 통과해야 한다. 목적은 강줄기 중간의 local-minima-like
+  pocket을 드물게 만들되, 모든 local minimum을 물로 채우지 않고 dry basin / closed basin 표현을
+  계속 유지하는 것이다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
@@ -172,7 +181,8 @@ deterministic graph base field, 충분한 padding, component pruning/assimilatio
 
 현재 launch 구현은 graph base `continentality`를 그대로 읽어 land/ocean ownership을 판정한다.
 `land_bias`와 `sea_level`은 그 값에 적용되는 signed offset일 뿐이며, macro_map은 별도 continent/island
-noise source를 합성하지 않는다. signed macro elevation은 graph base `elevation_seed`,
+noise source를 합성하지 않는다. 기본 `land_bias`는 7:3 land/water preview target을 위한 조율점이고,
+CLI preview에서는 `--land-bias`로 override할 수 있다. signed macro elevation은 graph base `elevation_seed`,
 `continentality`, coastness, basinness를 합성해 얻는다. component id와 distance 값은 아직 launch
 scaffold 수준의 deterministic hint이며, 이후 connected component resolve로 대체되어야 한다.
 
@@ -288,10 +298,13 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - `src/world/generation/macro_map/mod.rs`가 `pub mod macro_map`으로 연결되어 있다.
 - `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
 - continent/ocean ownership은 graph base `continentality`를 source of truth로 읽고, `land_bias`와
-  `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
+  `sea_level` offset만 적용해 정한다. launch 기본 `land_bias`는 0.22로, 기본 preview window에서
+  대략 7:3 land/water를 목표로 한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
 - ocean/lake ownership은 water component connectivity를 함께 읽는다. patch/open boundary에 연결된다는
   사실만으로 ocean이 되지는 않으며, explicit ocean basin으로 분류되지 않은 고립 water component는
   lake candidate로 surface kind를 바꾼다.
+- 큰 lake는 드문 deep/wet basin 조건으로 제한하고, 1~4 site/cell stream-pocket lake는 land-owned
+  저지대에서 deterministic low-probability 조건을 통과할 때만 추가한다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는

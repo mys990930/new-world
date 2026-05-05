@@ -75,8 +75,9 @@
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
-  count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
-  lake/ocean terminal segment counts, lake component count, inland water site count, dry basin site
+  count, visible site count, land site count, land ratio, candidate edge count, coast/ridge/fault
+  edge counts, selected river/lake/sink/outlet counts, lake/ocean terminal segment counts,
+  lake component count, small lake component count, inland water site count, dry basin site
   count, max lake component size, large lake component count, ocean component count, lake-capped
   segment count, lake inlet/outlet count, disconnected lake inlet/outlet count, selected lake-edge
   river segment count, invalid lake contact/intersection count, ambiguous shared corner count,
@@ -98,6 +99,9 @@
 3. Build a padded Delaunay/circumcenter Voronoi dual graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
+   - The launch default land bias targets roughly 7:3 land/water in the default macro preview
+     window while preserving complex coastlines from graph continentality rather than adding a
+     separate continent noise source.
 5. Solve selected hydrology through `solve_hydrology(&patch, &macro_map, HydrologyConfig::default())`.
 6. Generate the RGB pixel buffer with Rayon.
 7. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph

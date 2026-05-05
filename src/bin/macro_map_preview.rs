@@ -267,7 +267,11 @@ struct PreviewHydrologyStats {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PreviewSurfaceStats {
+    visible_site_count: usize,
+    land_site_count: usize,
+    land_ratio_per_mille: u16,
     lake_component_count: usize,
+    small_lake_component_count: usize,
     inland_water_site_count: usize,
     dry_basin_site_count: usize,
     max_lake_component_sites: usize,
@@ -329,6 +333,15 @@ impl PreviewHeader {
                 self.graph_area.max.x, self.graph_area.max.z
             ),
             format!("site_count={}", self.site_count),
+            format!(
+                "visible_site_count={}",
+                self.surface_stats.visible_site_count
+            ),
+            format!("land_site_count={}", self.surface_stats.land_site_count),
+            format!(
+                "land_ratio={:.3}",
+                self.surface_stats.land_ratio_per_mille as f32 / 1000.0
+            ),
             format!("candidate_edge_count={}", self.edge_count),
             format!("coast_edge_count={}", self.coast_edge_count),
             format!("ridge_edge_count={}", self.ridge_edge_count),
@@ -340,6 +353,10 @@ impl PreviewHeader {
             format!(
                 "lake_component_count={}",
                 self.surface_stats.lake_component_count
+            ),
+            format!(
+                "small_lake_component_count={}",
+                self.surface_stats.small_lake_component_count
             ),
             format!(
                 "inland_water_site_count={}",
@@ -576,8 +593,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         outlet_node_count
     );
     println!(
-        "surface stats: lake components {}, inland water sites {}, dry basin sites {}, max lake size {}, large lakes {}, ocean components {}, ocean sites {}",
+        "surface stats: visible sites {}, land sites {}, land ratio {:.3}, lake components {} (small {}), inland water sites {}, dry basin sites {}, max lake size {}, large lakes {}, ocean components {}, ocean sites {}",
+        surface_stats.visible_site_count,
+        surface_stats.land_site_count,
+        surface_stats.land_ratio_per_mille as f32 / 1000.0,
         surface_stats.lake_component_count,
+        surface_stats.small_lake_component_count,
         surface_stats.inland_water_site_count,
         surface_stats.dry_basin_site_count,
         surface_stats.max_lake_component_sites,
@@ -1295,6 +1316,8 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
     let mut lake_components = HashSet::new();
     let mut lake_component_sizes = HashMap::<_, usize>::new();
     let mut ocean_components = HashSet::new();
+    let mut visible_site_count = 0;
+    let mut land_site_count = 0;
     let mut inland_water_site_count = 0;
     let mut dry_basin_site_count = 0;
     let mut ocean_site_count = 0;
@@ -1306,6 +1329,10 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
             || site.position.z > window.max_z()
         {
             continue;
+        }
+        visible_site_count += 1;
+        if site.surface_kind.is_land_owned() {
+            land_site_count += 1;
         }
 
         match site.surface_kind {
@@ -1330,7 +1357,18 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
     }
 
     PreviewSurfaceStats {
+        visible_site_count,
+        land_site_count,
+        land_ratio_per_mille: if visible_site_count == 0 {
+            0
+        } else {
+            ((land_site_count as f32 / visible_site_count as f32) * 1000.0).round() as u16
+        },
         lake_component_count: lake_components.len(),
+        small_lake_component_count: lake_component_sizes
+            .values()
+            .filter(|&&size| (1..=4).contains(&size))
+            .count(),
         inland_water_site_count,
         dry_basin_site_count,
         max_lake_component_sites: lake_component_sizes.values().copied().max().unwrap_or(0),
@@ -1930,7 +1968,11 @@ mod tests {
             sink_node_count: 0,
             outlet_node_count: 2,
             surface_stats: PreviewSurfaceStats {
+                visible_site_count: 64,
+                land_site_count: 45,
+                land_ratio_per_mille: 703,
                 lake_component_count: 2,
+                small_lake_component_count: 1,
                 inland_water_site_count: 12,
                 dry_basin_site_count: 3,
                 max_lake_component_sites: 8,
@@ -1972,7 +2014,11 @@ mod tests {
         assert!(metadata.contains("ridge_edge_count=1"));
         assert!(metadata.contains("fault_edge_count=0"));
         assert!(metadata.contains("river_segment_count=3"));
+        assert!(metadata.contains("visible_site_count=64"));
+        assert!(metadata.contains("land_site_count=45"));
+        assert!(metadata.contains("land_ratio=0.703"));
         assert!(metadata.contains("lake_component_count=2"));
+        assert!(metadata.contains("small_lake_component_count=1"));
         assert!(metadata.contains("inland_water_site_count=12"));
         assert!(metadata.contains("dry_basin_site_count=3"));
         assert!(metadata.contains("max_lake_component_sites=8"));

@@ -165,7 +165,8 @@
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
   invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
   repeated lake contact pruned count, unclassified lake-connected flow count,
-  disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
+  disconnected lake inlet/outlet count, selected lake-edge river segment count, visible site count,
+  land site count, land ratio, small lake component count를 포함한다. 정상 preview에서
   disconnected, selected lake-edge, invalid, ambiguous count는 0이어야 하며, duplicate trunk pruned count는
   selected overlay에서 제거한 중복 upstream branch 수를 나타낸다. repeated lake contact pruned count는
   같은 selected chain이 두 번째 lake contact에 닿지 않도록 제거한 segment 수를 나타낸다.
@@ -175,7 +176,8 @@
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
   candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
-  node count, lake component count, inland water site count, ocean component count,
+  node count, visible site count, land site count, land ratio, lake component count,
+  small lake component count, inland water site count, ocean component count,
   lake/ocean terminal river segment count, lake-capped segment count, lake inlet/outlet count,
   disconnected lake inlet/outlet count, selected lake-edge river segment count,
   invalid lake contact/intersection count, ambiguous shared corner count, duplicate trunk pruned

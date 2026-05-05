@@ -151,6 +151,9 @@ hydrology 단계가 별도 layer에서 소유한다.
 - `elevation_seed`는 대륙 내부 highland/lowland, ocean basin depth, ridge guide 후보를 만들 수
   있는 broad gradient를 제공하고, `continentality`와 양의 context correlation을 갖는다.
 - graph field preview와 macro map preview는 같은 구조가 해석 전/해석 후로 이어져 보이는 관계여야 한다.
+- launch 기본 land/water 비율 조정은 graph field를 새 noise source로 바꾸는 대신 `macro_map`의
+  `land_bias` tuning handle에서 수행한다. graph는 여전히 복잡한 coastline이 나올 수 있는 coherent
+  `continentality` field를 제공하고, macro_map이 그 threshold를 해석한다.
 
 ---
 
