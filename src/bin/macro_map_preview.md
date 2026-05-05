@@ -51,8 +51,9 @@
   - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
     not `raw_flow_accumulation`; lake terminal discharge caps are therefore visible in the preview.
   - lake terminal/inlet selection is already reduced by hydrology before rendering: per-lake
-    top-N chain limits, short visible inlet segments, and lake-area discharge caps all affect
-    the displayed segment set.
+    top-N chain limits, lake-area inlet raw-flow thresholds, and lake-area discharge caps all
+    affect the displayed segment set. A qualifying lake-bound trunk is not clipped to only the
+    final few lake-adjacent segments; it can remain visible until the land-side inlet endpoint.
   - lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
     overlay symbols whose colors are intentionally distinct from the selected river stroke. Internal
     lake debug nodes are hidden in the default preview. Lake inlet/outlet markers are selected graph endpoint markers: inlet markers
@@ -76,7 +77,7 @@
   count, lake-capped segment count, lake inlet/outlet count, disconnected lake inlet/outlet count,
   selected lake-edge river segment count, invalid lake contact/intersection count, ambiguous shared
   corner count, duplicate trunk pruned count, repeated lake contact pruned count,
-  lake/ocean max display/raw flow, sea level, and source
+  lake/ocean max display/raw flow, lake inlet raw/display flow range, sea level, and source
   notes.
 
 ## Output Path Rules

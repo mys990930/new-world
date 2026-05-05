@@ -258,6 +258,10 @@ struct PreviewHydrologyStats {
     max_lake_raw_flow: f32,
     max_lake_capped_raw_flow: f32,
     max_ocean_raw_flow: f32,
+    min_lake_inlet_display_flow: f32,
+    max_lake_inlet_display_flow: f32,
+    min_lake_inlet_raw_flow: f32,
+    max_lake_inlet_raw_flow: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -418,6 +422,22 @@ impl PreviewHeader {
                 "max_ocean_raw_flow={:.3}",
                 self.hydrology_stats.max_ocean_raw_flow
             ),
+            format!(
+                "min_lake_inlet_display_flow={:.3}",
+                self.hydrology_stats.min_lake_inlet_display_flow
+            ),
+            format!(
+                "max_lake_inlet_display_flow={:.3}",
+                self.hydrology_stats.max_lake_inlet_display_flow
+            ),
+            format!(
+                "min_lake_inlet_raw_flow={:.3}",
+                self.hydrology_stats.min_lake_inlet_raw_flow
+            ),
+            format!(
+                "max_lake_inlet_raw_flow={:.3}",
+                self.hydrology_stats.max_lake_inlet_raw_flow
+            ),
             format!("sea_level={SEA_LEVEL}"),
             "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
             "stage6_hydrology=selected_downhill_watershed_raw_flow_selected_discharge_lake_sink_outlet".to_string(),
@@ -553,6 +573,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_lake_capped_raw_flow,
         hydrology_stats.max_ocean_display_flow,
         hydrology_stats.max_ocean_raw_flow
+    );
+    println!(
+        "lake inlet flow stats: display {:.2}..{:.2}, raw {:.2}..{:.2}",
+        hydrology_stats.min_lake_inlet_display_flow,
+        hydrology_stats.max_lake_inlet_display_flow,
+        hydrology_stats.min_lake_inlet_raw_flow,
+        hydrology_stats.max_lake_inlet_raw_flow
     );
     println!(
         "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}, repeated lake contact pruned {}",
@@ -1138,12 +1165,19 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
         .iter()
         .map(|node| (node.id, node.corner))
         .collect::<HashMap<_, _>>();
+    let node_kinds = hydrology
+        .nodes
+        .iter()
+        .map(|node| (node.id, node.kind))
+        .collect::<HashMap<_, _>>();
     let corners = hydrology
         .corners
         .iter()
         .map(|corner| (corner.id, corner))
         .collect::<HashMap<_, _>>();
     let mut stats = PreviewHydrologyStats::default();
+    stats.min_lake_inlet_display_flow = f32::INFINITY;
+    stats.min_lake_inlet_raw_flow = f32::INFINITY;
     stats.lake_inlet_count = hydrology.topology_stats.lake_inlet_count;
     stats.lake_outlet_count = hydrology.topology_stats.lake_outlet_count;
     stats.disconnected_lake_inlet_count = hydrology.topology_stats.disconnected_lake_inlet_count;
@@ -1159,6 +1193,25 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
         hydrology.topology_stats.repeated_lake_contact_pruned_count;
 
     for segment in &hydrology.segments {
+        if node_kinds
+            .get(&segment.to)
+            .copied()
+            .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeInlet)
+        {
+            stats.min_lake_inlet_display_flow = stats
+                .min_lake_inlet_display_flow
+                .min(segment.flow_accumulation);
+            stats.max_lake_inlet_display_flow = stats
+                .max_lake_inlet_display_flow
+                .max(segment.flow_accumulation);
+            stats.min_lake_inlet_raw_flow = stats
+                .min_lake_inlet_raw_flow
+                .min(segment.raw_flow_accumulation);
+            stats.max_lake_inlet_raw_flow = stats
+                .max_lake_inlet_raw_flow
+                .max(segment.raw_flow_accumulation);
+        }
+
         if segment.raw_flow_accumulation > segment.flow_accumulation + 0.001 {
             stats.lake_capped_segment_count += 1;
             stats.max_lake_capped_display_flow = stats
@@ -1191,6 +1244,13 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
             }
             _ => {}
         }
+    }
+
+    if stats.min_lake_inlet_display_flow == f32::INFINITY {
+        stats.min_lake_inlet_display_flow = 0.0;
+    }
+    if stats.min_lake_inlet_raw_flow == f32::INFINITY {
+        stats.min_lake_inlet_raw_flow = 0.0;
     }
 
     stats
@@ -1839,6 +1899,10 @@ mod tests {
                 max_lake_raw_flow: 120.0,
                 max_lake_capped_raw_flow: 120.0,
                 max_ocean_raw_flow: 160.0,
+                min_lake_inlet_display_flow: 6.0,
+                max_lake_inlet_display_flow: 18.0,
+                min_lake_inlet_raw_flow: 42.0,
+                max_lake_inlet_raw_flow: 96.0,
                 lake_capped_segment_count: 1,
             },
             macro_source: "world_generation_macro_map",
@@ -1864,6 +1928,8 @@ mod tests {
         assert!(metadata.contains("duplicate_trunk_pruned_count=4"));
         assert!(metadata.contains("repeated_lake_contact_pruned_count=0"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
+        assert!(metadata.contains("min_lake_inlet_display_flow=6.000"));
+        assert!(metadata.contains("max_lake_inlet_raw_flow=96.000"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
 

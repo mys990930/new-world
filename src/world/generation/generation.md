@@ -95,9 +95,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
    - lake로 끝나는 chain과 lake/wetland candidate component로 처음 들어가는 inlet chain은 ocean outlet
      chain과 같은 크기로 취급하지 않는다. raw accumulation은 보존하되, lake 면적/capacity에 비례해
-     lake별 top-N incoming chain, lake 유입부 visible segment, 표시/폭 계산용 discharge를 제한한다.
-     기본 lake terminal/inlet display discharge는 ocean outlet trunk보다
-     확연히 낮은 cap을 가진다.
+     lake별 top-N incoming chain, inlet raw-flow threshold, 표시/폭 계산용 discharge를 제한한다.
+     기본 lake terminal/inlet display discharge는 ocean outlet trunk보다 확연히 낮은 cap을 가진다.
+     기준을 통과한 lake-bound chain은 lake edge를 쓰지 않는 범위에서 기존 upstream trunk를 유지하고,
+     lake boundary 직전 land-side endpoint에서 `LakeInlet`으로 종료될 수 있다.
    - lake와 river의 접점은 lake edge를 따라 스쳐 지나가는 선이 아니라 `LakeInlet`/`LakeOutlet`
      selected endpoint marker로 표현한다. selected river segment는 lake 내부 edge나 lake boundary
      edge, lake-adjacent edge를 쓰지 않으며, 유입하천은 lake boundary 직전의 land-side endpoint에서 끝나고 유출하천은 같은
@@ -200,7 +201,9 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 - river segment는 downstream progress를 가진다.
 - flow accumulation은 합류 후 증가한다.
 - lake terminal/inlet river는 raw flow ledger와 selected/display discharge를 구분하고, lake
-  capacity에 따라 incoming chain 수, visible inlet segment 수, selected flow가 제한되어야 한다.
+  capacity에 따라 incoming chain 수, inlet marker raw-flow threshold, selected/display flow가
+  제한되어야 한다. lake가 클수록 inlet threshold와 display cap은 함께 커지지만, ocean outlet trunk보다
+  보수적인 상한을 유지해야 한다.
 - lake contact river는 lake 내부 edge나 lake boundary edge를 selected segment로 사용하지 않고,
   land-side inlet/outlet endpoint marker에서만 lake와 만나야 한다. selected river segment 자체는
   lake corner를 endpoint로 삼지 않고, macro edge의 lake class도 `NonLake`여야 한다.

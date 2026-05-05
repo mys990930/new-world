@@ -156,19 +156,20 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   수, 표시/폭 계산용 discharge를 제한한다. 기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,
   `max_lake_terminal_chains = min(3, 1 + floor(area_units / 24))`를 적용한다. 작은 lake는 1개
   이하의 feeder chain만 보이고, 큰 lake도 ocean outlet river network처럼 많은 지류를 먹지 않는다.
-- lake terminal/inlet chain은 일반 river threshold의 5배 이상 또는 lake display cap의 2배 이상 raw flow를
-  가져야 선택된다. 선택되더라도 visible segment는 lake 유입부 `2 + floor(area_units / 16)`개,
-  최대 6개로 제한한다. 이는 raw upstream ledger가 커도 preview와 초기 geometry가 lake 주변에
-  짧고 작은 feeder로 보이게 하기 위한 launch 정책이다.
-- lake terminal/inlet display discharge는 `min(16, 4 + area_units * 0.35)`로 cap된다. raw accumulation은
+- lake terminal/inlet chain은 lake area와 display cap에서 파생한 raw flow threshold를 넘어야 선택된다.
+  작은 lake는 작은 feeder를 허용하되 너무 자잘한 흐름은 marker로 승격하지 않고, 큰 lake는 더 큰
+  raw feeder를 요구한다. 선택된 lake-bound chain은 더 이상 호수 직전 몇 segment로 잘리지 않는다.
+  lake edge 자체는 계속 금지하지만, 기준을 통과한 기존 upstream trunk는 lake boundary 직전
+  land-side endpoint까지 selected river로 유지될 수 있다.
+- lake terminal/inlet display discharge는 `min(32, 4 + area_units * 0.35)`로 cap된다. raw accumulation은
   `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는 cap 적용 후의
   `flow_accumulation`을 사용한다. 따라서 lake terminal river는 일반 ocean outlet trunk보다
-  확연히 얇고 적어야 한다.
+  확연히 얇고 적어야 하며, 동시에 lake 크기가 커질수록 inlet 표시 flow cap도 커진다.
 - lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
   흐름은 `MacroLakeEdgeClass`가 lake 관련 edge로 분류한 edge를 selected segment로 쓰지 않는다.
   `LakeInlet`은 lake boundary 바로 바깥의
-  land-side selected endpoint에 붙고 incoming selected segment가 있으며 raw flow가 일반 river threshold의
-  `lake_river_flow_threshold_multiplier`배 이상일 때만 생성된다. 작은 feeder는 raw ledger와 selected
+  land-side selected endpoint에 붙고 incoming selected segment가 있으며 raw flow가 lake 면적/capacity
+  기반 inlet threshold 이상일 때만 생성된다. 작은 feeder는 raw ledger와 selected
   segment에는 남을 수 있지만 preview-visible inlet marker로 승격되지 않는다. `LakeOutlet`은 lake별
   0개부터 최대 2개까지 허용하는 launch 계약을 가진다. 현재 구현은 가장 낮고 유입부에서 떨어진 후보를
   우선해 lake별 0개 또는 1개 outlet을 고른다. `LakeOutlet`도
@@ -190,7 +191,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - edge chain을 spline으로 잇는다.
 - edge guard quadrilateral 안에서 noisy line을 만든다.
 - river width, floodplain, gravel bar, wetland는 flow와 local slope에 따라 조절한다.
-- lake terminal river의 width는 raw accumulation이 아니라 lake capacity가 적용된 selected discharge를 우선 사용한다.
+- lake terminal/inlet river의 width는 raw accumulation이 아니라 lake capacity가 적용된 selected
+  discharge를 우선 사용한다. raw flow는 hydrology ledger와 inlet threshold 판정에 남고, display flow는
+  lake area에 비례한 cap을 통과한 값이다.
 - confluence는 각진 snapping이 보이지 않도록 downstream smoothing을 적용한다.
 
 ---
@@ -263,7 +266,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 6. Perlin 이후 micro depression은 macro river routing을 새로 정의하지 않는다.
 7. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
 8. final river geometry는 raw straight edge가 아니라 spline/domain-warped realization을 사용해야 한다.
-9. lake terminal river는 lake 면적/capacity에 비례해서 선택되어야 하며, raw accumulation이 커도
+9. lake terminal/inlet river는 lake 면적/capacity에 비례해서 선택되어야 한다. 큰 lake는 더 큰
+   raw inlet feeder를 요구하고 더 큰 selected/display discharge를 허용하지만, raw accumulation이 커도
    selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
 10. selected river는 lake 내부 edge를 관통하거나 lake boundary edge를 따라 스치지 않는다.
     lake와의 접촉은 land-side `LakeInlet`/`LakeOutlet` endpoint marker와 lake component pairing으로만
@@ -290,9 +294,11 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 - selected river segment는 downstream chain을 따라 terminal outlet 또는 explicit sink/lake resolution까지
   이어지도록 선택된다.
 - selected river selection은 ocean outlet chain과 lake terminal/inlet chain을 구분한다. lake
-  terminal/inlet chain은 lake candidate footprint에서 산정한 capacity에 따라 더 높은 threshold,
-  lake별 top-N incoming chain, visible inlet segment 제한, selected/display discharge cap을
-  적용한다. raw corner accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다.
+  terminal/inlet chain은 lake candidate footprint에서 산정한 capacity에 따라 lake별 top-N incoming
+  chain, area-scaled inlet threshold, selected/display discharge cap을 적용한다. raw corner
+  accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다. 기준을 통과한 lake-bound
+  chain은 호수 직전 몇 edge로 truncate하지 않고, lake boundary 직전 land-side endpoint까지 이어질 수
+  있다.
 - selected river topology는 lake contact와 shared-corner intersection을 후처리로 검증한다. 결과 graph는
   selected segment endpoint에서만 생성되는 `LakeInlet`/`LakeOutlet` node와
   `GraphHydrologyTopologyStats`를 제공하며, preview와 테스트는 disconnected inlet/outlet, selected

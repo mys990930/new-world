@@ -10,7 +10,7 @@ pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
 pub const DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER: f32 = 5.0;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA: f32 = 0.35;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_FLOOR: f32 = 4.0;
-pub const DEFAULT_LAKE_DISCHARGE_CAP_CEILING: f32 = 16.0;
+pub const DEFAULT_LAKE_DISCHARGE_CAP_CEILING: f32 = 32.0;
 pub const DEFAULT_LAKE_AREA_UNITS_PER_CHAIN: f32 = 24.0;
 pub const DEFAULT_LAKE_MAX_INCOMING_CHAINS: usize = 3;
 pub const DEFAULT_LAKE_MAX_OUTLETS_PER_COMPONENT: usize = 2;
@@ -262,13 +262,6 @@ pub fn solve_hydrology(
         config,
     );
     let selected = selected_rivers.selected;
-    let selected_flow_accumulation = resolve_selected_flow_accumulation(
-        &flow_accumulation,
-        &terminal_indices,
-        &first_downstream_lakes,
-        &lake_policies,
-        &lake_inlet_policies,
-    );
     let node_kinds = resolve_node_kinds(
         &selected,
         &downstream,
@@ -276,6 +269,18 @@ pub fn solve_hydrology(
         &terminals,
         &resolutions,
         &lake_topology,
+        &lake_inlet_policies,
+        config,
+    );
+    let selected_flow_accumulation = resolve_selected_flow_accumulation(
+        &flow_accumulation,
+        &downstream,
+        &terminal_indices,
+        &first_downstream_lakes,
+        &lake_policies,
+        &lake_inlet_policies,
+        &lake_topology,
+        &node_kinds,
         config,
     );
     let topology_stats = resolve_topology_stats(
@@ -901,7 +906,6 @@ struct LakeTerminalPolicy {
     area_units: u32,
     component_root: usize,
     max_incoming_chains: usize,
-    max_visible_segments_per_chain: usize,
     selection_threshold: f32,
     discharge_cap: f32,
 }
@@ -932,18 +936,14 @@ fn resolve_lake_terminal_policies(
         let max_incoming_chains = (1.0 + (area / config.lake_area_units_per_chain).floor())
             .clamp(1.0, config.lake_max_incoming_chains as f32)
             as usize;
-        let max_visible_segments_per_chain = (2 + area_units / 16).clamp(2, 6) as usize;
         let discharge_cap = (config.lake_discharge_cap_floor
             + area * config.lake_discharge_cap_per_area)
             .min(config.lake_discharge_cap_ceiling);
-        let selection_threshold = (config.river_flow_threshold
-            * config.lake_river_flow_threshold_multiplier)
-            .max(discharge_cap * 2.0);
+        let selection_threshold = lake_inlet_selection_threshold(area, discharge_cap, config);
         policies[index] = Some(LakeTerminalPolicy {
             area_units,
             component_root: index,
             max_incoming_chains,
-            max_visible_segments_per_chain,
             selection_threshold,
             discharge_cap,
         });
@@ -998,22 +998,27 @@ fn lake_policy_for_area(
     let area = area_units as f32;
     let max_incoming_chains = (1.0 + (area / config.lake_area_units_per_chain).floor())
         .clamp(1.0, config.lake_max_incoming_chains as f32) as usize;
-    let max_visible_segments_per_chain = (2 + area_units / 16).clamp(2, 6) as usize;
     let discharge_cap = (config.lake_discharge_cap_floor
         + area * config.lake_discharge_cap_per_area)
         .min(config.lake_discharge_cap_ceiling);
-    let selection_threshold = (config.river_flow_threshold
-        * config.lake_river_flow_threshold_multiplier)
-        .max(discharge_cap * 2.0);
+    let selection_threshold = lake_inlet_selection_threshold(area, discharge_cap, config);
 
     LakeTerminalPolicy {
         area_units,
         component_root,
         max_incoming_chains,
-        max_visible_segments_per_chain,
         selection_threshold,
         discharge_cap,
     }
+}
+
+fn lake_inlet_selection_threshold(
+    area_units: f32,
+    discharge_cap: f32,
+    config: HydrologyConfig,
+) -> f32 {
+    let area_scale = (area_units / config.lake_area_units_per_chain).sqrt();
+    (config.river_flow_threshold * (3.0 + area_scale)).max(discharge_cap * 1.35)
 }
 
 fn resolve_first_downstream_lakes(
@@ -1178,17 +1183,8 @@ fn select_river_paths(
             }
         }
 
-        if let Some(policy) = lake_policy {
-            let visible_start = chain
-                .len()
-                .saturating_sub(policy.max_visible_segments_per_chain);
-            for &index in &chain[visible_start..] {
-                selected[index] = true;
-            }
-        } else {
-            for index in chain {
-                selected[index] = true;
-            }
+        for index in chain {
+            selected[index] = true;
         }
     }
 
@@ -1509,20 +1505,40 @@ fn remove_selected_upstream_tree(
 
 fn resolve_selected_flow_accumulation(
     raw_flow: &[f32],
+    downstream: &[Option<usize>],
     terminal_indices: &[usize],
     first_downstream_lakes: &[Option<usize>],
     lake_policies: &[Option<LakeTerminalPolicy>],
     lake_inlet_policies: &[Option<LakeTerminalPolicy>],
+    lake_topology: &LakeContactTopology,
+    node_kinds: &[GraphDrainageNodeKind],
+    config: HydrologyConfig,
 ) -> Vec<f32> {
     raw_flow
         .par_iter()
         .enumerate()
         .map(|(index, &flow)| {
             let terminal = terminal_indices[index];
-            if let Some(policy) = lake_policies[terminal].or_else(|| {
-                first_downstream_lakes[index].and_then(|lake| lake_inlet_policies[lake])
-            }) {
+            let lake_policy = lake_policies[terminal]
+                .or_else(|| {
+                    first_downstream_lakes[index].and_then(|lake| lake_inlet_policies[lake])
+                })
+                .or_else(|| {
+                    downstream[index]
+                        .filter(|&target| lake_topology.inlet_land_vertices[target])
+                        .and_then(|target| downstream[target])
+                        .and_then(|lake| lake_inlet_policies[lake])
+                });
+
+            if let Some(policy) = lake_policy {
                 flow.min(policy.discharge_cap)
+            } else if downstream[index].is_some_and(|target| {
+                node_kinds
+                    .get(target)
+                    .copied()
+                    .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeInlet)
+            }) {
+                flow.min(config.lake_discharge_cap_ceiling)
             } else {
                 flow
             }
@@ -1537,6 +1553,7 @@ fn resolve_node_kinds(
     terminals: &[bool],
     resolutions: &[GraphLocalMinimumResolution],
     lake_topology: &LakeContactTopology,
+    lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     config: HydrologyConfig,
 ) -> Vec<GraphDrainageNodeKind> {
     let mut incoming_selected = vec![0_u32; selected.len()];
@@ -1552,11 +1569,15 @@ fn resolve_node_kinds(
         }
     }
 
-    let inlet_threshold = config.river_flow_threshold * config.lake_river_flow_threshold_multiplier;
-
     (0..selected.len())
         .into_par_iter()
         .map(|index| {
+            let inlet_threshold = downstream[index]
+                .and_then(|lake| lake_inlet_policies.get(lake).copied().flatten())
+                .map(|policy| policy.selection_threshold)
+                .unwrap_or(
+                    config.river_flow_threshold * config.lake_river_flow_threshold_multiplier,
+                );
             if lake_topology.outlet_land_vertices[index] && selected[index] {
                 GraphDrainageNodeKind::LakeOutlet
             } else if lake_topology.inlet_land_vertices[index]
@@ -2171,6 +2192,7 @@ mod tests {
             &[false; 2],
             &[GraphLocalMinimumResolution::None; 2],
             &topology,
+            &[None; 2],
             HydrologyConfig::default(),
         );
 
@@ -2357,6 +2379,79 @@ mod tests {
             large_policy.max_incoming_chains <= DEFAULT_LAKE_MAX_INCOMING_CHAINS,
             "even large lakes should not accept ocean-like river networks"
         );
+        assert!(
+            large_policy.discharge_cap > small_policy.discharge_cap,
+            "larger lake footprint should allow proportionally larger inlet display discharge"
+        );
+        assert!(
+            large_policy.selection_threshold > small_policy.selection_threshold,
+            "larger lakes should require a stronger raw feeder before exposing an inlet marker"
+        );
+    }
+
+    #[test]
+    fn selected_lake_inlet_chain_keeps_upstream_trunk_to_boundary_endpoint() {
+        let downstream = vec![Some(1), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(10)),
+            Some(VoronoiEdgeId(11)),
+            Some(VoronoiEdgeId(12)),
+            None,
+        ];
+        let flow = vec![96.0, 94.0, 92.0, 92.0];
+        let elevations = vec![0.8, 0.7, 0.6, 0.2];
+        let terminals = vec![false; 4];
+        let terminal_indices = resolve_terminal_indices(&downstream);
+        let lake_candidates = vec![false, false, false, true];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::Lake,
+        ];
+        let config = HydrologyConfig::default();
+        let lake_policies = resolve_lake_terminal_policies(
+            &terminal_indices,
+            &lake_candidates,
+            &resolutions,
+            config,
+        );
+        let first_downstream_lakes = vec![Some(3), Some(3), Some(3), None];
+        let lake_inlet_policies = vec![None; 4];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None, None, None, Some(0)],
+            contact_component_by_land_corner: vec![None, None, Some(0), None],
+            inlet_vertices: vec![false, false, false, true],
+            outlet_vertices: vec![false; 4],
+            inlet_land_vertices: vec![false, false, true, false],
+            outlet_land_vertices: vec![false; 4],
+        };
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &terminals,
+            &lake_candidates,
+            &terminal_indices,
+            &first_downstream_lakes,
+            &lake_policies,
+            &lake_inlet_policies,
+            &lake_topology,
+            &HashMap::new(),
+            config,
+        )
+        .selected;
+
+        assert!(
+            selected[0] && selected[1],
+            "a qualifying lake-bound river should keep its existing upstream trunk selected"
+        );
+        assert!(
+            !selected[2],
+            "the lake boundary segment itself should still be removed from selected rivers"
+        );
     }
 
     #[test]
@@ -2380,12 +2475,24 @@ mod tests {
 
         let first_downstream_lakes = vec![None; 4];
         let lake_inlet_policies = vec![None; 4];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None; 4],
+            contact_component_by_land_corner: vec![None; 4],
+            inlet_vertices: vec![false; 4],
+            outlet_vertices: vec![false; 4],
+            inlet_land_vertices: vec![false; 4],
+            outlet_land_vertices: vec![false; 4],
+        };
         let selected_flow = resolve_selected_flow_accumulation(
             &raw_flow,
+            &[None; 4],
             &terminal_indices,
             &first_downstream_lakes,
             &lake_policies,
             &lake_inlet_policies,
+            &lake_topology,
+            &[GraphDrainageNodeKind::Source; 4],
+            config,
         );
         let policy = lake_policies[3].expect("lake terminal should have policy");
 
@@ -2399,6 +2506,49 @@ mod tests {
             raw_flow[2], 220.0,
             "raw hydrology ledger should remain unchanged"
         );
+    }
+
+    #[test]
+    fn lake_inlet_endpoint_segment_uses_display_cap() {
+        let raw_flow = vec![180.0, 180.0, 0.0];
+        let downstream = vec![Some(1), Some(2), None];
+        let terminal_indices = vec![2, 2, 2];
+        let first_downstream_lakes = vec![None; 3];
+        let lake_policies = vec![None; 3];
+        let config = HydrologyConfig::default();
+        let lake_policy = lake_policy_for_area(24, 2, config);
+        let lake_inlet_policies = vec![None, None, Some(lake_policy)];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None, None, Some(0)],
+            contact_component_by_land_corner: vec![None, Some(0), None],
+            inlet_vertices: vec![false, false, true],
+            outlet_vertices: vec![false; 3],
+            inlet_land_vertices: vec![false, true, false],
+            outlet_land_vertices: vec![false; 3],
+        };
+        let node_kinds = vec![
+            GraphDrainageNodeKind::Source,
+            GraphDrainageNodeKind::LakeInlet,
+            GraphDrainageNodeKind::Lake,
+        ];
+
+        let selected_flow = resolve_selected_flow_accumulation(
+            &raw_flow,
+            &downstream,
+            &terminal_indices,
+            &first_downstream_lakes,
+            &lake_policies,
+            &lake_inlet_policies,
+            &lake_topology,
+            &node_kinds,
+            config,
+        );
+
+        assert_eq!(
+            selected_flow[0], lake_policy.discharge_cap,
+            "the segment ending at a LakeInlet marker should use lake-area display discharge"
+        );
+        assert_eq!(raw_flow[0], 180.0);
     }
 
     #[test]
@@ -2423,12 +2573,24 @@ mod tests {
 
         let first_downstream_lakes = vec![None; 5];
         let lake_inlet_policies = vec![None; 5];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None; 5],
+            contact_component_by_land_corner: vec![None; 5],
+            inlet_vertices: vec![false; 5],
+            outlet_vertices: vec![false; 5],
+            inlet_land_vertices: vec![false; 5],
+            outlet_land_vertices: vec![false; 5],
+        };
         let selected_flow = resolve_selected_flow_accumulation(
             &raw_flow,
+            &[None; 5],
             &terminal_indices,
             &first_downstream_lakes,
             &lake_policies,
             &lake_inlet_policies,
+            &lake_topology,
+            &[GraphDrainageNodeKind::Source; 5],
+            config,
         );
 
         assert_eq!(
