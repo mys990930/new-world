@@ -289,15 +289,17 @@ renderer/GPU 계약을 만들지 않는다.
   mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
   direction만 표시한다.
 - 모든 `macro_field_preview` channel은 stage 7 `BoundaryCache`의 canonical noisy Voronoi graph edge
-  overlay를 얇고 반투명하게 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의
-  기본 표면이다.
+  overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
+  field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
+  macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다.
 - macro-field cache tile grid는 보조 진단 overlay로 유지할 수 있지만, graph edge overlay보다 강하게
   읽히면 안 된다. 이 grid는 각 tile 내부에서 height를 따로 low/high normalize한다는 뜻이 아니다.
 - 모든 `macro_field_preview` output은 world footprint를 이해할 수 있도록 scale bar를 표시한다.
 - `lit` channel은 preview lighting artifact를 줄이기 위해 combined height 데이터를 변경하지 않고
-  lighting normal 계산에만 smoothing/prefilter를 적용할 수 있다. metadata/stdout은 raw gradient와
-  smoothed-normal gradient 통계를 기록해 실제 combined height 변화와 lighting-only smoothing을
-  구분해야 한다.
+  lighting normal 계산에만 smoothing/prefilter를 적용할 수 있다. 이때 목표는 tile 하나하나의
+  sample-level lighting이 아니라, 전체 지형 고저차를 흰색 재질의 broad hillshade로 읽는 것이다.
+  metadata/stdout은 raw gradient, smoothed-normal gradient, broad hillshade brightness range/stddev를
+  기록해 실제 combined height 변화와 lighting-only smoothing/contrast를 구분해야 한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 검증 기준

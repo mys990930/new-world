@@ -29,12 +29,15 @@ const MACRO_PREVIEW_MAX_HEIGHT: f32 = 1.0;
 const COMBINED_PREVIEW_MIN_HEIGHT: f32 = -0.75;
 const COMBINED_PREVIEW_MAX_HEIGHT: f32 = 1.25;
 const WHITE_SATURATION_THRESHOLD: u8 = 248;
-const LIT_NORMAL_SAMPLE_RADIUS: usize = 3;
-const LIT_NORMAL_PREFILTER_RADIUS: usize = 2;
-const LIT_NORMAL_SLOPE_SCALE: f32 = 1.85;
-const LIT_DIFFUSE_STRENGTH: f32 = 0.38;
-const GRAPH_EDGE_OVERLAY_COLOR: [u8; 3] = [12, 18, 24];
-const GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.28;
+const LIT_NORMAL_SAMPLE_RADIUS: usize = 8;
+const LIT_NORMAL_PREFILTER_RADIUS: usize = 5;
+const LIT_NORMAL_SLOPE_SCALE: f32 = 7.25;
+const LIT_DIFFUSE_STRENGTH: f32 = 0.44;
+const LIT_AMBIENT_BASE: f32 = 0.20;
+const LIT_HEIGHT_STRENGTH: f32 = 0.44;
+const LIT_MAX_SHADE: f32 = 0.96;
+const GRAPH_EDGE_OVERLAY_COLOR: [u8; 3] = [8, 11, 15];
+const GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.075;
 const TILE_GRID_OVERLAY_AMOUNT: f32 = 0.18;
 const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
     PreviewChannel::MacroElevation,
@@ -324,6 +327,10 @@ struct LitGradientStats {
     raw_max: f32,
     smoothed_average: f32,
     smoothed_max: f32,
+    brightness_min: f32,
+    brightness_average: f32,
+    brightness_max: f32,
+    brightness_stddev: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -374,6 +381,10 @@ struct PreviewHeader {
     lit_raw_gradient_max: f32,
     lit_smoothed_gradient_average: f32,
     lit_smoothed_gradient_max: f32,
+    lit_brightness_min: f32,
+    lit_brightness_average: f32,
+    lit_brightness_max: f32,
+    lit_brightness_stddev: f32,
     white_saturation_fraction: f32,
     macro_stats: ChannelStats,
     ridge_stats: ChannelStats,
@@ -456,6 +467,13 @@ impl PreviewHeader {
                 self.graph_edge_overlay_curve_count, self.graph_edge_overlay_segment_count
             ),
             format!(
+                "voronoi_noisy_edge_overlay_style=color_{:02x}{:02x}{:02x}_amount_{:.3}",
+                GRAPH_EDGE_OVERLAY_COLOR[0],
+                GRAPH_EDGE_OVERLAY_COLOR[1],
+                GRAPH_EDGE_OVERLAY_COLOR[2],
+                GRAPH_EDGE_OVERLAY_AMOUNT
+            ),
+            format!(
                 "scale_bar_blocks_pixels={:.1},{}",
                 self.scale_bar_length_blocks, self.scale_bar_length_pixels
             ),
@@ -466,6 +484,13 @@ impl PreviewHeader {
             format!(
                 "lit_gradient_smoothed_avg_max={:.6},{:.6}",
                 self.lit_smoothed_gradient_average, self.lit_smoothed_gradient_max
+            ),
+            format!(
+                "lit_broad_hillshade_brightness_min_avg_max_stddev={:.6},{:.6},{:.6},{:.6}",
+                self.lit_brightness_min,
+                self.lit_brightness_average,
+                self.lit_brightness_max,
+                self.lit_brightness_stddev
             ),
             format!(
                 "white_saturation_fraction_channel={:.6}",
@@ -582,6 +607,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             lit_raw_gradient_max: lit_gradient.raw_max,
             lit_smoothed_gradient_average: lit_gradient.smoothed_average,
             lit_smoothed_gradient_max: lit_gradient.smoothed_max,
+            lit_brightness_min: lit_gradient.brightness_min,
+            lit_brightness_average: lit_gradient.brightness_average,
+            lit_brightness_max: lit_gradient.brightness_max,
+            lit_brightness_stddev: lit_gradient.brightness_stddev,
             white_saturation_fraction,
             macro_stats: tile.macro_stats,
             ridge_stats: tile.ridge_stats,
@@ -657,9 +686,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         lit_gradient.smoothed_max
     );
     println!(
-        "preview overlays: noisy voronoi curves {}, drawn segments {}, cache grid v/h {}/{}, scale bar {:.0} blocks ({} px)",
+        "lit broad hillshade brightness min/avg/max/stddev {:.3}/{:.3}/{:.3}/{:.3}",
+        lit_gradient.brightness_min,
+        lit_gradient.brightness_average,
+        lit_gradient.brightness_max,
+        lit_gradient.brightness_stddev
+    );
+    println!(
+        "preview overlays: noisy voronoi curves {}, drawn segments {}, graph edge amount {:.3}, cache grid v/h {}/{}, scale bar {:.0} blocks ({} px)",
         edge_overlay.noisy_curve_count,
         edge_overlay.drawn_segment_count,
+        GRAPH_EDGE_OVERLAY_AMOUNT,
         tile_grid.vertical_lines,
         tile_grid.horizontal_lines,
         scale_bar.length_blocks,
@@ -1431,6 +1468,12 @@ fn lit_height_color(
     width: usize,
     height: usize,
 ) -> [u8; 3] {
+    let shade = lit_height_shade(tile, x, y, width, height);
+    let value = (shade * 255.0).round() as u8;
+    [value, value, value]
+}
+
+fn lit_height_shade(tile: &MacroFieldTile, x: usize, y: usize, width: usize, height: usize) -> f32 {
     let radius = LIT_NORMAL_SAMPLE_RADIUS.min(width.saturating_sub(1).max(1));
     let left_x = x.saturating_sub(radius);
     let right_x = (x + radius).min(width - 1);
@@ -1451,11 +1494,10 @@ fn lit_height_color(
     ]);
     let light = normalize3([-0.45, 0.78, -0.43]);
     let diffuse = dot3(normal, light).max(0.0);
-    let height_t = normalize_absolute_combined_height(tile.samples[y * width + x].combined_height);
-    let ambient = 0.36 + height_t * 0.12;
-    let shade = (ambient + diffuse * LIT_DIFFUSE_STRENGTH).clamp(0.0, 0.94);
-    let value = (shade * 255.0).round() as u8;
-    [value, value, value]
+    let broad_height = smoothed_lit_height(tile, x, y, width, height);
+    let height_t = normalize_absolute_combined_height(broad_height);
+    (LIT_AMBIENT_BASE + height_t * LIT_HEIGHT_STRENGTH + diffuse * LIT_DIFFUSE_STRENGTH)
+        .clamp(0.0, LIT_MAX_SHADE)
 }
 
 fn smoothed_lit_height(
@@ -1531,33 +1573,62 @@ fn lit_gradient_stats(tile: &MacroFieldTile, width: usize, height: usize) -> Lit
         return LitGradientStats::default();
     }
 
-    let (raw_sum, raw_max, smoothed_sum, smoothed_max) = (0..width * height)
+    let (
+        raw_sum,
+        raw_max,
+        smoothed_sum,
+        smoothed_max,
+        brightness_sum,
+        brightness_min,
+        brightness_max,
+    ) = (0..width * height)
         .into_par_iter()
         .map(|index| {
             let x = index % width;
             let y = index / width;
             let raw = raw_height_gradient(tile, x, y, width, height);
             let smoothed = smoothed_lit_gradient(tile, x, y, width, height);
-            (raw, raw, smoothed, smoothed)
+            let brightness = lit_height_shade(tile, x, y, width, height);
+            (
+                raw, raw, smoothed, smoothed, brightness, brightness, brightness,
+            )
         })
         .reduce(
-            || (0.0, 0.0, 0.0, 0.0),
+            || (0.0, 0.0, 0.0, 0.0, 0.0, f32::INFINITY, f32::NEG_INFINITY),
             |left, right| {
                 (
                     left.0 + right.0,
                     left.1.max(right.1),
                     left.2 + right.2,
                     left.3.max(right.3),
+                    left.4 + right.4,
+                    left.5.min(right.5),
+                    left.6.max(right.6),
                 )
             },
         );
     let count = (width * height) as f32;
+    let brightness_average = brightness_sum / count;
+    let brightness_variance = (0..width * height)
+        .into_par_iter()
+        .map(|index| {
+            let x = index % width;
+            let y = index / width;
+            let delta = lit_height_shade(tile, x, y, width, height) - brightness_average;
+            delta * delta
+        })
+        .sum::<f32>()
+        / count;
 
     LitGradientStats {
         raw_average: raw_sum / count,
         raw_max,
         smoothed_average: smoothed_sum / count,
         smoothed_max,
+        brightness_min,
+        brightness_average,
+        brightness_max,
+        brightness_stddev: brightness_variance.sqrt(),
     }
 }
 
@@ -2059,6 +2130,14 @@ mod tests {
     }
 
     #[test]
+    fn noisy_voronoi_edge_overlay_is_faint_by_default() {
+        assert!(
+            GRAPH_EDGE_OVERLAY_AMOUNT <= 0.10,
+            "macro field graph edge overlay should be a faint reference layer, not a dominant line layer"
+        );
+    }
+
+    #[test]
     fn scale_bar_overlay_changes_pixels_and_reports_length() {
         let mut image = RgbImage::from_pixel(256, 128, image::Rgb([8, 8, 8]));
         let before = image.as_raw().clone();
@@ -2213,6 +2292,53 @@ mod tests {
         assert_ne!(
             left, right,
             "lit heightfield should respond to height gradients and height term"
+        );
+    }
+
+    #[test]
+    fn lit_hillshade_keeps_broad_height_contrast_visible() {
+        let width = 9;
+        let height = 9;
+        let mut samples = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let dx = x as f32 / (width - 1) as f32;
+                let dy = y as f32 / (height - 1) as f32;
+                samples.push(FieldSample {
+                    combined_height: -0.35 + dx * 0.85 + dy * 0.25,
+                    ..FieldSample::default()
+                });
+            }
+        }
+        let tile = MacroFieldTile {
+            samples,
+            combined_stats: ChannelStats {
+                min: -0.35,
+                max: 0.75,
+                average: 0.20,
+                robust_min: -0.35,
+                robust_max: 0.75,
+                contrast_span: 1.10,
+            },
+            ..MacroFieldTile {
+                samples: Vec::new(),
+                macro_stats: ChannelStats::default(),
+                ridge_stats: ChannelStats::default(),
+                river_stats: ChannelStats::default(),
+                combined_stats: ChannelStats::default(),
+                core_stats: CoreMacroFieldTileStats::default(),
+            }
+        };
+
+        let stats = lit_gradient_stats(&tile, width, height);
+
+        assert!(
+            stats.brightness_stddev > 0.04,
+            "lit hillshade should keep broad height contrast visible: {stats:?}"
+        );
+        assert!(
+            stats.brightness_max < LIT_MAX_SHADE + f32::EPSILON,
+            "lit hillshade should avoid white saturation"
         );
     }
 

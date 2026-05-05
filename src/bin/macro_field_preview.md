@@ -45,8 +45,9 @@
 - `river`: distance-envelope valley influence around selected hydrology river curves.
 - `combined`: macro elevation plus ridge raise, minus visible river valley carve guide, coast
   flatten, and water flatten.
-- `lit`: top-down white heightfield preview with simple directional lighting from combined height
-  gradients. This is not a 3D render; it is shaded relief over the combined macro height field.
+- `lit`: top-down white heightfield preview with broad directional hillshade from combined height
+  gradients. This is not a 3D render and it is not per-tile lighting; it is shaded relief over the
+  overall combined macro height field.
 
 `macro`, `combined`, and `lit` use a fixed absolute normalized preview scale rather than per-image
 min/max stretching. The launch preview scale is:
@@ -123,21 +124,23 @@ Each PNG contains:
   valley, and combined macro height
 - fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
 - noisy Voronoi edge overlay curve/segment count and scale bar length
-- lit raw gradient stats and smoothed-normal gradient stats
+- lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
+  min/average/max/stddev
 - channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
 
 ## Interpretation Notes
 
 - `lit` is still pre-Perlin. Any fine detail visible there comes from macro elevation gradients,
   noisy-boundary blend, ridge/coast/river influence, or the lighting contrast itself.
-- `lit` uses smoothing only for preview normal calculation. It does not blur or rewrite
-  `combined_macro_height`; the goal is to stop sample-scale macro transitions from reading as
-  artificial bumps in the shaded relief.
+- `lit` uses smoothing only for preview lighting. It does not blur or rewrite
+  `combined_macro_height`; the goal is to suppress sample-scale macro transitions while keeping
+  broad continent/ridge/basin/coast height differences visible as white-material hillshade.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
-- The primary visible boundary overlay is the canonical noisy Voronoi graph edge layer. The cache
-  grid is diagnostic only: it should reveal cache boundaries without implying that terrain height is
-  normalized independently inside each tile.
+- The primary boundary overlay is the canonical noisy Voronoi graph edge layer, but it must remain a
+  faint reference overlay so the field value stays visually dominant. The cache grid is diagnostic
+  only: it should reveal cache boundaries without implying that terrain height is normalized
+  independently inside each tile.
 - The scale bar is drawn on every channel so the world footprint can be read without checking
   metadata.
 
