@@ -2,6 +2,7 @@ pub mod boundary;
 pub mod field;
 pub mod graph;
 pub mod hydrology;
+pub mod macro_field;
 pub mod macro_map;
 pub mod pipeline;
 
@@ -41,6 +42,15 @@ pub use hydrology::{
     GraphHydrologyCorner, GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
     GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
     WatershedId, solve_hydrology,
+};
+#[allow(unused_imports)]
+pub use macro_field::{
+    DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH, DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS,
+    DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH, DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE,
+    DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE,
+    DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS,
+    MacroFieldRasterContext, MacroFieldSample, MacroFieldTile, MacroFieldTileConfig,
+    MacroFieldTileStats, generate_macro_field_tile, sample_macro_field_point,
 };
 #[allow(unused_imports)]
 pub use macro_map::{
