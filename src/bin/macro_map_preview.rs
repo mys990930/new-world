@@ -10,13 +10,13 @@ use rayon::prelude::*;
 
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, BoundaryRole, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+    BoundaryCache, BoundaryConfig, BoundaryProfile, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNodeKind, GraphHydrologyGraph,
-    GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord, HydrologyConfig, MacroEdge,
-    MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve, VoronoiCornerId,
-    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId,
-    WorldPlanePoint, generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
+    HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve,
+    VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
+    VoronoiSiteId, WorldPlanePoint, generate_macro_map, generate_noisy_boundaries,
+    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -303,14 +303,14 @@ struct PreviewHeader {
     fault_edge_count: usize,
     river_segment_count: usize,
     boundary_curve_count: usize,
-    noisy_coast_curve_count: usize,
-    noisy_river_curve_count: usize,
-    noisy_ridge_curve_count: usize,
-    noisy_fault_curve_count: usize,
-    noisy_lake_shore_curve_count: usize,
+    boundary_ordinary_curve_count: usize,
+    boundary_coast_curve_count: usize,
+    boundary_ridge_curve_count: usize,
+    boundary_fault_curve_count: usize,
+    boundary_lake_curve_count: usize,
+    boundary_land_seam_curve_count: usize,
     boundary_guard_violation_count: usize,
-    boundary_river_lake_edge_curve_count: usize,
-    boundary_river_endpoint_mismatch_count: usize,
+    boundary_missing_macro_edge_count: usize,
     lake_node_count: usize,
     sink_node_count: usize,
     outlet_node_count: usize,
@@ -359,25 +359,25 @@ impl PreviewHeader {
             format!("fault_edge_count={}", self.fault_edge_count),
             format!("river_segment_count={}", self.river_segment_count),
             format!("boundary_curve_count={}", self.boundary_curve_count),
-            format!("noisy_coast_curve_count={}", self.noisy_coast_curve_count),
-            format!("noisy_river_curve_count={}", self.noisy_river_curve_count),
-            format!("noisy_ridge_curve_count={}", self.noisy_ridge_curve_count),
-            format!("noisy_fault_curve_count={}", self.noisy_fault_curve_count),
             format!(
-                "noisy_lake_shore_curve_count={}",
-                self.noisy_lake_shore_curve_count
+                "boundary_ordinary_curve_count={}",
+                self.boundary_ordinary_curve_count
+            ),
+            format!("boundary_coast_curve_count={}", self.boundary_coast_curve_count),
+            format!("boundary_ridge_curve_count={}", self.boundary_ridge_curve_count),
+            format!("boundary_fault_curve_count={}", self.boundary_fault_curve_count),
+            format!("boundary_lake_curve_count={}", self.boundary_lake_curve_count),
+            format!(
+                "boundary_land_seam_curve_count={}",
+                self.boundary_land_seam_curve_count
             ),
             format!(
                 "boundary_guard_violation_count={}",
                 self.boundary_guard_violation_count
             ),
             format!(
-                "boundary_river_lake_edge_curve_count={}",
-                self.boundary_river_lake_edge_curve_count
-            ),
-            format!(
-                "boundary_river_endpoint_mismatch_count={}",
-                self.boundary_river_endpoint_mismatch_count
+                "boundary_missing_macro_edge_count={}",
+                self.boundary_missing_macro_edge_count
             ),
             format!("lake_node_count={}", self.lake_node_count),
             format!("sink_node_count={}", self.sink_node_count),
@@ -510,7 +510,7 @@ impl PreviewHeader {
             format!("sea_level={SEA_LEVEL}"),
             "stage4_guide_inputs=component,inlandness,signed_elevation_gradient,mountainness,ridgeness,basinness,drainage_divide_potential".to_string(),
             "stage6_hydrology=selected_downhill_watershed_raw_flow_selected_discharge_lake_sink_outlet".to_string(),
-            "stage7_boundary=noisy_curves_from_voronoi_edge_guard_coast_river_ridge_fault_lake_shore".to_string(),
+            "stage7_boundary=canonical_noisy_curve_per_voronoi_edge".to_string(),
             format!("macro_source={}", self.macro_source),
             "world_api=new_world::world::generation::generate_macro_map(patch, config)".to_string(),
         ]
@@ -580,15 +580,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         ridge_edge_count,
         fault_edge_count,
         river_segment_count: graph.hydrology.segments.len(),
-        boundary_curve_count: graph.boundary.curves.len(),
-        noisy_coast_curve_count: graph.boundary.stats.coast_curve_count,
-        noisy_river_curve_count: graph.boundary.stats.river_curve_count,
-        noisy_ridge_curve_count: graph.boundary.stats.ridge_curve_count,
-        noisy_fault_curve_count: graph.boundary.stats.fault_curve_count,
-        noisy_lake_shore_curve_count: graph.boundary.stats.lake_shore_curve_count,
+        boundary_curve_count: graph.boundary.stats.total_curve_count,
+        boundary_ordinary_curve_count: graph.boundary.stats.ordinary_curve_count,
+        boundary_coast_curve_count: graph.boundary.stats.coast_curve_count,
+        boundary_ridge_curve_count: graph.boundary.stats.ridge_curve_count,
+        boundary_fault_curve_count: graph.boundary.stats.fault_curve_count,
+        boundary_lake_curve_count: graph.boundary.stats.lake_curve_count,
+        boundary_land_seam_curve_count: graph.boundary.stats.land_seam_curve_count,
         boundary_guard_violation_count: graph.boundary.stats.guard_violation_count,
-        boundary_river_lake_edge_curve_count: graph.boundary.stats.river_lake_edge_curve_count,
-        boundary_river_endpoint_mismatch_count: graph.boundary.stats.river_endpoint_mismatch_count,
+        boundary_missing_macro_edge_count: graph.boundary.stats.missing_macro_edge_count,
         lake_node_count,
         sink_node_count,
         outlet_node_count,
@@ -599,8 +599,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut image = render_preview(window, &graph)?;
     draw_base_voronoi_edges(&mut image, window, &graph);
+    draw_noisy_boundary_edges(&mut image, window, &graph);
     draw_candidate_edges(&mut image, window, &graph);
-    draw_noisy_boundaries(&mut image, window, &graph);
     draw_hydrology(&mut image, window, &graph);
     draw_legend_overlay(&mut image);
     write_png_with_metadata(&image, &output, &header)?;
@@ -683,17 +683,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.unclassified_lake_connected_flow_count
     );
     println!(
-        "boundary stats: curves {} (coast {}, river {}, ridge {}, fault {}, lake shore {}, land seam {}), guard violations {}, river lake-edge curves {}, river endpoint mismatches {}",
-        graph.boundary.curves.len(),
+        "boundary stats: curves {} (ordinary {}, coast {}, ridge {}, fault {}, lake {}, land seam {}), guard violations {}, missing macro edges {}",
+        graph.boundary.stats.total_curve_count,
+        graph.boundary.stats.ordinary_curve_count,
         graph.boundary.stats.coast_curve_count,
-        graph.boundary.stats.river_curve_count,
         graph.boundary.stats.ridge_curve_count,
         graph.boundary.stats.fault_curve_count,
-        graph.boundary.stats.lake_shore_curve_count,
-        graph.boundary.stats.land_boundary_curve_count,
+        graph.boundary.stats.lake_curve_count,
+        graph.boundary.stats.land_seam_curve_count,
         graph.boundary.stats.guard_violation_count,
-        graph.boundary.stats.river_lake_edge_curve_count,
-        graph.boundary.stats.river_endpoint_mismatch_count
+        graph.boundary.stats.missing_macro_edge_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -818,7 +817,6 @@ fn build_macro_map_for_preview(
     let boundary = generate_noisy_boundaries(
         &patch,
         &macro_map,
-        &hydrology,
         BoundaryConfig::new(meta.seed, meta.generator_version),
     );
     let site_samples = macro_map
@@ -1110,7 +1108,29 @@ fn draw_candidate_edges(image: &mut RgbImage, window: PreviewWindow, graph: &Pre
     }
 }
 
+fn draw_noisy_boundary_edges(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
+    for curve in &graph.boundary.curves {
+        let (color, amount, width) = noisy_boundary_style(curve.profile);
+        draw_noisy_curve(image, window, curve, color, amount, width);
+    }
+}
+
+fn noisy_boundary_style(profile: BoundaryProfile) -> ([u8; 3], f32, i32) {
+    match profile {
+        BoundaryProfile::Ordinary => ([90, 112, 108], 0.10, 0),
+        BoundaryProfile::Coast => ([236, 213, 128], 0.38, 1),
+        BoundaryProfile::Ridge => ([247, 248, 242], 0.26, 1),
+        BoundaryProfile::Fault => ([231, 92, 88], 0.30, 1),
+        BoundaryProfile::Lake => ([116, 211, 232], 0.28, 1),
+        BoundaryProfile::LandSeam => ([185, 210, 150], 0.16, 0),
+    }
+}
+
 fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
+    for segment in &graph.hydrology.segments {
+        draw_river_segment(image, window, segment, &graph.boundary);
+    }
+
     draw_lake_contact_arrows(image, window, &graph.hydrology);
 
     for node in &graph.hydrology.nodes {
@@ -1131,52 +1151,6 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
         if node.kind == GraphDrainageNodeKind::Lake {
             draw_disc(image, x, y, radius.saturating_sub(2), [76, 35, 112], 0.86);
         }
-    }
-}
-
-fn draw_noisy_boundaries(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
-    for curve in &graph.boundary.curves {
-        let (color, amount, width) = noisy_boundary_style(curve);
-        draw_noisy_curve(
-            image,
-            window,
-            curve,
-            [5, 10, 16],
-            (amount * 0.48).clamp(0.0, 0.70),
-            width + 1,
-        );
-        draw_noisy_curve(image, window, curve, color, amount, width);
-    }
-}
-
-fn noisy_boundary_style(curve: &NoisyBoundaryCurve) -> ([u8; 3], f32, i32) {
-    match curve.role {
-        BoundaryRole::Coast => ([246, 214, 135], 0.88, 2),
-        BoundaryRole::River => (
-            selected_river_color(),
-            (0.74 + curve.width_hint_blocks * 0.012).clamp(0.70, 0.98),
-            (curve.width_hint_blocks / 4.5).round().clamp(1.0, 4.0) as i32,
-        ),
-        BoundaryRole::Ridge => ([250, 250, 244], 0.78, 2),
-        BoundaryRole::Fault => ([236, 82, 77], 0.82, 2),
-        BoundaryRole::LakeShore => ([116, 211, 232], 0.72, 1),
-        BoundaryRole::LandBoundary => ([185, 210, 150], 0.18, 0),
-    }
-}
-
-fn draw_noisy_curve(
-    image: &mut RgbImage,
-    window: PreviewWindow,
-    curve: &NoisyBoundaryCurve,
-    color: [u8; 3],
-    amount: f32,
-    width: i32,
-) {
-    for points in curve.points.windows(2) {
-        let Some((start, end)) = window.world_segment_to_pixels(points[0], points[1]) else {
-            continue;
-        };
-        draw_line(image, start, end, color, amount, width);
     }
 }
 
@@ -1263,12 +1237,41 @@ fn shortened_arrow_tip(start: (i32, i32), tip: (i32, i32), max_len: f32) -> (i32
     )
 }
 
-#[cfg(test)]
+fn draw_river_segment(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    segment: &GraphRiverSegment,
+    boundary: &BoundaryCache,
+) {
+    let Some(curve) = boundary.curve_for_edge(segment.edge) else {
+        return;
+    };
+    let width = river_width(segment.flow_accumulation);
+    let amount = river_amount(segment.flow_accumulation);
+    draw_noisy_curve(image, window, curve, [4, 12, 22], 0.50, width + 1);
+    draw_noisy_curve(image, window, curve, selected_river_color(), amount, width);
+}
+
+fn draw_noisy_curve(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    curve: &NoisyBoundaryCurve,
+    color: [u8; 3],
+    amount: f32,
+    width: i32,
+) {
+    for pair in curve.points.windows(2) {
+        let Some((start, end)) = window.world_segment_to_pixels(pair[0], pair[1]) else {
+            continue;
+        };
+        draw_line(image, start, end, color, amount, width);
+    }
+}
+
 fn river_amount(flow: f32) -> f32 {
     (0.62 + flow.sqrt() * 0.035).clamp(0.68, 0.98)
 }
 
-#[cfg(test)]
 fn river_width(flow: f32) -> i32 {
     if flow >= 80.0 {
         4
@@ -1603,8 +1606,8 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         1
     };
     let margin = 8 * scale;
-    let panel_width = (184 * scale).min(image.width());
-    let panel_height = (130 * scale).min(image.height());
+    let panel_width = (176 * scale).min(image.width());
+    let panel_height = (117 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1613,7 +1616,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         x + 7 * scale,
         y + 6 * scale,
-        "MACRO + NOISY",
+        "MACRO MAP",
         [238, 241, 232],
         scale,
     );
@@ -1722,14 +1725,6 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         key_y + 65 * scale,
         [62, 113, 255],
         "OUT",
-        scale,
-    );
-    draw_key(
-        image,
-        bar_x + 82 * scale,
-        key_y + 65 * scale,
-        [116, 211, 232],
-        "SHORE",
         scale,
     );
 }
@@ -1953,7 +1948,7 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use new_world::world::generation::{GraphRiverSegment, VoronoiEdgeId};
+    use new_world::world::generation::VoronoiEdgeId;
 
     fn test_config() -> PreviewConfig {
         PreviewConfig {
@@ -2042,15 +2037,15 @@ mod tests {
             ridge_edge_count: 1,
             fault_edge_count: 0,
             river_segment_count: 3,
-            boundary_curve_count: 7,
-            noisy_coast_curve_count: 1,
-            noisy_river_curve_count: 3,
-            noisy_ridge_curve_count: 1,
-            noisy_fault_curve_count: 0,
-            noisy_lake_shore_curve_count: 2,
+            boundary_curve_count: 12,
+            boundary_ordinary_curve_count: 5,
+            boundary_coast_curve_count: 2,
+            boundary_ridge_curve_count: 1,
+            boundary_fault_curve_count: 0,
+            boundary_lake_curve_count: 3,
+            boundary_land_seam_curve_count: 1,
             boundary_guard_violation_count: 0,
-            boundary_river_lake_edge_curve_count: 0,
-            boundary_river_endpoint_mismatch_count: 0,
+            boundary_missing_macro_edge_count: 0,
             lake_node_count: 1,
             sink_node_count: 0,
             outlet_node_count: 2,
@@ -2101,12 +2096,11 @@ mod tests {
         assert!(metadata.contains("ridge_edge_count=1"));
         assert!(metadata.contains("fault_edge_count=0"));
         assert!(metadata.contains("river_segment_count=3"));
-        assert!(metadata.contains("boundary_curve_count=7"));
-        assert!(metadata.contains("noisy_river_curve_count=3"));
-        assert!(metadata.contains("noisy_lake_shore_curve_count=2"));
+        assert!(metadata.contains("boundary_curve_count=12"));
+        assert!(metadata.contains("boundary_ordinary_curve_count=5"));
+        assert!(metadata.contains("boundary_lake_curve_count=3"));
         assert!(metadata.contains("boundary_guard_violation_count=0"));
-        assert!(metadata.contains("boundary_river_lake_edge_curve_count=0"));
-        assert!(metadata.contains("boundary_river_endpoint_mismatch_count=0"));
+        assert!(metadata.contains("stage7_boundary=canonical_noisy_curve_per_voronoi_edge"));
         assert!(metadata.contains("visible_site_count=64"));
         assert!(metadata.contains("land_site_count=45"));
         assert!(metadata.contains("land_ratio=0.703"));
@@ -2132,7 +2126,6 @@ mod tests {
         assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(metadata.contains("min_lake_inlet_display_flow=6.000"));
         assert!(metadata.contains("max_lake_inlet_raw_flow=96.000"));
-        assert!(metadata.contains("stage7_boundary=noisy_curves"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
 

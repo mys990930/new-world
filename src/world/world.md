@@ -153,7 +153,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/graph/graph.md`: Voronoi graph ownership과 graph-region coordinate 계약
 - `generation/macro_map/macro_map.md`: 대륙/바다, macro elevation, ridge/fault/coast guide와 mountainness/rugged context
 - `generation/hydrology/hydrology.md`: graph-first watershed, river, lake, local minima 계약
-- `generation/boundary/boundary.md`: noisy boundary와 feature별 boundary realization
+- `generation/boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry
 - `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
 - `generation/heightfield/heightfield.md`: Voronoi macro map과 Perlin micro relief 합성
@@ -180,7 +180,5 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   macro_map은 독자 continent/island noise source를 만들지 않는다.
 - 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
   flow accumulation, selected river segment scaffold를 제공한다.
-- 현재 `boundary` leaf는 graph/macro/hydrology output을 읽어 coast, selected river, ridge, fault,
-  lake shore, land seam edge를 deterministic noisy curve annotation layer로 현실화한다.
 - 아직 구현되지 않은 것: Voronoi-derived map, Perlin micro relief 합성.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

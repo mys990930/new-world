@@ -59,7 +59,8 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - ridge/fault edge guide와 coast edge guide는 hydrology보다 먼저다. mountainness/rugged context는 이 guide를 고르는 입력이다.
 - hydrology는 final heightfield와 voxel fill보다 먼저다.
 - hydrology는 potential river guide가 아니라 selected river chain, flow accumulation, lake/sink/outlet resolution을 만든다.
-- noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
+- noisy boundary는 모든 Voronoi edge의 canonical geometry layer이며 raw graph topology를 대체하지 않는다.
+  river는 별도 noisy curve를 만들지 않고 selected edge id path가 이 canonical geometry를 따른다.
 - Voronoi-derived macro map은 graph guide와 boundary 정보를 heightfield가 읽을 수 있는 field로 바꾸는 중간 layer다.
 - meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.
 - Perlin micro relief는 마지막 표면 디테일이며 macro ownership을 뒤집지 않는다.
@@ -103,7 +104,7 @@ miss에서만 worker thread가 수행한다.
 - `GraphRegionCache`: site/corner/edge topology와 base graph field
 - `MacroMapCache`: continent/ocean/island ownership, signed macro elevation, ridge/fault/coast guide
 - `HydrologyCache`: selected river chain, watershed, lake/sink/outlet resolution
-- `BoundaryCache`: graph/macro/hydrology output을 읽어 만든 selected visible edge의 noisy realization
+- `BoundaryCache`: 모든 graph edge id에 대한 canonical noisy polyline/spline
 - `HeightfieldCache`: chunk column sampling이 읽을 height/water/constraint field
 
 초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
@@ -147,6 +148,3 @@ region cache의 내부 의미를 직접 결정하지 않는다.
 
 - 현재는 v2 pipeline compile-time scaffold 단계다.
 - legacy generation entrypoint는 migration 동안 `world::generation`을 통해 re-export된다.
-- stage 7 boundary realization은 `world::generation::boundary`에 구현되어 있으며, 현재는 graph patch,
-  macro map, hydrology graph를 입력으로 `BoundaryCache { curves, stats }`를 생성한다. chunk fill은 이
-  curve를 직접 만들지 않고 boundary cache를 읽는 방향을 유지한다.

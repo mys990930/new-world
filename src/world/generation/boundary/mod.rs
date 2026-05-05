@@ -1,22 +1,21 @@
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::graph::{
     VoronoiCornerId, VoronoiEdge, VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint,
 };
-use super::hydrology::{GraphDrainageNodeId, GraphHydrologyGraph};
 use super::macro_map::{GraphMacroMap, MacroEdge, MacroLakeEdgeClass, MacroSite};
 
 pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 4;
 pub const DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS: f32 = 1.5;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
-const ROLE_SALT_COAST: u64 = 0x01c0_a57e_5eed_1001;
-const ROLE_SALT_RIVER: u64 = 0x02f1_0a1d_5eed_1002;
-const ROLE_SALT_RIDGE: u64 = 0x03a1_7d6e_5eed_1003;
-const ROLE_SALT_FAULT: u64 = 0x04fa_0175_5eed_1004;
-const ROLE_SALT_LAKE_SHORE: u64 = 0x05aa_1e5d_5eed_1005;
-const ROLE_SALT_LAND_BOUNDARY: u64 = 0x06b0_0d1e_5eed_1006;
+const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
+const PROFILE_SALT_COAST: u64 = 0x01c0_a57e_5eed_1001;
+const PROFILE_SALT_RIDGE: u64 = 0x03a1_7d6e_5eed_1003;
+const PROFILE_SALT_FAULT: u64 = 0x04fa_0175_5eed_1004;
+const PROFILE_SALT_LAKE: u64 = 0x05aa_1e5d_5eed_1005;
+const PROFILE_SALT_LAND_SEAM: u64 = 0x06b0_0d1e_5eed_1006;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundaryConfig {
@@ -24,12 +23,12 @@ pub struct BoundaryConfig {
     pub generator_version: u32,
     pub subdivision_levels: u8,
     pub guard_margin_blocks: f32,
+    pub ordinary_amplitude: f32,
     pub coast_amplitude: f32,
-    pub river_amplitude: f32,
     pub ridge_amplitude: f32,
     pub fault_amplitude: f32,
-    pub lake_shore_amplitude: f32,
-    pub land_boundary_amplitude: f32,
+    pub lake_amplitude: f32,
+    pub land_seam_amplitude: f32,
 }
 
 impl BoundaryConfig {
@@ -39,35 +38,35 @@ impl BoundaryConfig {
             generator_version,
             subdivision_levels: DEFAULT_BOUNDARY_SUBDIVISION_LEVELS,
             guard_margin_blocks: DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS,
+            ordinary_amplitude: 0.05,
             coast_amplitude: 0.24,
-            river_amplitude: 0.16,
             ridge_amplitude: 0.10,
             fault_amplitude: 0.08,
-            lake_shore_amplitude: 0.18,
-            land_boundary_amplitude: 0.07,
+            lake_amplitude: 0.18,
+            land_seam_amplitude: 0.07,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum BoundaryRole {
+pub enum BoundaryProfile {
+    Ordinary,
     Coast,
-    River,
     Ridge,
     Fault,
-    LakeShore,
-    LandBoundary,
+    Lake,
+    LandSeam,
 }
 
-impl BoundaryRole {
+impl BoundaryProfile {
     pub const fn salt(self) -> u64 {
         match self {
-            Self::Coast => ROLE_SALT_COAST,
-            Self::River => ROLE_SALT_RIVER,
-            Self::Ridge => ROLE_SALT_RIDGE,
-            Self::Fault => ROLE_SALT_FAULT,
-            Self::LakeShore => ROLE_SALT_LAKE_SHORE,
-            Self::LandBoundary => ROLE_SALT_LAND_BOUNDARY,
+            Self::Ordinary => PROFILE_SALT_ORDINARY,
+            Self::Coast => PROFILE_SALT_COAST,
+            Self::Ridge => PROFILE_SALT_RIDGE,
+            Self::Fault => PROFILE_SALT_FAULT,
+            Self::Lake => PROFILE_SALT_LAKE,
+            Self::LandSeam => PROFILE_SALT_LAND_SEAM,
         }
     }
 }
@@ -107,10 +106,9 @@ impl BoundaryGuard {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoisyBoundaryCurve {
     pub edge: VoronoiEdgeId,
-    pub role: BoundaryRole,
+    pub profile: BoundaryProfile,
     pub anchors: BoundaryAnchors,
     pub points: Vec<WorldPlanePoint>,
-    pub width_hint_blocks: f32,
     pub amplitude: f32,
     pub seed: u64,
     pub guard: BoundaryGuard,
@@ -118,15 +116,15 @@ pub struct NoisyBoundaryCurve {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BoundaryStats {
+    pub total_curve_count: usize,
+    pub ordinary_curve_count: usize,
     pub coast_curve_count: usize,
-    pub river_curve_count: usize,
     pub ridge_curve_count: usize,
     pub fault_curve_count: usize,
-    pub lake_shore_curve_count: usize,
-    pub land_boundary_curve_count: usize,
+    pub lake_curve_count: usize,
+    pub land_seam_curve_count: usize,
     pub guard_violation_count: usize,
-    pub river_lake_edge_curve_count: usize,
-    pub river_endpoint_mismatch_count: usize,
+    pub missing_macro_edge_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -136,18 +134,14 @@ pub struct BoundaryCache {
 }
 
 impl BoundaryCache {
-    pub fn curves_for_edge(
-        &self,
-        edge: VoronoiEdgeId,
-    ) -> impl Iterator<Item = &NoisyBoundaryCurve> {
-        self.curves.iter().filter(move |curve| curve.edge == edge)
+    pub fn curve_for_edge(&self, edge: VoronoiEdgeId) -> Option<&NoisyBoundaryCurve> {
+        self.curves.iter().find(|curve| curve.edge == edge)
     }
 }
 
 pub fn generate_noisy_boundaries(
     patch: &VoronoiGraphPatch,
     macro_map: &GraphMacroMap,
-    hydrology: &GraphHydrologyGraph,
     config: BoundaryConfig,
 ) -> BoundaryCache {
     validate_boundary_config(config);
@@ -172,64 +166,25 @@ pub fn generate_noisy_boundaries(
         .iter()
         .map(|site| (site.id, *site))
         .collect::<HashMap<_, _>>();
-    let graph_edges = patch
-        .edges
-        .iter()
-        .map(|edge| (edge.id, *edge))
-        .collect::<HashMap<_, _>>();
-    let river_edges = hydrology
-        .segments
-        .iter()
-        .map(|segment| segment.edge)
-        .collect::<HashSet<_>>();
-    let river_flow_by_edge = hydrology.segments.iter().fold(
-        HashMap::<VoronoiEdgeId, f32>::new(),
-        |mut flows, segment| {
-            let current = flows.entry(segment.edge).or_default();
-            *current = (*current).max(segment.flow_accumulation);
-            flows
-        },
-    );
-    let node_corners = hydrology
-        .nodes
-        .iter()
-        .map(|node| (node.id, node.corner))
-        .collect::<HashMap<_, _>>();
 
     let mut curves = patch
         .edges
         .par_iter()
-        .flat_map_iter(|edge| {
-            let Some(macro_edge) = macro_edges.get(&edge.id).copied() else {
-                return Vec::new().into_iter();
-            };
-            let roles = classify_boundary_roles(edge, macro_edge, &macro_sites, &river_edges);
-            roles
-                .into_iter()
-                .filter_map(|role| {
-                    build_curve_for_edge(
-                        *edge,
-                        role,
-                        macro_edge,
-                        &corner_positions,
-                        &site_positions,
-                        config,
-                        river_flow_by_edge.get(&edge.id).copied(),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
+        .filter_map(|edge| {
+            let macro_edge = macro_edges.get(&edge.id).copied()?;
+            build_curve_for_edge(
+                *edge,
+                macro_edge,
+                &macro_sites,
+                &corner_positions,
+                &site_positions,
+                config,
+            )
         })
         .collect::<Vec<_>>();
 
-    curves.sort_by_key(|curve| (curve.role, curve.edge.0));
-    let stats = boundary_stats(
-        &curves,
-        &macro_edges,
-        &graph_edges,
-        hydrology,
-        &node_corners,
-    );
+    curves.sort_by_key(|curve| curve.edge.0);
+    let stats = boundary_stats(&curves, patch.edges.len());
 
     BoundaryCache { curves, stats }
 }
@@ -244,12 +199,12 @@ fn validate_boundary_config(config: BoundaryConfig) {
         "guard margin must be finite and >= 0"
     );
     for value in [
+        config.ordinary_amplitude,
         config.coast_amplitude,
-        config.river_amplitude,
         config.ridge_amplitude,
         config.fault_amplitude,
-        config.lake_shore_amplitude,
-        config.land_boundary_amplitude,
+        config.lake_amplitude,
+        config.land_seam_amplitude,
     ] {
         assert!(
             value.is_finite() && (0.0..=0.5).contains(&value),
@@ -258,68 +213,21 @@ fn validate_boundary_config(config: BoundaryConfig) {
     }
 }
 
-fn classify_boundary_roles(
-    graph_edge: &VoronoiEdge,
-    macro_edge: MacroEdge,
-    macro_sites: &HashMap<VoronoiSiteId, MacroSite>,
-    river_edges: &HashSet<VoronoiEdgeId>,
-) -> Vec<BoundaryRole> {
-    let mut roles = Vec::new();
-    if macro_edge.guide.is_coast {
-        roles.push(BoundaryRole::Coast);
-    }
-    if macro_edge.lake_class != MacroLakeEdgeClass::NonLake {
-        roles.push(BoundaryRole::LakeShore);
-    }
-    if macro_edge.guide.is_ridge_candidate {
-        roles.push(BoundaryRole::Ridge);
-    }
-    if macro_edge.guide.is_fault_candidate {
-        roles.push(BoundaryRole::Fault);
-    }
-    if river_edges.contains(&graph_edge.id) && !macro_edge.lake_class.excludes_selected_river() {
-        roles.push(BoundaryRole::River);
-    }
-    if roles.is_empty() && is_low_amplitude_land_boundary(macro_edge, macro_sites) {
-        // Low-amplitude ownership seam used by later field/material stages. It is intentionally
-        // subtle in preview and can be ignored by heightfield if no visible transition is needed.
-        roles.push(BoundaryRole::LandBoundary);
-    }
-    roles
-}
-
-fn is_low_amplitude_land_boundary(
-    edge: MacroEdge,
-    macro_sites: &HashMap<VoronoiSiteId, MacroSite>,
-) -> bool {
-    let Some(a) = macro_sites.get(&edge.sites[0]).copied() else {
-        return false;
-    };
-    let Some(b) = macro_sites.get(&edge.sites[1]).copied() else {
-        return false;
-    };
-    a.surface_kind != b.surface_kind
-        && a.surface_kind.is_land_owned()
-        && b.surface_kind.is_land_owned()
-        && !a.surface_kind.is_coast()
-        && !b.surface_kind.is_coast()
-}
-
 fn build_curve_for_edge(
     edge: VoronoiEdge,
-    role: BoundaryRole,
     macro_edge: MacroEdge,
+    macro_sites: &HashMap<VoronoiSiteId, MacroSite>,
     corner_positions: &HashMap<VoronoiCornerId, WorldPlanePoint>,
     site_positions: &HashMap<VoronoiSiteId, WorldPlanePoint>,
     config: BoundaryConfig,
-    river_flow: Option<f32>,
 ) -> Option<NoisyBoundaryCurve> {
     let start = *corner_positions.get(&edge.corners[0])?;
     let end = *corner_positions.get(&edge.corners[1])?;
     let site_a = *site_positions.get(&edge.sites[0])?;
     let site_b = *site_positions.get(&edge.sites[1])?;
-    let seed = curve_seed(config, edge.id, role);
-    let amplitude = amplitude_for_role(role, config);
+    let profile = boundary_profile(macro_edge, macro_sites);
+    let seed = curve_seed(config, edge.id, profile);
+    let amplitude = amplitude_for_profile(profile, config);
     let guard = boundary_guard(start, end, site_a, site_b, config.guard_margin_blocks);
     let points = noisy_midpoint_curve(
         start,
@@ -331,9 +239,10 @@ fn build_curve_for_edge(
         config.subdivision_levels,
         guard,
     );
+
     Some(NoisyBoundaryCurve {
         edge: edge.id,
-        role,
+        profile,
         anchors: BoundaryAnchors {
             corners: macro_edge.corners,
             sites: macro_edge.sites,
@@ -341,11 +250,46 @@ fn build_curve_for_edge(
             end,
         },
         points,
-        width_hint_blocks: width_hint_for_role(role, macro_edge, river_flow),
         amplitude,
         seed,
         guard,
     })
+}
+
+fn boundary_profile(
+    edge: MacroEdge,
+    macro_sites: &HashMap<VoronoiSiteId, MacroSite>,
+) -> BoundaryProfile {
+    if edge.guide.is_coast {
+        return BoundaryProfile::Coast;
+    }
+    if edge.lake_class != MacroLakeEdgeClass::NonLake {
+        return BoundaryProfile::Lake;
+    }
+    if edge.guide.is_ridge_candidate {
+        return BoundaryProfile::Ridge;
+    }
+    if edge.guide.is_fault_candidate {
+        return BoundaryProfile::Fault;
+    }
+    if is_land_seam(edge, macro_sites) {
+        return BoundaryProfile::LandSeam;
+    }
+    BoundaryProfile::Ordinary
+}
+
+fn is_land_seam(edge: MacroEdge, macro_sites: &HashMap<VoronoiSiteId, MacroSite>) -> bool {
+    let Some(a) = macro_sites.get(&edge.sites[0]).copied() else {
+        return false;
+    };
+    let Some(b) = macro_sites.get(&edge.sites[1]).copied() else {
+        return false;
+    };
+    a.surface_kind != b.surface_kind
+        && a.surface_kind.is_land_owned()
+        && b.surface_kind.is_land_owned()
+        && !a.surface_kind.is_coast()
+        && !b.surface_kind.is_coast()
 }
 
 fn noisy_midpoint_curve(
@@ -374,7 +318,7 @@ fn noisy_midpoint_curve(
             base
         } else {
             let hash = splitmix64(seed ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-            let wave = ((t * std::f32::consts::PI).sin()).max(0.0);
+            let wave = (t * std::f32::consts::PI).sin().max(0.0);
             let offset = (unit_f32(hash) * 2.0 - 1.0) * lateral_limit * wave;
             let drift_hash = splitmix64(hash ^ 0xa24b_aed4_963e_3f13);
             let along = (unit_f32(drift_hash) * 2.0 - 1.0) * length * amplitude * 0.035;
@@ -408,62 +352,39 @@ fn boundary_guard(
     }
 }
 
-fn curve_seed(config: BoundaryConfig, edge: VoronoiEdgeId, role: BoundaryRole) -> u64 {
+fn curve_seed(config: BoundaryConfig, edge: VoronoiEdgeId, profile: BoundaryProfile) -> u64 {
     let mut state = splitmix64(config.seed ^ HASH_BOUNDARY);
     state = splitmix64(state ^ u64::from(config.generator_version));
     state = splitmix64(state ^ edge.0);
-    splitmix64(state ^ role.salt())
+    splitmix64(state ^ profile.salt())
 }
 
-fn amplitude_for_role(role: BoundaryRole, config: BoundaryConfig) -> f32 {
-    match role {
-        BoundaryRole::Coast => config.coast_amplitude,
-        BoundaryRole::River => config.river_amplitude,
-        BoundaryRole::Ridge => config.ridge_amplitude,
-        BoundaryRole::Fault => config.fault_amplitude,
-        BoundaryRole::LakeShore => config.lake_shore_amplitude,
-        BoundaryRole::LandBoundary => config.land_boundary_amplitude,
+fn amplitude_for_profile(profile: BoundaryProfile, config: BoundaryConfig) -> f32 {
+    match profile {
+        BoundaryProfile::Ordinary => config.ordinary_amplitude,
+        BoundaryProfile::Coast => config.coast_amplitude,
+        BoundaryProfile::Ridge => config.ridge_amplitude,
+        BoundaryProfile::Fault => config.fault_amplitude,
+        BoundaryProfile::Lake => config.lake_amplitude,
+        BoundaryProfile::LandSeam => config.land_seam_amplitude,
     }
 }
 
-fn width_hint_for_role(role: BoundaryRole, edge: MacroEdge, river_flow: Option<f32>) -> f32 {
-    match role {
-        BoundaryRole::Coast => 10.0 + edge.guide.coastness * 18.0,
-        BoundaryRole::River => 2.0 + river_flow.unwrap_or(0.0).sqrt() * 0.45,
-        BoundaryRole::Ridge => 8.0 + edge.guide.ridgeness * 16.0,
-        BoundaryRole::Fault => 6.0 + edge.guide.signed_elevation_gradient.abs() * 20.0,
-        BoundaryRole::LakeShore => 5.0,
-        BoundaryRole::LandBoundary => 2.0,
-    }
-}
-
-fn boundary_stats(
-    curves: &[NoisyBoundaryCurve],
-    macro_edges: &HashMap<VoronoiEdgeId, MacroEdge>,
-    graph_edges: &HashMap<VoronoiEdgeId, VoronoiEdge>,
-    hydrology: &GraphHydrologyGraph,
-    node_corners: &HashMap<GraphDrainageNodeId, VoronoiCornerId>,
-) -> BoundaryStats {
-    let mut stats = BoundaryStats::default();
-    let river_edges = hydrology
-        .segments
-        .iter()
-        .map(|segment| segment.edge)
-        .collect::<HashSet<_>>();
-    let river_curve_edges = curves
-        .iter()
-        .filter(|curve| curve.role == BoundaryRole::River)
-        .map(|curve| curve.edge)
-        .collect::<HashSet<_>>();
+fn boundary_stats(curves: &[NoisyBoundaryCurve], graph_edge_count: usize) -> BoundaryStats {
+    let mut stats = BoundaryStats {
+        total_curve_count: curves.len(),
+        missing_macro_edge_count: graph_edge_count.saturating_sub(curves.len()),
+        ..BoundaryStats::default()
+    };
 
     for curve in curves {
-        match curve.role {
-            BoundaryRole::Coast => stats.coast_curve_count += 1,
-            BoundaryRole::River => stats.river_curve_count += 1,
-            BoundaryRole::Ridge => stats.ridge_curve_count += 1,
-            BoundaryRole::Fault => stats.fault_curve_count += 1,
-            BoundaryRole::LakeShore => stats.lake_shore_curve_count += 1,
-            BoundaryRole::LandBoundary => stats.land_boundary_curve_count += 1,
+        match curve.profile {
+            BoundaryProfile::Ordinary => stats.ordinary_curve_count += 1,
+            BoundaryProfile::Coast => stats.coast_curve_count += 1,
+            BoundaryProfile::Ridge => stats.ridge_curve_count += 1,
+            BoundaryProfile::Fault => stats.fault_curve_count += 1,
+            BoundaryProfile::Lake => stats.lake_curve_count += 1,
+            BoundaryProfile::LandSeam => stats.land_seam_curve_count += 1,
         }
         if curve
             .points
@@ -472,44 +393,8 @@ fn boundary_stats(
         {
             stats.guard_violation_count += 1;
         }
-        if curve.role == BoundaryRole::River
-            && macro_edges
-                .get(&curve.edge)
-                .is_some_and(|edge| edge.lake_class.excludes_selected_river())
-        {
-            stats.river_lake_edge_curve_count += 1;
-        }
     }
 
-    for segment in &hydrology.segments {
-        if !river_curve_edges.contains(&segment.edge) {
-            continue;
-        }
-        let Some(edge) = graph_edges.get(&segment.edge) else {
-            stats.river_endpoint_mismatch_count += 1;
-            continue;
-        };
-        let Some(from_corner) = node_corners.get(&segment.from).copied() else {
-            stats.river_endpoint_mismatch_count += 1;
-            continue;
-        };
-        let Some(to_corner) = node_corners.get(&segment.to).copied() else {
-            stats.river_endpoint_mismatch_count += 1;
-            continue;
-        };
-        if !edge.corners.contains(&from_corner) || !edge.corners.contains(&to_corner) {
-            stats.river_endpoint_mismatch_count += 1;
-        }
-    }
-
-    stats.river_endpoint_mismatch_count += river_edges
-        .difference(&river_curve_edges)
-        .filter(|edge| {
-            macro_edges
-                .get(edge)
-                .is_none_or(|edge| !edge.lake_class.excludes_selected_river())
-        })
-        .count();
     stats
 }
 
@@ -542,51 +427,43 @@ mod tests {
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
         VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
-    use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
     use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
 
     #[test]
+    fn boundary_generation_creates_one_curve_for_every_macro_edge() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+
+        assert_eq!(boundary.curves.len(), macro_map.edges.len());
+        assert_eq!(boundary.stats.total_curve_count, macro_map.edges.len());
+        assert_eq!(boundary.stats.missing_macro_edge_count, 0);
+        assert!(boundary.stats.ordinary_curve_count > 0);
+    }
+
+    #[test]
     fn boundary_generation_is_deterministic_for_same_input() {
-        let (patch, macro_map, hydrology) = test_inputs(42, 0, 0);
+        let (patch, macro_map) = test_inputs(42, 0, 0);
         let config = BoundaryConfig::new(42, 11);
 
-        let first = generate_noisy_boundaries(&patch, &macro_map, &hydrology, config);
-        let second = generate_noisy_boundaries(&patch, &macro_map, &hydrology, config);
+        let first = generate_noisy_boundaries(&patch, &macro_map, config);
+        let second = generate_noisy_boundaries(&patch, &macro_map, config);
 
         assert_eq!(first, second);
     }
 
     #[test]
-    fn boundary_generation_changes_with_seed_or_role() {
-        let (patch, macro_map, hydrology) = test_inputs(42, 0, 0);
-        let first =
-            generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(42, 11));
-        let second =
-            generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(43, 11));
+    fn boundary_generation_changes_with_seed() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let first = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+        let second = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(43, 11));
 
         assert_ne!(first.curves, second.curves);
-
-        let edge_with_multiple_roles = first
-            .curves
-            .iter()
-            .find_map(|curve| {
-                first
-                    .curves_for_edge(curve.edge)
-                    .find(|other| other.role != curve.role)
-                    .map(|other| (curve, other))
-            })
-            .expect("test patch should expose at least one multi-role edge");
-        assert_ne!(
-            edge_with_multiple_roles.0.points,
-            edge_with_multiple_roles.1.points
-        );
     }
 
     #[test]
     fn noisy_points_stay_inside_edge_guard() {
-        let (patch, macro_map, hydrology) = test_inputs(42, 0, 0);
-        let boundary =
-            generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(42, 11));
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
 
         assert_eq!(boundary.stats.guard_violation_count, 0);
         assert!(boundary.curves.iter().all(|curve| {
@@ -598,50 +475,25 @@ mod tests {
     }
 
     #[test]
-    fn river_curves_only_use_selected_non_lake_edges() {
-        let (patch, macro_map, hydrology) = test_inputs(42, 0, 0);
-        let boundary =
-            generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(42, 11));
-        let selected_edges = hydrology
-            .segments
-            .iter()
-            .map(|segment| segment.edge)
-            .collect::<HashSet<_>>();
-        let macro_edges = macro_map
-            .edges
-            .iter()
-            .map(|edge| (edge.id, *edge))
-            .collect::<HashMap<_, _>>();
-
-        assert_eq!(boundary.stats.river_lake_edge_curve_count, 0);
-        assert_eq!(boundary.stats.river_endpoint_mismatch_count, 0);
-        assert!(
-            boundary
-                .curves
-                .iter()
-                .any(|curve| curve.role == BoundaryRole::River)
-        );
-        for curve in boundary
+    fn selected_hydrology_does_not_create_extra_boundary_curves() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+        let unique_edges = boundary
             .curves
             .iter()
-            .filter(|curve| curve.role == BoundaryRole::River)
-        {
-            assert!(selected_edges.contains(&curve.edge));
-            assert_eq!(
-                macro_edges[&curve.edge].lake_class,
-                MacroLakeEdgeClass::NonLake
-            );
-        }
+            .map(|curve| curve.edge)
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(unique_edges.len(), boundary.curves.len());
     }
 
     #[test]
     fn adjacent_patch_overlap_keeps_internal_boundary_curves_stable() {
-        let (left_patch, left_macro, left_hydro) = test_inputs(77, 0, 0);
-        let (right_patch, right_macro, right_hydro) =
-            test_inputs(77, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, 0);
+        let (left_patch, left_macro) = test_inputs(77, 0, 0);
+        let (right_patch, right_macro) = test_inputs(77, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, 0);
         let config = BoundaryConfig::new(77, 11);
-        let left = generate_noisy_boundaries(&left_patch, &left_macro, &left_hydro, config);
-        let right = generate_noisy_boundaries(&right_patch, &right_macro, &right_hydro, config);
+        let left = generate_noisy_boundaries(&left_patch, &left_macro, config);
+        let right = generate_noisy_boundaries(&right_patch, &right_macro, config);
         let left_sites = sites_in_region(&left_patch, 1, 0);
         let right_sites = sites_in_region(&right_patch, 1, 0);
         let left_edges = internal_edges(&left_patch, &left_sites);
@@ -649,19 +501,15 @@ mod tests {
         let shared_edges = left_edges
             .intersection(&right_edges)
             .copied()
-            .collect::<HashSet<_>>();
-        let left_curves = curves_by_key(&left, &shared_edges);
-        let right_curves = curves_by_key(&right, &shared_edges);
+            .collect::<std::collections::HashSet<_>>();
+        let left_curves = curves_by_edge(&left, &shared_edges);
+        let right_curves = curves_by_edge(&right, &shared_edges);
 
         assert!(!left_curves.is_empty());
         assert_eq!(left_curves, right_curves);
     }
 
-    fn test_inputs(
-        seed: u64,
-        center_x: i32,
-        center_z: i32,
-    ) -> (VoronoiGraphPatch, GraphMacroMap, GraphHydrologyGraph) {
+    fn test_inputs(seed: u64, center_x: i32, center_z: i32) -> (VoronoiGraphPatch, GraphMacroMap) {
         let patch = generate_voronoi_graph_patch(VoronoiGraphPatchRequest::new(
             VoronoiGraphConfig {
                 seed,
@@ -674,11 +522,14 @@ mod tests {
             center_z,
         ));
         let macro_map = generate_macro_map(&patch, MacroMapConfig::new(seed, 11));
-        let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
-        (patch, macro_map, hydrology)
+        (patch, macro_map)
     }
 
-    fn sites_in_region(patch: &VoronoiGraphPatch, x: i32, z: i32) -> HashSet<VoronoiSiteId> {
+    fn sites_in_region(
+        patch: &VoronoiGraphPatch,
+        x: i32,
+        z: i32,
+    ) -> std::collections::HashSet<VoronoiSiteId> {
         patch
             .sites
             .iter()
@@ -689,8 +540,8 @@ mod tests {
 
     fn internal_edges(
         patch: &VoronoiGraphPatch,
-        sites: &HashSet<VoronoiSiteId>,
-    ) -> HashSet<VoronoiEdgeId> {
+        sites: &std::collections::HashSet<VoronoiSiteId>,
+    ) -> std::collections::HashSet<VoronoiEdgeId> {
         patch
             .edges
             .iter()
@@ -699,15 +550,15 @@ mod tests {
             .collect()
     }
 
-    fn curves_by_key(
+    fn curves_by_edge(
         cache: &BoundaryCache,
-        edges: &HashSet<VoronoiEdgeId>,
-    ) -> HashMap<(BoundaryRole, VoronoiEdgeId), Vec<WorldPlanePoint>> {
+        edges: &std::collections::HashSet<VoronoiEdgeId>,
+    ) -> HashMap<VoronoiEdgeId, Vec<WorldPlanePoint>> {
         cache
             .curves
             .iter()
             .filter(|curve| edges.contains(&curve.edge))
-            .map(|curve| ((curve.role, curve.edge), curve.points.clone()))
+            .map(|curve| (curve.edge, curve.points.clone()))
             .collect()
     }
 }

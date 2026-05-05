@@ -138,13 +138,11 @@
   표시한다.
 - ridge candidate edge는 흰색, fault candidate edge는 붉은색, coast candidate edge는 sandy color overlay로 표시한다.
 - macro_map preview는 macro_map fill과 stage 4/5 guide를 기본 layer로 표시하고, stage 6 hydrology가
-  구현된 뒤에는 같은 composite 위에 selected river result를 추가 overlay한다. stage 7 boundary가
-  구현된 뒤에는 selected river straight segment 대신 `BoundaryRole::River` noisy curve를 기본 river
-  overlay로 표시한다.
-- selected river는 hydrology가 확정한 `GraphRiverSegment`에서 파생된 boundary curve만 표시한다.
-  pre-hydrology river candidate나 macro_map river potential은 표시하지 않는다.
-- selected river curve는 hydrology selected segment의 edge id를 읽어 만든 noisy polyline으로 표시하고,
-  segment의 selected/display `flow_accumulation`에서 파생한 width hint가 클수록 더 두껍게 그린다. hydrology raw corner
+  구현된 뒤에는 같은 composite 위에 selected river result를 추가 overlay한다.
+- selected river는 hydrology가 확정한 `GraphRiverSegment`만 표시한다. pre-hydrology river candidate나
+  macro_map river potential은 표시하지 않는다.
+- selected river segment는 stage 7 `BoundaryCache`가 제공하는 canonical noisy edge geometry를 따라 cyan/blue line으로 표시하고,
+  segment의 selected/display `flow_accumulation`이 클수록 더 두껍게 그린다. hydrology raw corner
   accumulation과 lake capacity가 적용된 selected discharge가 다를 수 있으며, lake terminal/inlet
   river는 ocean outlet river보다 보수적인 두께 cap을 가진다. lake terminal/inlet은 hydrology
   단계에서 chain 수와 inlet marker raw-flow threshold가 제한되지만, 기준을 통과한 lake-bound trunk는
@@ -164,9 +162,6 @@
 - selected river, `LakeInlet`, `LakeOutlet`, `CoastOutlet`, lake fill 색은 서로 구분되어야 한다.
   `GraphDrainageNodeKind::Lake`는 local minimum lake resolution을 나타내는 내부 debug node이며,
   기본 macro map preview legend와 overlay에는 표시하지 않는다.
-- noisy boundary overlay는 coast, selected river, ridge, fault, lake shore, low-amplitude land seam을
-  role별 색으로 그린다. faint raw Voronoi edge와 straight guide overlay는 before/after 진단용이며,
-  visible feature realization의 source of truth는 boundary curve다.
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
   invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
   repeated lake contact pruned count, unclassified lake-connected flow count,
@@ -188,9 +183,8 @@
   invalid lake contact/intersection count, ambiguous shared corner count, duplicate trunk pruned
   count, unclassified lake-connected flow count, dry basin site count, max lake component size,
   large lake component count, lake/ocean max display/raw flow, lake inlet raw/display flow range,
-  boundary curve count, noisy role별 curve count, guard violation count, lake-edge river curve
-  count, river endpoint mismatch count, sea level, stage 4 guide input note, stage 6 hydrology
-  raw/selected flow note, stage 7 boundary note, source note를 함께 기록한다.
+  boundary curve count, boundary profile counts, boundary guard violation count,
+  sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
@@ -212,8 +206,8 @@
 - coast/ridge/fault candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
-- hydrology overlay도 같은 실제 graph corner segment를 사용한다. 따라서 selected river는 raw
-  nearest-site raster boundary가 아니라 hydrology가 선택한 Voronoi edge chain 위에 놓인다.
+- hydrology overlay는 stage 7 이후 같은 edge id의 canonical noisy curve를 사용한다. 따라서 selected river는 raw
+  nearest-site raster boundary가 아니라 hydrology가 선택한 Voronoi edge chain의 noisy geometry 위에 놓인다.
 - hydrology overlay는 macro_map의 명시적 lake edge class를 통과한 selected segment만 그린다. 따라서
   nearest-site lake fill 경계와 corner surface 기준이 어긋나도 selected river가 lake boundary/internal/
   adjacent edge 위에 그려지면 회귀다.

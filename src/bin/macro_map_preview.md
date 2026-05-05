@@ -2,8 +2,8 @@
 
 ## Role
 
-- Render a deterministic top-down PNG composite for the graph-field-resolved macro map and noisy
-  boundary stages.
+- Render a deterministic top-down PNG composite for the graph-field-resolved macro map and
+  canonical noisy Voronoi edge stages.
 - Show separated ocean, island/coast, inland elevation, peak whitening, ridge/fault/coast candidate
   edge overlays, and stage 6 selected hydrology overlays in one image.
 - Keep default filenames short while preserving detailed settings in PNG metadata.
@@ -46,13 +46,13 @@
   - ridge candidate edges are white overlays.
   - fault candidate edges are red overlays.
   - coast candidate edges are sandy overlays.
-  - selected river chains are drawn from hydrology `GraphRiverSegment` results through stage 7
-    `BoundaryRole::River` noisy curves rather than straight corner-to-corner strokes.
+  - every Voronoi edge has one canonical noisy curve from stage 7 boundary realization.
+  - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
+    overlays following each segment edge id's canonical noisy curve.
   - selected river chains are drawn only for macro edges whose lake edge class is `NonLake`; lake
     internal, lake boundary, and lake-adjacent land edges are never rendered as selected rivers.
   - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
     not `raw_flow_accumulation`; lake terminal discharge caps are therefore visible in the preview.
-    The boundary curve stores this as a width hint.
   - lake terminal/inlet selection is already reduced by hydrology before rendering: per-lake
     top-N chain limits, lake-area inlet raw-flow thresholds, and lake-area discharge caps all
     affect the displayed segment set. A qualifying lake-bound trunk is not clipped to only the
@@ -74,9 +74,6 @@
     new chain, and any selected path that would touch a second lake contact is pruned.
   - connected selected flow adjacent to a lake must be classified as either a `LakeInlet` or a
     `LakeOutlet`; unclassified lake-connected flow is reported in metadata/stdout and should be 0.
-  - noisy boundary curves are drawn for coast, selected river, ridge, fault, lake shore, and subtle
-    land seams. Faint straight Voronoi edges and straight guide overlays remain as before/after
-    diagnostics, but the visible feature realization is the noisy curve layer.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
@@ -88,8 +85,7 @@
   river segment count, invalid lake contact/intersection count, ambiguous shared corner count,
   duplicate trunk pruned count, repeated lake contact pruned count, unclassified lake-connected flow count,
   lake/ocean max display/raw flow, lake inlet raw/display flow range, boundary curve count,
-  noisy role counts, boundary guard violation count, boundary river/lake-edge count, boundary river
-  endpoint mismatch count, sea level, and source notes.
+  boundary profile counts, boundary guard violation count, sea level, and source notes.
 
 ## Output Path Rules
 
@@ -109,7 +105,7 @@
      window while preserving complex coastlines from graph continentality rather than adding a
      separate continent noise source.
 5. Solve selected hydrology through `solve_hydrology(&patch, &macro_map, HydrologyConfig::default())`.
-6. Generate noisy boundary curves through `generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(...))`.
+6. Generate canonical noisy boundary curves through `generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(...))`.
 7. Generate the RGB pixel buffer with Rayon.
 8. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph
    patch's `VoronoiCorner.position` values, clipping the world-space segment to the preview window,
@@ -117,8 +113,7 @@
 9. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.
-10. Draw stage 7 noisy boundary curves. River curves come only from hydrology selected segments and
-   never from lake boundary/internal/adjacent edges.
+10. Draw selected river chains by following each selected segment's canonical noisy edge curve.
 11. Draw lake/inlet/outlet/sink/coast-outlet drainage node markers from hydrology results.
 12. Draw the compact legend and encode PNG metadata.
 
@@ -136,7 +131,7 @@ The binary uses the public macro map API exposed by `world::generation::macro_ma
 ```rust
 new_world::world::generation::generate_macro_map(&patch, MacroMapConfig::new(seed, generator_version))
 new_world::world::generation::solve_hydrology(&patch, &macro_map, HydrologyConfig::default())
-new_world::world::generation::generate_noisy_boundaries(&patch, &macro_map, &hydrology, BoundaryConfig::new(seed, generator_version))
+new_world::world::generation::generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(seed, generator_version))
 ```
 
 Goal contract: this preview should show how graph base `continentality/elevation_seed` resolves into
@@ -149,8 +144,8 @@ land-side selected endpoints paired with a lake component; selected river segmen
 along or cross lake boundary/internal/adjacent edges. `GraphDrainageNodeKind::Lake` means a graph
 local minimum resolved as an internal lake target; it is not a visible river endpoint and is not
 drawn by the default preview.
-Stage 7 then hides the raw polygon look by drawing noisy boundary curves constrained by each
-Voronoi edge's corner/site guard.
+Stage 7 does not create a separate river curve. It creates one canonical noisy curve for every
+Voronoi edge, and the hydrology overlay samples the curve for each selected river segment edge id.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

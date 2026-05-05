@@ -120,14 +120,12 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      lake outlet에서 시작하는 chain은 별도 chain으로 취급한다.
    - lake와 연결된 selected flow endpoint는 반드시 `LakeInlet` 또는 `LakeOutlet` 중 하나로 분류되어야
      하며, 미분류 lake-connected flow는 회귀로 계측한다.
-7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
-   - boundary stage는 `VoronoiGraphPatch`, `GraphMacroMap`, `GraphHydrologyGraph`를 읽어
-     `edge id -> NoisyBoundaryCurve` annotation layer를 만든다.
-   - river curve는 hydrology selected segment에 대해서만 생성하며, `MacroLakeEdgeClass::NonLake`
-     edge만 사용할 수 있다.
-   - coast, ridge, fault, lake shore, low-amplitude land boundary는 role별 amplitude와 seed salt를
-     사용해 서로 다른 noisy curve로 현실화한다.
-   - curve endpoint는 graph corner anchor를 유지하고, 내부 point는 edge guard 안에서만 흔들린다.
+7. 모든 Voronoi edge를 canonical noisy boundary geometry로 현실화한다. raw graph topology는 그대로 보존한다.
+   - boundary stage는 특정 visible feature edge만 골라 curve를 만들지 않는다.
+   - `NoisyBoundaryCurve`는 graph edge 전체에 대해 생성되는 `edge id -> noisy polyline/spline` layer다.
+   - coast/ridge/fault/lake/ordinary boundary 차이는 curve 존재 여부가 아니라 profile/amplitude/constraint parameter에 반영한다.
+   - river는 별도 noisy curve를 만들지 않는다. hydrology selected segment는 edge id path이며, preview, heightfield, water corridor는 해당 edge id의 canonical noisy geometry를 따라간다.
+   - lake boundary/internal/lake-adjacent edge에도 noisy curve는 존재하지만, selected river segment가 해당 edge를 타는 것은 계속 금지된다.
 8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
 10. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
@@ -144,7 +142,6 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 현재 구현된 scaffold:
 
 - `graph/graph.md`: graph region, Voronoi site/corner/edge id와 patch 계약
-- `boundary/boundary.md`: selected visible edge의 noisy boundary realization 계약
 - `field/field.md`: hard owner가 아닌 continuous blended field sampling 계약
 - `hydrology/hydrology.md`: watershed, drainage node, selected river edge 계약
 - `pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
@@ -173,11 +170,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   구현은 corner downhill, graph-stage local minimum, outlet carve, watershed, flow accumulation,
   selected river segment를 계산한다. 이 단계의 river는 후보 surface가 아니라
   downhill/local-minimum/outlet 정책을 통과한 결과다.
-- stage 7 boundary: graph/macro/hydrology annotation을 읽어 coast, selected river, ridge, fault,
-  lake shore, land boundary edge를 deterministic noisy curve layer로 만든다. 구현은 Amit식 noisy
-  edge 원칙을 따라 하나의 Voronoi edge의 두 corner와 두 site center가 만드는 guard 안에서 midpoint
-  displacement polyline을 생성한다. raw graph topology는 그대로 남고, preview와 이후 heightfield는
-  boundary curve를 visible feature realization으로 읽는다.
+- stage 7 boundary: graph/macro annotation을 읽어 모든 Voronoi edge의 deterministic canonical noisy
+  curve layer를 만든다. 구현은 Amit식 noisy edge 원칙을 따라 하나의 Voronoi edge의 두 corner와 두
+  site center가 만드는 guard 안에서 midpoint displacement polyline을 생성한다. raw graph topology는
+  그대로 남고, selected river는 별도 river curve가 아니라 hydrology segment의 edge id가 가리키는
+  canonical curve를 따라 preview/heightfield에서 해석된다.
 
 런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
 contract에 따라 graph region cache, macro map cache, hydrology/boundary/heightfield cache를 worker에서
@@ -185,7 +182,7 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 
 문서화된 다음 leaf:
 
-- `boundary/boundary.md`: selected coast/river/biome/fault boundary realization
+- `boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry 계약
 - `meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `heightfield/heightfield.md`: Voronoi-derived macro map과 Perlin micro relief 합성
 - `surface_plan/surface_plan.md`: biome, material, water/coast/wetland policy resolve
@@ -281,7 +278,7 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 2. macro ownership과 macro elevation은 graph base field resolve로 먼저 생성되고, Perlin은 마지막 micro relief로만 합성된다.
 3. 산맥/능선/단층 edge guide와 coast edge guide는 hydrology보다 먼저 정해진다.
 4. hydrology는 최종 heightfield와 voxel fill 전에 selected river, valley, lake, coast 제약을 제공한다.
-5. noisy boundary는 visible feature edge의 realization layer이며 raw graph topology를 대체하지 않는다.
+5. noisy boundary는 모든 Voronoi edge의 canonical geometry layer이며 raw graph topology를 대체하지 않는다.
 6. meso feature는 macro ownership을 뒤집지 않고 heightfield가 읽을 deterministic deformation plan을 제공한다.
 7. polygon owner와 visible material/biome boundary는 분리될 수 있어야 한다.
 8. material, water, vegetation은 직접 `ChunkData`를 수정하지 않고 plan으로 합쳐진 뒤 voxel fill에서 반영된다.

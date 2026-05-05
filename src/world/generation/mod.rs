@@ -12,7 +12,7 @@ pub use crate::world::legacy::generation::*;
 
 #[allow(unused_imports)]
 pub use boundary::{
-    BoundaryAnchors, BoundaryCache, BoundaryConfig, BoundaryGuard, BoundaryRole, BoundaryStats,
+    BoundaryAnchors, BoundaryCache, BoundaryConfig, BoundaryGuard, BoundaryProfile, BoundaryStats,
     DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS, DEFAULT_BOUNDARY_SUBDIVISION_LEVELS, NoisyBoundaryCurve,
     generate_noisy_boundaries,
 };

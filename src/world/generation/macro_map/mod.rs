@@ -846,11 +846,11 @@ fn small_stream_pocket_lake(
     let local_minima_score = basinness * 0.50 + fields.hydration * 0.28 + low_elevation * 0.22;
     let deterministic_roll = (feature_hash % 10_000) as u32;
     let chance_per_10k = if local_minima_score >= 0.90 {
-        1200
+        900
     } else if local_minima_score >= 0.84 {
-        720
+        520
     } else if local_minima_score >= 0.79 {
-        380
+        260
     } else {
         0
     };

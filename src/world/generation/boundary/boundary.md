@@ -2,81 +2,53 @@
 
 ## 역할
 
-`boundary`는 polygon boundary, coast, river, biome transition, cliff/fault line의 noisy realization
-계약을 소유한다.
+`boundary`는 모든 Voronoi edge의 canonical noisy geometry layer를 소유한다.
 
-raw Voronoi edge는 후보선일 뿐이다. 모든 edge를 visible boundary로 바꾸지 않는다. visible
-boundary는 coast, selected river, biome transition, cliff/fault처럼 feature role을 받은 edge만
-spline, recursive subdivision, domain warp, feature-specific width와 mask를 통해 현실화한다.
+raw Voronoi edge는 graph topology와 semantic annotation의 기준이지만, 최종 지형에서 그대로
+보이는 직선이어서는 안 된다. 이 모듈은 특정 feature edge만 골라 noisy curve를 만드는 단계가
+아니다. graph patch에 포함된 모든 Voronoi edge에 대해 deterministic noisy curve를 만들고, 이후
+coast, ridge, fault, river, lake, biome/material transition, heightfield mask가 같은 edge id의
+curve를 따라 해석되도록 한다.
 
 ---
 
 ## 책임
 
+- 모든 Voronoi edge에 대한 noisy polyline/spline 생성
 - Voronoi edge guard geometry 정의
-- noisy line / noisy curve deterministic 생성 계약
-- coast, river, biome transition, cliff/fault boundary별 realization 정책
-- edge id와 seed 기반 cache key 정의
-- boundary가 이웃 chunk/region에서 동일하게 재현되도록 입력 계약 유지
-- raw graph topology와 visible boundary realization layer 분리
+- edge id와 seed 기반 deterministic cache key 정의
+- 인접 chunk/region/patch가 같은 edge를 같은 curve로 재현하도록 입력 계약 유지
+- edge별 profile/amplitude/constraint parameter 결정
+- raw graph topology와 visible/sample geometry layer 분리
 
 ---
 
 ## 비책임
 
 - graph topology 생성
-- hydrology routing
+- hydrology routing 또는 selected river chain 결정
 - macro elevation ownership 결정
 - final material policy 선택
 - block fill
+- river 전용 noisy curve 생성
 
 ---
 
-## Noisy Boundary Realization
+## Canonical Noisy Edge Layer
 
-polygon boundary, coast, river, biome transition은 raw straight line으로 보이면 안 된다.
-
-단순히 noise를 더한 spline은 교차와 찢김을 만들 수 있다. Amit의 noisy edge 아이디어에서 가장
-쓸만한 부분은 boundary가 움직일 수 있는 공간을 제한하는 것이다.
-
-하나의 Voronoi edge는 두 site와 두 corner를 가진다. 이 네 점은 boundary guard quadrilateral을
-만든다.
-
-- corner edge는 polygon boundary, coast, river 후보선이 된다.
-- site edge는 polygon center 사이의 연결선이며 region adjacency와 terrain analysis에 쓸 수 있다.
-- noisy line은 guard quadrilateral 안에서 recursive subdivision 또는 spline perturbation으로 만든다.
-- 같은 edge id와 seed는 언제나 같은 noisy line을 만든다.
-- neighboring chunk가 같은 edge를 샘플하면 같은 line을 얻어야 한다.
-
----
-
-## 구현 계약
-
-pipeline 7단계는 noisy boundary realization이다. 이 단계는 graph, macro_map, hydrology 결과를 읽어
-visible feature edge만 block-space curve로 바꾸고, raw graph topology는 그대로 보존한다.
-
-현재 구현은 `src/world/generation/boundary/mod.rs`에 있다. public entrypoint는 아래다.
+pipeline 7단계는 noisy boundary realization이다. 이 단계의 출력은 graph edge 전체에 대한
+canonical geometry annotation이다.
 
 ```rust
 BoundaryConfig::new(seed, generator_version) -> BoundaryConfig
 generate_noisy_boundaries(
     &VoronoiGraphPatch,
     &GraphMacroMap,
-    &GraphHydrologyGraph,
     BoundaryConfig,
 ) -> BoundaryCache
 ```
 
-### 입력 데이터
-
-- `VoronoiGraphPatch`: site, corner, edge id, corner-to-corner straight edge, site-to-site guard geometry
-- `GraphMacroMap`: surface kind, coast/ridge/fault guide, signed macro elevation, `MacroLakeEdgeClass`
-- `GraphHydrologyGraph`: selected river segment, selected/display discharge, inlet/outlet/sink/coast outlet node
-- stage config: boundary seed salt, feature별 amplitude, subdivision depth, guard margin, smoothing policy
-
-### 출력 데이터 계약
-
-출력은 id 기반 annotation layer다.
+출력 계약:
 
 ```rust
 BoundaryCache {
@@ -86,79 +58,95 @@ BoundaryCache {
 
 NoisyBoundaryCurve {
     edge: VoronoiEdgeId,
-    role: BoundaryRole,
+    profile: BoundaryProfile,
     anchors: BoundaryAnchors,
     points: Vec<WorldPlanePoint>,
-    width_hint_blocks: f32,
     amplitude: f32,
     seed: u64,
     guard: BoundaryGuard,
 }
-
-BoundaryRole::{
-    Coast,
-    River,
-    Ridge,
-    Fault,
-    LakeShore,
-    LandBoundary,
-}
 ```
 
-`points`는 world-space polyline/spline control point다. 이후 field/heightfield 단계는 이 curve와
-edge id mapping을 읽어 coast gradient, river corridor, ridge envelope, lake shore mask를 만든다.
-`BoundaryStats`는 role별 curve 수, guard violation 수, lake edge 위 river curve 수, river endpoint
-attachment mismatch 수를 제공한다.
+불변식은 `macro_map.edges.len() == boundary.curves.len()`이다. downstream stage는 coast, ridge,
+fault, lake shore, river corridor를 새 curve로 다시 만들지 않고, 각 feature가 참조하는
+`VoronoiEdgeId`의 `NoisyBoundaryCurve`를 읽는다.
 
-### Deterministic Seed Policy
+---
 
-- curve seed는 `(world seed, generator version, edge id, role salt)`로 만든다.
-- 같은 edge id와 role은 patch 요청 중심, chunk 요청 순서, worker thread scheduling에 관계없이 같은
-  point sequence를 만든다.
-- 병렬 생성은 허용하지만 최종 `curves`는 `(role, edge id)` 기준으로 정렬한다.
-- 같은 edge라도 `Coast`, `River`, `LakeShore`처럼 role이 다르면 salt가 달라 다른 noisy path를 가진다.
+## Edge Profile
 
-### 알고리즘
+모든 edge에는 noisy curve가 있다. 역할별 차이는 curve의 존재 여부가 아니라 profile/amplitude/
+constraint parameter에 반영한다.
 
-구현은 Amit의 noisy edge 아이디어를 launch 수준으로 보수적으로 적용한다.
+- `Ordinary`: 일반 graph edge, biome/material blending이나 field sampling의 낮은 amplitude 기준
+- `Coast`: connected ocean과 land 사이의 shoreline profile
+- `Lake`: lake boundary/internal/lake-adjacent edge profile
+- `Ridge`: ridge guide가 붙은 edge, heightfield ridge envelope가 읽을 더 sharp한 profile
+- `Fault`: fault guide가 붙은 edge, lateral noise는 낮고 discontinuity hint를 유지하는 profile
+- `LandSeam`: land-owned surface kind가 바뀌는 낮은 amplitude seam
+
+profile 우선순위는 launch 기준으로 `Coast > Lake > Ridge > Fault > LandSeam > Ordinary`다. 한 edge에
+여러 semantic guide가 붙을 수 있어도 canonical curve는 하나이며, 필요하면 이후 stage가 같은 curve를
+여러 mask로 해석한다.
+
+---
+
+## River Contract
+
+river는 별도 `BoundaryRole::River` curve를 만들지 않는다.
+
+hydrology의 `GraphRiverSegment`는 selected edge id path다. preview, heightfield, water corridor,
+valley carve는 river segment의 `edge` id로 `BoundaryCache.curve_for_edge(edge)`를 찾아 그 noisy
+geometry를 따라간다. 따라서 강은 "noisy river curve"가 아니라 "selected hydrology path가 이미 noisy한
+Voronoi edge geometry를 따라 흐르는 것"으로 표현된다.
+
+lake rule은 그대로 유지한다.
+
+- lake boundary/internal/lake-adjacent edge에도 noisy curve는 존재한다.
+- selected river segment는 `MacroLakeEdgeClass::NonLake` edge만 사용할 수 있다.
+- inlet/outlet은 noisy edge endpoint 또는 land-side endpoint anchor에 접합한다.
+- lake edge 위로 river를 그리거나 sampling해서는 안 된다.
+
+---
+
+## Deterministic Seed Policy
+
+- curve seed는 `(world seed, generator version, edge id, profile salt)`로 만든다.
+- 같은 edge id와 profile은 patch 요청 중심, chunk 요청 순서, worker scheduling에 관계없이 같은 point
+  sequence를 만든다.
+- 병렬 생성은 허용하지만 최종 `curves`는 `edge id` 기준으로 정렬한다.
+- profile은 macro/hydrology 결과를 읽는 downstream 의미이며, canonical curve identity는 edge id가
+  소유한다.
+
+---
+
+## 알고리즘
+
+launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 guard를 제한한다"는 원칙을 따른다.
 
 - 하나의 Voronoi edge는 두 corner와 두 site center를 함께 읽는다.
-- 이 네 점의 bounding guard를 만들고, margin을 더해 수치적 guard 영역을 만든다.
+- 이 네 점의 guard를 만들고 margin을 더해 수치적 guard 영역을 만든다.
 - corner-to-corner edge를 recursive midpoint displacement polyline으로 세분화한다.
-- noisy point는 edge normal 방향으로 흔들되, guard 영역으로 clamp한다.
+- noisy point는 edge normal 방향으로 흔들되 guard 영역으로 clamp한다.
 - endpoint는 항상 원본 corner 위치를 유지한다.
 - 기본 subdivision level은 4이며 curve당 17개의 point를 만든다.
-- amplitude는 role별로 다르며 0.5 이하로 제한한다.
+- amplitude는 profile별로 다르며 0.5 이하로 제한한다.
 
 기본 amplitude:
 
+- ordinary: `0.05`
 - coast: `0.24`
-- river: `0.16`
-- lake shore: `0.18`
+- lake: `0.18`
 - ridge: `0.10`
 - fault: `0.08`
-- land boundary: `0.07`
+- land seam: `0.07`
 
-이 방식은 Amit의 사각형 내부 recursive subdivision을 그대로 베낀 것은 아니지만, 같은 핵심 원칙을
-따른다. 즉 noisy line은 raw Voronoi topology를 바꾸지 않고, 각 edge의 두 corner와 두 site가 만드는
-guard 안에서만 흔들린다. 이후 더 정교한 point-in-convex-quad clamp가 필요해지면 `BoundaryGuard`를
-axis-aligned guard에서 bilinear/convex guard로 좁힐 수 있다.
+이 구현은 raw topology를 바꾸지 않는다. graph edge id, corner id, site id는 그대로 유지되고, noisy
+curve는 heightfield와 preview가 읽는 geometry layer일 뿐이다.
 
-### Feature Constraints
+---
 
-- river curve는 hydrology selected segment에 대해서만 생성한다. macro river potential이나 raw graph edge는
-  river가 아니다.
-- selected river는 계속 `MacroLakeEdgeClass::NonLake` edge만 사용한다. lake boundary/internal/adjacent
-  edge에는 river curve를 만들지 않는다.
-- `LakeInlet`/`LakeOutlet`은 land-side selected endpoint와 lake component를 연결하는 접합 anchor다.
-  river curve는 endpoint에서 끝나거나 시작하고, lake boundary curve는 별도 lake shore role로 생성한다.
-- coast는 connected ocean basin과 land ownership 경계에서만 생성한다. lake shore와 ocean coast는 role을
-  분리해 amplitude와 material mask를 다르게 준다.
-- coast amplitude는 river보다 크고, ridge/fault는 feature 방향성을 유지하도록 낮은 lateral noise와
-  sharpness hint를 가진다.
-- noisy point는 edge guard quadrilateral 안에 있어야 하며, 이웃 edge curve와 교차하면 안 된다.
-
-### Runtime Cache
+## Runtime Cache
 
 runtime cache chain은 아래 순서를 따른다.
 
@@ -171,55 +159,47 @@ graph region cache
 -> chunk generation samples column/window data
 ```
 
-chunk fill은 boundary curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서
-graph/macro/hydrology와 같은 deterministic key/padding 정책으로 생성한다.
-
-### Preview
-
-- `macro_map_preview`는 같은 world window에서 faint raw Voronoi edge와 noisy boundary를 함께 보여준다.
-- 현재 layer는 before/after overlay를 제공한다.
-  - faint raw Voronoi edge
-  - straight coast/ridge/fault guide
-  - coast noisy curve
-  - river noisy curve, width hint
-  - lake shore curve
-  - ridge/fault curve
-- PNG metadata에는 curve count, role별 count, guard violation count, lake edge river curve count,
-  hydrology endpoint attachment mismatch count를 기록한다.
-
-현재 preview는 selected river straight segment를 기본 표시에서 제외하고, boundary의 noisy river curve를
-river overlay로 사용한다. hydrology node와 inlet/outlet arrow는 그대로 마지막 layer에 그린다.
-
-### 테스트
-
-- determinism: 같은 seed/config/edge role은 같은 curve point를 만든다.
-- adjacent patch stability: 인접 graph patch overlap의 같은 edge curve가 동일해야 한다.
-- guard containment: noisy points는 edge guard quadrilateral과 margin 안에 있어야 한다.
-- no crossing: 같은 role 또는 서로 다른 visible role curve가 guard 밖 교차를 만들지 않아야 한다.
-- hydrology attachment: river curve endpoint는 selected segment endpoint, `LakeInlet`, `LakeOutlet`,
-  `CoastOutlet`, `Sink` node와 계속 붙어 있어야 한다.
-- lake constraint: lake edge에는 river curve가 생성되지 않는다.
+`BoundaryCache`는 `graph edge id -> noisy polyline/spline` 전체를 저장한다. chunk fill은 boundary
+curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서 graph/macro/hydrology와
+같은 deterministic key/padding 정책으로 생성한다.
 
 ---
 
-## Feature별 표현
+## Preview
 
-boundary 표현은 feature마다 다를 수 있다.
+`macro_map_preview`는 raw Voronoi edge와 canonical noisy edge를 함께 보여줄 수 있어야 한다.
 
-- biome boundary: gradient, dithering, domain warp 중심
-- river: spline corridor, width, floodplain, gravel bar, wetland mask
-- coast: noisy coastline, beach/cliff/rocky shore material policy
-- fault/cliff: 부분적인 discontinuous height transition 허용
-- lake edge: water level flattening과 shore material transition
+- faint raw Voronoi edge: topology 진단용 straight edge
+- canonical noisy edge: 모든 edge에 존재하는 noisy geometry
+- coast/ridge/fault/lake/river overlay: 별도 curve가 아니라 해당 edge id의 canonical curve를 따라 그림
+- river width/opacity: hydrology selected/display `flow_accumulation`을 사용하되 geometry는
+  `BoundaryCache.curve_for_edge(segment.edge)`를 사용
+
+PNG metadata에는 total curve count, profile별 count, guard violation count, missing macro edge count를
+기록한다. river curve count나 river endpoint mismatch 같은 항목은 river 전용 boundary curve가 없으므로
+boundary stats의 책임이 아니다. river/lake 접촉 정합성은 hydrology stats가 계속 소유한다.
+
+---
+
+## 테스트
+
+- all-edge coverage: macro edge마다 정확히 하나의 noisy curve가 있어야 한다.
+- determinism: 같은 seed/config/edge/profile은 같은 curve point를 만든다.
+- adjacent patch stability: 인접 graph patch overlap의 같은 edge curve가 동일해야 한다.
+- guard containment: noisy points는 edge guard와 margin 안에 있어야 한다.
+- no duplicate river curve: hydrology selected segment가 boundary curve 수를 늘리면 안 된다.
+- lake constraint: lake edge에도 canonical noisy curve는 있지만 selected river segment는 해당 edge를
+  사용할 수 없다.
 
 ---
 
 ## 불변식
 
-1. raw Voronoi edge가 그대로 직선 river/coast/biome boundary로 보이면 안 된다.
-2. feature role이 없는 edge는 visible noisy boundary를 만들지 않는다.
-3. noisy boundary는 raw graph topology를 대체하지 않는다.
-4. noisy boundary는 edge guard 영역 밖으로 나가거나 이웃 edge와 교차하면 안 된다.
-5. 같은 edge id, seed, feature role은 같은 curve를 만들어야 한다.
-6. boundary realization은 chunk 요청 순서와 graph patch padding 차이에 독립적이어야 한다.
-7. hard owner와 visible material boundary가 과도하게 같은 선을 따라가면 회귀다.
+1. 모든 macro Voronoi edge는 canonical noisy curve를 하나 가진다.
+2. raw Voronoi edge가 그대로 직선 river/coast/biome boundary로 보이면 안 된다.
+3. river는 별도 noisy curve를 만들지 않고 selected edge id path가 canonical noisy geometry를 따른다.
+4. noisy boundary는 raw graph topology를 대체하지 않는다.
+5. noisy point는 edge guard 영역 밖으로 나가거나 이웃 edge와 교차하면 안 된다.
+6. 같은 edge id, seed, profile은 같은 curve를 만들어야 한다.
+7. boundary realization은 chunk 요청 순서와 graph patch padding 차이에 독립적이어야 한다.
+8. hard owner와 visible material boundary가 과도하게 같은 직선을 따라가면 회귀다.
