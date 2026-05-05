@@ -123,6 +123,9 @@ pub struct GraphRiverSegment {
 pub struct GraphHydrologyTopologyStats {
     pub lake_inlet_count: usize,
     pub lake_outlet_count: usize,
+    pub disconnected_lake_inlet_count: usize,
+    pub disconnected_lake_outlet_count: usize,
+    pub selected_lake_edge_segment_count: usize,
     pub invalid_lake_contact_count: usize,
     pub invalid_river_intersection_count: usize,
     pub ambiguous_shared_corner_count: usize,
@@ -618,6 +621,8 @@ struct LakeContactTopology {
     component_by_corner: Vec<Option<usize>>,
     inlet_vertices: Vec<bool>,
     outlet_vertices: Vec<bool>,
+    inlet_land_vertices: Vec<bool>,
+    outlet_land_vertices: Vec<bool>,
 }
 
 fn resolve_lake_contact_topology(
@@ -634,6 +639,8 @@ fn resolve_lake_contact_topology(
         component_by_corner: vec![None; lake_candidates.len()],
         inlet_vertices: vec![false; lake_candidates.len()],
         outlet_vertices: vec![false; lake_candidates.len()],
+        inlet_land_vertices: vec![false; lake_candidates.len()],
+        outlet_land_vertices: vec![false; lake_candidates.len()],
     };
 
     for (component_index, component) in components.iter().enumerate() {
@@ -649,6 +656,7 @@ fn resolve_lake_contact_topology(
         };
         if !lake_candidates[from] && lake_candidates[target] {
             topology.inlet_vertices[target] = true;
+            topology.inlet_land_vertices[from] = true;
             if let Some(component) = topology.component_by_corner[target] {
                 component_inlet_elevation[component] =
                     component_inlet_elevation[component].max(elevations[from]);
@@ -685,6 +693,7 @@ fn resolve_lake_contact_topology(
 
         downstream[outlet] = Some(target);
         downstream_edges[outlet] = Some(edge);
+        topology.outlet_land_vertices[target] = true;
         if resolutions[outlet] == GraphLocalMinimumResolution::Lake {
             resolutions[outlet] = GraphLocalMinimumResolution::OutletCarve;
         }
@@ -1132,16 +1141,11 @@ fn select_river_paths(
         }
     }
 
-    enforce_lake_contact_topology(
-        &mut selected,
-        downstream,
-        flow,
-        lake_candidates,
-        lake_topology,
-    );
+    enforce_lake_contact_topology(&mut selected, downstream, lake_candidates, lake_topology);
     remove_invalid_terminal_intersections(&mut selected, downstream, flow, lake_candidates);
     let duplicate_trunk_pruned_count =
         remove_ambiguous_shared_corner_intersections(&mut selected, downstream, flow);
+    enforce_lake_contact_topology(&mut selected, downstream, lake_candidates, lake_topology);
 
     SelectedRiverPaths {
         selected,
@@ -1152,7 +1156,6 @@ fn select_river_paths(
 fn enforce_lake_contact_topology(
     selected: &mut [bool],
     downstream: &[Option<usize>],
-    flow: &[f32],
     lake_candidates: &[bool],
     lake_topology: &LakeContactTopology,
 ) {
@@ -1167,48 +1170,13 @@ fn enforce_lake_contact_topology(
         let from_lake = lake_candidates[index];
         let to_lake = lake_candidates[target];
 
-        if from_lake && to_lake {
+        if from_lake || to_lake {
             selected[index] = false;
-        } else if to_lake {
-            selected[index] = lake_topology.inlet_vertices[target];
-        } else if from_lake {
-            selected[index] = lake_topology.outlet_vertices[index];
-        }
-    }
-
-    let mut incoming_to_lake = vec![Vec::<usize>::new(); selected.len()];
-    for (index, is_selected) in selected.iter().copied().enumerate() {
-        if !is_selected {
-            continue;
-        }
-        if let Some(target) = downstream[index] {
-            if lake_candidates[target] {
-                incoming_to_lake[target].push(index);
-            }
-        }
-    }
-
-    for incoming in incoming_to_lake {
-        if incoming.len() <= 1 {
-            continue;
-        }
-        let keep = incoming
-            .iter()
-            .copied()
-            .max_by(|&left, &right| {
-                flow[left]
-                    .total_cmp(&flow[right])
-                    .then_with(|| right.cmp(&left))
-            })
-            .expect("non-empty lake inlet list should have a keep candidate");
-        for index in incoming {
-            if index != keep {
-                selected[index] = false;
-            }
         }
     }
 
     let mut component_has_selected_inlet = vec![false; selected.len()];
+    let mut incoming_selected = vec![0_u32; selected.len()];
     for (index, is_selected) in selected.iter().copied().enumerate() {
         if !is_selected {
             continue;
@@ -1216,22 +1184,51 @@ fn enforce_lake_contact_topology(
         let Some(target) = downstream[index] else {
             continue;
         };
-        if lake_candidates[target] {
-            if let Some(component) = lake_topology.component_by_corner[target] {
-                component_has_selected_inlet[component] = true;
-            }
+        incoming_selected[target] = incoming_selected[target].saturating_add(1);
+    }
+
+    for (index, is_inlet_land) in lake_topology
+        .inlet_land_vertices
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        if !is_inlet_land || incoming_selected[index] == 0 {
+            continue;
+        }
+        let Some(lake_vertex) = downstream[index] else {
+            continue;
+        };
+        if let Some(component) = lake_topology.component_by_corner[lake_vertex] {
+            component_has_selected_inlet[component] = true;
         }
     }
 
-    for (index, is_outlet) in lake_topology.outlet_vertices.iter().copied().enumerate() {
+    for (index, is_outlet) in lake_topology
+        .outlet_land_vertices
+        .iter()
+        .copied()
+        .enumerate()
+    {
         if !is_outlet {
             continue;
         }
-        let Some(component) = lake_topology.component_by_corner[index] else {
-            continue;
-        };
-        if component_has_selected_inlet[component] && downstream[index].is_some() {
+        let has_component_inlet =
+            lake_topology
+                .component_by_corner
+                .iter()
+                .enumerate()
+                .any(|(lake_corner, component)| {
+                    component.is_some_and(|component| {
+                        component_has_selected_inlet[component]
+                            && lake_topology.outlet_vertices[lake_corner]
+                            && downstream[lake_corner] == Some(index)
+                    })
+                });
+        if has_component_inlet && downstream[index].is_some() && !lake_candidates[index] {
             selected[index] = true;
+        } else {
+            selected[index] = false;
         }
     }
 }
@@ -1396,9 +1393,9 @@ fn resolve_node_kinds(
     (0..selected.len())
         .into_par_iter()
         .map(|index| {
-            if lake_topology.outlet_vertices[index] && selected[index] {
+            if lake_topology.outlet_land_vertices[index] && selected[index] {
                 GraphDrainageNodeKind::LakeOutlet
-            } else if lake_topology.inlet_vertices[index] && incoming_selected[index] > 0 {
+            } else if lake_topology.inlet_land_vertices[index] && incoming_selected[index] > 0 {
                 GraphDrainageNodeKind::LakeInlet
             } else if (terminals[index]
                 || resolutions[index] == GraphLocalMinimumResolution::OceanOutlet)
@@ -1444,19 +1441,21 @@ fn resolve_topology_stats(
 
         let from_lake = lake_candidates[index];
         let to_lake = lake_candidates[target];
-        if from_lake && to_lake {
+        if from_lake || to_lake {
+            stats.selected_lake_edge_segment_count += 1;
             stats.invalid_lake_contact_count += 1;
-        } else if to_lake {
-            if lake_topology.inlet_vertices[target] {
+        }
+    }
+
+    for index in 0..selected.len() {
+        if lake_topology.inlet_land_vertices[index] {
+            if incoming[index] > 0 {
                 stats.lake_inlet_count += 1;
-            } else {
-                stats.invalid_lake_contact_count += 1;
             }
-        } else if from_lake {
-            if lake_topology.outlet_vertices[index] {
+        }
+        if lake_topology.outlet_land_vertices[index] {
+            if outgoing[index] > 0 {
                 stats.lake_outlet_count += 1;
-            } else {
-                stats.invalid_lake_contact_count += 1;
             }
         }
     }
@@ -1739,6 +1738,9 @@ mod tests {
             "seed 42 should expose selected lake inlet contacts"
         );
         assert_eq!(hydro.topology_stats.invalid_lake_contact_count, 0);
+        assert_eq!(hydro.topology_stats.selected_lake_edge_segment_count, 0);
+        assert_eq!(hydro.topology_stats.disconnected_lake_inlet_count, 0);
+        assert_eq!(hydro.topology_stats.disconnected_lake_outlet_count, 0);
 
         for segment in &hydro.segments {
             let from = &nodes[&segment.from];
@@ -1747,24 +1749,10 @@ mod tests {
             let to_lake = is_lake_corner(macro_corners[&to.corner]);
 
             assert!(
-                !(from_lake && to_lake),
-                "selected river must not run through a lake edge: {:?}",
+                !from_lake && !to_lake,
+                "selected river segment must stay off lake and lake-boundary edges: {:?}",
                 segment
             );
-            if to_lake {
-                assert_eq!(
-                    to.kind,
-                    GraphDrainageNodeKind::LakeInlet,
-                    "river entering a lake must terminate at a lake inlet vertex"
-                );
-            }
-            if from_lake {
-                assert_eq!(
-                    from.kind,
-                    GraphDrainageNodeKind::LakeOutlet,
-                    "river leaving a lake must start at a lake outlet vertex"
-                );
-            }
         }
     }
 
@@ -1793,23 +1781,20 @@ mod tests {
             .map(|corner| (corner.id, corner))
             .collect::<HashMap<_, _>>();
         let nodes = nodes_by_id(&hydro);
-        let inlet_vertices = hydro
-            .segments
-            .iter()
-            .filter_map(|segment| {
-                let node = &nodes[&segment.to];
-                (node.kind == GraphDrainageNodeKind::LakeInlet)
-                    .then_some(corner_indices[&node.corner])
-            })
-            .collect::<Vec<_>>();
-        let inlet_approaches = hydro
+        let inlet_lake_vertices = hydro
             .segments
             .iter()
             .filter_map(|segment| {
                 let to = &nodes[&segment.to];
                 let from = &nodes[&segment.from];
-                (to.kind == GraphDrainageNodeKind::LakeInlet)
-                    .then_some((corner_indices[&to.corner], corner_indices[&from.corner]))
+                if to.kind != GraphDrainageNodeKind::LakeInlet {
+                    return None;
+                }
+                let inlet_index = corner_indices[&to.corner];
+                let lake_vertex = hydro_corners[&to.corner]
+                    .downstream
+                    .map(|corner| corner_indices[&corner])?;
+                Some((lake_vertex, inlet_index, corner_indices[&from.corner]))
             })
             .collect::<Vec<_>>();
 
@@ -1824,18 +1809,37 @@ mod tests {
                 continue;
             }
             let outlet_index = corner_indices[&outlet_node.corner];
-            let component = component_by_corner[outlet_index]
-                .expect("lake outlet should belong to a lake component");
-            let component_inlets = inlet_vertices
+            assert!(
+                !lake_candidates[outlet_index],
+                "lake outlet marker should be on the selected land-side endpoint"
+            );
+            let outlet_lake_vertices = adjacency
                 .iter()
-                .copied()
-                .filter(|&index| component_by_corner[index] == Some(component))
+                .enumerate()
+                .filter(|(lake_vertex, _)| {
+                    lake_candidates[*lake_vertex]
+                        && hydro_corners[&patch.corners[*lake_vertex].id].downstream
+                            == Some(outlet_node.corner)
+                })
+                .map(|(lake_vertex, _)| lake_vertex)
                 .collect::<Vec<_>>();
-            let component_approaches = inlet_approaches
+            assert!(
+                !outlet_lake_vertices.is_empty(),
+                "lake outlet marker should be paired with an adjacent lake vertex"
+            );
+            let component = component_by_corner[outlet_lake_vertices[0]]
+                .expect("lake outlet pair should belong to a lake component");
+            let component_inlets = inlet_lake_vertices
                 .iter()
                 .copied()
-                .filter(|(inlet, _)| component_by_corner[*inlet] == Some(component))
-                .map(|(_, approach)| approach)
+                .map(|(lake_vertex, _, _)| lake_vertex)
+                .filter(|&lake_vertex| component_by_corner[lake_vertex] == Some(component))
+                .collect::<Vec<_>>();
+            let component_approaches = inlet_lake_vertices
+                .iter()
+                .copied()
+                .filter(|(lake_vertex, _, _)| component_by_corner[*lake_vertex] == Some(component))
+                .map(|(_, _, approach)| approach)
                 .collect::<Vec<_>>();
             assert!(
                 !component_inlets.is_empty(),
@@ -1858,7 +1862,10 @@ mod tests {
                 "lake outlet elevation {outlet_elevation} should be below inlet elevation {inlet_elevation}"
             );
             assert!(
-                distances[outlet_index] >= DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS,
+                outlet_lake_vertices
+                    .iter()
+                    .any(|&lake_vertex| distances[lake_vertex]
+                        >= DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS),
                 "lake outlet should be separated from inlet by at least {} lake hops",
                 DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS
             );
@@ -1885,24 +1892,76 @@ mod tests {
     }
 
     #[test]
+    fn lake_contact_markers_are_selected_segment_endpoints() {
+        let (_patch, _macro_map) = seed_42_preview_inputs();
+        let hydro = solve_hydrology(&_patch, &_macro_map, HydrologyConfig::default());
+        let nodes = nodes_by_id(&hydro);
+        let mut incoming = HashMap::<GraphDrainageNodeId, usize>::new();
+        let mut outgoing = HashMap::<GraphDrainageNodeId, usize>::new();
+
+        for segment in &hydro.segments {
+            *incoming.entry(segment.to).or_default() += 1;
+            *outgoing.entry(segment.from).or_default() += 1;
+        }
+
+        for node in &hydro.nodes {
+            match node.kind {
+                GraphDrainageNodeKind::LakeInlet => {
+                    assert!(
+                        incoming.get(&node.id).copied().unwrap_or(0) > 0,
+                        "lake inlet marker should be backed by an incoming selected segment"
+                    );
+                    assert_eq!(
+                        outgoing.get(&node.id).copied().unwrap_or(0),
+                        0,
+                        "lake inlet should terminate the selected river before the lake boundary edge"
+                    );
+                }
+                GraphDrainageNodeKind::LakeOutlet => {
+                    assert!(
+                        outgoing.get(&node.id).copied().unwrap_or(0) > 0,
+                        "lake outlet marker should be backed by an outgoing selected segment"
+                    );
+                    assert_eq!(
+                        incoming.get(&node.id).copied().unwrap_or(0),
+                        0,
+                        "lake outlet should start after the lake boundary edge"
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(hydro.topology_stats.disconnected_lake_inlet_count, 0);
+        assert_eq!(hydro.topology_stats.disconnected_lake_outlet_count, 0);
+        assert_eq!(nodes.len(), hydro.nodes.len());
+    }
+
+    #[test]
     fn lake_terminal_policy_limits_selected_incoming_chains_by_area() {
-        let downstream = vec![Some(3), Some(3), Some(3), None];
+        let downstream = vec![Some(4), Some(5), Some(6), None, Some(3), Some(3), Some(3)];
         let downstream_edges = vec![
             Some(VoronoiEdgeId(10)),
             Some(VoronoiEdgeId(11)),
             Some(VoronoiEdgeId(12)),
             None,
+            Some(VoronoiEdgeId(13)),
+            Some(VoronoiEdgeId(14)),
+            Some(VoronoiEdgeId(15)),
         ];
-        let flow = vec![72.0, 70.0, 68.0, 210.0];
-        let elevations = vec![0.8, 0.7, 0.6, 0.1];
-        let terminals = vec![false, false, false, false];
+        let flow = vec![72.0, 70.0, 68.0, 210.0, 72.0, 70.0, 68.0];
+        let elevations = vec![0.8, 0.7, 0.6, 0.1, 0.5, 0.45, 0.4];
+        let terminals = vec![false, false, false, false, false, false, false];
         let terminal_indices = resolve_terminal_indices(&downstream);
-        let lake_candidates = vec![false, false, false, true];
+        let lake_candidates = vec![false, false, false, true, false, false, false];
         let resolutions = vec![
             GraphLocalMinimumResolution::None,
             GraphLocalMinimumResolution::None,
             GraphLocalMinimumResolution::None,
             GraphLocalMinimumResolution::Lake,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
         ];
         let config = HydrologyConfig::default();
         let lake_policies = resolve_lake_terminal_policies(
@@ -1911,12 +1970,15 @@ mod tests {
             &resolutions,
             config,
         );
-        let first_downstream_lakes = vec![None; 4];
-        let lake_inlet_policies = vec![None; 4];
+        let first_downstream_lakes =
+            vec![Some(3), Some(3), Some(3), None, Some(3), Some(3), Some(3)];
+        let lake_inlet_policies = vec![None; 7];
         let lake_topology = LakeContactTopology {
-            component_by_corner: vec![None; 4],
-            inlet_vertices: vec![false, false, false, true],
-            outlet_vertices: vec![false; 4],
+            component_by_corner: vec![None, None, None, Some(3), None, None, None],
+            inlet_vertices: vec![false, false, false, true, false, false, false],
+            outlet_vertices: vec![false; 7],
+            inlet_land_vertices: vec![false, false, false, false, true, true, true],
+            outlet_land_vertices: vec![false; 7],
         };
 
         let selected = select_river_paths(
@@ -1939,6 +2001,10 @@ mod tests {
         assert_eq!(
             incoming_to_lake, 1,
             "a tiny lake should accept only one selected incoming river chain"
+        );
+        assert!(
+            !selected[4] && !selected[5] && !selected[6],
+            "selected river must not include lake boundary edges"
         );
     }
 

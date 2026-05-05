@@ -95,9 +95,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      기본 lake terminal/inlet display discharge는 ocean outlet trunk보다
      확연히 낮은 cap을 가진다.
    - lake와 river의 접점은 lake edge를 따라 스쳐 지나가는 선이 아니라 `LakeInlet`/`LakeOutlet`
-     corner로 표현한다. 유입하천은 lake boundary vertex에서 끝나고, 유출하천은 같은 lake component의
-     다른 boundary vertex에서 시작한다. outlet vertex는 유입하천의 land-side approach corner보다 낮고
-     최소 hop 거리만큼 떨어져야 한다.
+     selected endpoint marker로 표현한다. selected river segment는 lake 내부 edge나 lake boundary
+     edge를 쓰지 않으며, 유입하천은 lake boundary 직전의 land-side endpoint에서 끝나고 유출하천은 같은
+     lake component의 다른 boundary vertex 밖 land-side endpoint에서 시작한다. outlet pair는 유입하천의
+     land-side approach corner보다 낮고 최소 hop 거리만큼 떨어져야 한다.
 7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
 8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
@@ -193,7 +194,8 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 - lake terminal/inlet river는 raw flow ledger와 selected/display discharge를 구분하고, lake
   capacity에 따라 incoming chain 수, visible inlet segment 수, selected flow가 제한되어야 한다.
 - lake contact river는 lake 내부 edge나 lake boundary edge를 selected segment로 사용하지 않고,
-  inlet/outlet corner에서만 lake와 만나야 한다.
+  land-side inlet/outlet endpoint marker에서만 lake와 만나야 한다. selected river segment 자체는
+  lake corner를 endpoint로 삼지 않는다.
 - selected river graph는 confluence/branch로 설명되지 않는 shared-corner intersection을 남기면 안 된다.
 - preview-visible selected river graph는 같은 corner에 여러 독립 incoming chain이 겹쳐 보이지 않도록
   occupancy/merge 정책을 적용해야 한다. 명시 confluence geometry가 생기기 전까지는 가장 큰 selected

@@ -51,9 +51,13 @@
     top-N chain limits, short visible inlet segments, and lake-area discharge caps all affect
     the displayed segment set.
   - lake, lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
-    overlay dots. Lake inlets and outlets also draw short directional arrows: inlet arrows point
-    into the lake vertex, and outlet arrows point away from the lake vertex toward downstream.
-    These markers are drawn above the river line so topology changes are visible in the preview.
+    overlay dots. Lake inlet/outlet markers are selected graph endpoint markers: inlet markers
+    require an incoming selected segment on the land side of the lake boundary, and outlet markers
+    require an outgoing selected segment on the land side. Lake boundary edges themselves are never
+    drawn as selected river segments. Lake inlets and outlets also draw short directional arrows:
+    inlet arrows point into the endpoint from the selected river side, and outlet arrows point away
+    from the endpoint toward downstream. These markers are drawn above the river line so topology
+    changes are visible in the preview.
   - selected river occupancy is stricter than the raw flow ledger: if multiple selected upstream
     branches would share the same corner as separate visible chains, hydrology keeps the largest
     branch and prunes the losing upstream selected tree until explicit confluence geometry exists.
@@ -62,9 +66,10 @@
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
   lake/ocean terminal segment counts, lake component count, inland water site count, ocean component
-  count, lake-capped segment count, lake inlet/outlet count, invalid lake contact/intersection
-  count, ambiguous shared corner count, duplicate trunk pruned count, lake/ocean max display/raw
-  flow, sea level, and source notes.
+  count, lake-capped segment count, lake inlet/outlet count, disconnected lake inlet/outlet count,
+  selected lake-edge river segment count, invalid lake contact/intersection count, ambiguous shared
+  corner count, duplicate trunk pruned count, lake/ocean max display/raw flow, sea level, and source
+  notes.
 
 ## Output Path Rules
 
@@ -113,8 +118,9 @@ continent/ocean/island ownership, macro elevation, coast, ridge/fault guide, and
 The graph continentality and elevation maps should visibly match the macro map's land/ocean and
 high/low patterns, and selected rivers should follow continuous downstream chains to ocean/coast or
 explicit lake/sink resolution. Lake-bound selected rivers should terminate at `LakeInlet` vertices,
-and lake outlet rivers should start from separated `LakeOutlet` vertices rather than skimming along
-lake edges.
+and lake outlet rivers should start from separated `LakeOutlet` vertices. These vertices are
+land-side selected endpoints paired with a lake component; selected river segments must not skim
+along or cross lake boundary edges.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

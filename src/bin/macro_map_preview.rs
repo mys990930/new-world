@@ -241,6 +241,9 @@ struct MacroEdgeSample {
 struct PreviewHydrologyStats {
     lake_inlet_count: usize,
     lake_outlet_count: usize,
+    disconnected_lake_inlet_count: usize,
+    disconnected_lake_outlet_count: usize,
+    selected_lake_edge_segment_count: usize,
     invalid_lake_contact_count: usize,
     invalid_river_intersection_count: usize,
     ambiguous_shared_corner_count: usize,
@@ -345,6 +348,18 @@ impl PreviewHeader {
             format!(
                 "lake_outlet_count={}",
                 self.hydrology_stats.lake_outlet_count
+            ),
+            format!(
+                "disconnected_lake_inlet_count={}",
+                self.hydrology_stats.disconnected_lake_inlet_count
+            ),
+            format!(
+                "disconnected_lake_outlet_count={}",
+                self.hydrology_stats.disconnected_lake_outlet_count
+            ),
+            format!(
+                "selected_lake_edge_segment_count={}",
+                self.hydrology_stats.selected_lake_edge_segment_count
             ),
             format!(
                 "invalid_lake_contact_count={}",
@@ -535,9 +550,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_ocean_raw_flow
     );
     println!(
-        "river topology stats: lake inlets {}, lake outlets {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}",
+        "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}",
         hydrology_stats.lake_inlet_count,
         hydrology_stats.lake_outlet_count,
+        hydrology_stats.disconnected_lake_inlet_count,
+        hydrology_stats.disconnected_lake_outlet_count,
+        hydrology_stats.selected_lake_edge_segment_count,
         hydrology_stats.invalid_lake_contact_count,
         hydrology_stats.invalid_river_intersection_count,
         hydrology_stats.ambiguous_shared_corner_count,
@@ -1072,6 +1090,10 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
     let mut stats = PreviewHydrologyStats::default();
     stats.lake_inlet_count = hydrology.topology_stats.lake_inlet_count;
     stats.lake_outlet_count = hydrology.topology_stats.lake_outlet_count;
+    stats.disconnected_lake_inlet_count = hydrology.topology_stats.disconnected_lake_inlet_count;
+    stats.disconnected_lake_outlet_count = hydrology.topology_stats.disconnected_lake_outlet_count;
+    stats.selected_lake_edge_segment_count =
+        hydrology.topology_stats.selected_lake_edge_segment_count;
     stats.invalid_lake_contact_count = hydrology.topology_stats.invalid_lake_contact_count;
     stats.invalid_river_intersection_count =
         hydrology.topology_stats.invalid_river_intersection_count;
@@ -1727,6 +1749,9 @@ mod tests {
             hydrology_stats: PreviewHydrologyStats {
                 lake_inlet_count: 3,
                 lake_outlet_count: 1,
+                disconnected_lake_inlet_count: 0,
+                disconnected_lake_outlet_count: 0,
+                selected_lake_edge_segment_count: 0,
                 invalid_lake_contact_count: 0,
                 invalid_river_intersection_count: 0,
                 ambiguous_shared_corner_count: 0,
@@ -1755,6 +1780,9 @@ mod tests {
         assert!(metadata.contains("lake_capped_river_segment_count=1"));
         assert!(metadata.contains("lake_inlet_count=3"));
         assert!(metadata.contains("lake_outlet_count=1"));
+        assert!(metadata.contains("disconnected_lake_inlet_count=0"));
+        assert!(metadata.contains("disconnected_lake_outlet_count=0"));
+        assert!(metadata.contains("selected_lake_edge_segment_count=0"));
         assert!(metadata.contains("invalid_lake_contact_count=0"));
         assert!(metadata.contains("invalid_river_intersection_count=0"));
         assert!(metadata.contains("ambiguous_shared_corner_count=0"));

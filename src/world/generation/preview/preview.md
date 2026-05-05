@@ -149,12 +149,15 @@
   segment만 표시되어야 한다.
 - lake/sink/outlet node는 작은 marker로 표시한다.
 - lake inlet과 lake outlet node가 있으면 서로 다른 marker 색과 짧은 방향 화살표로 표시한다.
-  inlet arrow는 land-side river가 lake vertex로 들어가는 방향을, outlet arrow는 lake vertex에서
-  downstream land/ocean 쪽으로 나가는 방향을 보여준다. 이 marker는 river line과 node dot 위에서도
-  보이도록 hydrology overlay의 마지막 쪽에서 그린다.
+  이 marker는 hydrology selected graph endpoint marker다. inlet marker는 lake boundary 직전의
+  land-side endpoint에 incoming selected segment가 있을 때만 생기고, outlet marker는 lake boundary
+  바깥의 land-side endpoint에 outgoing selected segment가 있을 때만 생긴다. river segment 자체는
+  lake boundary edge 위에 그려지지 않는다. marker와 화살표는 river line과 node dot 위에서도 보이도록
+  hydrology overlay의 마지막 쪽에서 그린다.
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
-  invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count를
-  포함한다. 정상 preview에서 invalid/ambiguous count는 0이어야 하며, duplicate trunk pruned count는
+  invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
+  disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
+  disconnected, selected lake-edge, invalid, ambiguous count는 0이어야 하며, duplicate trunk pruned count는
   selected overlay에서 제거한 중복 upstream branch 수를 나타낸다.
 - 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
@@ -163,6 +166,7 @@
   candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
   node count, lake component count, inland water site count, ocean component count,
   lake/ocean terminal river segment count, lake-capped segment count, lake inlet/outlet count,
+  disconnected lake inlet/outlet count, selected lake-edge river segment count,
   invalid lake contact/intersection count, ambiguous shared corner count, duplicate trunk pruned
   count, lake/ocean max display/raw flow, sea level, stage 4 guide input note, stage 6 hydrology
   raw/selected flow note, source note를 함께 기록한다.
