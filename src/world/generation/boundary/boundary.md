@@ -126,20 +126,40 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
 
 - 하나의 Voronoi edge는 두 corner와 두 site center를 함께 읽는다.
 - 이 네 점의 guard를 만들고 margin을 더해 수치적 guard 영역을 만든다.
-- corner-to-corner edge를 recursive midpoint displacement polyline으로 세분화한다.
-- noisy point는 edge normal 방향으로 흔들되 guard 영역으로 clamp한다.
+- corner-to-corner edge를 midpoint/domain-warp 계열 polyline으로 세분화한다.
+- noisy point는 직선 edge 위에 sample만 찍는 것이 아니라, edge tangent의 법선 방향으로 실제
+  world-space displacement를 적용한다. 즉 noisy boundary의 정의는 "직선 segment를 더 촘촘히 그린
+  것"이 아니라, endpoint anchor는 유지하면서 중간 control/sample point가 좌우로 울퉁불퉁하게 흔들린
+  polyline이다.
+- displacement는 low/mid frequency wave와 deterministic jitter를 합성하고, endpoint에서는 0으로
+  줄어드는 envelope를 적용한다.
+- noisy point는 edge normal 방향으로 흔들되 guard 영역으로 clamp한다. 한쪽 normal 방향이 guard에
+  눌려 직선으로 붕괴하면 반대 방향 후보를 사용해 유효한 perpendicular displacement를 유지한다.
 - endpoint는 항상 원본 corner 위치를 유지한다.
-- 기본 subdivision level은 4이며 curve당 17개의 point를 만든다.
-- amplitude는 profile별로 다르며 0.5 이하로 제한한다.
+- 기본 subdivision level은 5이며 curve당 33개의 point를 만든다.
+- amplitude profile 값은 edge/site local scale에 곱해지는 비율이며, launch 기본값은 4K preview에서도
+  식별 가능한 최소 world-space displacement를 보장하기 위해 24 block의 최소 visible amplitude floor를
+  가진다. 단, 아주 짧은 degenerate edge는 edge length/site span 기반 clamp가 우선한다.
+- amplitude는 edge length와 site span 대비 과도하게 커지지 않도록 clamp하고, launch 기본값에서는
+  128 block의 절대 상한을 둔다.
 
 기본 amplitude:
 
-- ordinary: `0.05`
-- coast: `0.24`
-- lake: `0.18`
-- ridge: `0.10`
-- fault: `0.08`
-- land seam: `0.07`
+- ordinary: `0.14`
+- coast: `0.34`
+- lake: `0.26`
+- ridge: `0.24`
+- fault: `0.18`
+- land seam: `0.18`
+
+기본 preview scale에서 기대값:
+
+- 4K 기본 preview(`32768` block span, `3840` px width)는 1px이 약 8.53 block이다.
+- 기본 curve 평균 amplitude는 여러 profile을 합쳐 대략 수십 block 단위여야 하며, 평균 visible
+  perpendicular displacement가 4K에서 2px 이상으로 드러나야 한다.
+- `BoundaryStats`는 평균/최대 amplitude block, 평균/최대 perpendicular displacement block,
+  nearly-straight curve count를 기록한다. nearly-straight는 의미 있는 길이의 edge가 guard/clamp나
+  잘못된 noise 합성 때문에 거의 직선으로 남은 경우를 찾는 회귀 계측이다.
 
 이 구현은 raw topology를 바꾸지 않는다. graph edge id, corner id, site id는 그대로 유지되고, noisy
 curve는 heightfield와 preview가 읽는 geometry layer일 뿐이다.
@@ -175,9 +195,11 @@ curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 w
 - river width/opacity: hydrology selected/display `flow_accumulation`을 사용하되 geometry는
   `BoundaryCache.curve_for_edge(segment.edge)`를 사용
 
-PNG metadata에는 total curve count, profile별 count, guard violation count, missing macro edge count를
-기록한다. river curve count나 river endpoint mismatch 같은 항목은 river 전용 boundary curve가 없으므로
-boundary stats의 책임이 아니다. river/lake 접촉 정합성은 hydrology stats가 계속 소유한다.
+PNG metadata에는 total curve count, profile별 count, guard violation count, missing macro edge count,
+평균/최대 amplitude block, 현재 preview scale에서의 평균/최대 pixel displacement, nearly-straight
+curve count를 기록한다. river curve count나 river endpoint mismatch 같은 항목은 river 전용 boundary
+curve가 없으므로 boundary stats의 책임이 아니다. river/lake 접촉 정합성은 hydrology stats가 계속
+소유한다.
 
 ---
 
@@ -187,6 +209,8 @@ boundary stats의 책임이 아니다. river/lake 접촉 정합성은 hydrology 
 - determinism: 같은 seed/config/edge/profile은 같은 curve point를 만든다.
 - adjacent patch stability: 인접 graph patch overlap의 같은 edge curve가 동일해야 한다.
 - guard containment: noisy points는 edge guard와 margin 안에 있어야 한다.
+- visible displacement: non-degenerate edge는 interior point가 원본 straight segment와 같은 직선 위에
+  머물면 안 되며, 기본 amplitude는 4K preview scale에서 식별 가능해야 한다.
 - no duplicate river curve: hydrology selected segment가 boundary curve 수를 늘리면 안 된다.
 - lake constraint: lake edge에도 canonical noisy curve는 있지만 selected river segment는 해당 edge를
   사용할 수 없다.

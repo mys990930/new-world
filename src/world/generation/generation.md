@@ -123,6 +123,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 7. 모든 Voronoi edge를 canonical noisy boundary geometry로 현실화한다. raw graph topology는 그대로 보존한다.
    - boundary stage는 특정 visible feature edge만 골라 curve를 만들지 않는다.
    - `NoisyBoundaryCurve`는 graph edge 전체에 대해 생성되는 `edge id -> noisy polyline/spline` layer다.
+   - noisy boundary는 straight edge 위에 sample만 늘리는 것이 아니라 endpoint anchor 사이의 interior
+     point를 edge normal 방향으로 흔들어 울퉁불퉁한 visible boundary를 만든다.
+   - 기본 amplitude는 4K topdown preview에서 식별 가능해야 하며, 너무 짧은 edge를 제외한 curve가
+     거의 직선으로 남으면 회귀다.
    - coast/ridge/fault/lake/ordinary boundary 차이는 curve 존재 여부가 아니라 profile/amplitude/constraint parameter에 반영한다.
    - river는 별도 noisy curve를 만들지 않는다. hydrology selected segment는 edge id path이며, preview, heightfield, water corridor는 해당 edge id의 canonical noisy geometry를 따라간다.
    - lake boundary/internal/lake-adjacent edge에도 noisy curve는 존재하지만, selected river segment가 해당 edge를 타는 것은 계속 금지된다.

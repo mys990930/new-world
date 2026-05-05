@@ -282,6 +282,12 @@ struct PreviewSurfaceStats {
     ocean_site_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct BoundaryPixelStats {
+    average_displacement_px: f32,
+    max_displacement_px: f32,
+}
+
 #[derive(Debug, Clone)]
 struct PreviewHeader {
     seed: u64,
@@ -311,6 +317,11 @@ struct PreviewHeader {
     boundary_land_seam_curve_count: usize,
     boundary_guard_violation_count: usize,
     boundary_missing_macro_edge_count: usize,
+    boundary_average_amplitude_blocks: f32,
+    boundary_max_amplitude_blocks: f32,
+    boundary_average_pixel_displacement: f32,
+    boundary_max_pixel_displacement: f32,
+    boundary_nearly_straight_curve_count: usize,
     lake_node_count: usize,
     sink_node_count: usize,
     outlet_node_count: usize,
@@ -378,6 +389,26 @@ impl PreviewHeader {
             format!(
                 "boundary_missing_macro_edge_count={}",
                 self.boundary_missing_macro_edge_count
+            ),
+            format!(
+                "boundary_average_amplitude_blocks={:.3}",
+                self.boundary_average_amplitude_blocks
+            ),
+            format!(
+                "boundary_max_amplitude_blocks={:.3}",
+                self.boundary_max_amplitude_blocks
+            ),
+            format!(
+                "boundary_average_pixel_displacement={:.3}",
+                self.boundary_average_pixel_displacement
+            ),
+            format!(
+                "boundary_max_pixel_displacement={:.3}",
+                self.boundary_max_pixel_displacement
+            ),
+            format!(
+                "boundary_nearly_straight_curve_count={}",
+                self.boundary_nearly_straight_curve_count
             ),
             format!("lake_node_count={}", self.lake_node_count),
             format!("sink_node_count={}", self.sink_node_count),
@@ -560,6 +591,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .count();
     let hydrology_stats = preview_hydrology_stats(&graph.hydrology);
     let surface_stats = preview_surface_stats(&graph, window);
+    let boundary_pixel_stats = boundary_pixel_stats(&graph.boundary, window);
 
     let header = PreviewHeader {
         seed: config.seed,
@@ -589,6 +621,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         boundary_land_seam_curve_count: graph.boundary.stats.land_seam_curve_count,
         boundary_guard_violation_count: graph.boundary.stats.guard_violation_count,
         boundary_missing_macro_edge_count: graph.boundary.stats.missing_macro_edge_count,
+        boundary_average_amplitude_blocks: graph.boundary.stats.average_amplitude_blocks,
+        boundary_max_amplitude_blocks: graph.boundary.stats.max_amplitude_blocks,
+        boundary_average_pixel_displacement: boundary_pixel_stats.average_displacement_px,
+        boundary_max_pixel_displacement: boundary_pixel_stats.max_displacement_px,
+        boundary_nearly_straight_curve_count: graph.boundary.stats.nearly_straight_curve_count,
         lake_node_count,
         sink_node_count,
         outlet_node_count,
@@ -683,7 +720,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.unclassified_lake_connected_flow_count
     );
     println!(
-        "boundary stats: curves {} (ordinary {}, coast {}, ridge {}, fault {}, lake {}, land seam {}), guard violations {}, missing macro edges {}",
+        "boundary stats: curves {} (ordinary {}, coast {}, ridge {}, fault {}, lake {}, land seam {}), guard violations {}, missing macro edges {}, nearly straight {}",
         graph.boundary.stats.total_curve_count,
         graph.boundary.stats.ordinary_curve_count,
         graph.boundary.stats.coast_curve_count,
@@ -692,7 +729,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph.boundary.stats.lake_curve_count,
         graph.boundary.stats.land_seam_curve_count,
         graph.boundary.stats.guard_violation_count,
-        graph.boundary.stats.missing_macro_edge_count
+        graph.boundary.stats.missing_macro_edge_count,
+        graph.boundary.stats.nearly_straight_curve_count
+    );
+    println!(
+        "boundary displacement: avg amplitude {:.2} blocks, max amplitude {:.2} blocks, avg visible displacement {:.2}px, max visible displacement {:.2}px",
+        graph.boundary.stats.average_amplitude_blocks,
+        graph.boundary.stats.max_amplitude_blocks,
+        boundary_pixel_stats.average_displacement_px,
+        boundary_pixel_stats.max_displacement_px
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -1117,12 +1162,12 @@ fn draw_noisy_boundary_edges(image: &mut RgbImage, window: PreviewWindow, graph:
 
 fn noisy_boundary_style(profile: BoundaryProfile) -> ([u8; 3], f32, i32) {
     match profile {
-        BoundaryProfile::Ordinary => ([90, 112, 108], 0.10, 0),
-        BoundaryProfile::Coast => ([236, 213, 128], 0.38, 1),
-        BoundaryProfile::Ridge => ([247, 248, 242], 0.26, 1),
-        BoundaryProfile::Fault => ([231, 92, 88], 0.30, 1),
-        BoundaryProfile::Lake => ([116, 211, 232], 0.28, 1),
-        BoundaryProfile::LandSeam => ([185, 210, 150], 0.16, 0),
+        BoundaryProfile::Ordinary => ([36, 50, 54], 0.34, 0),
+        BoundaryProfile::Coast => ([236, 213, 128], 0.48, 1),
+        BoundaryProfile::Ridge => ([247, 248, 242], 0.34, 1),
+        BoundaryProfile::Fault => ([231, 92, 88], 0.38, 1),
+        BoundaryProfile::Lake => ([116, 211, 232], 0.42, 1),
+        BoundaryProfile::LandSeam => ([185, 210, 150], 0.26, 0),
     }
 }
 
@@ -1453,6 +1498,19 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
     }
 }
 
+fn boundary_pixel_stats(boundary: &BoundaryCache, window: PreviewWindow) -> BoundaryPixelStats {
+    let blocks_per_pixel = (window.world_span_x / window.width.max(1) as f32)
+        .max(window.world_span_z / window.height.max(1) as f32)
+        .max(f32::EPSILON);
+
+    BoundaryPixelStats {
+        average_displacement_px: boundary.stats.average_perpendicular_displacement_blocks
+            / blocks_per_pixel,
+        max_displacement_px: boundary.stats.max_perpendicular_displacement_blocks
+            / blocks_per_pixel,
+    }
+}
+
 fn terminal_resolution(
     start: VoronoiCornerId,
     corners: &HashMap<VoronoiCornerId, &new_world::world::generation::GraphHydrologyCorner>,
@@ -1607,7 +1665,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     };
     let margin = 8 * scale;
     let panel_width = (176 * scale).min(image.width());
-    let panel_height = (117 * scale).min(image.height());
+    let panel_height = (130 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1725,6 +1783,14 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         key_y + 65 * scale,
         [62, 113, 255],
         "OUT",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 82 * scale,
+        key_y + 65 * scale,
+        [36, 50, 54],
+        "BNDRY",
         scale,
     );
 }
@@ -2046,6 +2112,11 @@ mod tests {
             boundary_land_seam_curve_count: 1,
             boundary_guard_violation_count: 0,
             boundary_missing_macro_edge_count: 0,
+            boundary_average_amplitude_blocks: 28.5,
+            boundary_max_amplitude_blocks: 64.0,
+            boundary_average_pixel_displacement: 3.2,
+            boundary_max_pixel_displacement: 8.1,
+            boundary_nearly_straight_curve_count: 0,
             lake_node_count: 1,
             sink_node_count: 0,
             outlet_node_count: 2,
@@ -2100,6 +2171,9 @@ mod tests {
         assert!(metadata.contains("boundary_ordinary_curve_count=5"));
         assert!(metadata.contains("boundary_lake_curve_count=3"));
         assert!(metadata.contains("boundary_guard_violation_count=0"));
+        assert!(metadata.contains("boundary_average_amplitude_blocks=28.500"));
+        assert!(metadata.contains("boundary_average_pixel_displacement=3.200"));
+        assert!(metadata.contains("boundary_nearly_straight_curve_count=0"));
         assert!(metadata.contains("stage7_boundary=canonical_noisy_curve_per_voronoi_edge"));
         assert!(metadata.contains("visible_site_count=64"));
         assert!(metadata.contains("land_site_count=45"));

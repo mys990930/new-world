@@ -46,7 +46,10 @@
   - ridge candidate edges are white overlays.
   - fault candidate edges are red overlays.
   - coast candidate edges are sandy overlays.
-  - every Voronoi edge has one canonical noisy curve from stage 7 boundary realization.
+  - every Voronoi edge has one canonical noisy curve from stage 7 boundary realization. This
+    boundary overlay is not a straight edge resample: endpoints stay anchored while interior points
+    receive deterministic edge-normal displacement large enough to be visible in the default 4K
+    preview.
   - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
     overlays following each segment edge id's canonical noisy curve.
   - selected river chains are drawn only for macro edges whose lake edge class is `NonLake`; lake
@@ -85,7 +88,9 @@
   river segment count, invalid lake contact/intersection count, ambiguous shared corner count,
   duplicate trunk pruned count, repeated lake contact pruned count, unclassified lake-connected flow count,
   lake/ocean max display/raw flow, lake inlet raw/display flow range, boundary curve count,
-  boundary profile counts, boundary guard violation count, sea level, and source notes.
+  boundary profile counts, boundary guard violation count, boundary average/max amplitude blocks,
+  boundary average/max pixel displacement at the current preview scale, boundary nearly-straight
+  curve count, sea level, and source notes.
 
 ## Output Path Rules
 
@@ -110,12 +115,14 @@
 8. Draw a faint base Voronoi edge overlay by resolving each graph edge's corners against the graph
    patch's `VoronoiCorner.position` values, clipping the world-space segment to the preview window,
    and projecting it onto pixel centers.
-9. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
+9. Draw the stage 7 noisy boundary overlay for every edge from `BoundaryCache`. The overlay follows
+   the canonical noisy polyline and reports displacement stats in stdout/metadata.
+10. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.
-10. Draw selected river chains by following each selected segment's canonical noisy edge curve.
-11. Draw lake/inlet/outlet/sink/coast-outlet drainage node markers from hydrology results.
-12. Draw the compact legend and encode PNG metadata.
+11. Draw selected river chains by following each selected segment's canonical noisy edge curve.
+12. Draw lake/inlet/outlet/sink/coast-outlet drainage node markers from hydrology results.
+13. Draw the compact legend and encode PNG metadata.
 
 The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from
 the rendered edge overlay because the overlay is not inferred from nearest-site color changes; it uses

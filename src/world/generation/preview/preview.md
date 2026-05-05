@@ -136,6 +136,9 @@
   가장 높은 peak는 흰색으로 표현한다.
 - 모든 graph Voronoi edge는 실제 graph corner-to-corner segment를 기준으로 희미한 base overlay로
   표시한다.
+- stage 7 boundary overlay는 모든 graph Voronoi edge의 canonical noisy curve를 그린다. 이 overlay는
+  straight edge를 재샘플링한 선이 아니라 endpoint는 유지하고 중간 point를 edge normal 방향으로
+  흔든 울퉁불퉁한 polyline이어야 하며, 기본 4K preview에서도 식별 가능한 amplitude를 가져야 한다.
 - ridge candidate edge는 흰색, fault candidate edge는 붉은색, coast candidate edge는 sandy color overlay로 표시한다.
 - macro_map preview는 macro_map fill과 stage 4/5 guide를 기본 layer로 표시하고, stage 6 hydrology가
   구현된 뒤에는 같은 composite 위에 selected river result를 추가 overlay한다.
@@ -184,6 +187,8 @@
   count, unclassified lake-connected flow count, dry basin site count, max lake component size,
   large lake component count, lake/ocean max display/raw flow, lake inlet raw/display flow range,
   boundary curve count, boundary profile counts, boundary guard violation count,
+  boundary average/max amplitude blocks, boundary average/max pixel displacement,
+  boundary nearly-straight curve count,
   sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.

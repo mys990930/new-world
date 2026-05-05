@@ -6,8 +6,12 @@ use super::graph::{
 };
 use super::macro_map::{GraphMacroMap, MacroEdge, MacroLakeEdgeClass, MacroSite};
 
-pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 4;
+pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 5;
 pub const DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS: f32 = 1.5;
+pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 24.0;
+pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 128.0;
+pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.32;
+pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.42;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
 const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
@@ -23,6 +27,10 @@ pub struct BoundaryConfig {
     pub generator_version: u32,
     pub subdivision_levels: u8,
     pub guard_margin_blocks: f32,
+    pub min_visible_amplitude_blocks: f32,
+    pub max_visible_amplitude_blocks: f32,
+    pub max_edge_fraction: f32,
+    pub max_site_span_fraction: f32,
     pub ordinary_amplitude: f32,
     pub coast_amplitude: f32,
     pub ridge_amplitude: f32,
@@ -38,12 +46,16 @@ impl BoundaryConfig {
             generator_version,
             subdivision_levels: DEFAULT_BOUNDARY_SUBDIVISION_LEVELS,
             guard_margin_blocks: DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS,
-            ordinary_amplitude: 0.05,
-            coast_amplitude: 0.24,
-            ridge_amplitude: 0.10,
-            fault_amplitude: 0.08,
-            lake_amplitude: 0.18,
-            land_seam_amplitude: 0.07,
+            min_visible_amplitude_blocks: DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS,
+            max_visible_amplitude_blocks: DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS,
+            max_edge_fraction: DEFAULT_BOUNDARY_MAX_EDGE_FRACTION,
+            max_site_span_fraction: DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION,
+            ordinary_amplitude: 0.14,
+            coast_amplitude: 0.34,
+            ridge_amplitude: 0.24,
+            fault_amplitude: 0.18,
+            lake_amplitude: 0.26,
+            land_seam_amplitude: 0.18,
         }
     }
 }
@@ -114,7 +126,7 @@ pub struct NoisyBoundaryCurve {
     pub guard: BoundaryGuard,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct BoundaryStats {
     pub total_curve_count: usize,
     pub ordinary_curve_count: usize,
@@ -125,6 +137,11 @@ pub struct BoundaryStats {
     pub land_seam_curve_count: usize,
     pub guard_violation_count: usize,
     pub missing_macro_edge_count: usize,
+    pub average_amplitude_blocks: f32,
+    pub max_amplitude_blocks: f32,
+    pub average_perpendicular_displacement_blocks: f32,
+    pub max_perpendicular_displacement_blocks: f32,
+    pub nearly_straight_curve_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -198,6 +215,25 @@ fn validate_boundary_config(config: BoundaryConfig) {
         config.guard_margin_blocks.is_finite() && config.guard_margin_blocks >= 0.0,
         "guard margin must be finite and >= 0"
     );
+    assert!(
+        config.min_visible_amplitude_blocks.is_finite()
+            && config.min_visible_amplitude_blocks >= 0.0,
+        "min visible amplitude must be finite and >= 0"
+    );
+    assert!(
+        config.max_visible_amplitude_blocks.is_finite()
+            && config.max_visible_amplitude_blocks >= config.min_visible_amplitude_blocks,
+        "max visible amplitude must be finite and >= min visible amplitude"
+    );
+    assert!(
+        config.max_edge_fraction.is_finite() && (0.0..=0.5).contains(&config.max_edge_fraction),
+        "max edge fraction must be finite in 0..=0.5"
+    );
+    assert!(
+        config.max_site_span_fraction.is_finite()
+            && (0.0..=0.5).contains(&config.max_site_span_fraction),
+        "max site span fraction must be finite in 0..=0.5"
+    );
     for value in [
         config.ordinary_amplitude,
         config.coast_amplitude,
@@ -229,13 +265,14 @@ fn build_curve_for_edge(
     let seed = curve_seed(config, edge.id, profile);
     let amplitude = amplitude_for_profile(profile, config);
     let guard = boundary_guard(start, end, site_a, site_b, config.guard_margin_blocks);
+    let amplitude_blocks = visible_amplitude_blocks(start, end, site_a, site_b, amplitude, config);
     let points = noisy_midpoint_curve(
         start,
         end,
         site_a,
         site_b,
         seed,
-        amplitude,
+        amplitude_blocks,
         config.subdivision_levels,
         guard,
     );
@@ -250,7 +287,7 @@ fn build_curve_for_edge(
             end,
         },
         points,
-        amplitude,
+        amplitude: amplitude_blocks,
         seed,
         guard,
     })
@@ -295,10 +332,10 @@ fn is_land_seam(edge: MacroEdge, macro_sites: &HashMap<VoronoiSiteId, MacroSite>
 fn noisy_midpoint_curve(
     start: WorldPlanePoint,
     end: WorldPlanePoint,
-    site_a: WorldPlanePoint,
-    site_b: WorldPlanePoint,
+    _site_a: WorldPlanePoint,
+    _site_b: WorldPlanePoint,
     seed: u64,
-    amplitude: f32,
+    amplitude_blocks: f32,
     levels: u8,
     guard: BoundaryGuard,
 ) -> Vec<WorldPlanePoint> {
@@ -308,29 +345,77 @@ fn noisy_midpoint_curve(
     let dz = end.z - start.z;
     let length = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
     let normal = WorldPlanePoint::new(-dz / length, dx / length);
-    let site_span = distance(site_a, site_b).max(1.0);
-    let lateral_limit = (site_span * amplitude * 0.28).min(length * 0.34);
+    let lateral_limit = amplitude_blocks.max(0.0);
 
     for index in 0..=segment_count {
         let t = index as f32 / segment_count as f32;
         let base = lerp_point(start, end, t);
-        let point = if index == 0 || index == segment_count || amplitude <= f32::EPSILON {
+        let point = if index == 0 || index == segment_count || lateral_limit <= f32::EPSILON {
             base
         } else {
-            let hash = splitmix64(seed ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-            let wave = (t * std::f32::consts::PI).sin().max(0.0);
-            let offset = (unit_f32(hash) * 2.0 - 1.0) * lateral_limit * wave;
-            let drift_hash = splitmix64(hash ^ 0xa24b_aed4_963e_3f13);
-            let along = (unit_f32(drift_hash) * 2.0 - 1.0) * length * amplitude * 0.035;
-            WorldPlanePoint::new(
+            let hash_a = splitmix64(seed ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            let hash_b =
+                splitmix64(seed ^ ((index as u64 + 17).wrapping_mul(0xbf58_476d_1ce4_e5b9)));
+            let envelope = (t * std::f32::consts::PI).sin().max(0.0);
+            let low_wave_phase = unit_f32(seed) * std::f32::consts::TAU;
+            let mid_wave_phase =
+                unit_f32(splitmix64(seed ^ 0x8412_91c3_5a77_9021)) * std::f32::consts::TAU;
+            let low_wave = (t * std::f32::consts::TAU * 1.5 + low_wave_phase).sin() * 0.46;
+            let mid_wave = (t * std::f32::consts::TAU * 4.0 + mid_wave_phase).sin() * 0.28;
+            let jitter = (unit_f32(hash_a) * 2.0 - 1.0) * 0.34;
+            let mut signed_noise = (low_wave + mid_wave + jitter).clamp(-1.0, 1.0);
+            if signed_noise.abs() < 0.42 {
+                let sign = if signed_noise.is_sign_negative() {
+                    -1.0
+                } else {
+                    1.0
+                };
+                signed_noise = sign * 0.42;
+            }
+            let offset = signed_noise * lateral_limit * envelope;
+            let along = (unit_f32(hash_b) * 2.0 - 1.0) * lateral_limit * 0.12 * envelope;
+            let first = WorldPlanePoint::new(
                 base.x + normal.x * offset + dx / length * along,
                 base.z + normal.z * offset + dz / length * along,
-            )
+            );
+            let first_clamped = guard.clamp(first);
+            let first_distance = perpendicular_distance_to_line(first_clamped, start, end);
+            let minimum_useful_distance = (lateral_limit * envelope * 0.25).min(1.0);
+            if first_distance >= minimum_useful_distance {
+                first_clamped
+            } else {
+                WorldPlanePoint::new(
+                    base.x - normal.x * offset + dx / length * along,
+                    base.z - normal.z * offset + dz / length * along,
+                )
+            }
         };
         points.push(guard.clamp(point));
     }
 
     points
+}
+
+fn visible_amplitude_blocks(
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    site_a: WorldPlanePoint,
+    site_b: WorldPlanePoint,
+    amplitude: f32,
+    config: BoundaryConfig,
+) -> f32 {
+    let edge_length = distance(start, end).max(1.0);
+    let site_span = distance(site_a, site_b).max(1.0);
+    let local_scale = edge_length.min(site_span);
+    let desired = (local_scale * amplitude).max(config.min_visible_amplitude_blocks);
+    let edge_limit = edge_length * config.max_edge_fraction;
+    let site_limit = site_span * config.max_site_span_fraction;
+
+    desired
+        .min(edge_limit)
+        .min(site_limit)
+        .min(config.max_visible_amplitude_blocks)
+        .max(0.0)
 }
 
 fn boundary_guard(
@@ -376,6 +461,8 @@ fn boundary_stats(curves: &[NoisyBoundaryCurve], graph_edge_count: usize) -> Bou
         missing_macro_edge_count: graph_edge_count.saturating_sub(curves.len()),
         ..BoundaryStats::default()
     };
+    let mut amplitude_sum = 0.0;
+    let mut displacement_sum = 0.0;
 
     for curve in curves {
         match curve.profile {
@@ -393,9 +480,53 @@ fn boundary_stats(curves: &[NoisyBoundaryCurve], graph_edge_count: usize) -> Bou
         {
             stats.guard_violation_count += 1;
         }
+        amplitude_sum += curve.amplitude;
+        stats.max_amplitude_blocks = stats.max_amplitude_blocks.max(curve.amplitude);
+        let displacement = max_perpendicular_displacement(curve);
+        displacement_sum += displacement;
+        stats.max_perpendicular_displacement_blocks = stats
+            .max_perpendicular_displacement_blocks
+            .max(displacement);
+        if curve_chord_length(curve) >= 8.0 && displacement < 1.0 {
+            stats.nearly_straight_curve_count += 1;
+        }
+    }
+
+    if !curves.is_empty() {
+        let count = curves.len() as f32;
+        stats.average_amplitude_blocks = amplitude_sum / count;
+        stats.average_perpendicular_displacement_blocks = displacement_sum / count;
     }
 
     stats
+}
+
+fn max_perpendicular_displacement(curve: &NoisyBoundaryCurve) -> f32 {
+    curve
+        .points
+        .iter()
+        .skip(1)
+        .take(curve.points.len().saturating_sub(2))
+        .map(|point| perpendicular_distance_to_line(*point, curve.anchors.start, curve.anchors.end))
+        .fold(0.0, f32::max)
+}
+
+fn curve_chord_length(curve: &NoisyBoundaryCurve) -> f32 {
+    distance(curve.anchors.start, curve.anchors.end)
+}
+
+fn perpendicular_distance_to_line(
+    point: WorldPlanePoint,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+) -> f32 {
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    let length = (dx * dx + dz * dz).sqrt();
+    if length <= f32::EPSILON {
+        return distance(point, start);
+    }
+    ((point.x - start.x) * dz - (point.z - start.z) * dx).abs() / length
 }
 
 fn lerp_point(a: WorldPlanePoint, b: WorldPlanePoint, t: f32) -> WorldPlanePoint {
@@ -472,6 +603,48 @@ mod tests {
                 .iter()
                 .all(|point| curve.guard.contains(*point))
         }));
+    }
+
+    #[test]
+    fn noisy_curves_have_visible_perpendicular_displacement() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+
+        assert_eq!(boundary.stats.nearly_straight_curve_count, 0);
+        assert!(
+            boundary.stats.average_perpendicular_displacement_blocks >= 8.0,
+            "default noisy edges should visibly bend in world space, got avg displacement {:.2}",
+            boundary.stats.average_perpendicular_displacement_blocks
+        );
+        assert!(
+            boundary
+                .curves
+                .iter()
+                .filter(|curve| curve_chord_length(curve) >= 8.0)
+                .all(|curve| max_perpendicular_displacement(curve) >= 1.0),
+            "every canonical boundary curve should have non-collinear interior points"
+        );
+        assert!(
+            boundary.curves.iter().all(|curve| curve.amplitude > 0.0),
+            "every Voronoi edge should receive a nonzero canonical noisy amplitude"
+        );
+    }
+
+    #[test]
+    fn default_amplitude_is_visible_at_4k_preview_scale() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+        let blocks_per_4k_pixel = 32_768.0 / 3_840.0;
+
+        assert!(
+            boundary.stats.average_amplitude_blocks / blocks_per_4k_pixel >= 2.5,
+            "average boundary amplitude should be visible at 4K preview scale: avg {:.2} blocks",
+            boundary.stats.average_amplitude_blocks
+        );
+        assert!(
+            boundary.stats.max_perpendicular_displacement_blocks / blocks_per_4k_pixel >= 3.0,
+            "some boundary displacement should be unmistakable at 4K preview scale"
+        );
     }
 
     #[test]
