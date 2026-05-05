@@ -71,9 +71,9 @@
 6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
 7. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
    - noisy-boundary owner/blend for macro elevation and masks,
-   - ridge candidate noisy curves,
-   - coast noisy curves,
-   - selected hydrology river noisy curves.
+   - ridge candidate noisy curves through a tile-local influence raster pass,
+   - coast noisy curves through a tile-local influence raster pass,
+   - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 9. Render the requested channel or all channels with a compact legend.
 10. Encode PNG metadata in `new-world-preview-header`.
@@ -100,6 +100,8 @@ Each PNG contains:
   land bias
 - graph site count, macro edge count, boundary curve count, selected river feature sample count
 - ridge, river, and coast feature sample counts
+- ridge, river, and coast source curve/pixel counts from the influence raster pass
+- macro field tile generation timing plus render/encode timing
 - noisy boundary average/max displacement
 - min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
   valley, and combined macro height
@@ -115,4 +117,10 @@ All-channel smoke output:
 
 ```bash
 cargo run --bin macro_field_preview -- 42 0 0 --width 640 --height 360 --channel all --output target/macro-field-preview/field-smoke.png
+```
+
+Release timing smoke:
+
+```bash
+cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel lit --output target/macro-field-preview/field-splat-720p.png
 ```

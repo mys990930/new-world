@@ -121,6 +121,12 @@ column sampler는 nearest graph edge, noisy curve distance, lake containment, ri
 river distance를 직접 반복 계산하지 않고, macro field tile의 sample 값을 읽는다. tile cache miss는
 worker에서 graph/macro/hydrology/boundary cache를 입력으로 rasterize한다.
 
+ridge/coast/river influence는 tile cache miss에서 curve source를 rasterize하고 distance/influence
+field로 전파한다. 따라서 chunk fill이나 preview render loop는 selected river/ridge/coast curve의
+polyline distance를 sample마다 반복하지 않는다. ownership과 macro elevation의 noisy-boundary
+side/blend 판정은 launch 단계에서 정확도 우선으로 per-sample query가 남아 있을 수 있지만, 이것도
+chunk hot path가 아니라 macro field cache miss에서만 수행되어야 한다.
+
 macro field tile의 기본 channel은 아래를 포함해야 한다.
 
 - macro elevation: signed macro elevation을 noisy boundary 기준으로 연속 샘플링한 큰 지형 높이

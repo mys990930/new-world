@@ -181,5 +181,5 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   macro_map은 독자 continent/island noise source를 만들지 않는다.
 - 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
   flow accumulation, selected river segment scaffold를 제공한다.
-- 아직 구현되지 않은 것: macro field tile rasterization, Perlin micro relief 합성, lit topdown heightfield preview.
+- 아직 구현되지 않은 것: Perlin micro relief 합성, final heightfield/water surface 합성, voxel fill 연결.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

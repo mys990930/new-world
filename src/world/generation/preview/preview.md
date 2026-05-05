@@ -235,6 +235,12 @@ world-space sample grid로 굽는 과정을 검사한다. source of truth는 gra
 selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`은 heightfield와 chunk fill이
 빠르게 읽기 위한 graph-derived signed distance / influence field cache다.
 
+preview와 runtime cache miss는 ridge/coast/river curve distance를 sample마다 반복 계산하지 않아야
+한다. stage 8 preview는 먼저 selected river, ridge, coast의 canonical noisy curve를 tile source
+pixel로 rasterize하고, distance propagation으로 influence field를 만든 뒤 그 결과를 렌더한다.
+ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launch 단계에서 per-sample query가
+남을 수 있지만, 이 비용은 chunk fill hot path가 아니라 macro field tile cache miss에 한정된다.
+
 ### 입력
 
 - 필수 positional 인자: `<seed> <center-x> <center-z>`
@@ -244,23 +250,24 @@ selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`�
   - `--height <u32>`: 기본 `2160`
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--stage macro_field`
-  - `--mode <all|macro-elevation|mask|ridge|river-valley|combined|lit-heightfield>`: 기본 `combined`
+  - `--channel <all|macro|mask|ridge|river|combined|lit>`: 기본 `lit`
   - `--output <path>`
 
 ### Preview Checklist
 
-각 channel은 독립 PNG로 뽑을 수 있어야 하며, `--mode all`은 아래 항목을 모두 생성한다.
+각 channel은 독립 PNG로 뽑을 수 있어야 하며, `--channel all`은 아래 항목을 모두 생성한다.
 
-- `macro-elevation`: graph signed macro elevation을 noisy boundary/ownership context로 연속화한 field
+- `macro`: graph signed macro elevation을 noisy boundary/ownership context로 연속화한 field
 - `mask`: coast, lake, ocean, dry basin mask와 distance band. 경계는 straight nearest-site raster가
   아니라 `BoundaryCache`의 canonical noisy curve를 따라 보여야 한다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
-- `river-valley`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
-  carve strength
+- `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
+  carve strength. 이 channel은 selected curve를 source pixel로 rasterize한 tile influence pass를
+  사용해야 하며, raw polyline distance를 preview pixel마다 반복 계산하면 안 된다.
 - `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과.
   이 단계의 river carve는 최종 water/voxel carve가 아니라 heightfield가 읽을 2D valley guide이며,
   combined/lit preview에서 보여야 한다.
-- `lit-heightfield`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
+- `lit`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
 
 중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
@@ -270,13 +277,14 @@ renderer/GPU 계약을 만들지 않는다.
 ### 출력
 
 - 기본 출력은 `target/macro-field-preview/` 아래 PNG다.
-- 기본 파일명은 `s<seed>_x<center-x>_z<center-z>_<mode>.png`처럼 짧게 유지한다.
+- 기본 파일명은 `s<seed>_x<center-x>_z<center-z>_<channel>.png`처럼 짧게 유지한다.
 - width, height, generator version, stage, world span, tile resolution은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/boundary version,
   channel name, min/max/avg, robust preview contrast range, noisy boundary displacement stats,
-  finite/NaN count, overlap guard width, source cache key, legend labels를 기록한다.
+  finite/NaN count, overlap guard width, source cache key, legend labels, influence source curve/pixel
+  count, tile generation timing을 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
   direction만 표시한다.

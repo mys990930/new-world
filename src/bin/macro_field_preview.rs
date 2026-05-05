@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, BufWriter, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use image::RgbImage;
 use rayon::prelude::*;
@@ -11,11 +11,10 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
-    HydrologyConfig, MacroFieldSample as CoreMacroFieldSample,
-    MacroFieldTileConfig as CoreMacroFieldTileConfig, MacroMapConfig, MacroSite, MacroSurfaceKind,
-    NoisyBoundaryCurve, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
-    VoronoiSiteId, WorldPlanePoint, generate_macro_field_tile, generate_macro_map,
+    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HydrologyConfig,
+    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
+    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_macro_field_tile, generate_macro_map,
     generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
     solve_hydrology,
 };
@@ -25,11 +24,6 @@ const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "macro_field";
 const OUTPUT_DIR: &str = "target/macro-field-preview";
-const FEATURE_BUCKET_BLOCKS: f32 = 256.0;
-const RIDGE_RADIUS_BLOCKS: f32 = 760.0;
-const RIVER_RADIUS_BLOCKS: f32 = 420.0;
-const COAST_RADIUS_BLOCKS: f32 = 520.0;
-
 const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
     PreviewChannel::MacroElevation,
     PreviewChannel::Mask,
@@ -262,89 +256,13 @@ impl PreviewWindow {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct SiteGridCoord {
-    x: i32,
-    z: i32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct FeatureGridCoord {
-    x: i32,
-    z: i32,
-}
-
 #[derive(Debug, Clone)]
 struct PreviewWorld {
     patch: VoronoiGraphPatch,
     macro_map: GraphMacroMap,
     hydrology: GraphHydrologyGraph,
     boundary: BoundaryCache,
-    site_grid: HashMap<SiteGridCoord, usize>,
-    site_samples: HashMap<VoronoiSiteId, MacroSite>,
-    ridge_grid: FeatureGrid,
-    river_grid: FeatureGrid,
-    coast_grid: FeatureGrid,
     river_segment_count: usize,
-    spacing: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct NearestSite {
-    index: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct FeatureSamplePoint {
-    position: WorldPlanePoint,
-    strength: f32,
-}
-
-#[derive(Debug, Clone, Default)]
-struct FeatureGrid {
-    buckets: HashMap<FeatureGridCoord, Vec<FeatureSamplePoint>>,
-}
-
-impl FeatureGrid {
-    fn insert(&mut self, point: FeatureSamplePoint) {
-        self.buckets
-            .entry(feature_grid_coord(point.position))
-            .or_default()
-            .push(point);
-    }
-
-    fn influence_at(&self, position: WorldPlanePoint, radius: f32) -> f32 {
-        if radius <= 0.0 || self.buckets.is_empty() {
-            return 0.0;
-        }
-        let center = feature_grid_coord(position);
-        let search = (radius / FEATURE_BUCKET_BLOCKS).ceil() as i32 + 1;
-        let radius_sq = radius * radius;
-        let mut influence = 0.0_f32;
-
-        for oz in -search..=search {
-            for ox in -search..=search {
-                let Some(points) = self.buckets.get(&FeatureGridCoord {
-                    x: center.x + ox,
-                    z: center.z + oz,
-                }) else {
-                    continue;
-                };
-                for point in points {
-                    let dx = point.position.x - position.x;
-                    let dz = point.position.z - position.z;
-                    let distance_sq = dx * dx + dz * dz;
-                    if distance_sq > radius_sq {
-                        continue;
-                    }
-                    let t = 1.0 - distance_sq.sqrt() / radius;
-                    influence = influence.max(smoothstep01(t) * point.strength);
-                }
-            }
-        }
-
-        influence.clamp(0.0, 1.0)
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -376,6 +294,7 @@ struct MacroFieldTile {
     ridge_stats: ChannelStats,
     river_stats: ChannelStats,
     combined_stats: ChannelStats,
+    core_stats: CoreMacroFieldTileStats,
 }
 
 #[derive(Debug, Clone)]
@@ -402,6 +321,9 @@ struct PreviewHeader {
     ridge_feature_samples: usize,
     river_feature_samples: usize,
     coast_feature_samples: usize,
+    tile_generation_ms: u128,
+    render_encode_ms: u128,
+    total_runtime_ms: u128,
     macro_stats: ChannelStats,
     ridge_stats: ChannelStats,
     river_stats: ChannelStats,
@@ -444,6 +366,9 @@ impl PreviewHeader {
             format!("ridge_feature_samples={}", self.ridge_feature_samples),
             format!("river_feature_samples={}", self.river_feature_samples),
             format!("coast_feature_samples={}", self.coast_feature_samples),
+            format!("tile_generation_ms={}", self.tile_generation_ms),
+            format!("render_encode_ms={}", self.render_encode_ms),
+            format!("total_runtime_ms={}", self.total_runtime_ms),
             format!(
                 "macro_elevation_min_max_avg={:.4},{:.4},{:.4}",
                 self.macro_stats.min, self.macro_stats.max, self.macro_stats.average
@@ -486,14 +411,20 @@ impl PreviewHeader {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let total_start = Instant::now();
     let config = parse_args()?.validate()?;
     let meta = WorldMeta::new(config.seed);
     let window = config.window();
     let graph_area = window.graph_area(config.region_size_blocks)?;
+    let build_start = Instant::now();
     let preview = build_preview_world(&meta, &config, graph_area)?;
+    let build_ms = build_start.elapsed().as_millis();
+    let tile_start = Instant::now();
     let tile = rasterize_macro_field(window, &preview)?;
+    let tile_generation_ms = tile_start.elapsed().as_millis();
     let output_paths = output_paths_for_config(&config)?;
     let mut generated = Vec::with_capacity(output_paths.len());
+    let render_start = Instant::now();
 
     for (channel, output) in output_paths {
         let header = PreviewHeader {
@@ -522,9 +453,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .boundary
                 .stats
                 .max_perpendicular_displacement_blocks,
-            ridge_feature_samples: preview.ridge_grid.sample_count(),
-            river_feature_samples: preview.river_grid.sample_count(),
-            coast_feature_samples: preview.coast_grid.sample_count(),
+            ridge_feature_samples: tile.core_stats.ridge_source_pixel_count,
+            river_feature_samples: tile.core_stats.river_source_pixel_count,
+            coast_feature_samples: tile.core_stats.coast_source_pixel_count,
+            tile_generation_ms,
+            render_encode_ms: render_start.elapsed().as_millis(),
+            total_runtime_ms: total_start.elapsed().as_millis(),
             macro_stats: tile.macro_stats,
             ridge_stats: tile.ridge_stats,
             river_stats: tile.river_stats,
@@ -535,6 +469,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((channel, output, image.width(), image.height()));
     }
+    let render_encode_ms = render_start.elapsed().as_millis();
+    let total_runtime_ms = total_start.elapsed().as_millis();
 
     println!("seed: {}", config.seed);
     println!("generator version: {}", meta.generator_version);
@@ -565,12 +501,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area.min.x, graph_area.max.x, graph_area.min.z, graph_area.max.z
     );
     println!(
-        "stage inputs: sites {}, macro edges {}, boundary curves {}, selected river segments {}, river feature samples {}",
+        "stage inputs: sites {}, macro edges {}, boundary curves {}, selected river segments {}, river source pixels {}",
         preview.patch.sites.len(),
         preview.macro_map.edges.len(),
         preview.boundary.curves.len(),
         preview.river_segment_count,
-        preview.river_grid.sample_count()
+        tile.core_stats.river_source_pixel_count
+    );
+    println!(
+        "macro field splat sources: ridge curves/pixels {}/{}, river curves/pixels {}/{}, coast curves/pixels {}/{}",
+        tile.core_stats.ridge_source_curve_count,
+        tile.core_stats.ridge_source_pixel_count,
+        tile.core_stats.river_source_curve_count,
+        tile.core_stats.river_source_pixel_count,
+        tile.core_stats.coast_source_curve_count,
+        tile.core_stats.coast_source_pixel_count
+    );
+    println!(
+        "timing: build world {} ms, macro field tile {} ms, render+encode {} ms, total {} ms",
+        build_ms, tile_generation_ms, render_encode_ms, total_runtime_ms
     );
     println!(
         "noisy boundary displacement avg/max {:.2}/{:.2} blocks",
@@ -619,12 +568,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
-}
-
-impl FeatureGrid {
-    fn sample_count(&self) -> usize {
-        self.buckets.values().map(Vec::len).sum()
-    }
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
@@ -744,7 +687,6 @@ fn build_preview_world(
     config: &PreviewConfig,
     graph_area: GraphRegionArea,
 ) -> Result<PreviewWorld, Box<dyn Error>> {
-    let spacing = config.site_spacing_blocks as f32;
     let center_region =
         graph_region_for_world_block(config.center_x, config.center_z, config.region_size_blocks);
     let padding_regions = required_padding_regions(center_region, graph_area)?;
@@ -757,13 +699,7 @@ fn build_preview_world(
     };
     let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
     let patch = generate_voronoi_graph_patch(request);
-    let site_grid = patch
-        .sites
-        .iter()
-        .enumerate()
-        .map(|(index, site)| (site_grid_coord_for_position(site.position, spacing), index))
-        .collect::<HashMap<_, _>>();
-    if site_grid.is_empty() {
+    if patch.sites.is_empty() {
         return Err(cli_error("generated graph patch did not contain sites"));
     }
 
@@ -780,53 +716,6 @@ fn build_preview_world(
         &macro_map,
         BoundaryConfig::new(meta.seed, meta.generator_version),
     );
-    let site_samples = macro_map
-        .sites
-        .iter()
-        .map(|site| (site.id, *site))
-        .collect::<HashMap<_, _>>();
-    let edge_samples = macro_map
-        .edges
-        .iter()
-        .map(|edge| (edge.id, *edge))
-        .collect::<HashMap<_, _>>();
-    let mut ridge_grid = FeatureGrid::default();
-    let mut river_grid = FeatureGrid::default();
-    let mut coast_grid = FeatureGrid::default();
-
-    for edge in &macro_map.edges {
-        let Some(curve) = boundary.curve_for_edge(edge.id) else {
-            continue;
-        };
-        if edge.guide.is_ridge_candidate {
-            insert_curve_samples(
-                &mut ridge_grid,
-                curve,
-                (0.35 + edge.guide.ridgeness * 0.65).clamp(0.0, 1.0),
-            );
-        }
-        if edge.guide.is_coast {
-            insert_curve_samples(
-                &mut coast_grid,
-                curve,
-                (0.35 + edge.guide.coastness * 0.65).clamp(0.0, 1.0),
-            );
-        }
-    }
-
-    for segment in &hydrology.segments {
-        if edge_samples
-            .get(&segment.edge)
-            .is_some_and(|edge| edge.lake_class.excludes_selected_river())
-        {
-            continue;
-        }
-        let Some(curve) = boundary.curve_for_edge(segment.edge) else {
-            continue;
-        };
-        insert_curve_samples(&mut river_grid, curve, river_strength(segment));
-    }
-
     let river_segment_count = hydrology.segments.len();
 
     Ok(PreviewWorld {
@@ -834,13 +723,7 @@ fn build_preview_world(
         macro_map,
         hydrology,
         boundary,
-        site_grid,
-        site_samples,
-        ridge_grid,
-        river_grid,
-        coast_grid,
         river_segment_count,
-        spacing,
     })
 }
 
@@ -856,33 +739,6 @@ fn required_padding_regions(
         .max((area.max.z - center.z).abs());
     u32::try_from(dx.max(dz).saturating_add(1))
         .map_err(|_| cli_error("macro field preview padding overflowed"))
-}
-
-fn site_grid_coord_for_position(position: WorldPlanePoint, spacing: f32) -> SiteGridCoord {
-    SiteGridCoord {
-        x: (position.x / spacing).floor() as i32,
-        z: (position.z / spacing).floor() as i32,
-    }
-}
-
-fn feature_grid_coord(position: WorldPlanePoint) -> FeatureGridCoord {
-    FeatureGridCoord {
-        x: (position.x / FEATURE_BUCKET_BLOCKS).floor() as i32,
-        z: (position.z / FEATURE_BUCKET_BLOCKS).floor() as i32,
-    }
-}
-
-fn insert_curve_samples(grid: &mut FeatureGrid, curve: &NoisyBoundaryCurve, strength: f32) {
-    for point in &curve.points {
-        grid.insert(FeatureSamplePoint {
-            position: *point,
-            strength,
-        });
-    }
-}
-
-fn river_strength(segment: &GraphRiverSegment) -> f32 {
-    ((segment.flow_accumulation.max(0.0) + 1.0).ln() / 7.0).clamp(0.15, 1.0)
 }
 
 fn rasterize_macro_field(
@@ -916,6 +772,7 @@ fn rasterize_macro_field(
         ridge_stats: channel_stats(&samples, |sample| sample.ridge_influence),
         river_stats: channel_stats(&samples, |sample| sample.river_valley),
         combined_stats: channel_stats(&samples, |sample| sample.combined_height),
+        core_stats: core_tile.stats,
         samples,
     })
 }
@@ -932,98 +789,6 @@ impl FieldSample {
             river_valley: sample.river_valley_strength,
             combined_height: sample.combined_macro_height,
         }
-    }
-}
-
-#[allow(dead_code)]
-fn sample_field(preview: &PreviewWorld, position: WorldPlanePoint) -> FieldSample {
-    let site = nearest_site(preview, position.x, position.z);
-    let macro_site = preview
-        .site_samples
-        .get(&preview.patch.sites[site.index].id)
-        .copied()
-        .expect("macro map should contain every graph site");
-    let ridge = preview
-        .ridge_grid
-        .influence_at(position, RIDGE_RADIUS_BLOCKS)
-        .max(macro_site.ridgeness * 0.35);
-    let river = preview
-        .river_grid
-        .influence_at(position, RIVER_RADIUS_BLOCKS);
-    let coast = preview
-        .coast_grid
-        .influence_at(position, COAST_RADIUS_BLOCKS)
-        .max(macro_site.coastness * 0.7)
-        .clamp(0.0, 1.0);
-    let ocean = if macro_site.surface_kind.is_ocean_owned() {
-        1.0
-    } else {
-        0.0
-    };
-    let lake = if matches!(
-        macro_site.surface_kind,
-        MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
-    ) {
-        1.0
-    } else {
-        0.0
-    };
-    let dry = if macro_site.surface_kind == MacroSurfaceKind::DryBasin {
-        1.0
-    } else {
-        0.0
-    };
-
-    let water_flatten = (ocean * 0.55_f32 + lake * 0.42_f32).clamp(0.0, 0.65);
-    let coast_flatten = coast * 0.10;
-    let ridge_raise = ridge * (0.20 + macro_site.mountainness.max(0.0) * 0.36);
-    let river_carve = river * (0.10 + 0.26 * (1.0 - lake * 0.5));
-    let combined_height = (macro_site.signed_macro_elevation + ridge_raise
-        - river_carve
-        - coast_flatten
-        - water_flatten)
-        .clamp(-1.25, 1.75);
-
-    FieldSample {
-        macro_elevation: macro_site.signed_macro_elevation,
-        ocean_mask: ocean,
-        lake_mask: lake,
-        coast_mask: coast,
-        dry_mask: dry,
-        ridge_influence: ridge,
-        river_valley: river,
-        combined_height,
-    }
-}
-
-fn nearest_site(preview: &PreviewWorld, world_x: f32, world_z: f32) -> NearestSite {
-    let center_cell_x = (world_x / preview.spacing).floor() as i32;
-    let center_cell_z = (world_z / preview.spacing).floor() as i32;
-    let mut nearest_index = 0;
-    let mut nearest_distance_sq = f32::MAX;
-
-    for offset_z in -2..=2 {
-        for offset_x in -2..=2 {
-            let coord = SiteGridCoord {
-                x: center_cell_x + offset_x,
-                z: center_cell_z + offset_z,
-            };
-            let Some(index) = preview.site_grid.get(&coord).copied() else {
-                continue;
-            };
-            let site = preview.patch.sites[index];
-            let dx = site.position.x - world_x;
-            let dz = site.position.z - world_z;
-            let distance_sq = dx * dx + dz * dz;
-            if distance_sq < nearest_distance_sq {
-                nearest_distance_sq = distance_sq;
-                nearest_index = index;
-            }
-        }
-    }
-
-    NearestSite {
-        index: nearest_index,
     }
 }
 
@@ -1504,11 +1269,6 @@ fn mix_channel(base: u8, tint: u8, amount: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
-fn smoothstep01(value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    value * value * (3.0 - 2.0 * value)
-}
-
 fn normalize3(value: [f32; 3]) -> [f32; 3] {
     let length = (value[0] * value[0] + value[1] * value[1] + value[2] * value[2])
         .sqrt()
@@ -1671,6 +1431,7 @@ mod tests {
                 robust_max: 1.0,
                 contrast_span: 2.0,
             },
+            core_stats: CoreMacroFieldTileStats::default(),
         };
         let window = PreviewWindow {
             center_x: 0.0,
@@ -1713,6 +1474,7 @@ mod tests {
                 ridge_stats: ChannelStats::default(),
                 river_stats: ChannelStats::default(),
                 combined_stats: ChannelStats::default(),
+                core_stats: CoreMacroFieldTileStats::default(),
             }
         };
 

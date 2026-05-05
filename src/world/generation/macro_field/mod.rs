@@ -99,6 +99,12 @@ pub struct MacroFieldTileStats {
     pub ocean_sample_count: usize,
     pub lake_sample_count: usize,
     pub dry_basin_sample_count: usize,
+    pub ridge_source_curve_count: usize,
+    pub river_source_curve_count: usize,
+    pub coast_source_curve_count: usize,
+    pub ridge_source_pixel_count: usize,
+    pub river_source_pixel_count: usize,
+    pub coast_source_pixel_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,11 +138,19 @@ pub fn generate_macro_field_tile(
     );
 
     let context = MacroFieldRasterContext::new(patch, macro_map, hydrology, boundary);
+    let influence_fields = rasterize_influence_fields(&context, config);
     let samples = (0..config.sample_count())
         .into_par_iter()
-        .map(|index| sample_macro_field_point(&context, config, config.sample_position(index)))
+        .map(|index| {
+            sample_macro_field_point_with_influence(
+                &context,
+                config,
+                config.sample_position(index),
+                influence_fields.sample(index, config),
+            )
+        })
         .collect::<Vec<_>>();
-    let stats = macro_field_stats(&samples);
+    let stats = macro_field_stats(&samples, influence_fields.stats);
 
     MacroFieldTile {
         config,
@@ -214,6 +228,367 @@ pub fn sample_macro_field_point(
         river_distance_blocks,
         river_flow_hint,
         combined_macro_height,
+    }
+}
+
+fn sample_macro_field_point_with_influence(
+    context: &MacroFieldRasterContext<'_>,
+    config: MacroFieldTileConfig,
+    position: WorldPlanePoint,
+    influence: MacroFieldInfluenceSample,
+) -> MacroFieldSample {
+    let owner_sample = context.owner_sample(position, config);
+    let nearest_site = owner_sample.primary;
+    let surface_kind = nearest_site.map(|site| site.surface_kind);
+    let macro_elevation = owner_sample.macro_elevation;
+    let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
+    let ocean_mask = surface_kind
+        .is_some_and(MacroSurfaceKind::is_ocean_owned)
+        .then_some(1.0)
+        .unwrap_or(0.0);
+    let lake_mask = surface_kind
+        .is_some_and(is_lake_surface)
+        .then_some(1.0)
+        .unwrap_or(0.0);
+    let dry_basin_mask = surface_kind
+        .is_some_and(|kind| kind == MacroSurfaceKind::DryBasin)
+        .then_some(1.0)
+        .unwrap_or(0.0);
+    let coast_mask = influence
+        .coast_influence
+        .max(site_coastness)
+        .max(owner_sample.boundary_blend * 0.35)
+        .clamp(0.0, 1.0);
+    let ridge_influence = influence.ridge_influence;
+    let river_distance_blocks = influence.river_distance_blocks;
+    let river_flow_hint = influence.river_flow_hint;
+    let river_valley_strength = influence.river_valley_strength;
+    let combined_macro_height = combine_macro_height(
+        macro_elevation,
+        ocean_mask,
+        coast_mask,
+        lake_mask,
+        dry_basin_mask,
+        ridge_influence,
+        river_valley_strength,
+        river_flow_hint,
+        config,
+    );
+
+    MacroFieldSample {
+        position,
+        nearest_site: nearest_site.map(|site| site.id),
+        surface_kind,
+        macro_elevation,
+        ocean_mask,
+        coast_mask,
+        lake_mask,
+        dry_basin_mask,
+        ridge_influence,
+        river_valley_strength,
+        river_distance_blocks,
+        river_flow_hint,
+        combined_macro_height,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct MacroFieldInfluenceStats {
+    ridge_source_curve_count: usize,
+    river_source_curve_count: usize,
+    coast_source_curve_count: usize,
+    ridge_source_pixel_count: usize,
+    river_source_pixel_count: usize,
+    coast_source_pixel_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MacroFieldInfluenceSample {
+    ridge_influence: f32,
+    coast_influence: f32,
+    river_valley_strength: f32,
+    river_distance_blocks: f32,
+    river_flow_hint: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MacroFieldInfluenceFields {
+    ridge_distance_blocks: Vec<f32>,
+    coast_distance_blocks: Vec<f32>,
+    river_distance_blocks: Vec<f32>,
+    river_flow_hint: Vec<f32>,
+    stats: MacroFieldInfluenceStats,
+}
+
+impl MacroFieldInfluenceFields {
+    fn sample(&self, index: usize, config: MacroFieldTileConfig) -> MacroFieldInfluenceSample {
+        let ridge_distance = self.ridge_distance_blocks[index];
+        let coast_distance = self.coast_distance_blocks[index];
+        let river_distance = self.river_distance_blocks[index];
+        let river_flow_hint = self.river_flow_hint[index];
+        let river_valley_strength =
+            envelope(river_distance, config.river_radius_blocks) * (0.35 + river_flow_hint * 0.65);
+
+        MacroFieldInfluenceSample {
+            ridge_influence: envelope(ridge_distance, config.ridge_radius_blocks),
+            coast_influence: envelope(coast_distance, config.coast_radius_blocks),
+            river_valley_strength: river_valley_strength.clamp(0.0, 1.0),
+            river_distance_blocks: river_distance,
+            river_flow_hint,
+        }
+    }
+}
+
+fn rasterize_influence_fields(
+    context: &MacroFieldRasterContext<'_>,
+    config: MacroFieldTileConfig,
+) -> MacroFieldInfluenceFields {
+    let ridge_sources = context
+        .ridge_curves
+        .iter()
+        .map(|curve| (*curve, 1.0))
+        .collect::<Vec<_>>();
+    let coast_sources = context
+        .coast_curves
+        .iter()
+        .map(|curve| (*curve, 1.0))
+        .collect::<Vec<_>>();
+    let river_sources = context
+        .river_curves
+        .iter()
+        .map(|river| (river.curve, flow_hint(river.flow_accumulation)))
+        .collect::<Vec<_>>();
+
+    let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
+    let coast = rasterize_curve_distance_field(&coast_sources, config, config.coast_radius_blocks);
+    let river = rasterize_curve_distance_field(&river_sources, config, config.river_radius_blocks);
+    let stats = MacroFieldInfluenceStats {
+        ridge_source_curve_count: ridge_sources.len(),
+        river_source_curve_count: river_sources.len(),
+        coast_source_curve_count: coast_sources.len(),
+        ridge_source_pixel_count: ridge.source_pixel_count,
+        river_source_pixel_count: river.source_pixel_count,
+        coast_source_pixel_count: coast.source_pixel_count,
+    };
+
+    MacroFieldInfluenceFields {
+        ridge_distance_blocks: ridge.distance_blocks,
+        coast_distance_blocks: coast.distance_blocks,
+        river_distance_blocks: river.distance_blocks,
+        river_flow_hint: river.flow_hint,
+        stats,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RasterDistanceField {
+    distance_blocks: Vec<f32>,
+    flow_hint: Vec<f32>,
+    source_pixel_count: usize,
+}
+
+fn rasterize_curve_distance_field(
+    sources: &[(&NoisyBoundaryCurve, f32)],
+    config: MacroFieldTileConfig,
+    radius_blocks: f32,
+) -> RasterDistanceField {
+    let sample_count = config.sample_count();
+    if sources.is_empty() {
+        return RasterDistanceField {
+            distance_blocks: vec![f32::INFINITY; sample_count],
+            flow_hint: vec![0.0; sample_count],
+            source_pixel_count: 0,
+        };
+    }
+
+    let margin = ((radius_blocks / config.sample_spacing_blocks).ceil() as usize).saturating_add(2);
+    let width = config.width as usize;
+    let height = config.height as usize;
+    let ext_width = width + margin * 2;
+    let ext_height = height + margin * 2;
+    let ext_len = ext_width * ext_height;
+    let ext_origin = WorldPlanePoint::new(
+        config.origin.x - margin as f32 * config.sample_spacing_blocks,
+        config.origin.z - margin as f32 * config.sample_spacing_blocks,
+    );
+    let mut distance = vec![f32::INFINITY; ext_len];
+    let mut flow_hint = vec![0.0; ext_len];
+
+    for (curve, strength) in sources {
+        rasterize_curve_sources(
+            &mut distance,
+            &mut flow_hint,
+            ext_width,
+            ext_height,
+            ext_origin,
+            config.sample_spacing_blocks,
+            curve,
+            *strength,
+        );
+    }
+
+    let source_pixel_count = distance.iter().filter(|distance| **distance == 0.0).count();
+    propagate_chamfer_distance(
+        &mut distance,
+        &mut flow_hint,
+        ext_width,
+        ext_height,
+        config.sample_spacing_blocks,
+        radius_blocks,
+    );
+
+    let mut cropped_distance = Vec::with_capacity(sample_count);
+    let mut cropped_flow = Vec::with_capacity(sample_count);
+    for z in 0..height {
+        let ext_row = (z + margin) * ext_width;
+        for x in 0..width {
+            let index = ext_row + x + margin;
+            cropped_distance.push(distance[index]);
+            cropped_flow.push(flow_hint[index]);
+        }
+    }
+
+    RasterDistanceField {
+        distance_blocks: cropped_distance,
+        flow_hint: cropped_flow,
+        source_pixel_count,
+    }
+}
+
+fn rasterize_curve_sources(
+    distance: &mut [f32],
+    flow_hint: &mut [f32],
+    width: usize,
+    height: usize,
+    origin: WorldPlanePoint,
+    spacing: f32,
+    curve: &NoisyBoundaryCurve,
+    strength: f32,
+) {
+    for segment in curve.points.windows(2) {
+        rasterize_segment_sources(
+            distance, flow_hint, width, height, origin, spacing, segment[0], segment[1], strength,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rasterize_segment_sources(
+    distance: &mut [f32],
+    flow_hint: &mut [f32],
+    width: usize,
+    height: usize,
+    origin: WorldPlanePoint,
+    spacing: f32,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    strength: f32,
+) {
+    let start_x = (start.x - origin.x) / spacing;
+    let start_z = (start.z - origin.z) / spacing;
+    let end_x = (end.x - origin.x) / spacing;
+    let end_z = (end.z - origin.z) / spacing;
+    let steps = ((end_x - start_x).abs().max((end_z - start_z).abs()) * 2.0)
+        .ceil()
+        .max(1.0) as usize;
+
+    for step in 0..=steps {
+        let t = step as f32 / steps as f32;
+        let x = (start_x + (end_x - start_x) * t).round() as isize;
+        let z = (start_z + (end_z - start_z) * t).round() as isize;
+        if x < 0 || z < 0 || x >= width as isize || z >= height as isize {
+            continue;
+        }
+        let index = z as usize * width + x as usize;
+        distance[index] = 0.0;
+        flow_hint[index] = flow_hint[index].max(strength);
+    }
+}
+
+fn propagate_chamfer_distance(
+    distance: &mut [f32],
+    flow_hint: &mut [f32],
+    width: usize,
+    height: usize,
+    spacing: f32,
+    radius_blocks: f32,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let diagonal = spacing * std::f32::consts::SQRT_2;
+    let limit = radius_blocks + diagonal * 2.0;
+    for _ in 0..2 {
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, -1, 0, spacing, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, 0, -1, spacing, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, -1, -1, diagonal, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, 1, -1, diagonal, width, height, limit,
+                );
+            }
+        }
+        for z in (0..height).rev() {
+            for x in (0..width).rev() {
+                let index = z * width + x;
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, 1, 0, spacing, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, 0, 1, spacing, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, 1, 1, diagonal, width, height, limit,
+                );
+                update_from_neighbor(
+                    distance, flow_hint, index, x, z, -1, 1, diagonal, width, height, limit,
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_from_neighbor(
+    distance: &mut [f32],
+    flow_hint: &mut [f32],
+    index: usize,
+    x: usize,
+    z: usize,
+    dx: isize,
+    dz: isize,
+    cost: f32,
+    width: usize,
+    height: usize,
+    limit: f32,
+) {
+    let nx = x as isize + dx;
+    let nz = z as isize + dz;
+    if nx < 0 || nz < 0 || nx >= width as isize || nz >= height as isize {
+        return;
+    }
+    let neighbor = nz as usize * width + nx as usize;
+    if neighbor >= distance.len() {
+        return;
+    }
+    let candidate = distance[neighbor] + cost;
+    if candidate > limit {
+        return;
+    }
+    if candidate + 0.001 < distance[index] {
+        distance[index] = candidate;
+        flow_hint[index] = flow_hint[neighbor];
+    } else if (candidate - distance[index]).abs() <= 0.001 {
+        flow_hint[index] = flow_hint[index].max(flow_hint[neighbor]);
     }
 }
 
@@ -674,7 +1049,10 @@ fn combine_macro_height(
     height.clamp(-2.0, 2.0)
 }
 
-fn macro_field_stats(samples: &[MacroFieldSample]) -> MacroFieldTileStats {
+fn macro_field_stats(
+    samples: &[MacroFieldSample],
+    influence_stats: MacroFieldInfluenceStats,
+) -> MacroFieldTileStats {
     if samples.is_empty() {
         return MacroFieldTileStats::default();
     }
@@ -683,6 +1061,12 @@ fn macro_field_stats(samples: &[MacroFieldSample]) -> MacroFieldTileStats {
         sample_count: samples.len(),
         min_combined_macro_height: f32::INFINITY,
         max_combined_macro_height: f32::NEG_INFINITY,
+        ridge_source_curve_count: influence_stats.ridge_source_curve_count,
+        river_source_curve_count: influence_stats.river_source_curve_count,
+        coast_source_curve_count: influence_stats.coast_source_curve_count,
+        ridge_source_pixel_count: influence_stats.ridge_source_pixel_count,
+        river_source_pixel_count: influence_stats.river_source_pixel_count,
+        coast_source_pixel_count: influence_stats.coast_source_pixel_count,
         ..MacroFieldTileStats::default()
     };
 
@@ -910,6 +1294,44 @@ mod tests {
     }
 
     #[test]
+    fn rasterized_ridge_influence_tile_has_near_stronger_than_far_sample() {
+        let inputs = test_inputs(42);
+        let Some(ridge_curve) = inputs.boundary.curves.iter().find(|curve| {
+            inputs
+                .macro_map
+                .edge(curve.edge)
+                .is_some_and(|edge| edge.guide.is_ridge_candidate)
+        }) else {
+            return;
+        };
+        let near = ridge_curve.points[ridge_curve.points.len() / 2];
+        let tile = generate_macro_field_tile(
+            &inputs.patch,
+            &inputs.macro_map,
+            &inputs.hydrology,
+            &inputs.boundary,
+            centered_test_tile_config(near),
+        );
+        let max = tile
+            .samples
+            .iter()
+            .map(|sample| sample.ridge_influence)
+            .fold(0.0, f32::max);
+        let min = tile
+            .samples
+            .iter()
+            .map(|sample| sample.ridge_influence)
+            .fold(1.0, f32::min);
+
+        assert!(tile.stats.ridge_source_curve_count > 0);
+        assert!(tile.stats.ridge_source_pixel_count > 0);
+        assert!(
+            max > min,
+            "splat ridge field should preserve a near/far gradient: max={max} min={min}"
+        );
+    }
+
+    #[test]
     fn river_valley_strength_is_higher_near_selected_river_than_far_sample() {
         let inputs = test_inputs(42);
         let Some(segment) = inputs.hydrology.segments.first() else {
@@ -941,6 +1363,43 @@ mod tests {
             far_sample.river_valley_strength
         );
         assert!(near_sample.river_flow_hint >= far_sample.river_flow_hint);
+    }
+
+    #[test]
+    fn rasterized_river_field_has_near_stronger_than_far_sample() {
+        let inputs = test_inputs(42);
+        let Some(segment) = inputs.hydrology.segments.first() else {
+            return;
+        };
+        let curve = inputs
+            .boundary
+            .curve_for_edge(segment.edge)
+            .expect("selected river edge should have canonical boundary curve");
+        let near = curve.points[curve.points.len() / 2];
+        let tile = generate_macro_field_tile(
+            &inputs.patch,
+            &inputs.macro_map,
+            &inputs.hydrology,
+            &inputs.boundary,
+            centered_test_tile_config(near),
+        );
+        let max = tile
+            .samples
+            .iter()
+            .map(|sample| sample.river_valley_strength)
+            .fold(0.0, f32::max);
+        let min = tile
+            .samples
+            .iter()
+            .map(|sample| sample.river_valley_strength)
+            .fold(1.0, f32::min);
+
+        assert!(tile.stats.river_source_curve_count > 0);
+        assert!(tile.stats.river_source_pixel_count > 0);
+        assert!(
+            max > min,
+            "splat river field should preserve a near/far gradient: max={max} min={min}"
+        );
     }
 
     #[test]
@@ -1099,6 +1558,10 @@ mod tests {
 
     fn test_tile_config() -> MacroFieldTileConfig {
         MacroFieldTileConfig::new(-512.0, -512.0, 24, 24, 64.0)
+    }
+
+    fn centered_test_tile_config(center: WorldPlanePoint) -> MacroFieldTileConfig {
+        MacroFieldTileConfig::new(center.x - 512.0, center.z - 512.0, 24, 24, 64.0)
     }
 
     fn test_site(
