@@ -1,0 +1,118 @@
+# macro_field_preview
+
+## Role
+
+- Render deterministic top-down PNG previews for the stage 8 macro field rasterization step.
+- Treat graph, macro map, hydrology, and noisy boundary output as the source of truth, then bake a
+  preview tile that heightfield synthesis can sample cheaply.
+- Keep default filenames short while preserving detailed settings and stage statistics in PNG
+  metadata.
+
+## Inputs
+
+- positional: `<seed> <center-x> <center-z>`
+  - `center-x` and `center-z` are world-block coordinates.
+- optional:
+  - `--width <u32>`
+  - `--height <u32>`
+  - `--world-span-blocks <i32>`
+  - `--region-size-blocks <i32>`
+  - `--site-spacing-blocks <i32>`
+  - `--land-bias <f32>`
+  - `--stage macro_field`
+  - `--channel <all|macro|mask|ridge|river|combined|lit>`
+  - `--output <path>`
+
+## Defaults
+
+- `--width 3840`
+- `--height 2160`
+- `--world-span-blocks 32768`
+- `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
+- `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
+- `--land-bias MacroMapConfig::new(...).land_bias`
+- `--stage macro_field`
+- `--channel lit`
+- single-channel output: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>_<channel>.png`
+- all-channel output directory: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>/`
+
+## Channels
+
+- `macro`: signed macro elevation sampled from the resolved macro site field.
+- `mask`: ocean, lake/wetland, coast, dry basin, and land context.
+- `ridge`: distance-envelope influence around ridge noisy boundary curves.
+- `river`: distance-envelope valley influence around selected hydrology river curves.
+- `combined`: macro elevation plus ridge raise, minus river valley, coast flatten, and water flatten.
+- `lit`: top-down white heightfield preview with simple directional lighting from combined height
+  gradients. This is not a 3D render; it is shaded relief over the combined macro height field.
+
+## Output Path Rules
+
+- With no `--output`, a single channel writes the short default PNG path.
+- With `--output <path>.png`, a single channel writes that exact PNG path.
+- With `--output <directory>`, a single channel writes `<channel>.png` below that directory.
+- In `--channel all`, `--output <directory>` writes one short PNG per channel in that directory.
+- In `--channel all`, `--output <path>.png` is interpreted as a prefix directory using the file stem,
+  so `--output target/macro-field-preview/field-smoke.png` writes
+  `target/macro-field-preview/field-smoke/macro.png`, `mask.png`, `ridge.png`, `river.png`,
+  `combined.png`, and `lit.png`.
+- Width, height, span, spacing, stage, and generator version stay in PNG metadata rather than
+  default filenames.
+
+## Current Flow
+
+1. Parse the seed and world-block center.
+2. Resolve the preview window from image dimensions and `--world-span-blocks`.
+3. Build the padded Voronoi graph through `generate_voronoi_graph_patch(...)`.
+4. Resolve macro ownership/elevation through `generate_macro_map(...)`.
+5. Solve selected hydrology through `solve_hydrology(...)`.
+6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
+7. Build preview-only spatial buckets from:
+   - ridge candidate noisy curves,
+   - coast noisy curves,
+   - selected hydrology river noisy curves.
+8. Rasterize a `MacroFieldTile` in parallel over the image sample grid.
+9. Render the requested channel or all channels with a compact legend.
+10. Encode PNG metadata in `new-world-preview-header`.
+
+## Integration Note
+
+The current binary owns only preview-side rasterization because the core `macro_field` module has not
+exposed a public tile API yet. The CLI contract and output semantics are intended to stay stable.
+When core terrain-field cache types land, the internal rasterization step should be replaced with the
+world-owned API while keeping the channel names and output path behavior intact.
+
+The preview must not redefine macro terrain semantics. It reads:
+
+```rust
+generate_voronoi_graph_patch(...)
+generate_macro_map(...)
+solve_hydrology(...)
+generate_noisy_boundaries(...)
+```
+
+and bakes those results into diagnostic 2D fields.
+
+## Metadata
+
+Each PNG contains:
+
+- seed, generator version, stage, channel, center, dimensions, world span, graph area, spacing, and
+  land bias
+- graph site count, macro edge count, boundary curve count, selected river feature sample count
+- ridge, river, and coast feature sample counts
+- min/max/average for macro elevation, ridge influence, river valley, and combined macro height
+- channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
+
+## Example
+
+```bash
+cargo run --bin macro_field_preview -- 42 0 0
+```
+
+All-channel smoke output:
+
+```bash
+cargo run --bin macro_field_preview -- 42 0 0 --width 640 --height 360 --channel all --output target/macro-field-preview/field-smoke.png
+```
+
