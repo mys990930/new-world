@@ -11,8 +11,9 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
-    GraphRegionCoord, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSite,
-    WorldPlanePoint, generate_voronoi_graph_patch, graph_region_for_world_block,
+    GraphRegionCoord, GraphSiteSpacingStats, VoronoiGraphConfig, VoronoiGraphPatch,
+    VoronoiGraphPatchRequest, VoronoiSite, WorldPlanePoint, generate_voronoi_graph_patch,
+    graph_region_for_world_block, graph_site_spacing_stats,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -342,6 +343,7 @@ struct SiteGridCoord {
 struct PreviewGraph {
     patch: VoronoiGraphPatch,
     site_grid: HashMap<SiteGridCoord, usize>,
+    spacing_stats: GraphSiteSpacingStats,
     spacing: f32,
 }
 
@@ -369,6 +371,11 @@ struct PreviewHeader {
     graph_area: GraphRegionArea,
     site_count: usize,
     owner_region_count: usize,
+    min_nearest_site_distance_blocks: f32,
+    max_nearest_site_distance_blocks: f32,
+    average_nearest_site_distance_blocks: f32,
+    nearest_site_distance_stddev_blocks: f32,
+    nearest_site_distance_cv: f32,
     graph_source: &'static str,
 }
 
@@ -398,6 +405,26 @@ impl PreviewHeader {
             ),
             format!("site_count={}", self.site_count),
             format!("owner_region_count={}", self.owner_region_count),
+            format!(
+                "min_nearest_site_distance_blocks={:.3}",
+                self.min_nearest_site_distance_blocks
+            ),
+            format!(
+                "max_nearest_site_distance_blocks={:.3}",
+                self.max_nearest_site_distance_blocks
+            ),
+            format!(
+                "average_nearest_site_distance_blocks={:.3}",
+                self.average_nearest_site_distance_blocks
+            ),
+            format!(
+                "nearest_site_distance_stddev_blocks={:.3}",
+                self.nearest_site_distance_stddev_blocks
+            ),
+            format!(
+                "nearest_site_distance_cv={:.3}",
+                self.nearest_site_distance_cv
+            ),
             format!("graph_source={}", self.graph_source),
         ]
         .join("\n")
@@ -430,6 +457,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             graph_area,
             site_count: graph.patch.sites.len(),
             owner_region_count: graph.patch.owner_regions.len(),
+            min_nearest_site_distance_blocks: graph.spacing_stats.min_nearest_distance_blocks,
+            max_nearest_site_distance_blocks: graph.spacing_stats.max_nearest_distance_blocks,
+            average_nearest_site_distance_blocks: graph
+                .spacing_stats
+                .average_nearest_distance_blocks,
+            nearest_site_distance_stddev_blocks: graph.spacing_stats.nearest_distance_stddev_blocks,
+            nearest_site_distance_cv: graph.spacing_stats.nearest_distance_cv,
             graph_source: "world_generation_graph",
         };
 
@@ -476,6 +510,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         "site spacing: {} blocks, sites: {}",
         config.site_spacing_blocks,
         graph.patch.sites.len()
+    );
+    println!(
+        "site spacing stats: nearest min/avg/max {:.2}/{:.2}/{:.2} blocks, stddev {:.2}, cv {:.3}",
+        graph.spacing_stats.min_nearest_distance_blocks,
+        graph.spacing_stats.average_nearest_distance_blocks,
+        graph.spacing_stats.max_nearest_distance_blocks,
+        graph.spacing_stats.nearest_distance_stddev_blocks,
+        graph.spacing_stats.nearest_distance_cv
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!();
@@ -629,6 +671,7 @@ fn build_graph_patch_for_preview(
         .enumerate()
         .map(|(index, site)| (site_grid_coord_for_position(site.position, spacing), index))
         .collect::<HashMap<_, _>>();
+    let spacing_stats = graph_site_spacing_stats(&patch);
 
     if site_grid.is_empty() {
         return Err(cli_error("generated graph patch did not contain sites"));
@@ -637,6 +680,7 @@ fn build_graph_patch_for_preview(
     Ok(PreviewGraph {
         patch,
         site_grid,
+        spacing_stats,
         spacing,
     })
 }

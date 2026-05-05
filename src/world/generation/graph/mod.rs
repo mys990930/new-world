@@ -8,7 +8,8 @@ pub const DEFAULT_GRAPH_PADDING_REGIONS: u32 = 1;
 pub const DEFAULT_BASE_FIELD_SMOOTHING_PASSES: u32 = 2;
 pub const DEFAULT_BASE_FIELD_SELF_WEIGHT: f32 = 0.55;
 
-const SITE_JITTER_FRACTION: f64 = 0.35;
+const SITE_JITTER_FRACTION: f64 = 0.43;
+pub const MIN_NEAREST_SITE_SPACING_FRACTION: f32 = 0.14;
 const TOPOLOGY_SITE_GUARD_CELLS: i64 = 3;
 const HASH_SITE: u64 = 0x8f53_7a29_381d_55f7;
 const HASH_SITE_FIELD: u64 = 0xa1b9_f4d2_0c73_17e5;
@@ -232,6 +233,16 @@ impl VoronoiGraphPatch {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GraphSiteSpacingStats {
+    pub site_count: usize,
+    pub min_nearest_distance_blocks: f32,
+    pub max_nearest_distance_blocks: f32,
+    pub average_nearest_distance_blocks: f32,
+    pub nearest_distance_stddev_blocks: f32,
+    pub nearest_distance_cv: f32,
+}
+
 pub fn generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> VoronoiGraphPatch {
     validate_graph_config(request.config);
 
@@ -256,6 +267,59 @@ pub fn generate_voronoi_graph_patch(request: VoronoiGraphPatchRequest) -> Vorono
     };
     apply_base_graph_fields(&mut patch, GraphBaseFieldConfig::default());
     patch
+}
+
+pub fn graph_site_spacing_stats(patch: &VoronoiGraphPatch) -> GraphSiteSpacingStats {
+    if patch.sites.len() < 2 {
+        return GraphSiteSpacingStats {
+            site_count: patch.sites.len(),
+            ..GraphSiteSpacingStats::default()
+        };
+    }
+
+    let nearest_distances = patch
+        .sites
+        .par_iter()
+        .map(|site| {
+            patch
+                .sites
+                .iter()
+                .filter(|other| other.id != site.id)
+                .map(|other| point_distance(site.position, other.position))
+                .fold(f32::INFINITY, f32::min)
+        })
+        .collect::<Vec<_>>();
+
+    let site_count = nearest_distances.len();
+    let min_nearest_distance_blocks = nearest_distances
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
+    let max_nearest_distance_blocks = nearest_distances
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let average_nearest_distance_blocks = nearest_distances.iter().sum::<f32>() / site_count as f32;
+    let variance = nearest_distances
+        .iter()
+        .map(|distance| {
+            let delta = distance - average_nearest_distance_blocks;
+            delta * delta
+        })
+        .sum::<f32>()
+        / site_count as f32;
+    let nearest_distance_stddev_blocks = variance.sqrt();
+    let nearest_distance_cv =
+        nearest_distance_stddev_blocks / average_nearest_distance_blocks.max(f32::EPSILON);
+
+    GraphSiteSpacingStats {
+        site_count,
+        min_nearest_distance_blocks,
+        max_nearest_distance_blocks,
+        average_nearest_distance_blocks,
+        nearest_distance_stddev_blocks,
+        nearest_distance_cv,
+    }
 }
 
 pub fn apply_base_graph_fields(patch: &mut VoronoiGraphPatch, config: GraphBaseFieldConfig) {
@@ -534,6 +598,12 @@ fn smooth_unit(value: f32) -> f32 {
 
 fn lerp(a: f32, b: f32, amount: f32) -> f32 {
     a + (b - a) * amount
+}
+
+fn point_distance(a: WorldPlanePoint, b: WorldPlanePoint) -> f32 {
+    let dx = a.x - b.x;
+    let dz = a.z - b.z;
+    (dx * dx + dz * dz).sqrt()
 }
 
 fn site_adjacency(sites: &[VoronoiSite], edges: &[VoronoiEdge]) -> Vec<Vec<usize>> {
@@ -1061,6 +1131,26 @@ mod tests {
         assert!(
             diagonal_or_oblique_edges > patch.edges.len() / 8,
             "Delaunay edges should not collapse to only horizontal/vertical lattice adjacencies"
+        );
+    }
+
+    #[test]
+    fn site_spacing_has_visible_variability_but_keeps_minimum_guard() {
+        let patch = generate_voronoi_graph_patch(test_request(42, 0, 0));
+        let stats = graph_site_spacing_stats(&patch);
+        let spacing = DEFAULT_SITE_SPACING_BLOCKS as f32;
+
+        assert!(
+            stats.nearest_distance_cv >= 0.16,
+            "site spacing should avoid an overly uniform grid look: {stats:?}"
+        );
+        assert!(
+            stats.min_nearest_distance_blocks >= spacing * MIN_NEAREST_SITE_SPACING_FRACTION,
+            "site jitter should keep a conservative minimum spacing guard: {stats:?}"
+        );
+        assert!(
+            stats.max_nearest_distance_blocks >= stats.average_nearest_distance_blocks * 1.18,
+            "site spacing should include visibly larger cells as well as smaller ones: {stats:?}"
         );
     }
 

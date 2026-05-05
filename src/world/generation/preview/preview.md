@@ -85,7 +85,7 @@
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG metadata에만
   기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
-  owner region count, mode/map name을 함께 기록한다.
+  owner region count, mode/map name, nearest-site spacing min/avg/max/stddev/CV를 함께 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. field map은 gradient color bar와 양끝 의미 label을 표시하고,
   identity map은 간단한 header만 표시한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
@@ -101,6 +101,9 @@
 - 실제 topology overlay는 `VoronoiEdge.corners`가 참조하는 `VoronoiCorner.position` 두 점을
   world-space에서 clipping/projection한 corner-to-corner segment로 그린다. 따라서 nearest-site raster
   경계와 Delaunay/circumcenter Voronoi dual edge overlay는 일부 위치에서 다르게 보일 수 있다.
+- stdout과 PNG metadata는 nearest-site distance 통계를 포함한다. 이 값은 graph cell 크기가 지나치게
+  균일한 격자로 돌아가거나, 반대로 극단적으로 작은 cell이 생기는 문제를 빠르게 확인하기 위한
+  진단값이다.
 - temperature, hydration/humidity, continentality, elevation map은 graph base-field stage가 만든
   smoothed `VoronoiSite::base_fields`를 색상 gradient로 표현한다.
 - ruggedness map은 아직 smoothing 대상이 아닌 site-level roughness seed를 표현한다.

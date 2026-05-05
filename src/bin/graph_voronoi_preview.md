@@ -51,7 +51,8 @@
   - identity mode shows a small map label/header only
   - field modes show a small gradient bar with low/high meaning labels
 - stdout summary for seed, generator version, selected modes, world footprint, graph region area, site count, metadata, and generated file paths
-- a PNG iTXt chunk named `new-world-preview-header` containing the deterministic header fields plus `mode` and `map_name`
+- stdout and metadata include nearest-site spacing min/avg/max/stddev/CV so cell size variability is visible without reading pixels by eye
+- a PNG iTXt chunk named `new-world-preview-header` containing the deterministic header fields plus `mode`, `map_name`, and site spacing stats
 
 ## Output Path Rules
 
@@ -68,11 +69,12 @@
 2. Resolve the graph preview window from image dimensions and `--world-span-blocks`.
 3. Build a `VoronoiGraphPatch` through `generate_voronoi_graph_patch(...)`.
    - The preview derives the required padding from the requested image footprint so the visible area has surrounding sites.
-4. Generate the RGB pixel buffer with Rayon via parallel chunks.
-5. Convert that buffer through `image::RgbImage`.
-6. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
-7. Draw the compact legend overlay directly into the RGB image without external font dependencies.
-8. Encode PNG with the `png` crate so the header is preserved as metadata.
+4. Calculate nearest-site spacing diagnostics from the generated patch.
+5. Generate the RGB pixel buffer with Rayon via parallel chunks.
+6. Convert that buffer through `image::RgbImage`.
+7. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
+8. Draw the compact legend overlay directly into the RGB image without external font dependencies.
+9. Encode PNG with the `png` crate so the header is preserved as metadata.
 
 The temperature, hydration, continentality, and elevation modes read the graph base-field stage's smoothed `VoronoiSite::base_fields`. Ruggedness remains a site-level graph roughness seed until a later terrain stage derives a richer roughness field.
 

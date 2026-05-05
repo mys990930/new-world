@@ -8,8 +8,8 @@ use super::macro_map::{GraphMacroMap, MacroEdge, MacroLakeEdgeClass, MacroSite};
 
 pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 6;
 pub const DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS: f32 = 4.0;
-pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 36.0;
-pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 192.0;
+pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 30.0;
+pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 160.0;
 pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.38;
 pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.48;
 
@@ -50,12 +50,12 @@ impl BoundaryConfig {
             max_visible_amplitude_blocks: DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS,
             max_edge_fraction: DEFAULT_BOUNDARY_MAX_EDGE_FRACTION,
             max_site_span_fraction: DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION,
-            ordinary_amplitude: 0.20,
-            coast_amplitude: 0.44,
-            ridge_amplitude: 0.34,
-            fault_amplitude: 0.24,
-            lake_amplitude: 0.36,
-            land_seam_amplitude: 0.24,
+            ordinary_amplitude: 0.18,
+            coast_amplitude: 0.39,
+            ridge_amplitude: 0.30,
+            fault_amplitude: 0.21,
+            lake_amplitude: 0.32,
+            land_seam_amplitude: 0.21,
         }
     }
 }

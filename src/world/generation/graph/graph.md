@@ -50,7 +50,10 @@
 
 현재 구현은 launch 단계의 안정성을 위해 고정 density jittered site 후보를 유지하되, graph topology는
 `delaunator` 기반 Delaunay/Voronoi dual로 만든다. 전역 site lattice는 seed와 generator version으로
-jitter되어 deterministic site id와 위치를 제공한다. patch 내부 site point들을 Delaunay triangulation한
+jitter되어 deterministic site id와 위치를 제공한다. 기본 jitter는 cell 안에 머무는 범위에서 비교적
+크게 적용해 macro cell 크기가 너무 균일한 격자로 보이지 않게 한다. 단, site는 자기 lattice cell
+밖으로 나가지 않으므로 deterministic site id, 인접 patch overlap 안정성, 최소 spacing guard는 유지한다.
+patch 내부 site point들을 Delaunay triangulation한
 뒤 각 triangle circumcenter를 `VoronoiCorner`로 만들고, shared Delaunay edge의 양쪽 triangle
 circumcenter를 연결해 `VoronoiEdge`를 만든다. 따라서 `VoronoiEdge`는 기존 계약처럼 두 site id와 두
 corner id를 함께 보존하지만, topology는 상하좌우 grid edge가 아니라 Delaunay adjacency를 따른다.
@@ -103,6 +106,10 @@ apply_base_graph_fields(patch, GraphBaseFieldConfig::default())
 
 생성 단계는 rayon으로 site와 corner, edge 후보를 병렬 계산한다. 병렬 수집 뒤에는 id 기준 정렬과
 dedup을 수행하므로 thread scheduling은 결과 순서에 영향을 주지 않는다.
+
+`GraphSiteSpacingStats`는 진단용 nearest-site distance 통계를 제공한다. preview는 min/avg/max,
+standard deviation, coefficient of variation을 metadata/stdout에 기록해 site placement가 과도하게
+균일해지거나 반대로 극단적으로 뭉치는 회귀를 찾는다.
 
 ## Base Graph Field Stage
 

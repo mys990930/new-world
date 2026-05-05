@@ -27,10 +27,11 @@ pub use field::{
 pub use graph::{
     DEFAULT_BASE_FIELD_SELF_WEIGHT, DEFAULT_BASE_FIELD_SMOOTHING_PASSES,
     DEFAULT_GRAPH_PADDING_REGIONS, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphBaseFieldConfig, GraphBaseFields, GraphRegionArea, GraphRegionCoord, VoronoiCorner,
-    VoronoiCornerId, VoronoiEdge, VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch,
-    VoronoiGraphPatchRequest, VoronoiSite, VoronoiSiteId, WorldPlanePoint, apply_base_graph_fields,
-    generate_voronoi_graph_patch, graph_region_for_world_block,
+    GraphBaseFieldConfig, GraphBaseFields, GraphRegionArea, GraphRegionCoord,
+    GraphSiteSpacingStats, MIN_NEAREST_SITE_SPACING_FRACTION, VoronoiCorner, VoronoiCornerId,
+    VoronoiEdge, VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
+    VoronoiSite, VoronoiSiteId, WorldPlanePoint, apply_base_graph_fields,
+    generate_voronoi_graph_patch, graph_region_for_world_block, graph_site_spacing_stats,
 };
 #[allow(unused_imports)]
 pub use hydrology::{
