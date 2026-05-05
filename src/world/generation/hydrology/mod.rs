@@ -11,6 +11,7 @@ pub const DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER: f32 = 5.0;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA: f32 = 0.35;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_FLOOR: f32 = 4.0;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_CEILING: f32 = 32.0;
+pub const DEFAULT_LAKE_DISCHARGE_RANGE_PER_AREA: f32 = 0.18;
 pub const DEFAULT_LAKE_AREA_UNITS_PER_CHAIN: f32 = 24.0;
 pub const DEFAULT_LAKE_MAX_INCOMING_CHAINS: usize = 3;
 pub const DEFAULT_LAKE_MAX_OUTLETS_PER_COMPONENT: usize = 2;
@@ -24,6 +25,7 @@ pub struct HydrologyConfig {
     pub lake_discharge_cap_per_area: f32,
     pub lake_discharge_cap_floor: f32,
     pub lake_discharge_cap_ceiling: f32,
+    pub lake_discharge_range_per_area: f32,
     pub lake_area_units_per_chain: f32,
     pub lake_max_incoming_chains: usize,
     pub lake_max_outlets_per_component: usize,
@@ -39,6 +41,7 @@ impl Default for HydrologyConfig {
             lake_discharge_cap_per_area: DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
             lake_discharge_cap_floor: DEFAULT_LAKE_DISCHARGE_CAP_FLOOR,
             lake_discharge_cap_ceiling: DEFAULT_LAKE_DISCHARGE_CAP_CEILING,
+            lake_discharge_range_per_area: DEFAULT_LAKE_DISCHARGE_RANGE_PER_AREA,
             lake_area_units_per_chain: DEFAULT_LAKE_AREA_UNITS_PER_CHAIN,
             lake_max_incoming_chains: DEFAULT_LAKE_MAX_INCOMING_CHAINS,
             lake_max_outlets_per_component: DEFAULT_LAKE_MAX_OUTLETS_PER_COMPONENT,
@@ -134,6 +137,7 @@ pub struct GraphHydrologyTopologyStats {
     pub ambiguous_shared_corner_count: usize,
     pub duplicate_trunk_pruned_count: usize,
     pub repeated_lake_contact_pruned_count: usize,
+    pub unclassified_lake_connected_flow_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -371,6 +375,11 @@ fn validate_hydrology_config(config: HydrologyConfig) {
         config.lake_discharge_cap_ceiling.is_finite()
             && config.lake_discharge_cap_ceiling >= config.lake_discharge_cap_floor,
         "lake_discharge_cap_ceiling must be finite and >= lake_discharge_cap_floor"
+    );
+    assert!(
+        config.lake_discharge_range_per_area.is_finite()
+            && config.lake_discharge_range_per_area >= 0.0,
+        "lake_discharge_range_per_area must be finite and >= 0"
     );
     assert!(
         config.lake_area_units_per_chain.is_finite() && config.lake_area_units_per_chain > 0.0,
@@ -907,6 +916,7 @@ struct LakeTerminalPolicy {
     component_root: usize,
     max_incoming_chains: usize,
     selection_threshold: f32,
+    discharge_floor: f32,
     discharge_cap: f32,
 }
 
@@ -945,6 +955,7 @@ fn resolve_lake_terminal_policies(
             component_root: index,
             max_incoming_chains,
             selection_threshold,
+            discharge_floor: lake_discharge_floor_for_area(area, config),
             discharge_cap,
         });
     }
@@ -1008,8 +1019,14 @@ fn lake_policy_for_area(
         component_root,
         max_incoming_chains,
         selection_threshold,
+        discharge_floor: lake_discharge_floor_for_area(area, config),
         discharge_cap,
     }
+}
+
+fn lake_discharge_floor_for_area(area_units: f32, config: HydrologyConfig) -> f32 {
+    (config.lake_discharge_cap_floor * 0.55 + area_units * config.lake_discharge_range_per_area)
+        .min(config.lake_discharge_cap_ceiling * 0.55)
 }
 
 fn lake_inlet_selection_threshold(
@@ -1192,9 +1209,11 @@ fn select_river_paths(
         &mut selected,
         downstream,
         downstream_edges,
+        flow,
         elevations,
         lake_candidates,
         lake_topology,
+        lake_inlet_policies,
         edge_map,
     );
     remove_invalid_terminal_intersections(&mut selected, downstream, flow, lake_candidates);
@@ -1206,9 +1225,11 @@ fn select_river_paths(
         &mut selected,
         downstream,
         downstream_edges,
+        flow,
         elevations,
         lake_candidates,
         lake_topology,
+        lake_inlet_policies,
         edge_map,
     );
 
@@ -1223,9 +1244,11 @@ fn enforce_lake_contact_topology(
     selected: &mut [bool],
     downstream: &[Option<usize>],
     downstream_edges: &[Option<VoronoiEdgeId>],
+    flow: &[f32],
     elevations: &[f32],
     lake_candidates: &[bool],
     lake_topology: &LakeContactTopology,
+    lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
 ) {
     for index in 0..selected.len() {
@@ -1251,6 +1274,7 @@ fn enforce_lake_contact_topology(
     let mut component_has_selected_inlet = vec![false; selected.len()];
     let mut component_selected_inlet_elevation = vec![f32::NEG_INFINITY; selected.len()];
     let mut incoming_selected = vec![0_u32; selected.len()];
+    let mut incoming_flow = vec![0.0_f32; selected.len()];
     for (index, is_selected) in selected.iter().copied().enumerate() {
         if !is_selected {
             continue;
@@ -1259,6 +1283,7 @@ fn enforce_lake_contact_topology(
             continue;
         };
         incoming_selected[target] = incoming_selected[target].saturating_add(1);
+        incoming_flow[target] = incoming_flow[target].max(flow[index]);
     }
 
     for (index, is_inlet_land) in lake_topology
@@ -1274,6 +1299,20 @@ fn enforce_lake_contact_topology(
             continue;
         };
         if let Some(component) = lake_topology.component_by_corner[lake_vertex] {
+            let threshold = lake_inlet_policies
+                .get(lake_vertex)
+                .copied()
+                .flatten()
+                .map(|policy| policy.selection_threshold)
+                .unwrap_or(0.0);
+            if incoming_flow[index] < threshold {
+                for (source, &is_selected) in selected.to_vec().iter().enumerate() {
+                    if is_selected && downstream[source] == Some(index) {
+                        selected[source] = false;
+                    }
+                }
+                continue;
+            }
             component_has_selected_inlet[component] = true;
             component_selected_inlet_elevation[component] =
                 component_selected_inlet_elevation[component].max(elevations[index]);
@@ -1531,7 +1570,11 @@ fn resolve_selected_flow_accumulation(
                 });
 
             if let Some(policy) = lake_policy {
-                flow.min(policy.discharge_cap)
+                if flow >= policy.selection_threshold {
+                    flow.min(policy.discharge_cap).max(policy.discharge_floor)
+                } else {
+                    flow.min(policy.discharge_cap)
+                }
             } else if downstream[index].is_some_and(|target| {
                 node_kinds
                     .get(target)
@@ -1654,6 +1697,32 @@ fn resolve_topology_stats(
             } else {
                 stats.disconnected_lake_outlet_count += 1;
             }
+        }
+        let touches_lake_component = incoming[index] > 0
+            && matches!(
+                node_kinds[index],
+                GraphDrainageNodeKind::Source
+                    | GraphDrainageNodeKind::Confluence
+                    | GraphDrainageNodeKind::Lake
+            );
+        if touches_lake_component
+            && !lake_candidates[index]
+            && downstream[index].is_some_and(|target| lake_candidates[target])
+        {
+            stats.unclassified_lake_connected_flow_count += 1;
+        }
+        if selected[index]
+            && !lake_candidates[index]
+            && downstream[index].is_some()
+            && matches!(
+                node_kinds[index],
+                GraphDrainageNodeKind::Source | GraphDrainageNodeKind::Confluence
+            )
+            && downstream[index].is_some_and(|target| {
+                lake_candidates[target] || node_kinds[target] == GraphDrainageNodeKind::Lake
+            })
+        {
+            stats.unclassified_lake_connected_flow_count += 1;
         }
     }
 
@@ -2256,6 +2325,52 @@ mod tests {
     }
 
     #[test]
+    fn local_minima_do_not_all_become_lakes() {
+        let (patch, macro_map) = seed_42_preview_inputs();
+        let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+        let lake_minima = hydro
+            .corners
+            .iter()
+            .filter(|corner| corner.is_local_minimum)
+            .filter(|corner| corner.resolution == GraphLocalMinimumResolution::Lake)
+            .count();
+        let dry_or_closed_minima = hydro
+            .corners
+            .iter()
+            .filter(|corner| corner.is_local_minimum)
+            .filter(|corner| {
+                matches!(
+                    corner.resolution,
+                    GraphLocalMinimumResolution::Sink | GraphLocalMinimumResolution::OutletCarve
+                )
+            })
+            .count();
+
+        assert!(
+            lake_minima > 0,
+            "seed 42 should still expose explicit lake minima for preview diagnosis"
+        );
+        assert!(
+            dry_or_closed_minima > 0,
+            "local minima should not all resolve as lakes; dry/closed sink or outlet carve basins must exist"
+        );
+    }
+
+    #[test]
+    fn lake_connected_selected_flow_is_always_classified() {
+        let (patch, macro_map) = seed_42_preview_inputs();
+        let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+
+        assert_eq!(
+            hydro.topology_stats.unclassified_lake_connected_flow_count, 0,
+            "selected flow adjacent to a lake must resolve as either LakeInlet or LakeOutlet"
+        );
+        assert_eq!(hydro.topology_stats.selected_lake_edge_segment_count, 0);
+        assert_eq!(hydro.topology_stats.disconnected_lake_inlet_count, 0);
+        assert_eq!(hydro.topology_stats.disconnected_lake_outlet_count, 0);
+    }
+
+    #[test]
     fn lake_terminal_policy_limits_selected_incoming_chains_by_area() {
         let downstream = vec![Some(4), Some(5), Some(6), None, Some(3), Some(3), Some(3)];
         let downstream_edges = vec![
@@ -2382,6 +2497,10 @@ mod tests {
         assert!(
             large_policy.discharge_cap > small_policy.discharge_cap,
             "larger lake footprint should allow proportionally larger inlet display discharge"
+        );
+        assert!(
+            large_policy.discharge_floor > small_policy.discharge_floor,
+            "larger lake footprint should lift the selected/display discharge range, not only the cap"
         );
         assert!(
             large_policy.selection_threshold > small_policy.selection_threshold,

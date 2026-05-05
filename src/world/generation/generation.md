@@ -82,7 +82,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
    - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를 합성해 만든다.
    - water component는 patch/guard boundary 접촉만으로 ocean이 되지 않는다. explicit ocean basin으로
-     분류된 장거리 water component와 연결되지 않은 물은 바다에 가까워도 lake/wetland 후보로 유지한다.
+     분류된 장거리 water component와 연결되지 않은 물은 바다에 가까워도 lake/wetland/dry basin 후보로 유지한다.
+   - 고립 저지대가 모두 호수가 되어서는 안 된다. 작은 호수는 일반적으로 10 site/cell 이내를 목표로
+     하고, 30 site/cell 안팎의 큰 호수는 드문 deep/wet basin 조건에서만 허용하는 soft cap 정책을 따른다.
 4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault edge guide를 선정한다.
    - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness/mountainness context, drainage divide 가능성을 함께 만족해야 한다.
 5. land/ocean ownership 경계에서 coast edge guide를 선정한다.
@@ -92,6 +94,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 6. macro elevation, ridge/coast guide, graph topology를 읽어 hydrology를 푼다.
    - 이 단계는 potential guide가 아니라 selected hydrology result를 만든다.
    - downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation을 계산한다.
+   - local minimum은 lake, sink, outlet carve, dry/closed basin 의미로 분리되어야 하며, local
+     minimum이라는 이유만으로 모두 물로 채우지 않는다.
    - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
    - lake로 끝나는 chain과 lake/wetland candidate component로 처음 들어가는 inlet chain은 ocean outlet
      chain과 같은 크기로 취급하지 않는다. raw accumulation은 보존하되, lake 면적/capacity에 비례해
@@ -108,6 +112,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      0개부터 여러 개까지 가능하지만, `LakeOutlet`은 lake별 0개부터 최대 2개까지의 낮고 분리된 후보로
      제한한다. 같은 selected river chain이 lake와 두 번 접촉하면 안 되며, lake inlet에서 끝난 chain과
      lake outlet에서 시작하는 chain은 별도 chain으로 취급한다.
+   - lake와 연결된 selected flow endpoint는 반드시 `LakeInlet` 또는 `LakeOutlet` 중 하나로 분류되어야
+     하며, 미분류 lake-connected flow는 회귀로 계측한다.
 7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
 8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.

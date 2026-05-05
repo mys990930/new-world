@@ -150,6 +150,7 @@
 - lake fill은 파란색 계열로 표시한다. `CoastOcean`처럼 ocean-owned coast transition에 속하는 영역도
   사용자 눈에는 바다로 읽히도록 파란 계열을 유지한다. sandy/pale yellow 계열은 land-side coast
   overlay나 coast land fill에만 사용한다.
+- dry basin fill은 지속 수면이 아닌 폐쇄 저지대로 읽히도록 muted olive/khaki 계열로 표시한다.
 - sink/outlet node는 작은 marker로 표시한다. internal lake debug node는 기본 preview에서 표시하지 않는다.
 - lake inlet과 lake outlet node가 있으면 서로 다른 marker 색과 짧은 방향 화살표로 표시한다.
   이 marker는 hydrology selected graph endpoint marker다. inlet marker는 lake boundary 직전의
@@ -163,11 +164,12 @@
   기본 macro map preview legend와 overlay에는 표시하지 않는다.
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
   invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
-  repeated lake contact pruned count, disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
+  repeated lake contact pruned count, unclassified lake-connected flow count,
+  disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
   disconnected, selected lake-edge, invalid, ambiguous count는 0이어야 하며, duplicate trunk pruned count는
   selected overlay에서 제거한 중복 upstream branch 수를 나타낸다. repeated lake contact pruned count는
   같은 selected chain이 두 번째 lake contact에 닿지 않도록 제거한 segment 수를 나타낸다.
-- 작은 legend overlay는 ocean/lake/land fill, ridge/fault/coast edge, selected river, sink,
+- 작은 legend overlay는 ocean/lake/land/dry fill, ridge/fault/coast edge, selected river, sink,
   inlet/outlet marker key를 포함한다. 숨겨진 debug-only lake node는 legend에 넣지 않는다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
@@ -177,8 +179,9 @@
   lake/ocean terminal river segment count, lake-capped segment count, lake inlet/outlet count,
   disconnected lake inlet/outlet count, selected lake-edge river segment count,
   invalid lake contact/intersection count, ambiguous shared corner count, duplicate trunk pruned
-  count, lake/ocean max display/raw flow, lake inlet raw/display flow range, sea level, stage 4
-  guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
+  count, unclassified lake-connected flow count, dry basin site count, max lake component size,
+  large lake component count, lake/ocean max display/raw flow, lake inlet raw/display flow range,
+  sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.

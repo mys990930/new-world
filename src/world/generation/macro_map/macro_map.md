@@ -57,6 +57,7 @@ MacroSurfaceKind::{
     CoastLand,
     CoastIsland,
     CoastOcean,
+    DryBasin,
     LakeCandidate,
     WetlandCandidate,
 }
@@ -119,6 +120,7 @@ water는 단순히 `height < sea_level`로 끝내면 안 된다. world는 물의
   않는 작은 양수 component
 - lake: land 내부의 local minimum, basin fill, 또는 open ocean component와 연결되지 않은 내륙 물
 - wetland/marsh: 얕은 물, 높은 hydration, 낮은 slope가 겹친 지역
+- dry basin / closed basin: 내륙 저지대지만 지속 수면을 만들 만큼 깊거나 습하지 않은 폐쇄분지
 - coast: ocean과 land 사이의 transition band
 - beach/cliff/rocky shore: coast의 slope, exposure, material policy에 따른 표면 표현
 
@@ -146,10 +148,15 @@ launch 정책은 아래처럼 잡는다.
 - macro_map은 `continentality >= threshold`를 초기 land mask로 보고 connected component를 resolve한다.
 - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
 - 음수 `continentality` water component라도 explicit ocean basin과 연결되지 않으면 바다에 가까워 보여도
-  `OceanBasin`이 아니라 `LakeCandidate` 또는 `WetlandCandidate`로 분류한다.
+  `OceanBasin`이 아니라 `LakeCandidate`, `WetlandCandidate`, 또는 `DryBasin`으로 분류한다.
 - patch/open boundary 또는 guard/padding boundary에 닿는다는 사실만으로 ocean이 되면 안 된다.
   launch 구현은 가장 큰 장거리 water component와 충분히 큰/충분히 oceanic한 secondary component만
   explicit ocean basin으로 보고, 나머지 고립 water component는 lake/wetland 후보로 유지한다.
+- 고립 water component가 모두 lake가 되면 안 된다. launch 정책은 site/cell 기준 10개 이하의 작은
+  component를 일반 lake 후보로 보고, 30개 안팎의 큰 lake는 component hash와 깊은/습한 basin 조건이
+  동시에 맞을 때만 드물게 허용한다. 그 외 큰 폐쇄 저지대는 wetland 또는 dry basin으로 흡수한다.
+  이 값은 launch tuning용 soft cap이며, 이후 heightfield/water level solve가 들어오면 component
+  내부 일부만 수면으로 남기는 방식으로 더 정교화한다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
@@ -266,7 +273,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 4. ridge/fault/coast guide는 hydrology보다 먼저 결정되어야 한다.
 5. macro_map은 독자적인 continent/island noise source를 만들지 않고 graph base field를 resolve해야 한다.
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
-7. 내륙 water component는 signed elevation이 음수여도 connected ocean basin이 아니면 lake/wetland
+7. 내륙 water component는 signed elevation이 음수여도 connected ocean basin이 아니면 lake/wetland/dry basin
    후보로 유지해야 한다.
 8. lake edge는 site/corner 혼합 판정이 아니라 `MacroLakeEdgeClass`로 명시되어야 한다. hydrology가
    selected river를 금지할 때도 이 edge class를 읽어야 한다.

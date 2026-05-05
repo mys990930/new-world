@@ -37,6 +37,7 @@
 - One RGB PNG composite:
   - ocean and lake areas use blue ranges. Ocean-owned coast transition (`CoastOcean`) also stays
     blue; sandy/pale yellow colors are reserved for land-side coast meaning.
+  - dry basins use muted olive/khaki fill and are not rendered as water.
   - coast areas use sandy transition colors only on land-side coast surfaces and coast guide overlays.
   - inland land and island components use green-to-upland colors.
   - high elevation approaches white, and peak colors are white.
@@ -69,14 +70,17 @@
     branch and prunes the losing upstream selected tree until explicit confluence geometry exists.
   - selected river lake contact is chain-scoped: a chain ends at a lake inlet, an outlet starts a
     new chain, and any selected path that would touch a second lake contact is pruned.
+  - connected selected flow adjacent to a lake must be classified as either a `LakeInlet` or a
+    `LakeOutlet`; unclassified lake-connected flow is reported in metadata/stdout and should be 0.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
-  lake/ocean terminal segment counts, lake component count, inland water site count, ocean component
-  count, lake-capped segment count, lake inlet/outlet count, disconnected lake inlet/outlet count,
-  selected lake-edge river segment count, invalid lake contact/intersection count, ambiguous shared
-  corner count, duplicate trunk pruned count, repeated lake contact pruned count,
+  lake/ocean terminal segment counts, lake component count, inland water site count, dry basin site
+  count, max lake component size, large lake component count, ocean component count, lake-capped
+  segment count, lake inlet/outlet count, disconnected lake inlet/outlet count, selected lake-edge
+  river segment count, invalid lake contact/intersection count, ambiguous shared corner count,
+  duplicate trunk pruned count, repeated lake contact pruned count, unclassified lake-connected flow count,
   lake/ocean max display/raw flow, lake inlet raw/display flow range, sea level, and source
   notes.
 

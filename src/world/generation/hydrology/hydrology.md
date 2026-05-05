@@ -146,6 +146,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - 더 낮은 이웃이 없는 graph-stage local minimum은 spill path search를 수행한다.
 - local minimum이 `LakeCandidate` 또는 `WetlandCandidate` 위에 있으면 ocean으로 carve하기 전에
   explicit lake resolution을 우선 적용한다.
+- 모든 graph-stage local minimum을 lake로 만들지는 않는다. macro_map이 `DryBasin`으로 분류한
+  폐쇄 저지대나 spill path가 없는 분지는 explicit `Sink`로 남을 수 있고, ocean/coast까지 낮은
+  spill path가 있으면 `OutletCarve`가 우선될 수 있다.
 - spill path가 ocean/coast terminal까지 닿으면 outlet carve로 downstream edge chain을 만든다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
@@ -161,10 +164,12 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   raw feeder를 요구한다. 선택된 lake-bound chain은 더 이상 호수 직전 몇 segment로 잘리지 않는다.
   lake edge 자체는 계속 금지하지만, 기준을 통과한 기존 upstream trunk는 lake boundary 직전
   land-side endpoint까지 selected river로 유지될 수 있다.
-- lake terminal/inlet display discharge는 `min(32, 4 + area_units * 0.35)`로 cap된다. raw accumulation은
-  `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는 cap 적용 후의
-  `flow_accumulation`을 사용한다. 따라서 lake terminal river는 일반 ocean outlet trunk보다
-  확연히 얇고 적어야 하며, 동시에 lake 크기가 커질수록 inlet 표시 flow cap도 커진다.
+- lake terminal/inlet display discharge는 lake 면적에 따라 범위가 함께 올라간다. launch 기본 cap은
+  `min(32, 4 + area_units * 0.35)`이고, display floor는 `min(32 * 0.55, 4 * 0.55 + area_units * 0.18)`이다.
+  raw accumulation은 `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는
+  이 lake-area display band를 통과한 `flow_accumulation`을 사용한다. 따라서 lake terminal river는
+  일반 ocean outlet trunk보다 확연히 얇고 적되, lake 크기가 커질수록 inlet/outlet discharge range도
+  같이 커진다.
 - lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
   흐름은 `MacroLakeEdgeClass`가 lake 관련 edge로 분류한 edge를 selected segment로 쓰지 않는다.
   `LakeInlet`은 lake boundary 바로 바깥의
@@ -181,6 +186,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - 같은 selected river chain은 lake와 두 번 접촉하지 않는다. lake inlet에서 끝난 chain과 lake outlet에서
   시작하는 chain은 별도 chain으로 취급한다. outlet에서 시작한 chain이 다른 lake contact에 다시 닿으면
   launch 정책은 그 selected outlet chain을 제거하고 `repeated_lake_contact_pruned_count`에 기록한다.
+- lake boundary 바깥의 selected flow endpoint가 lake와 연결되어 있는데 `LakeInlet` 또는 `LakeOutlet`
+  marker로 분류되지 않으면 회귀다. launch 구현은 이런 endpoint를
+  `unclassified_lake_connected_flow_count`로 계측하고 정상 solve에서 0을 요구한다.
 - selected river occupancy는 `one selected outgoing per corner`인 downhill graph 위에서, preview-visible
   incoming도 기본적으로 `one incoming per corner`가 되도록 정리한다. 자연스러운 대규모 합류를 별도
   confluence geometry로 표현하기 전까지는 여러 headwater가 같은 trunk vertex에 따로 붙는 형태보다
@@ -260,7 +268,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 
 1. Voronoi edge는 hydrology substrate이지 자동 river가 아니다.
 2. selected river segment는 descending 또는 outlet-carved graph logic을 따라야 한다.
-3. local minima는 lake, sink, outlet carve 중 하나로 명시되어야 한다.
+3. local minima는 lake, sink, outlet carve 중 하나로 명시되어야 한다. local minimum이라는 이유만으로
+   모두 lake가 되면 안 되며 dry/closed basin은 sink 또는 dry basin surface로 남을 수 있다.
 4. selected river는 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기면 안 된다.
 5. selected river path는 generation order와 chunk order에 독립적이어야 한다.
 6. Perlin 이후 micro depression은 macro river routing을 새로 정의하지 않는다.
@@ -281,6 +290,7 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     `repeated_lake_contact_pruned_count`에 기록한다.
 14. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
     `selected_lake_edge_segment_count`는 정상 hydrology solve에서 0이어야 한다.
+15. `unclassified_lake_connected_flow_count`는 정상 hydrology solve에서 0이어야 한다.
 
 ---
 

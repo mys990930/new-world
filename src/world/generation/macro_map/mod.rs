@@ -54,6 +54,7 @@ pub enum MacroSurfaceKind {
     CoastLand,
     CoastIsland,
     CoastOcean,
+    DryBasin,
     LakeCandidate,
     WetlandCandidate,
 }
@@ -66,6 +67,7 @@ impl MacroSurfaceKind {
                 | Self::Island
                 | Self::CoastLand
                 | Self::CoastIsland
+                | Self::DryBasin
                 | Self::LakeCandidate
                 | Self::WetlandCandidate
         )
@@ -261,6 +263,7 @@ struct SiteContext {
     is_land_owned: bool,
     is_island_owned: bool,
     is_inland_water: bool,
+    inland_water_surface: Option<MacroSurfaceKind>,
     component_id: u64,
     graph_distance_to_coast: u32,
     spacing_blocks: f32,
@@ -322,6 +325,8 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
             let component_size = component_sizes.get(&component).copied().unwrap_or(0);
             let is_inland_water =
                 !land_mask[index] && !ocean_components.get(&component).copied().unwrap_or(false);
+            let inland_water_surface = is_inland_water
+                .then(|| inland_water_surface_kind(component, component_size, site.base_fields));
             SiteContext {
                 base_fields: site.base_fields,
                 ruggedness: site.ruggedness,
@@ -330,12 +335,34 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
                     && Some(component) != largest_land_component
                     && component_size <= island_size_limit,
                 is_inland_water,
+                inland_water_surface,
                 component_id: component,
                 graph_distance_to_coast: coast_distances[index],
                 spacing_blocks,
             }
         })
         .collect()
+}
+
+fn inland_water_surface_kind(
+    component: u64,
+    component_size: usize,
+    fields: GraphBaseFields,
+) -> MacroSurfaceKind {
+    let deep_basin = fields.elevation_seed < -0.42 || fields.hydration >= 0.62;
+    let rare_large_lake = component_size <= 30
+        && splitmix64(component ^ 0x49f1_69b4_8f7d_21ab) % 100 < 13
+        && deep_basin;
+
+    if component_size <= 10 || rare_large_lake {
+        MacroSurfaceKind::LakeCandidate
+    } else if component_size <= 30 && fields.hydration >= 0.50 {
+        MacroSurfaceKind::WetlandCandidate
+    } else if fields.hydration >= 0.74 && fields.elevation_seed < -0.18 {
+        MacroSurfaceKind::WetlandCandidate
+    } else {
+        MacroSurfaceKind::DryBasin
+    }
 }
 
 fn component_sizes(components: &[u64]) -> HashMap<u64, usize> {
@@ -542,6 +569,11 @@ fn macro_field_sample_from_context(
     config: MacroMapConfig,
 ) -> MacroFieldSample {
     let fields = context.base_fields;
+    let dry_basin = matches!(
+        context.inland_water_surface,
+        Some(MacroSurfaceKind::DryBasin)
+    );
+    let effective_land_owned = context.is_land_owned || dry_basin;
     let continentality = clamp_signed(fields.continentality + config.land_bias - config.sea_level);
     let raw_distance_to_coast_blocks = if context.graph_distance_to_coast == u32::MAX {
         config.coast_width_blocks * 8.0
@@ -557,12 +589,12 @@ fn macro_field_sample_from_context(
         + continentality.max(0.0) * 0.24
         + inlandness * 0.14
         + context.ruggedness * 0.12;
-    let mountainness = if context.is_land_owned {
+    let mountainness = if effective_land_owned {
         smoothstep(0.18, 0.78, highland_signal)
     } else {
         0.0
     };
-    let ridgeness = if context.is_land_owned {
+    let ridgeness = if effective_land_owned {
         smoothstep(
             0.34,
             0.82,
@@ -571,7 +603,7 @@ fn macro_field_sample_from_context(
     } else {
         0.0
     };
-    let basinness = if context.is_land_owned {
+    let basinness = if effective_land_owned {
         clamp_unit(
             (1.0 - mountainness) * 0.34
                 + (1.0 - inlandness) * 0.22
@@ -581,7 +613,7 @@ fn macro_field_sample_from_context(
     } else {
         clamp_unit((-continentality).max(0.0) * 0.70 + inlandness * 0.30)
     };
-    let signed_macro_elevation = if context.is_land_owned {
+    let signed_macro_elevation = if effective_land_owned {
         (0.035
             + ((elevation_seed + 1.0) * 0.5) * 0.62
             + continentality.max(0.0) * 0.14
@@ -601,6 +633,7 @@ fn macro_field_sample_from_context(
             context.is_land_owned,
             context.is_island_owned,
             context.is_inland_water,
+            context.inland_water_surface,
             coastness,
             basinness,
             signed_macro_elevation,
@@ -667,6 +700,17 @@ fn macro_corner(
         .count();
     let is_inland_water =
         !adjacent_sites.is_empty() && lake_neighbor_count * 2 >= adjacent_sites.len();
+    let dry_basin_neighbor_count = adjacent_sites
+        .iter()
+        .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::DryBasin))
+        .count();
+    let inland_water_surface = if is_inland_water {
+        Some(MacroSurfaceKind::LakeCandidate)
+    } else if !adjacent_sites.is_empty() && dry_basin_neighbor_count * 2 >= adjacent_sites.len() {
+        Some(MacroSurfaceKind::DryBasin)
+    } else {
+        None
+    };
     let base_is_land_owned = is_land_owned && !is_inland_water;
     let component_site = adjacent_sites
         .iter()
@@ -703,6 +747,7 @@ fn macro_corner(
         is_land_owned: base_is_land_owned,
         is_island_owned,
         is_inland_water,
+        inland_water_surface,
         component_id: component_site
             .and_then(|site| {
                 site.continent
@@ -738,12 +783,15 @@ fn surface_kind(
     is_land_owned: bool,
     is_island_owned: bool,
     is_inland_water: bool,
+    inland_water_surface: Option<MacroSurfaceKind>,
     coastness: f32,
     basinness: f32,
     signed_macro_elevation: f32,
 ) -> MacroSurfaceKind {
     if is_inland_water {
-        MacroSurfaceKind::LakeCandidate
+        inland_water_surface.unwrap_or(MacroSurfaceKind::LakeCandidate)
+    } else if matches!(inland_water_surface, Some(MacroSurfaceKind::DryBasin)) {
+        MacroSurfaceKind::DryBasin
     } else if is_land_owned {
         if coastness >= 0.55 {
             if is_island_owned {
@@ -1013,7 +1061,9 @@ mod tests {
                     macro_site.surface_kind.is_ocean_owned()
                         || matches!(
                             macro_site.surface_kind,
-                            MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+                            MacroSurfaceKind::DryBasin
+                                | MacroSurfaceKind::LakeCandidate
+                                | MacroSurfaceKind::WetlandCandidate
                         )
                 );
             }
@@ -1040,8 +1090,8 @@ mod tests {
             .collect::<HashSet<_>>();
 
         assert!(
-            default_window_lakes.len() >= 2,
-            "seed 42 default macro preview window should expose at least two inland lake components, got {}",
+            !default_window_lakes.is_empty(),
+            "seed 42 default macro preview window should expose at least one inland lake component after dry basin pruning, got {}",
             default_window_lakes.len()
         );
         assert!(
@@ -1050,6 +1100,46 @@ mod tests {
                 .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::LakeCandidate))
                 .all(|site| site.ocean_basin.is_none()),
             "inland lake candidates must not retain ocean basin ownership"
+        );
+    }
+
+    #[test]
+    fn inland_water_components_are_not_all_lakes() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let dry_basin_sites = map
+            .sites
+            .iter()
+            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::DryBasin))
+            .count();
+
+        assert!(
+            dry_basin_sites > 0,
+            "large closed inland depressions should be allowed to resolve as dry basins instead of all becoming lakes"
+        );
+    }
+
+    #[test]
+    fn lake_component_size_policy_keeps_default_lakes_small() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let mut lake_sizes = HashMap::<MacroContinentId, usize>::new();
+
+        for site in map.sites.iter().filter(|site| {
+            matches!(
+                site.surface_kind,
+                MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+            )
+        }) {
+            if let Some(component) = site.continent {
+                *lake_sizes.entry(component).or_default() += 1;
+            }
+        }
+
+        assert!(
+            lake_sizes.values().all(|&size| size <= 30),
+            "launch lake policy should keep lake/wetland components within the documented rare-large soft cap: {:?}",
+            lake_sizes
         );
     }
 

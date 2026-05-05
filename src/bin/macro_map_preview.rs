@@ -249,6 +249,7 @@ struct PreviewHydrologyStats {
     ambiguous_shared_corner_count: usize,
     duplicate_trunk_pruned_count: usize,
     repeated_lake_contact_pruned_count: usize,
+    unclassified_lake_connected_flow_count: usize,
     lake_terminal_segment_count: usize,
     lake_capped_segment_count: usize,
     ocean_terminal_segment_count: usize,
@@ -268,6 +269,9 @@ struct PreviewHydrologyStats {
 struct PreviewSurfaceStats {
     lake_component_count: usize,
     inland_water_site_count: usize,
+    dry_basin_site_count: usize,
+    max_lake_component_sites: usize,
+    large_lake_component_count: usize,
     ocean_component_count: usize,
     ocean_site_count: usize,
 }
@@ -342,6 +346,18 @@ impl PreviewHeader {
                 self.surface_stats.inland_water_site_count
             ),
             format!(
+                "dry_basin_site_count={}",
+                self.surface_stats.dry_basin_site_count
+            ),
+            format!(
+                "max_lake_component_sites={}",
+                self.surface_stats.max_lake_component_sites
+            ),
+            format!(
+                "large_lake_component_count={}",
+                self.surface_stats.large_lake_component_count
+            ),
+            format!(
                 "ocean_component_count={}",
                 self.surface_stats.ocean_component_count
             ),
@@ -385,6 +401,10 @@ impl PreviewHeader {
             format!(
                 "repeated_lake_contact_pruned_count={}",
                 self.hydrology_stats.repeated_lake_contact_pruned_count
+            ),
+            format!(
+                "unclassified_lake_connected_flow_count={}",
+                self.hydrology_stats.unclassified_lake_connected_flow_count
             ),
             format!(
                 "lake_terminal_river_segment_count={}",
@@ -556,9 +576,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         outlet_node_count
     );
     println!(
-        "surface stats: lake components {}, inland water sites {}, ocean components {}, ocean sites {}",
+        "surface stats: lake components {}, inland water sites {}, dry basin sites {}, max lake size {}, large lakes {}, ocean components {}, ocean sites {}",
         surface_stats.lake_component_count,
         surface_stats.inland_water_site_count,
+        surface_stats.dry_basin_site_count,
+        surface_stats.max_lake_component_sites,
+        surface_stats.large_lake_component_count,
         surface_stats.ocean_component_count,
         surface_stats.ocean_site_count
     );
@@ -582,7 +605,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_lake_inlet_raw_flow
     );
     println!(
-        "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}, repeated lake contact pruned {}",
+        "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}, repeated lake contact pruned {}, unclassified lake-connected flow {}",
         hydrology_stats.lake_inlet_count,
         hydrology_stats.lake_outlet_count,
         hydrology_stats.disconnected_lake_inlet_count,
@@ -592,7 +615,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.invalid_river_intersection_count,
         hydrology_stats.ambiguous_shared_corner_count,
         hydrology_stats.duplicate_trunk_pruned_count,
-        hydrology_stats.repeated_lake_contact_pruned_count
+        hydrology_stats.repeated_lake_contact_pruned_count,
+        hydrology_stats.unclassified_lake_connected_flow_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -885,6 +909,14 @@ fn color_for_macro_site(site: MacroSite) -> [u8; 3] {
                 (0.00, [28, 98, 168]),
                 (0.62, [57, 154, 199]),
                 (1.00, [116, 196, 221]),
+            ],
+        ),
+        MacroSurfaceKind::DryBasin => gradient_color(
+            elevation,
+            &[
+                (0.00, [113, 121, 87]),
+                (0.58, [136, 145, 91]),
+                (1.00, [176, 171, 121]),
             ],
         ),
         MacroSurfaceKind::CoastLand => gradient_color(
@@ -1191,6 +1223,9 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
     stats.duplicate_trunk_pruned_count = hydrology.topology_stats.duplicate_trunk_pruned_count;
     stats.repeated_lake_contact_pruned_count =
         hydrology.topology_stats.repeated_lake_contact_pruned_count;
+    stats.unclassified_lake_connected_flow_count = hydrology
+        .topology_stats
+        .unclassified_lake_connected_flow_count;
 
     for segment in &hydrology.segments {
         if node_kinds
@@ -1258,8 +1293,10 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
 
 fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> PreviewSurfaceStats {
     let mut lake_components = HashSet::new();
+    let mut lake_component_sizes = HashMap::<_, usize>::new();
     let mut ocean_components = HashSet::new();
     let mut inland_water_site_count = 0;
+    let mut dry_basin_site_count = 0;
     let mut ocean_site_count = 0;
 
     for site in graph.site_samples.values() {
@@ -1276,7 +1313,11 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
                 inland_water_site_count += 1;
                 if let Some(component) = site.continent {
                     lake_components.insert(component);
+                    *lake_component_sizes.entry(component).or_default() += 1;
                 }
+            }
+            MacroSurfaceKind::DryBasin => {
+                dry_basin_site_count += 1;
             }
             MacroSurfaceKind::OceanBasin | MacroSurfaceKind::CoastOcean => {
                 ocean_site_count += 1;
@@ -1291,6 +1332,12 @@ fn preview_surface_stats(graph: &PreviewGraph, window: PreviewWindow) -> Preview
     PreviewSurfaceStats {
         lake_component_count: lake_components.len(),
         inland_water_site_count,
+        dry_basin_site_count,
+        max_lake_component_sites: lake_component_sizes.values().copied().max().unwrap_or(0),
+        large_lake_component_count: lake_component_sizes
+            .values()
+            .filter(|&&size| size > 10)
+            .count(),
         ocean_component_count: ocean_components.len(),
         ocean_site_count,
     }
@@ -1450,7 +1497,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     };
     let margin = 8 * scale;
     let panel_width = (176 * scale).min(image.width());
-    let panel_height = (104 * scale).min(image.height());
+    let panel_height = (117 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1518,6 +1565,14 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x,
         key_y + 26 * scale,
+        [136, 145, 91],
+        "DRY",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 82 * scale,
+        key_y + 26 * scale,
         [247, 248, 242],
         "RIDGE",
         scale,
@@ -1525,7 +1580,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     draw_key(
         image,
         bar_x + 82 * scale,
-        key_y + 26 * scale,
+        key_y + 39 * scale,
         [231, 92, 88],
         "FAULT",
         scale,
@@ -1540,15 +1595,15 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     );
     draw_key(
         image,
-        bar_x + 82 * scale,
-        key_y + 39 * scale,
+        bar_x,
+        key_y + 52 * scale,
         [128, 75, 178],
         "SINK",
         scale,
     );
     draw_key(
         image,
-        bar_x,
+        bar_x + 82 * scale,
         key_y + 52 * scale,
         [252, 224, 66],
         "INLET",
@@ -1556,8 +1611,8 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     );
     draw_key(
         image,
-        bar_x + 82 * scale,
-        key_y + 52 * scale,
+        bar_x,
+        key_y + 65 * scale,
         [62, 113, 255],
         "OUT",
         scale,
@@ -1877,6 +1932,9 @@ mod tests {
             surface_stats: PreviewSurfaceStats {
                 lake_component_count: 2,
                 inland_water_site_count: 12,
+                dry_basin_site_count: 3,
+                max_lake_component_sites: 8,
+                large_lake_component_count: 0,
                 ocean_component_count: 1,
                 ocean_site_count: 44,
             },
@@ -1891,6 +1949,7 @@ mod tests {
                 ambiguous_shared_corner_count: 0,
                 duplicate_trunk_pruned_count: 4,
                 repeated_lake_contact_pruned_count: 0,
+                unclassified_lake_connected_flow_count: 0,
                 lake_terminal_segment_count: 1,
                 ocean_terminal_segment_count: 2,
                 max_lake_display_flow: 8.0,
@@ -1915,6 +1974,9 @@ mod tests {
         assert!(metadata.contains("river_segment_count=3"));
         assert!(metadata.contains("lake_component_count=2"));
         assert!(metadata.contains("inland_water_site_count=12"));
+        assert!(metadata.contains("dry_basin_site_count=3"));
+        assert!(metadata.contains("max_lake_component_sites=8"));
+        assert!(metadata.contains("large_lake_component_count=0"));
         assert!(metadata.contains("lake_terminal_river_segment_count=1"));
         assert!(metadata.contains("lake_capped_river_segment_count=1"));
         assert!(metadata.contains("lake_inlet_count=3"));
@@ -1927,6 +1989,7 @@ mod tests {
         assert!(metadata.contains("ambiguous_shared_corner_count=0"));
         assert!(metadata.contains("duplicate_trunk_pruned_count=4"));
         assert!(metadata.contains("repeated_lake_contact_pruned_count=0"));
+        assert!(metadata.contains("unclassified_lake_connected_flow_count=0"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(metadata.contains("min_lake_inlet_display_flow=6.000"));
         assert!(metadata.contains("max_lake_inlet_raw_flow=96.000"));
