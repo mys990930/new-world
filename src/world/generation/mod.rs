@@ -28,8 +28,9 @@ pub use hydrology::{
     DEFAULT_HEADWATER_ELEVATION, DEFAULT_LAKE_DISCHARGE_CAP_FLOOR,
     DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA, DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER,
     DEFAULT_RIVER_FLOW_THRESHOLD, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
-    GraphHydrologyCorner, GraphHydrologyGraph, GraphHydrologyRole, GraphLocalMinimumResolution,
-    GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig, WatershedId, solve_hydrology,
+    GraphHydrologyCorner, GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
+    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
+    WatershedId, solve_hydrology,
 };
 #[allow(unused_imports)]
 pub use macro_map::{

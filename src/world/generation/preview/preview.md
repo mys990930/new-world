@@ -148,15 +148,18 @@
   chain 수와 lake 유입부 visible segment 수도 제한되므로, preview에는 cap 적용 후 남은 selected
   segment만 표시되어야 한다.
 - lake/sink/outlet node는 작은 marker로 표시한다.
+- lake inlet과 lake outlet node가 있으면 서로 다른 marker 색으로 표시한다. metadata/stdout에는
+  lake inlet count, lake outlet count, invalid lake contact count, invalid river intersection count를
+  포함하며 invalid count는 정상 preview에서 0이어야 한다.
 - 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
   candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
   node count, lake component count, inland water site count, ocean component count,
-  lake/ocean terminal river segment count, lake-capped segment count, lake/ocean max
-  display/raw flow, sea level, stage 4 guide input note, stage 6 hydrology raw/selected flow note,
-  source note를 함께 기록한다.
+  lake/ocean terminal river segment count, lake-capped segment count, lake inlet/outlet count,
+  invalid lake contact/intersection count, lake/ocean max display/raw flow, sea level, stage 4
+  guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.

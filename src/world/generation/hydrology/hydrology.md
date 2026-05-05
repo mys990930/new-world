@@ -42,6 +42,8 @@ hydrology 단계는 아래를 계산한다.
 - raw flow accumulation
 - selected/display discharge
 - selected river segment
+- lake inlet/outlet vertex
+- topology validation stats
 - river role: headwater, tributary, trunk, floodplain, outlet
 - downstream progress
 - approximate river width
@@ -67,6 +69,7 @@ GraphHydrologyGraph {
     corners: Vec<GraphHydrologyCorner>,
     nodes: Vec<GraphDrainageNode>,
     segments: Vec<GraphRiverSegment>,
+    topology_stats: GraphHydrologyTopologyStats,
 }
 
 GraphHydrologyCorner {
@@ -78,6 +81,13 @@ GraphHydrologyCorner {
     flow_accumulation,
     is_local_minimum,
     resolution,
+}
+
+GraphHydrologyTopologyStats {
+    lake_inlet_count,
+    lake_outlet_count,
+    invalid_lake_contact_count,
+    invalid_river_intersection_count,
 }
 ```
 
@@ -99,8 +109,17 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
 5. local minimum을 lake로 유지할지, sink로 둘지, outlet을 carve할지 결정한다.
 6. watershed와 flow accumulation을 계산한다.
 7. terminal 정책을 적용해 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
-8. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
-9. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
+8. lake contact topology를 정리한다.
+   - selected river는 lake 내부 edge나 lake boundary edge를 따라 지나가지 않는다.
+   - 유입하천은 lake boundary corner에서 `LakeInlet` node로 종료된다.
+   - 유출하천은 같은 lake component의 다른 boundary corner인 `LakeOutlet` node에서 시작된다.
+   - outlet vertex는 selected inlet이 lake로 들어오기 직전의 land-side approach corner elevation보다 낮아야 한다.
+   - outlet vertex는 inlet vertex와 같은 corner가 아니며, 기본값 기준 최소 2 lake-edge hop 이상 떨어져야 한다.
+9. selected river graph의 shared corner를 검증한다.
+   - 둘 이상의 selected segment가 한 corner에서 만나는 경우는 downstream confluence 또는 명시 terminal로 설명 가능해야 한다.
+   - branch를 명시적으로 모델링하기 전까지 selected graph는 한 corner에서 여러 독립 chain이 교차하는 형태를 제거한다.
+10. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
+11. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
 
 launch 구현은 아래의 보수적인 정책을 사용한다.
 
@@ -128,6 +147,12 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는 cap 적용 후의
   `flow_accumulation`을 사용한다. 따라서 lake terminal river는 일반 ocean outlet trunk보다
   확연히 얇고 적어야 한다.
+- lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
+  segment는 `non-lake corner -> lake inlet corner` 하나의 vertex contact로 끝나며, lake 안쪽 edge나
+  lake-lake edge를 river로 선택하지 않는다. lake에서 나가는 segment는 별도의 `lake outlet corner ->
+  non-lake corner`로 시작한다. outlet corner의 높이 비교는 lake surface vertex가 아니라 유입하천의
+  land-side approach corner elevation을 기준으로 한다. 이는 lake 후보 corner들이 같은 수면/분지 값으로
+  평탄해질 수 있기 때문이다.
 
 최종 river geometry는 raw edge segment가 아니다.
 
@@ -209,6 +234,10 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 8. final river geometry는 raw straight edge가 아니라 spline/domain-warped realization을 사용해야 한다.
 9. lake terminal river는 lake 면적/capacity에 비례해서 선택되어야 하며, raw accumulation이 커도
    selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
+10. selected river는 lake 내부 edge를 관통하거나 lake boundary edge를 따라 스치지 않고, lake inlet/outlet
+    vertex에서만 lake와 접촉해야 한다.
+11. selected river graph의 shared corner는 confluence, branch, lake inlet/outlet, sink, coast outlet 중
+    하나로 설명 가능해야 하며 독립 chain 교차는 허용하지 않는다.
 
 ---
 
@@ -225,6 +254,9 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   terminal/inlet chain은 lake candidate footprint에서 산정한 capacity에 따라 더 높은 threshold,
   lake별 top-N incoming chain, visible inlet segment 제한, selected/display discharge cap을
   적용한다. raw corner accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다.
+- selected river topology는 lake contact와 shared-corner intersection을 후처리로 검증한다. 결과 graph는
+  `LakeInlet`/`LakeOutlet` node와 `GraphHydrologyTopologyStats`를 제공하며, preview와 테스트는 invalid
+  lake contact/intersection count가 0인지 확인한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
   noisy river spline realization, valley carve와 heightfield coupling.

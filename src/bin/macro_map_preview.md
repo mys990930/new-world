@@ -50,13 +50,16 @@
   - lake terminal/inlet selection is already reduced by hydrology before rendering: per-lake
     top-N chain limits, short visible inlet segments, and lake-area discharge caps all affect
     the displayed segment set.
-  - lake, sink, and outlet drainage nodes are marked with small overlay dots.
+  - lake, lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
+    overlay dots. Lake inlets and outlets use distinct colors so lake contact topology can be
+    checked without reading raw dumps.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
   lake/ocean terminal segment counts, lake component count, inland water site count, ocean component
-  count, lake-capped segment count, lake/ocean max display/raw flow, sea level, and source notes.
+  count, lake-capped segment count, lake inlet/outlet count, invalid lake contact/intersection
+  count, lake/ocean max display/raw flow, sea level, and source notes.
 
 ## Output Path Rules
 
@@ -80,7 +83,8 @@
 8. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.
-9. Draw selected river chains and lake/sink/outlet drainage node markers from hydrology results.
+9. Draw selected river chains and lake/inlet/outlet/sink/coast-outlet drainage node markers from
+   hydrology results.
 10. Draw the compact legend and encode PNG metadata.
 
 The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from
@@ -103,7 +107,9 @@ Goal contract: this preview should show how graph base `continentality/elevation
 continent/ocean/island ownership, macro elevation, coast, ridge/fault guide, and selected hydrology.
 The graph continentality and elevation maps should visibly match the macro map's land/ocean and
 high/low patterns, and selected rivers should follow continuous downstream chains to ocean/coast or
-explicit lake/sink resolution.
+explicit lake/sink resolution. Lake-bound selected rivers should terminate at `LakeInlet` vertices,
+and lake outlet rivers should start from separated `LakeOutlet` vertices rather than skimming along
+lake edges.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

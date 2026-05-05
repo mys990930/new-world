@@ -239,6 +239,10 @@ struct MacroEdgeSample {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct PreviewHydrologyStats {
+    lake_inlet_count: usize,
+    lake_outlet_count: usize,
+    invalid_lake_contact_count: usize,
+    invalid_river_intersection_count: usize,
     lake_terminal_segment_count: usize,
     lake_capped_segment_count: usize,
     ocean_terminal_segment_count: usize,
@@ -332,6 +336,22 @@ impl PreviewHeader {
                 self.surface_stats.ocean_component_count
             ),
             format!("ocean_site_count={}", self.surface_stats.ocean_site_count),
+            format!(
+                "lake_inlet_count={}",
+                self.hydrology_stats.lake_inlet_count
+            ),
+            format!(
+                "lake_outlet_count={}",
+                self.hydrology_stats.lake_outlet_count
+            ),
+            format!(
+                "invalid_lake_contact_count={}",
+                self.hydrology_stats.invalid_lake_contact_count
+            ),
+            format!(
+                "invalid_river_intersection_count={}",
+                self.hydrology_stats.invalid_river_intersection_count
+            ),
             format!(
                 "lake_terminal_river_segment_count={}",
                 self.hydrology_stats.lake_terminal_segment_count
@@ -503,6 +523,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_lake_capped_raw_flow,
         hydrology_stats.max_ocean_display_flow,
         hydrology_stats.max_ocean_raw_flow
+    );
+    println!(
+        "river topology stats: lake inlets {}, lake outlets {}, invalid lake contacts {}, invalid intersections {}",
+        hydrology_stats.lake_inlet_count,
+        hydrology_stats.lake_outlet_count,
+        hydrology_stats.invalid_lake_contact_count,
+        hydrology_stats.invalid_river_intersection_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -924,6 +951,8 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
 
     for node in &graph.hydrology.nodes {
         let color = match node.kind {
+            GraphDrainageNodeKind::LakeInlet => [91, 232, 255],
+            GraphDrainageNodeKind::LakeOutlet => [32, 126, 229],
             GraphDrainageNodeKind::Lake => [82, 190, 226],
             GraphDrainageNodeKind::Sink => [128, 75, 178],
             GraphDrainageNodeKind::CoastOutlet => [47, 219, 235],
@@ -931,6 +960,8 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
         };
         let (x, y) = window.world_to_pixel_clamped(node.position);
         let radius = match node.kind {
+            GraphDrainageNodeKind::LakeInlet => 2,
+            GraphDrainageNodeKind::LakeOutlet => 3,
             GraphDrainageNodeKind::Lake => 3,
             GraphDrainageNodeKind::Sink => 3,
             GraphDrainageNodeKind::CoastOutlet => 2,
@@ -994,6 +1025,11 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
         .map(|corner| (corner.id, corner))
         .collect::<HashMap<_, _>>();
     let mut stats = PreviewHydrologyStats::default();
+    stats.lake_inlet_count = hydrology.topology_stats.lake_inlet_count;
+    stats.lake_outlet_count = hydrology.topology_stats.lake_outlet_count;
+    stats.invalid_lake_contact_count = hydrology.topology_stats.invalid_lake_contact_count;
+    stats.invalid_river_intersection_count =
+        hydrology.topology_stats.invalid_river_intersection_count;
 
     for segment in &hydrology.segments {
         if segment.raw_flow_accumulation > segment.flow_accumulation + 0.001 {
@@ -1263,6 +1299,22 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         key_y + 26 * scale,
         [128, 75, 178],
         "SINK",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x,
+        key_y + 39 * scale,
+        [91, 232, 255],
+        "INLET",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 68 * scale,
+        key_y + 39 * scale,
+        [32, 126, 229],
+        "OUT",
         scale,
     );
 }
@@ -1584,6 +1636,10 @@ mod tests {
                 ocean_site_count: 44,
             },
             hydrology_stats: PreviewHydrologyStats {
+                lake_inlet_count: 3,
+                lake_outlet_count: 1,
+                invalid_lake_contact_count: 0,
+                invalid_river_intersection_count: 0,
                 lake_terminal_segment_count: 1,
                 ocean_terminal_segment_count: 2,
                 max_lake_display_flow: 8.0,
@@ -1606,6 +1662,10 @@ mod tests {
         assert!(metadata.contains("inland_water_site_count=12"));
         assert!(metadata.contains("lake_terminal_river_segment_count=1"));
         assert!(metadata.contains("lake_capped_river_segment_count=1"));
+        assert!(metadata.contains("lake_inlet_count=3"));
+        assert!(metadata.contains("lake_outlet_count=1"));
+        assert!(metadata.contains("invalid_lake_contact_count=0"));
+        assert!(metadata.contains("invalid_river_intersection_count=0"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
