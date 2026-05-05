@@ -5,6 +5,7 @@
 - Render deterministic top-down PNG previews for the stage 8 macro field rasterization step.
 - Treat graph, macro map, hydrology, and noisy boundary output as the source of truth, then bake a
   preview tile that heightfield synthesis can sample cheaply.
+- Use the world-owned `macro_field` tile API rather than redefining preview-only terrain sampling.
 - Keep default filenames short while preserving detailed settings and stage statistics in PNG
   metadata.
 
@@ -38,11 +39,12 @@
 
 ## Channels
 
-- `macro`: signed macro elevation sampled from the resolved macro site field.
-- `mask`: ocean, lake/wetland, coast, dry basin, and land context.
+- `macro`: signed macro elevation sampled through noisy-boundary owner/blend logic.
+- `mask`: ocean, lake/wetland, coast, dry basin, and land context following noisy boundaries.
 - `ridge`: distance-envelope influence around ridge noisy boundary curves.
 - `river`: distance-envelope valley influence around selected hydrology river curves.
-- `combined`: macro elevation plus ridge raise, minus river valley, coast flatten, and water flatten.
+- `combined`: macro elevation plus ridge raise, minus visible river valley carve guide, coast
+  flatten, and water flatten.
 - `lit`: top-down white heightfield preview with simple directional lighting from combined height
   gradients. This is not a 3D render; it is shaded relief over the combined macro height field.
 
@@ -67,20 +69,16 @@
 4. Resolve macro ownership/elevation through `generate_macro_map(...)`.
 5. Solve selected hydrology through `solve_hydrology(...)`.
 6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
-7. Build preview-only spatial buckets from:
+7. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
+   - noisy-boundary owner/blend for macro elevation and masks,
    - ridge candidate noisy curves,
    - coast noisy curves,
    - selected hydrology river noisy curves.
-8. Rasterize a `MacroFieldTile` in parallel over the image sample grid.
+8. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 9. Render the requested channel or all channels with a compact legend.
 10. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
-
-The current binary owns only preview-side rasterization because the core `macro_field` module has not
-exposed a public tile API yet. The CLI contract and output semantics are intended to stay stable.
-When core terrain-field cache types land, the internal rasterization step should be replaced with the
-world-owned API while keeping the channel names and output path behavior intact.
 
 The preview must not redefine macro terrain semantics. It reads:
 
@@ -89,9 +87,10 @@ generate_voronoi_graph_patch(...)
 generate_macro_map(...)
 solve_hydrology(...)
 generate_noisy_boundaries(...)
+generate_macro_field_tile(...)
 ```
 
-and bakes those results into diagnostic 2D fields.
+and renders that world-owned tile into diagnostic 2D fields.
 
 ## Metadata
 
@@ -101,7 +100,9 @@ Each PNG contains:
   land bias
 - graph site count, macro edge count, boundary curve count, selected river feature sample count
 - ridge, river, and coast feature sample counts
-- min/max/average for macro elevation, ridge influence, river valley, and combined macro height
+- noisy boundary average/max displacement
+- min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
+  valley, and combined macro height
 - channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
 
 ## Example
@@ -115,4 +116,3 @@ All-channel smoke output:
 ```bash
 cargo run --bin macro_field_preview -- 42 0 0 --width 640 --height 360 --channel all --output target/macro-field-preview/field-smoke.png
 ```
-

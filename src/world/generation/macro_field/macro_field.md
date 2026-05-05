@@ -68,6 +68,7 @@ MacroFieldTileConfig {
     river_carve_scale,
     coast_flatten_strength,
     lake_flatten_strength,
+    boundary_blend_radius_blocks,
 }
 
 MacroFieldSample {
@@ -100,10 +101,13 @@ MacroFieldTile {
 tile 생성은 먼저 빈 sample grid를 만든 뒤, 각 world-space sample point를 병렬로 채운다.
 
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
-2. nearest macro site를 찾아 `surface_kind`와 `signed_macro_elevation`을 읽는다.
-   - launch 구현은 polygon containment 대신 deterministic nearest-site rasterization으로 시작한다.
-   - 계약상 이 단계는 noisy boundary 이후에 실행되며, 이후 구현은 noisy boundary 기반 containment/blend로 대체될 수 있다.
-3. `surface_kind`에서 ocean/coast/lake/dry basin mask를 만든다.
+2. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
+   있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
+   - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 7
+     `BoundaryCache`의 `NoisyBoundaryCurve`를 따라야 한다.
+   - macro elevation은 primary owner의 값을 기준으로 하되 boundary blend band 안에서는 반대편 site
+     elevation을 일부 섞어 계단형 단절을 줄인다.
+3. noisy-boundary owner의 `surface_kind`에서 ocean/coast/lake/dry basin mask를 만든다.
 4. coast guide edge의 canonical noisy curve distance로 coast mask를 보강한다.
 5. ridge guide edge의 canonical noisy curve distance로 `ridge_influence`를 만든다.
    - ridge 자체는 Voronoi edge 위의 산맥 maxima guide다.
@@ -111,7 +115,8 @@ tile 생성은 먼저 빈 sample grid를 만든 뒤, 각 world-space sample poin
 6. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
-7. 아래 계열로 combined macro height를 계산한다.
+7. 아래 계열로 combined macro height를 계산한다. 이 단계의 river carve는 최종 물/복셀 carve가
+   아니라 heightfield가 읽을 2D valley/carve guide이며, preview에서 보여야 한다.
 
 ```text
 combined_macro_height =
@@ -155,10 +160,11 @@ sample한다.
 `macro_field` preview는 최소한 아래 channel을 각각 2D로 출력할 수 있어야 한다.
 
 - macro elevation
-- ocean/coast/lake/dry basin mask
+- ocean/coast/lake/dry basin mask. coast/lake/ocean 경계는 noisy boundary를 따라 보여야 한다.
 - ridge influence
-- river valley strength/distance/flow hint
-- combined macro height
+- river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
+  carve guide가 보여야 한다.
+- combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 한다.
 
 중간 단계 preview는 2D gradient map이면 충분하다. 이후 heightfield stage의 최종 산출물은 white
 texture 기반 top-down heightfield render와 simple lighting으로 검증한다.
@@ -182,5 +188,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - `src/world/generation/macro_field/mod.rs`가 `MacroFieldTileConfig`, `MacroFieldSample`,
   `MacroFieldTile`, `generate_macro_field_tile`을 제공한다.
 - sample fill은 rayon parallel iterator를 사용하고, index 기반 위치 계산으로 deterministic order를 유지한다.
-- launch rasterizer는 nearest macro site와 noisy curve distance envelope를 사용한다.
-- signed distance/polygon containment, high quality boundary blend, macro field preview binary는 후속 worker 또는 다음 단계에서 확장해야 한다.
+- launch rasterizer는 nearest macro site를 기본 lookup으로 사용하되, boundary blend radius 안에서는
+  canonical noisy boundary curve의 side test로 owner/mask/elevation boundary를 고른다.
+- ridge/coast/river influence는 selected edge id가 참조하는 canonical noisy curve distance를 사용한다.
+- signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
+  visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.

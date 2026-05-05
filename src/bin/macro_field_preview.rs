@@ -11,11 +11,13 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphRiverSegment, HydrologyConfig,
-    MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint,
-    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
+    HydrologyConfig, MacroFieldSample as CoreMacroFieldSample,
+    MacroFieldTileConfig as CoreMacroFieldTileConfig, MacroMapConfig, MacroSite, MacroSurfaceKind,
+    NoisyBoundaryCurve, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
+    VoronoiSiteId, WorldPlanePoint, generate_macro_field_tile, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -245,14 +247,6 @@ impl PreviewWindow {
         self.center_z + self.world_span_z * 0.5
     }
 
-    fn sample_world_x(self, pixel_x: u32) -> f32 {
-        self.min_x() + (pixel_x as f32 + 0.5) * self.world_span_x / self.width as f32
-    }
-
-    fn sample_world_z(self, pixel_z: u32) -> f32 {
-        self.min_z() + (pixel_z as f32 + 0.5) * self.world_span_z / self.height as f32
-    }
-
     fn graph_area(self, region_size_blocks: i32) -> Result<GraphRegionArea, Box<dyn Error>> {
         let min = graph_region_for_world_block(
             self.min_x().floor() as i32,
@@ -284,6 +278,7 @@ struct FeatureGridCoord {
 struct PreviewWorld {
     patch: VoronoiGraphPatch,
     macro_map: GraphMacroMap,
+    hydrology: GraphHydrologyGraph,
     boundary: BoundaryCache,
     site_grid: HashMap<SiteGridCoord, usize>,
     site_samples: HashMap<VoronoiSiteId, MacroSite>,
@@ -369,6 +364,9 @@ struct ChannelStats {
     min: f32,
     max: f32,
     average: f32,
+    robust_min: f32,
+    robust_max: f32,
+    contrast_span: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +397,8 @@ struct PreviewHeader {
     macro_edge_count: usize,
     river_segment_count: usize,
     boundary_curve_count: usize,
+    average_boundary_displacement_blocks: f32,
+    max_boundary_displacement_blocks: f32,
     ridge_feature_samples: usize,
     river_feature_samples: usize,
     coast_feature_samples: usize,
@@ -437,6 +437,10 @@ impl PreviewHeader {
             format!("macro_edge_count={}", self.macro_edge_count),
             format!("river_segment_count={}", self.river_segment_count),
             format!("boundary_curve_count={}", self.boundary_curve_count),
+            format!(
+                "boundary_displacement_avg_max_blocks={:.4},{:.4}",
+                self.average_boundary_displacement_blocks, self.max_boundary_displacement_blocks
+            ),
             format!("ridge_feature_samples={}", self.ridge_feature_samples),
             format!("river_feature_samples={}", self.river_feature_samples),
             format!("coast_feature_samples={}", self.coast_feature_samples),
@@ -456,10 +460,22 @@ impl PreviewHeader {
                 "combined_height_min_max_avg={:.4},{:.4},{:.4}",
                 self.combined_stats.min, self.combined_stats.max, self.combined_stats.average
             ),
+            format!(
+                "macro_elevation_robust_min_max_contrast={:.4},{:.4},{:.4}",
+                self.macro_stats.robust_min,
+                self.macro_stats.robust_max,
+                self.macro_stats.contrast_span
+            ),
+            format!(
+                "combined_height_robust_min_max_contrast={:.4},{:.4},{:.4}",
+                self.combined_stats.robust_min,
+                self.combined_stats.robust_max,
+                self.combined_stats.contrast_span
+            ),
             "macro_field_meaning=graph_macro_hydrology_boundary_raster_cache_for_heightfield"
                 .to_string(),
-            "macro_elevation=nearest_macro_site_signed_elevation".to_string(),
-            "mask=ocean_lake_coast_dry_land_context".to_string(),
+            "macro_elevation=noisy_boundary_owner_blended_signed_elevation".to_string(),
+            "mask=ocean_lake_coast_dry_land_context_following_noisy_boundaries".to_string(),
             "ridge_influence=distance_to_ridge_noisy_edge_envelope".to_string(),
             "river_valley=distance_to_selected_river_noisy_edge_envelope".to_string(),
             "combined=macro_elevation_plus_ridge_minus_river_and_water_flatten".to_string(),
@@ -498,6 +514,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             macro_edge_count: preview.macro_map.edges.len(),
             river_segment_count: preview.river_segment_count,
             boundary_curve_count: preview.boundary.curves.len(),
+            average_boundary_displacement_blocks: preview
+                .boundary
+                .stats
+                .average_perpendicular_displacement_blocks,
+            max_boundary_displacement_blocks: preview
+                .boundary
+                .stats
+                .max_perpendicular_displacement_blocks,
             ridge_feature_samples: preview.ridge_grid.sample_count(),
             river_feature_samples: preview.river_grid.sample_count(),
             coast_feature_samples: preview.coast_grid.sample_count(),
@@ -549,6 +573,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         preview.river_grid.sample_count()
     );
     println!(
+        "noisy boundary displacement avg/max {:.2}/{:.2} blocks",
+        preview
+            .boundary
+            .stats
+            .average_perpendicular_displacement_blocks,
+        preview.boundary.stats.max_perpendicular_displacement_blocks
+    );
+    println!(
         "macro elevation min/avg/max {:.3}/{:.3}/{:.3}",
         tile.macro_stats.min, tile.macro_stats.average, tile.macro_stats.max
     );
@@ -563,6 +595,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "combined height min/avg/max {:.3}/{:.3}/{:.3}",
         tile.combined_stats.min, tile.combined_stats.average, tile.combined_stats.max
+    );
+    println!(
+        "preview contrast macro robust {:.3}..{:.3} span {:.3}; combined robust {:.3}..{:.3} span {:.3}",
+        tile.macro_stats.robust_min,
+        tile.macro_stats.robust_max,
+        tile.macro_stats.contrast_span,
+        tile.combined_stats.robust_min,
+        tile.combined_stats.robust_max,
+        tile.combined_stats.contrast_span
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!();
@@ -786,16 +827,19 @@ fn build_preview_world(
         insert_curve_samples(&mut river_grid, curve, river_strength(segment));
     }
 
+    let river_segment_count = hydrology.segments.len();
+
     Ok(PreviewWorld {
         patch,
         macro_map,
+        hydrology,
         boundary,
         site_grid,
         site_samples,
         ridge_grid,
         river_grid,
         coast_grid,
-        river_segment_count: hydrology.segments.len(),
+        river_segment_count,
         spacing,
     })
 }
@@ -845,24 +889,26 @@ fn rasterize_macro_field(
     window: PreviewWindow,
     preview: &PreviewWorld,
 ) -> Result<MacroFieldTile, Box<dyn Error>> {
-    let width = usize::try_from(window.width).map_err(|_| cli_error("image width overflowed"))?;
-    let height =
-        usize::try_from(window.height).map_err(|_| cli_error("image height overflowed"))?;
-    let len = width
-        .checked_mul(height)
-        .ok_or_else(|| cli_error("image dimensions overflowed"))?;
-
-    let samples = (0..len)
-        .into_par_iter()
-        .map(|index| {
-            let pixel_x = (index as u32) % window.width;
-            let pixel_z = (index as u32) / window.width;
-            let position = WorldPlanePoint::new(
-                window.sample_world_x(pixel_x),
-                window.sample_world_z(pixel_z),
-            );
-            sample_field(preview, position)
-        })
+    let sample_spacing = window.world_span_x / window.width as f32;
+    let core_config = CoreMacroFieldTileConfig::new(
+        window.min_x() + sample_spacing * 0.5,
+        window.min_z() + sample_spacing * 0.5,
+        window.width,
+        window.height,
+        sample_spacing,
+    );
+    let core_tile = generate_macro_field_tile(
+        &preview.patch,
+        &preview.macro_map,
+        &preview.hydrology,
+        &preview.boundary,
+        core_config,
+    );
+    let samples = core_tile
+        .samples
+        .iter()
+        .copied()
+        .map(FieldSample::from_core)
         .collect::<Vec<_>>();
 
     Ok(MacroFieldTile {
@@ -874,6 +920,22 @@ fn rasterize_macro_field(
     })
 }
 
+impl FieldSample {
+    fn from_core(sample: CoreMacroFieldSample) -> Self {
+        Self {
+            macro_elevation: sample.macro_elevation,
+            ocean_mask: sample.ocean_mask,
+            lake_mask: sample.lake_mask,
+            coast_mask: sample.coast_mask,
+            dry_mask: sample.dry_basin_mask,
+            ridge_influence: sample.ridge_influence,
+            river_valley: sample.river_valley_strength,
+            combined_height: sample.combined_macro_height,
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn sample_field(preview: &PreviewWorld, position: WorldPlanePoint) -> FieldSample {
     let site = nearest_site(preview, position.x, position.z);
     let macro_site = preview
@@ -972,17 +1034,33 @@ fn channel_stats(samples: &[FieldSample], read: fn(&FieldSample) -> f32) -> Chan
     let mut min = f32::MAX;
     let mut max = f32::MIN;
     let mut sum = 0.0;
+    let mut values = Vec::with_capacity(samples.len());
     for sample in samples {
         let value = read(sample);
         min = min.min(value);
         max = max.max(value);
         sum += value;
+        values.push(value);
     }
+    values.sort_by(f32::total_cmp);
+    let robust_min = percentile_sorted(&values, 0.02);
+    let robust_max = percentile_sorted(&values, 0.98);
     ChannelStats {
         min,
         max,
         average: sum / samples.len() as f32,
+        robust_min,
+        robust_max,
+        contrast_span: robust_max - robust_min,
     }
+}
+
+fn percentile_sorted(values: &[f32], t: f32) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let index = ((values.len() - 1) as f32 * t.clamp(0.0, 1.0)).round() as usize;
+    values[index]
 }
 
 fn render_channel(
@@ -1025,14 +1103,15 @@ fn color_for_channel(
     let sample = tile.samples[index];
     match channel {
         PreviewChannel::MacroElevation => {
-            gradient_macro(normalize(sample.macro_elevation, tile.macro_stats))
+            gradient_macro(normalize_contrast(sample.macro_elevation, tile.macro_stats))
         }
         PreviewChannel::Mask => color_for_mask(sample),
         PreviewChannel::RidgeInfluence => gradient_fire(sample.ridge_influence),
         PreviewChannel::RiverValley => gradient_river(sample.river_valley),
-        PreviewChannel::CombinedMacroHeight => {
-            gradient_height(normalize(sample.combined_height, tile.combined_stats))
-        }
+        PreviewChannel::CombinedMacroHeight => gradient_height(normalize_contrast(
+            sample.combined_height,
+            tile.combined_stats,
+        )),
         PreviewChannel::LitHeightfield => lit_height_color(tile, x, y, width, height),
     }
 }
@@ -1069,12 +1148,12 @@ fn lit_height_color(
     let normal = normalize3([-dx * 5.0, 1.0, -dz * 5.0]);
     let light = normalize3([-0.45, 0.78, -0.43]);
     let diffuse = dot3(normal, light).max(0.0);
-    let height_t = normalize(
+    let height_t = normalize_contrast(
         tile.samples[y * width + x].combined_height,
         tile.combined_stats,
     );
-    let ambient = 0.42 + height_t * 0.12;
-    let shade = (ambient + diffuse * 0.56).clamp(0.0, 1.0);
+    let ambient = 0.34 + height_t * 0.20;
+    let shade = (ambient + diffuse * 0.70).clamp(0.0, 1.0);
     let value = (shade * 255.0).round() as u8;
     [value, value, value]
 }
@@ -1086,6 +1165,16 @@ fn normalize(value: f32, stats: ChannelStats) -> f32 {
     } else {
         ((value - stats.min) / span).clamp(0.0, 1.0)
     }
+}
+
+fn normalize_contrast(value: f32, stats: ChannelStats) -> f32 {
+    let span = stats.robust_max - stats.robust_min;
+    let base = if span.abs() <= f32::EPSILON {
+        normalize(value, stats)
+    } else {
+        ((value - stats.robust_min) / span).clamp(0.0, 1.0)
+    };
+    ((base - 0.5) * 1.22 + 0.5).clamp(0.0, 1.0).powf(0.92)
 }
 
 fn gradient_macro(value: f32) -> [u8; 3] {
@@ -1554,21 +1643,33 @@ mod tests {
                 min: -1.0,
                 max: 1.0,
                 average: 0.0,
+                robust_min: -1.0,
+                robust_max: 1.0,
+                contrast_span: 2.0,
             },
             ridge_stats: ChannelStats {
                 min: 0.0,
                 max: 1.0,
                 average: 0.25,
+                robust_min: 0.0,
+                robust_max: 1.0,
+                contrast_span: 1.0,
             },
             river_stats: ChannelStats {
                 min: 0.0,
                 max: 1.0,
                 average: 0.25,
+                robust_min: 0.0,
+                robust_max: 1.0,
+                contrast_span: 1.0,
             },
             combined_stats: ChannelStats {
                 min: -1.0,
                 max: 1.0,
                 average: 0.0,
+                robust_min: -1.0,
+                robust_max: 1.0,
+                contrast_span: 2.0,
             },
         };
         let window = PreviewWindow {
@@ -1602,6 +1703,9 @@ mod tests {
                 min: 0.0,
                 max: 2.5,
                 average: 1.25,
+                robust_min: 0.0,
+                robust_max: 2.5,
+                contrast_span: 2.5,
             },
             ..MacroFieldTile {
                 samples: Vec::new(),

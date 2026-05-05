@@ -252,10 +252,14 @@ selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`�
 각 channel은 독립 PNG로 뽑을 수 있어야 하며, `--mode all`은 아래 항목을 모두 생성한다.
 
 - `macro-elevation`: graph signed macro elevation을 noisy boundary/ownership context로 연속화한 field
-- `mask`: coast, lake, ocean, dry basin mask와 distance band
+- `mask`: coast, lake, ocean, dry basin mask와 distance band. 경계는 straight nearest-site raster가
+  아니라 `BoundaryCache`의 canonical noisy curve를 따라 보여야 한다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
-- `river-valley`: selected hydrology segment 주변 distance, flow, carve strength
-- `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과
+- `river-valley`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
+  carve strength
+- `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과.
+  이 단계의 river carve는 최종 water/voxel carve가 아니라 heightfield가 읽을 2D valley guide이며,
+  combined/lit preview에서 보여야 한다.
 - `lit-heightfield`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
 
@@ -271,8 +275,8 @@ renderer/GPU 계약을 만들지 않는다.
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/boundary version,
-  channel name, min/max/avg, finite/NaN count, overlap guard width, source cache key, legend labels를
-  기록한다.
+  channel name, min/max/avg, robust preview contrast range, noisy boundary displacement stats,
+  finite/NaN count, overlap guard width, source cache key, legend labels를 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
   direction만 표시한다.
@@ -285,6 +289,8 @@ renderer/GPU 계약을 만들지 않는다.
 - finite/range sanity: 모든 channel은 finite 값이며 문서화된 range를 벗어나지 않는다.
 - hydrology endpoint attachment: river valley field는 selected segment의 canonical noisy curve와
   lake inlet/outlet endpoint를 따라가야 한다.
+- noisy boundary ownership: macro elevation과 mask 경계는 nearest-site straight boundary가 아니라
+  stage 7 noisy boundary curve를 따라야 한다.
 - no lake-edge river invariant: river valley field는 `MacroLakeEdgeClass::NonLake` selected segment만
   rasterize해야 한다.
 - preview nonblank: 각 channel은 blank 단색 이미지가 아니어야 하며 legend와 metadata를 포함해야 한다.

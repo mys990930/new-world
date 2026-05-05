@@ -139,12 +139,17 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 기본 channel은 macro elevation, coast/lake/ocean/dry basin mask, ridge/fault influence,
      river valley field, combined macro height다.
    - macro elevation은 graph signed elevation을 noisy boundary와 ownership context로 연속화한 값이다.
+   - macro elevation과 ownership/mask 경계는 nearest-site 직선 경계가 아니라 stage 7
+     `NoisyBoundaryCurve`의 side/blend 판정을 따라야 한다.
    - coast/lake/ocean/dry basin mask는 water surface, shoreline flatten, lake flatten, dry basin
      material policy가 읽는 distance/mask다.
    - ridge influence는 ridge edge가 산맥 local maxima guide라는 사실을 heightfield로 옮기기 위한
      distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
    - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge 주변 distance,
      flow, carve strength를 저장한다. 강을 별도 noise curve로 다시 만들지 않는다.
+   - river valley carve는 이 단계에서 2D scalar guide로 보이는 것이 정상이다. 최종 water surface와
+     voxel carve는 heightfield/water/voxel 단계에서 확정하지만, combined macro height와 lit preview는
+     이 guide가 지형을 낮추는 효과를 보여야 한다.
    - combined macro height는 아직 Perlin이 섞이지 않은 pre-micro 높이이며, macro elevation,
      ridge raise, river carve, coast/lake flatten을 합성한다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.

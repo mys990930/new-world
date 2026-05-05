@@ -6,14 +6,17 @@ use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePo
 use super::hydrology::GraphHydrologyGraph;
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 
+const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
+
 pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 640.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 192.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.42;
-pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.30;
+pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.48;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
+pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -24,6 +27,7 @@ pub struct MacroFieldTileConfig {
     pub ridge_radius_blocks: f32,
     pub river_radius_blocks: f32,
     pub coast_radius_blocks: f32,
+    pub boundary_blend_radius_blocks: f32,
     pub ridge_height_scale: f32,
     pub river_carve_scale: f32,
     pub coast_flatten_strength: f32,
@@ -46,6 +50,7 @@ impl MacroFieldTileConfig {
             ridge_radius_blocks: DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS,
             river_radius_blocks: DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS,
             coast_radius_blocks: DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS,
+            boundary_blend_radius_blocks: DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS,
             ridge_height_scale: DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE,
             river_carve_scale: DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE,
             coast_flatten_strength: DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH,
@@ -145,11 +150,11 @@ pub fn sample_macro_field_point(
     config: MacroFieldTileConfig,
     position: WorldPlanePoint,
 ) -> MacroFieldSample {
-    let nearest_site = context.nearest_site(position);
+    let owner_sample = context.owner_sample(position, config);
+    let nearest_site = owner_sample.primary;
     let surface_kind = nearest_site.map(|site| site.surface_kind);
-    let macro_elevation = nearest_site
-        .map(|site| site.signed_macro_elevation)
-        .unwrap_or_default();
+    let macro_elevation = owner_sample.macro_elevation;
+    let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
     let ocean_mask = surface_kind
         .is_some_and(MacroSurfaceKind::is_ocean_owned)
         .then_some(1.0)
@@ -163,14 +168,17 @@ pub fn sample_macro_field_point(
         .then_some(1.0)
         .unwrap_or(0.0);
     let coast_mask = context
-        .nearest_coast_distance(position)
+        .nearest_coast_distance(position, config.coast_radius_blocks)
         .map(|distance| envelope(distance, config.coast_radius_blocks))
-        .unwrap_or_else(|| nearest_site.map(|site| site.coastness).unwrap_or_default())
-        .max(nearest_site.map(|site| site.coastness).unwrap_or_default())
+        .unwrap_or(site_coastness)
+        .max(site_coastness)
+        .max(owner_sample.boundary_blend * 0.35)
         .clamp(0.0, 1.0);
     let ridge_influence = context
-        .ridge_curves
-        .iter()
+        .ridge_grid
+        .candidate_indices(position, config.ridge_radius_blocks)
+        .into_iter()
+        .filter_map(|index| context.ridge_curves.get(index))
         .map(|curve| {
             envelope(
                 polyline_distance(position, &curve.points),
@@ -212,14 +220,21 @@ pub fn sample_macro_field_point(
 #[derive(Debug)]
 pub struct MacroFieldRasterContext<'a> {
     sites: &'a [MacroSite],
+    site_by_id: HashMap<VoronoiSiteId, MacroSite>,
+    site_grid: SiteIndexGrid,
+    boundary_edges: Vec<BoundaryEdgeRef<'a>>,
+    boundary_grid: CurveIndexGrid,
     coast_curves: Vec<&'a NoisyBoundaryCurve>,
+    coast_grid: CurveIndexGrid,
     ridge_curves: Vec<&'a NoisyBoundaryCurve>,
+    ridge_grid: CurveIndexGrid,
     river_curves: Vec<RiverCurveRef<'a>>,
+    river_grid: CurveIndexGrid,
 }
 
 impl<'a> MacroFieldRasterContext<'a> {
     pub fn new(
-        patch: &'a VoronoiGraphPatch,
+        _patch: &'a VoronoiGraphPatch,
         macro_map: &'a GraphMacroMap,
         hydrology: &'a GraphHydrologyGraph,
         boundary: &'a BoundaryCache,
@@ -234,6 +249,12 @@ impl<'a> MacroFieldRasterContext<'a> {
             .iter()
             .map(|curve| (curve.edge, curve))
             .collect::<HashMap<_, _>>();
+        let site_by_id = macro_map
+            .sites
+            .iter()
+            .map(|site| (site.id, *site))
+            .collect::<HashMap<_, _>>();
+        let site_grid = SiteIndexGrid::from_sites(&macro_map.sites);
         let mut river_flow_by_edge = HashMap::<VoronoiEdgeId, f32>::new();
         for segment in &hydrology.segments {
             river_flow_by_edge
@@ -242,7 +263,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .or_insert(segment.flow_accumulation);
         }
 
-        let coast_curves = patch
+        let coast_curves = macro_map
             .edges
             .iter()
             .filter_map(|edge| {
@@ -253,7 +274,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        let ridge_curves = patch
+        let ridge_curves = macro_map
             .edges
             .iter()
             .filter_map(|edge| {
@@ -278,26 +299,100 @@ impl<'a> MacroFieldRasterContext<'a> {
             })
             .collect::<Vec<_>>();
         river_curves.sort_by_key(|river| river.edge.0);
+        let mut boundary_edges = macro_map
+            .edges
+            .iter()
+            .filter_map(|edge| {
+                let left = site_by_id.get(&edge.sites[0]).copied()?;
+                let right = site_by_id.get(&edge.sites[1]).copied()?;
+                let curve = boundary_curves.get(&edge.id).copied()?;
+                Some(BoundaryEdgeRef { curve, left, right })
+            })
+            .collect::<Vec<_>>();
+        boundary_edges.sort_by_key(|edge| edge.curve.edge.0);
+        let boundary_grid = CurveIndexGrid::from_boundary_edges(&boundary_edges);
+        let coast_grid = CurveIndexGrid::from_curves(&coast_curves);
+        let ridge_grid = CurveIndexGrid::from_curves(&ridge_curves);
+        let river_curves_only = river_curves
+            .iter()
+            .map(|river| river.curve)
+            .collect::<Vec<_>>();
+        let river_grid = CurveIndexGrid::from_curves(&river_curves_only);
 
         Self {
             sites: &macro_map.sites,
+            site_by_id,
+            site_grid,
+            boundary_edges,
+            boundary_grid,
             coast_curves,
+            coast_grid,
             ridge_curves,
+            ridge_grid,
             river_curves,
+            river_grid,
         }
     }
 
     pub fn nearest_site(&self, position: WorldPlanePoint) -> Option<&'a MacroSite> {
-        self.sites.iter().min_by(|left, right| {
-            squared_distance(position, left.position)
-                .total_cmp(&squared_distance(position, right.position))
-                .then_with(|| left.id.0.cmp(&right.id.0))
-        })
+        let candidates = self.site_grid.candidate_indices(position);
+        let iter: Box<dyn Iterator<Item = usize> + '_> = if candidates.is_empty() {
+            Box::new(0..self.sites.len())
+        } else {
+            Box::new(candidates.into_iter())
+        };
+        iter.filter_map(|index| self.sites.get(index))
+            .min_by(|left, right| {
+                squared_distance(position, left.position)
+                    .total_cmp(&squared_distance(position, right.position))
+                    .then_with(|| left.id.0.cmp(&right.id.0))
+            })
     }
 
-    fn nearest_coast_distance(&self, position: WorldPlanePoint) -> Option<f32> {
-        self.coast_curves
-            .iter()
+    fn owner_sample(&self, position: WorldPlanePoint, config: MacroFieldTileConfig) -> OwnerSample {
+        let nearest = self.nearest_site(position);
+        let Some(boundary) = self.nearest_boundary(position, config.boundary_blend_radius_blocks)
+        else {
+            return OwnerSample::from_site(nearest);
+        };
+        if boundary.distance > config.boundary_blend_radius_blocks {
+            return OwnerSample::from_site(nearest);
+        }
+
+        let primary = boundary.primary_site();
+        let secondary = boundary.secondary_site();
+        let blend = envelope(boundary.distance, config.boundary_blend_radius_blocks);
+        let mixed_elevation = primary.signed_macro_elevation * (1.0 - blend * 0.35)
+            + secondary.signed_macro_elevation * (blend * 0.35);
+
+        OwnerSample {
+            primary: self
+                .site_by_id
+                .get(&primary.id)
+                .copied()
+                .or(nearest.copied()),
+            macro_elevation: mixed_elevation,
+            boundary_blend: blend,
+        }
+    }
+
+    fn nearest_boundary(
+        &self,
+        position: WorldPlanePoint,
+        radius: f32,
+    ) -> Option<BoundarySideSample> {
+        self.boundary_grid
+            .candidate_indices(position, radius)
+            .into_iter()
+            .filter_map(|index| self.boundary_edges[index].side_sample(position))
+            .min_by(|left, right| left.distance.total_cmp(&right.distance))
+    }
+
+    fn nearest_coast_distance(&self, position: WorldPlanePoint, radius: f32) -> Option<f32> {
+        self.coast_grid
+            .candidate_indices(position, radius)
+            .into_iter()
+            .filter_map(|index| self.coast_curves.get(index))
             .map(|curve| polyline_distance(position, &curve.points))
             .min_by(f32::total_cmp)
     }
@@ -308,8 +403,10 @@ impl<'a> MacroFieldRasterContext<'a> {
         config: MacroFieldTileConfig,
     ) -> (f32, f32, f32) {
         let Some((distance, flow)) = self
-            .river_curves
-            .iter()
+            .river_grid
+            .candidate_indices(position, config.river_radius_blocks)
+            .into_iter()
+            .filter_map(|index| self.river_curves.get(index))
             .map(|river| {
                 (
                     polyline_distance(position, &river.curve.points),
@@ -334,6 +431,185 @@ struct RiverCurveRef<'a> {
     flow_accumulation: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BoundaryEdgeRef<'a> {
+    curve: &'a NoisyBoundaryCurve,
+    left: MacroSite,
+    right: MacroSite,
+}
+
+impl BoundaryEdgeRef<'_> {
+    fn side_sample(self, position: WorldPlanePoint) -> Option<BoundarySideSample> {
+        let nearest = nearest_polyline_segment(position, &self.curve.points)?;
+        let side = signed_side(position, nearest.start, nearest.end);
+        let left_side = signed_side(self.left.position, nearest.start, nearest.end);
+        let right_side = signed_side(self.right.position, nearest.start, nearest.end);
+        Some(BoundarySideSample {
+            distance: nearest.distance,
+            side,
+            left_side,
+            right_side,
+            left: self.left,
+            right: self.right,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BoundarySideSample {
+    distance: f32,
+    side: f32,
+    left_side: f32,
+    right_side: f32,
+    left: MacroSite,
+    right: MacroSite,
+}
+
+impl BoundarySideSample {
+    fn primary_site(self) -> MacroSite {
+        if self.matches_left_side() {
+            self.left
+        } else {
+            self.right
+        }
+    }
+
+    fn secondary_site(self) -> MacroSite {
+        if self.matches_left_side() {
+            self.right
+        } else {
+            self.left
+        }
+    }
+
+    fn matches_left_side(self) -> bool {
+        let left_side = usable_side(self.left_side, self.right_side);
+        let sample_side = if self.side.abs() <= f32::EPSILON {
+            left_side
+        } else {
+            self.side
+        };
+        sample_side.signum() == left_side.signum()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OwnerSample {
+    primary: Option<MacroSite>,
+    macro_elevation: f32,
+    boundary_blend: f32,
+}
+
+impl OwnerSample {
+    fn from_site(site: Option<&MacroSite>) -> Self {
+        Self {
+            primary: site.copied(),
+            macro_elevation: site
+                .map(|site| site.signed_macro_elevation)
+                .unwrap_or_default(),
+            boundary_blend: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NearestPolylineSegment {
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    distance: f32,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CurveIndexGrid {
+    buckets: HashMap<(i32, i32), Vec<usize>>,
+}
+
+impl CurveIndexGrid {
+    fn from_curves(curves: &[&NoisyBoundaryCurve]) -> Self {
+        let mut grid = Self::default();
+        for (index, curve) in curves.iter().enumerate() {
+            grid.insert_curve(index, &curve.points);
+        }
+        grid
+    }
+
+    fn from_boundary_edges(edges: &[BoundaryEdgeRef<'_>]) -> Self {
+        let mut grid = Self::default();
+        for (index, edge) in edges.iter().enumerate() {
+            grid.insert_curve(index, &edge.curve.points);
+        }
+        grid
+    }
+
+    fn insert_curve(&mut self, index: usize, points: &[WorldPlanePoint]) {
+        for point in points {
+            self.buckets
+                .entry(curve_bucket(*point))
+                .or_default()
+                .push(index);
+        }
+    }
+
+    fn candidate_indices(&self, position: WorldPlanePoint, radius: f32) -> Vec<usize> {
+        if self.buckets.is_empty() {
+            return Vec::new();
+        }
+        let center = curve_bucket(position);
+        let search = (radius.max(MACRO_FIELD_CURVE_BUCKET_BLOCKS) / MACRO_FIELD_CURVE_BUCKET_BLOCKS)
+            .ceil() as i32
+            + 1;
+        let mut indices = Vec::new();
+        for z in center.1 - search..=center.1 + search {
+            for x in center.0 - search..=center.0 + search {
+                if let Some(bucket) = self.buckets.get(&(x, z)) {
+                    indices.extend(bucket.iter().copied());
+                }
+            }
+        }
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct SiteIndexGrid {
+    buckets: HashMap<(i32, i32), Vec<usize>>,
+}
+
+impl SiteIndexGrid {
+    fn from_sites(sites: &[MacroSite]) -> Self {
+        let mut grid = Self::default();
+        for (index, site) in sites.iter().enumerate() {
+            grid.buckets
+                .entry(curve_bucket(site.position))
+                .or_default()
+                .push(index);
+        }
+        grid
+    }
+
+    fn candidate_indices(&self, position: WorldPlanePoint) -> Vec<usize> {
+        let center = curve_bucket(position);
+        for search in 1..=4 {
+            let mut indices = Vec::new();
+            for z in center.1 - search..=center.1 + search {
+                for x in center.0 - search..=center.0 + search {
+                    if let Some(bucket) = self.buckets.get(&(x, z)) {
+                        indices.extend(bucket.iter().copied());
+                    }
+                }
+            }
+            if !indices.is_empty() {
+                indices.sort_unstable();
+                indices.dedup();
+                return indices;
+            }
+        }
+        Vec::new()
+    }
+}
+
 fn validate_macro_field_config(config: MacroFieldTileConfig) {
     assert!(config.width > 0, "macro field tile width must be > 0");
     assert!(config.height > 0, "macro field tile height must be > 0");
@@ -342,6 +618,10 @@ fn validate_macro_field_config(config: MacroFieldTileConfig) {
         ("ridge_radius_blocks", config.ridge_radius_blocks),
         ("river_radius_blocks", config.river_radius_blocks),
         ("coast_radius_blocks", config.coast_radius_blocks),
+        (
+            "boundary_blend_radius_blocks",
+            config.boundary_blend_radius_blocks,
+        ),
         ("ridge_height_scale", config.ridge_height_scale),
         ("river_carve_scale", config.river_carve_scale),
         ("coast_flatten_strength", config.coast_flatten_strength),
@@ -356,6 +636,10 @@ fn validate_macro_field_config(config: MacroFieldTileConfig) {
     assert!(config.ridge_radius_blocks > 0.0, "ridge radius must be > 0");
     assert!(config.river_radius_blocks > 0.0, "river radius must be > 0");
     assert!(config.coast_radius_blocks > 0.0, "coast radius must be > 0");
+    assert!(
+        config.boundary_blend_radius_blocks > 0.0,
+        "boundary blend radius must be > 0"
+    );
 }
 
 fn combine_macro_height(
@@ -457,6 +741,23 @@ fn polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f
     }
 }
 
+fn nearest_polyline_segment(
+    position: WorldPlanePoint,
+    points: &[WorldPlanePoint],
+) -> Option<NearestPolylineSegment> {
+    match points {
+        [] | [_] => None,
+        _ => points
+            .windows(2)
+            .map(|segment| NearestPolylineSegment {
+                start: segment[0],
+                end: segment[1],
+                distance: point_segment_distance(position, segment[0], segment[1]),
+            })
+            .min_by(|left, right| left.distance.total_cmp(&right.distance)),
+    }
+}
+
 fn point_segment_distance(
     point: WorldPlanePoint,
     start: WorldPlanePoint,
@@ -477,6 +778,29 @@ fn squared_distance(a: WorldPlanePoint, b: WorldPlanePoint) -> f32 {
     let dx = a.x - b.x;
     let dz = a.z - b.z;
     dx * dx + dz * dz
+}
+
+fn curve_bucket(point: WorldPlanePoint) -> (i32, i32) {
+    (
+        (point.x / MACRO_FIELD_CURVE_BUCKET_BLOCKS).floor() as i32,
+        (point.z / MACRO_FIELD_CURVE_BUCKET_BLOCKS).floor() as i32,
+    )
+}
+
+fn signed_side(point: WorldPlanePoint, start: WorldPlanePoint, end: WorldPlanePoint) -> f32 {
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    (point.x - start.x) * dz - (point.z - start.z) * dx
+}
+
+fn usable_side(preferred: f32, fallback: f32) -> f32 {
+    if preferred.abs() > f32::EPSILON {
+        preferred
+    } else if fallback.abs() > f32::EPSILON {
+        -fallback
+    } else {
+        1.0
+    }
 }
 
 #[cfg(test)]
@@ -619,6 +943,129 @@ mod tests {
         assert!(near_sample.river_flow_hint >= far_sample.river_flow_hint);
     }
 
+    #[test]
+    fn macro_field_owner_sampling_follows_noisy_boundary_curve() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
+        use crate::world::generation::macro_map::{
+            MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
+        };
+
+        let left = test_site(
+            VoronoiSiteId(1),
+            -10.0,
+            0.0,
+            MacroSurfaceKind::Continent,
+            0.8,
+        );
+        let right = test_site(
+            VoronoiSiteId(2),
+            10.0,
+            0.0,
+            MacroSurfaceKind::OceanBasin,
+            -0.8,
+        );
+        let edge = VoronoiEdgeId(7);
+        let start = WorldPlanePoint::new(0.0, -10.0);
+        let end = WorldPlanePoint::new(0.0, 10.0);
+        let curve = NoisyBoundaryCurve {
+            edge,
+            profile: BoundaryProfile::Coast,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [left.id, right.id],
+                start,
+                end,
+            },
+            points: vec![start, WorldPlanePoint::new(5.0, 0.0), end],
+            amplitude: 5.0,
+            seed: 1,
+            guard: BoundaryGuard {
+                min_x: -20.0,
+                max_x: 20.0,
+                min_z: -20.0,
+                max_z: 20.0,
+            },
+        };
+        let macro_map = GraphMacroMap {
+            sites: vec![left, right],
+            corners: Vec::new(),
+            edges: vec![MacroEdge {
+                id: edge,
+                sites: [left.id, right.id],
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                guide: MacroEdgeGuide {
+                    is_coast: true,
+                    is_ridge_candidate: false,
+                    is_river_candidate: false,
+                    is_fault_candidate: false,
+                    coastness: 1.0,
+                    mountainness: 0.0,
+                    ridgeness: 0.0,
+                    signed_elevation_gradient: 1.6,
+                    drainage_divide_potential: 0.0,
+                    river_potential: 0.0,
+                },
+                lake_class: MacroLakeEdgeClass::NonLake,
+            }],
+        };
+        let boundary = BoundaryCache {
+            curves: vec![curve],
+            stats: Default::default(),
+        };
+        let patch = Default::default();
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let mut config = test_tile_config();
+        config.boundary_blend_radius_blocks = 24.0;
+
+        let sample = sample_macro_field_point(&context, config, WorldPlanePoint::new(4.0, 0.0));
+
+        assert_eq!(
+            sample.nearest_site,
+            Some(left.id),
+            "point is closer to the right site in straight Voronoi space, but the bowed noisy curve should classify it on the left side"
+        );
+        assert_eq!(sample.surface_kind, Some(MacroSurfaceKind::Continent));
+        assert!(sample.coast_mask > 0.5);
+    }
+
+    #[test]
+    fn combined_macro_height_is_lower_near_river_curve_than_far_terrain() {
+        let inputs = test_inputs(42);
+        let Some(segment) = inputs.hydrology.segments.first() else {
+            return;
+        };
+        let curve = inputs
+            .boundary
+            .curve_for_edge(segment.edge)
+            .expect("selected river edge should have canonical boundary curve");
+        let context = MacroFieldRasterContext::new(
+            &inputs.patch,
+            &inputs.macro_map,
+            &inputs.hydrology,
+            &inputs.boundary,
+        );
+        let config = test_tile_config();
+        let near = curve.points[curve.points.len() / 2];
+        let far = WorldPlanePoint::new(
+            near.x + config.river_radius_blocks * 2.4,
+            near.z + config.river_radius_blocks * 2.4,
+        );
+        let near_sample = sample_macro_field_point(&context, config, near);
+        let far_sample = sample_macro_field_point(&context, config, far);
+
+        assert!(
+            near_sample.combined_macro_height < far_sample.combined_macro_height,
+            "river carve should be visible in combined macro height: near={} far={}",
+            near_sample.combined_macro_height,
+            far_sample.combined_macro_height
+        );
+    }
+
     struct TestInputs {
         patch: super::super::graph::VoronoiGraphPatch,
         macro_map: GraphMacroMap,
@@ -652,5 +1099,31 @@ mod tests {
 
     fn test_tile_config() -> MacroFieldTileConfig {
         MacroFieldTileConfig::new(-512.0, -512.0, 24, 24, 64.0)
+    }
+
+    fn test_site(
+        id: super::super::graph::VoronoiSiteId,
+        x: f32,
+        z: f32,
+        surface_kind: MacroSurfaceKind,
+        signed_macro_elevation: f32,
+    ) -> MacroSite {
+        MacroSite {
+            id,
+            owner_region: super::super::graph::GraphRegionCoord { x: 0, z: 0 },
+            position: WorldPlanePoint::new(x, z),
+            surface_kind,
+            continent: None,
+            ocean_basin: None,
+            signed_macro_elevation,
+            continentality: signed_macro_elevation,
+            coastness: 0.0,
+            distance_to_coast_blocks: 0.0,
+            distance_to_continent_core_blocks: 0.0,
+            distance_to_ocean_basin_blocks: 0.0,
+            mountainness: 0.0,
+            ridgeness: 0.0,
+            basinness: 0.0,
+        }
     }
 }
