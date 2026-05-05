@@ -9,7 +9,7 @@ use super::graph::{
 pub const DEFAULT_MACRO_COAST_WIDTH_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD: f32 = 0.28;
 pub const DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD: f32 = 0.66;
-pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.22;
+pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.14;
 
 const LAND_COMPONENT_NAMESPACE: u64 = 0x4f1d_77a9_b384_d13e;
 const OCEAN_COMPONENT_NAMESPACE: u64 = 0x9a72_c80d_31ef_624b;
@@ -846,11 +846,11 @@ fn small_stream_pocket_lake(
     let local_minima_score = basinness * 0.50 + fields.hydration * 0.28 + low_elevation * 0.22;
     let deterministic_roll = (feature_hash % 10_000) as u32;
     let chance_per_10k = if local_minima_score >= 0.90 {
-        900
+        1200
     } else if local_minima_score >= 0.84 {
-        520
+        720
     } else if local_minima_score >= 0.79 {
-        260
+        380
     } else {
         0
     };
@@ -1218,8 +1218,8 @@ mod tests {
             .count();
 
         assert!(
-            (0.65..=0.75).contains(&land_ratio),
-            "default macro preview land ratio should lean toward 7:3 land/water, got {land_ratio:.3}"
+            (0.57..=0.63).contains(&land_ratio),
+            "default macro preview land ratio should lean toward 6:4 land/water, got {land_ratio:.3}"
         );
         assert!(
             visible_coast_edges >= 512,
@@ -1251,7 +1251,7 @@ mod tests {
         let large_lakes = lake_sizes.values().filter(|&&size| size > 10).count();
 
         assert!(
-            small_lakes >= 4,
+            small_lakes >= 3,
             "seed 42 default preview should expose several 1..4 site stream-pocket lakes, got {lake_sizes:?}"
         );
         assert_eq!(

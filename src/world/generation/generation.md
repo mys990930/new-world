@@ -85,7 +85,7 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      분류된 장거리 water component와 연결되지 않은 물은 바다에 가까워도 lake/wetland/dry basin 후보로 유지한다.
    - 고립 저지대가 모두 호수가 되어서는 안 된다. 작은 호수는 일반적으로 10 site/cell 이내를 목표로
      하고, 30 site/cell 안팎의 큰 호수는 드문 deep/wet basin 조건에서만 허용하는 soft cap 정책을 따른다.
-   - launch 기본 `land_bias`는 기본 preview에서 대략 land:water = 7:3을 목표로 한다. 이 조정은
+   - launch 기본 `land_bias`는 기본 preview에서 대략 land:water = 6:4를 목표로 한다. 이 조정은
      graph base `continentality`의 coherent coastline을 그대로 threshold 이동으로 해석하는 것이며,
      단순 직선 coastline을 새로 만들면 안 된다.
    - 1~4 site/cell 규모의 작은 stream-pocket lake는 land-owned 저지대에서 낮은 확률로 생성될 수

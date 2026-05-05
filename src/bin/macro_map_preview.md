@@ -99,7 +99,7 @@
 3. Build a padded Delaunay/circumcenter Voronoi dual graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
-   - The launch default land bias targets roughly 7:3 land/water in the default macro preview
+   - The launch default land bias targets roughly 6:4 land/water in the default macro preview
      window while preserving complex coastlines from graph continentality rather than adding a
      separate continent noise source.
 5. Solve selected hydrology through `solve_hydrology(&patch, &macro_map, HydrologyConfig::default())`.
