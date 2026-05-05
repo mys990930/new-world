@@ -66,7 +66,7 @@
 
 - graph region, site, corner, edge id와 patch
 - graph base `continentality/elevation_seed`와 macro ownership/elevation resolve annotation
-- graph region cache, macro map cache, hydrology/boundary/heightfield cache key와 cached stage output
+- graph region cache, macro map cache, hydrology/boundary/macro field/heightfield cache key와 cached stage output
 - continuous blended field sample
 - hydrology watershed, drainage node, river segment
 - generation stage, generation config, column synthesis request/result
@@ -156,7 +156,8 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry
 - `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
-- `generation/heightfield/heightfield.md`: Voronoi macro map과 Perlin micro relief 합성
+- `generation/macro_field/macro_field.md`: graph-derived signed distance / influence field tile cache
+- `generation/heightfield/heightfield.md`: macro field와 Perlin micro relief 합성
 - `generation/surface_plan/surface_plan.md`: biome/material/water/coast surface policy resolve
 - `generation/vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `generation/voxel/voxel.md`: column plan에서 `ChunkData`로 이어지는 voxel fill 계약
@@ -180,5 +181,5 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   macro_map은 독자 continent/island noise source를 만들지 않는다.
 - 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
   flow accumulation, selected river segment scaffold를 제공한다.
-- 아직 구현되지 않은 것: Voronoi-derived map, Perlin micro relief 합성.
+- 아직 구현되지 않은 것: macro field tile rasterization, Perlin micro relief 합성, lit topdown heightfield preview.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.

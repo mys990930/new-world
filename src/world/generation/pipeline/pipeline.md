@@ -6,7 +6,7 @@
 
 이 모듈은 새 파이프라인이 legacy generator를 대체하기 전까지 compile-time stage contract를
 제공한다. 실제 stage 구현은 `graph`, `macro_map`, `hydrology`, `boundary`, `field`,
-`meso_feature`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
+`macro_field`, `meso_feature`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
 
 ---
 
@@ -40,7 +40,7 @@
 5. coast edge guide selection
 6. hydrology solve
 7. noisy boundary realization
-8. graph-derived macro map
+8. macro field rasterization
 9. meso feature planning
 10. Perlin micro relief
 11. heightfield and water surface
@@ -61,7 +61,9 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - hydrology는 potential river guide가 아니라 selected river chain, flow accumulation, lake/sink/outlet resolution을 만든다.
 - noisy boundary는 모든 Voronoi edge의 canonical geometry layer이며 raw graph topology를 대체하지 않는다.
   river는 별도 noisy curve를 만들지 않고 selected edge id path가 이 canonical geometry를 따른다.
-- Voronoi-derived macro map은 graph guide와 boundary 정보를 heightfield가 읽을 수 있는 field로 바꾸는 중간 layer다.
+- macro field rasterization은 graph/macro/hydrology/boundary 결과를 heightfield와 chunk sampling이
+  빠르게 읽을 수 있는 graph-derived signed distance / influence field cache로 굽는 중간 layer다.
+  이 단계는 새 noise source가 아니며, source of truth는 앞 단계의 vector/graph annotation에 남아 있다.
 - meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.
 - Perlin micro relief는 마지막 표면 디테일이며 macro ownership을 뒤집지 않는다.
 - material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다.
@@ -79,7 +81,9 @@ path는 이미 계산된 world-owned generation cache를 읽어 column/voxel 결
 ```text
 graph region cache
 -> macro map cache
--> hydrology / boundary / heightfield cache
+-> hydrology / boundary cache
+-> macro field tile cache
+-> micro relief / heightfield cache
 -> chunk generation samples column/window data
 -> voxel fill writes ChunkData
 ```
@@ -105,10 +109,25 @@ miss에서만 worker thread가 수행한다.
 - `MacroMapCache`: continent/ocean/island ownership, signed macro elevation, ridge/fault/coast guide
 - `HydrologyCache`: selected river chain, watershed, lake/sink/outlet resolution
 - `BoundaryCache`: 모든 graph edge id에 대한 canonical noisy polyline/spline
+- `MacroFieldTileCache`: macro elevation, coast/lake/ocean/dry basin mask, ridge/fault influence,
+  river valley field, combined macro height 같은 graph-derived raster field
 - `HeightfieldCache`: chunk column sampling이 읽을 height/water/constraint field
 
 초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
 계약은 “chunk fill이 graph/macro/hydrology를 생성하지 않고 읽는다”는 방향을 유지해야 한다.
+
+`MacroFieldTileCache`는 chunk fill hot path의 graph query 반복을 막기 위한 cache canvas다. chunk
+column sampler는 nearest graph edge, noisy curve distance, lake containment, ridge envelope,
+river distance를 직접 반복 계산하지 않고, macro field tile의 sample 값을 읽는다. tile cache miss는
+worker에서 graph/macro/hydrology/boundary cache를 입력으로 rasterize한다.
+
+macro field tile의 기본 channel은 아래를 포함해야 한다.
+
+- macro elevation: signed macro elevation을 noisy boundary 기준으로 연속 샘플링한 큰 지형 높이
+- coast/lake/ocean/dry basin mask: water ownership과 shoreline/lake flatten이 읽는 mask/distance
+- ridge/fault influence: ridge/fault guide edge의 canonical noisy curve 주변 envelope
+- river valley: selected hydrology segment의 noisy curve 주변 distance, flow, carve strength
+- combined macro height: macro elevation, ridge raise, river carve, coast/lake flatten을 합성한 pre-Perlin height
 
 ### Job Boundary
 
@@ -122,6 +141,7 @@ region cache의 내부 의미를 직접 결정하지 않는다.
 실시간 chunk generation 기준에서 목표는 아래와 같다.
 
 - chunk fill hot path: Delaunay triangulation 0회
+- chunk fill hot path: nearest graph edge/curve search 0회 또는 bounded cached lookup
 - graph region cache miss: worker에서 Delaunay triangulation 1회
 - 같은 graph/macro region을 참조하는 chunk들은 cached stage output 공유
 - preview처럼 큰 world window를 한 번에 triangulate하는 경로는 diagnostic binary에 한정
@@ -141,6 +161,8 @@ region cache의 내부 의미를 직접 결정하지 않는다.
 5. 모든 stage는 독립 topdown preview 대상이어야 한다.
 6. chunk fill hot path는 graph triangulation이나 macro ownership resolve를 반복 수행하지 않고,
    world-owned generation cache를 읽어야 한다.
+7. macro field tile은 noise source가 아니라 graph-derived cache이며, Perlin micro relief는 이 cache
+   이후에만 합성된다.
 
 ---
 

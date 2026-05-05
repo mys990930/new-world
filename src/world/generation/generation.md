@@ -43,7 +43,7 @@ noisy boundary, heightfield synthesis를 통해 현실화한다.
 - graph region, site, corner, edge 기반의 deterministic 생성 계약
 - graph base field 기반 대륙/바다/섬 ownership, macro elevation, 산맥/능선/단층/해안 guide의 생성 순서 정의
 - edge 기반 hydrology, watershed, selected river chain의 생성 순서 정의
-- graph region cache, macro map cache, hydrology/heightfield cache가 chunk fill hot path보다 먼저
+- graph region cache, macro map cache, hydrology/boundary/macro field/heightfield cache가 chunk fill hot path보다 먼저
   생성되고 공유되는 런타임 계약 정의
 - noisy boundary, meso feature, continuous field, heightfield synthesis, surface plan, voxel fill 단계 경계 정의
 - 각 단계 이후 topdown preview binary가 접근할 수 있는 stage surface 정의
@@ -132,7 +132,21 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - coast/ridge/fault/lake/ordinary boundary 차이는 curve 존재 여부가 아니라 profile/amplitude/constraint parameter에 반영한다.
    - river는 별도 noisy curve를 만들지 않는다. hydrology selected segment는 edge id path이며, preview, heightfield, water corridor는 해당 edge id의 canonical noisy geometry를 따라간다.
    - lake boundary/internal/lake-adjacent edge에도 noisy curve는 존재하지만, selected river segment가 해당 edge를 타는 것은 계속 금지된다.
-8. graph guide, hydrology, noisy boundary를 합쳐 Voronoi-derived macro field/noise map을 만든다.
+8. graph guide, hydrology, noisy boundary를 합쳐 macro field tile을 rasterize한다.
+   - 이 단계는 noise map 생성이 아니라 graph-derived signed distance / influence field cache 생성이다.
+   - source of truth는 graph/macro/hydrology/boundary vector data에 남고, macro field는 heightfield와
+     chunk sampler가 빠르게 읽기 위한 tile cache다.
+   - 기본 channel은 macro elevation, coast/lake/ocean/dry basin mask, ridge/fault influence,
+     river valley field, combined macro height다.
+   - macro elevation은 graph signed elevation을 noisy boundary와 ownership context로 연속화한 값이다.
+   - coast/lake/ocean/dry basin mask는 water surface, shoreline flatten, lake flatten, dry basin
+     material policy가 읽는 distance/mask다.
+   - ridge influence는 ridge edge가 산맥 local maxima guide라는 사실을 heightfield로 옮기기 위한
+     distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
+   - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge 주변 distance,
+     flow, carve strength를 저장한다. 강을 별도 noise curve로 다시 만들지 않는다.
+   - combined macro height는 아직 Perlin이 섞이지 않은 pre-micro 높이이며, macro elevation,
+     ridge raise, river carve, coast/lake flatten을 합성한다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
 10. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
 11. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
@@ -181,16 +195,22 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   site center가 만드는 guard 안에서 midpoint displacement polyline을 생성한다. raw graph topology는
   그대로 남고, selected river는 별도 river curve가 아니라 hydrology segment의 edge id가 가리키는
   canonical curve를 따라 preview/heightfield에서 해석된다.
+- stage 8 macro field: graph/macro/hydrology/boundary cache를 읽어 tile 단위 raster field를 만든다.
+  이 field는 새 noise source가 아니라 heightfield와 chunk fill이 읽을 cache다. macro elevation,
+  coast/lake/ocean/dry basin mask, ridge/fault influence, river valley, combined macro height는 각각
+  독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다.
 
 런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
-contract에 따라 graph region cache, macro map cache, hydrology/boundary/heightfield cache를 worker에서
-준비하고, chunk generation은 필요한 world-space column/window만 sample해 `ChunkData`를 채운다.
+contract에 따라 graph region cache, macro map cache, hydrology/boundary cache, macro field tile cache,
+micro relief/heightfield cache를 worker에서 준비하고, chunk generation은 필요한 world-space
+column/window만 sample해 `ChunkData`를 채운다.
 
 문서화된 다음 leaf:
 
 - `boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry 계약
 - `meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
-- `heightfield/heightfield.md`: Voronoi-derived macro map과 Perlin micro relief 합성
+- `macro_field/macro_field.md`: graph-derived signed distance / influence field tile cache
+- `heightfield/heightfield.md`: macro field와 Perlin micro relief 합성
 - `surface_plan/surface_plan.md`: biome, material, water/coast/wetland policy resolve
 - `vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `voxel/voxel.md`: column plan을 `ChunkData`로 채우는 graph-first voxel fill
@@ -246,6 +266,18 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 - local minima는 lake, sink, outlet carve 중 하나로 명시된다.
 - river width는 flow와 안정적으로 연결된다.
 
+### Macro Field / Heightfield
+
+- macro field는 noise가 아니라 graph-derived signed distance / influence field cache다.
+- macro field tile overlap은 인접 tile에서 같은 world-space sample에 대해 같은 값을 내야 한다.
+- macro elevation, coast/lake/ocean/dry basin mask, ridge influence, river valley, combined macro
+  height는 각각 finite 값과 문서화된 range를 유지해야 한다.
+- selected hydrology endpoint, lake inlet/outlet, no lake-edge river invariant는 macro field
+  rasterization 이후에도 유지되어야 한다.
+- Perlin micro relief는 macro ownership, lake surface, river continuity를 뒤집으면 안 된다.
+- 최종 heightfield preview는 흰색 texture에 단순 lighting을 적용한 top-down rendering으로 비어 있지
+  않아야 하며, PNG metadata와 legend가 stage/channel을 명확히 기록해야 한다.
+
 ### Field Continuity
 
 - 인접 site의 temperature/hydration/elevation bias는 비현실적으로 튀지 않는다.
@@ -292,3 +324,5 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 10. legacy generation re-export는 migration bridge이며, 새 graph-first 책임을 legacy 쪽으로 늘리지 않는다.
 11. Delaunay/Voronoi graph construction과 macro ownership resolve는 chunk fill hot path에서 반복하지 않고,
     world-owned generation cache miss에서만 실행해야 한다.
+12. macro field rasterization은 Perlin micro relief보다 먼저이며, chunk fill hot path는 graph query가
+    아니라 macro field/heightfield cache 샘플링을 수행해야 한다.

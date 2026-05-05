@@ -42,7 +42,7 @@
 9. watershed map
 10. river flow accumulation map
 11. noisy edge preview
-12. Voronoi-derived macro noise/gradient map preview
+12. macro field rasterization preview
 13. meso feature plan preview
 14. Perlin micro relief preview
 15. heightfield and water surface preview
@@ -225,6 +225,72 @@
 
 ---
 
+## `macro_field_preview` CLI 계약
+
+`macro_field_preview`는 stage 8 macro field rasterization을 chunk 생성 없이 검사하는 topdown preview
+binary다.
+
+macro field는 noise source가 아니다. 이 preview는 graph/macro/hydrology/boundary cache를
+world-space sample grid로 굽는 과정을 검사한다. source of truth는 graph topology, macro annotation,
+selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`은 heightfield와 chunk fill이
+빠르게 읽기 위한 graph-derived signed distance / influence field cache다.
+
+### 입력
+
+- 필수 positional 인자: `<seed> <center-x> <center-z>`
+  - `center-x`, `center-z`는 world-block 좌표다.
+- 선택 인자:
+  - `--width <u32>`: 기본 `3840`
+  - `--height <u32>`: 기본 `2160`
+  - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
+  - `--stage macro_field`
+  - `--mode <all|macro-elevation|mask|ridge|river-valley|combined|lit-heightfield>`: 기본 `combined`
+  - `--output <path>`
+
+### Preview Checklist
+
+각 channel은 독립 PNG로 뽑을 수 있어야 하며, `--mode all`은 아래 항목을 모두 생성한다.
+
+- `macro-elevation`: graph signed macro elevation을 noisy boundary/ownership context로 연속화한 field
+- `mask`: coast, lake, ocean, dry basin mask와 distance band
+- `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
+- `river-valley`: selected hydrology segment 주변 distance, flow, carve strength
+- `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과
+- `lit-heightfield`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
+  보여주는 top-down rendering
+
+중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
+간단한 normal/light shading을 입힌 top-down heightfield rendering이어야 한다. lighting은 진단용이며
+renderer/GPU 계약을 만들지 않는다.
+
+### 출력
+
+- 기본 출력은 `target/macro-field-preview/` 아래 PNG다.
+- 기본 파일명은 `s<seed>_x<center-x>_z<center-z>_<mode>.png`처럼 짧게 유지한다.
+- width, height, generator version, stage, world span, tile resolution은 파일명에 넣지 않고 PNG
+  metadata에만 기록한다.
+- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
+- metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/boundary version,
+  channel name, min/max/avg, finite/NaN count, overlap guard width, source cache key, legend labels를
+  기록한다.
+- 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
+  mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
+  direction만 표시한다.
+- 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
+
+### 검증 기준
+
+- determinism: 같은 seed/config/tile/channel은 같은 PNG와 metadata를 만든다.
+- adjacent tile overlap stability: 인접 tile overlap의 같은 world-space sample은 같은 값을 가진다.
+- finite/range sanity: 모든 channel은 finite 값이며 문서화된 range를 벗어나지 않는다.
+- hydrology endpoint attachment: river valley field는 selected segment의 canonical noisy curve와
+  lake inlet/outlet endpoint를 따라가야 한다.
+- no lake-edge river invariant: river valley field는 `MacroLakeEdgeClass::NonLake` selected segment만
+  rasterize해야 한다.
+- preview nonblank: 각 channel은 blank 단색 이미지가 아니어야 하며 legend와 metadata를 포함해야 한다.
+
+---
+
 ## Determinism
 
 - 같은 seed, generator version, area, stage input은 같은 preview를 만든다.
@@ -241,6 +307,8 @@
 - noisy boundary가 guard 영역 밖으로 나가면 회귀다.
 - hydrology flow가 outlet 없이 끊기면 회귀다.
 - biome/material transition이 hard owner 선을 그대로 따라가면 회귀다.
+- macro field channel이 graph-derived source와 무관한 새 noise처럼 보이면 회귀다.
+- lit heightfield preview가 단색 평면이거나 lighting 방향을 읽을 수 없으면 회귀다.
 
 ---
 
@@ -250,3 +318,6 @@
 2. preview output은 deterministic이어야 한다.
 3. preview는 문서와 테스트의 보조물이 아니라 generation artifact를 발견하는 1차 검증 표면이다.
 4. 이상한 작은 흔적이 보이면 무시하지 않고 source-of-truth 문서와 테스트로 환류한다.
+5. 매 generation stage는 전용 preview binary 또는 기존 binary의 명시적 stage/mode로 검사 가능해야 한다.
+6. macro field 이후 final heightfield 검증은 흰색 texture와 단순 lighting이 있는 top-down rendering을
+   포함해야 한다.
