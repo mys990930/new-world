@@ -49,7 +49,8 @@
   - every Voronoi edge has one canonical noisy curve from stage 7 boundary realization. This
     boundary overlay is not a straight edge resample: endpoints stay anchored while interior points
     receive deterministic edge-normal displacement large enough to be visible in the default 4K
-    preview.
+    preview. The displacement is correlated and smoothed rather than independent per-sample jitter,
+    so coast/material/river paths read as natural curves instead of jagged polylines.
   - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
     overlays following each segment edge id's canonical noisy curve.
   - selected river chains are drawn only for macro edges whose lake edge class is `NonLake`; lake
@@ -116,7 +117,9 @@
    patch's `VoronoiCorner.position` values, clipping the world-space segment to the preview window,
    and projecting it onto pixel centers.
 9. Draw the stage 7 noisy boundary overlay for every edge from `BoundaryCache`. The overlay follows
-   the canonical noisy polyline and reports displacement stats in stdout/metadata.
+   the canonical noisy polyline and reports displacement stats in stdout/metadata. The curve points
+   are already smoothed/coherent in world space; preview drawing must not replace them with straight
+   corner-to-corner segments.
 10. Draw candidate edge overlays by resolving `MacroEdge.corners` against the graph patch's
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.

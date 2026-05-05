@@ -6,12 +6,12 @@ use super::graph::{
 };
 use super::macro_map::{GraphMacroMap, MacroEdge, MacroLakeEdgeClass, MacroSite};
 
-pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 5;
-pub const DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS: f32 = 1.5;
-pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 24.0;
-pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 128.0;
-pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.32;
-pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.42;
+pub const DEFAULT_BOUNDARY_SUBDIVISION_LEVELS: u8 = 6;
+pub const DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS: f32 = 4.0;
+pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 36.0;
+pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 192.0;
+pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.38;
+pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.48;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
 const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
@@ -50,12 +50,12 @@ impl BoundaryConfig {
             max_visible_amplitude_blocks: DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS,
             max_edge_fraction: DEFAULT_BOUNDARY_MAX_EDGE_FRACTION,
             max_site_span_fraction: DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION,
-            ordinary_amplitude: 0.14,
-            coast_amplitude: 0.34,
-            ridge_amplitude: 0.24,
-            fault_amplitude: 0.18,
-            lake_amplitude: 0.26,
-            land_seam_amplitude: 0.18,
+            ordinary_amplitude: 0.20,
+            coast_amplitude: 0.44,
+            ridge_amplitude: 0.34,
+            fault_amplitude: 0.24,
+            lake_amplitude: 0.36,
+            land_seam_amplitude: 0.24,
         }
     }
 }
@@ -346,6 +346,7 @@ fn noisy_midpoint_curve(
     let length = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
     let normal = WorldPlanePoint::new(-dz / length, dx / length);
     let lateral_limit = amplitude_blocks.max(0.0);
+    let displacements = natural_displacement_series(seed, lateral_limit, segment_count);
 
     for index in 0..=segment_count {
         let t = index as f32 / segment_count as f32;
@@ -353,47 +354,96 @@ fn noisy_midpoint_curve(
         let point = if index == 0 || index == segment_count || lateral_limit <= f32::EPSILON {
             base
         } else {
-            let hash_a = splitmix64(seed ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-            let hash_b =
-                splitmix64(seed ^ ((index as u64 + 17).wrapping_mul(0xbf58_476d_1ce4_e5b9)));
-            let envelope = (t * std::f32::consts::PI).sin().max(0.0);
-            let low_wave_phase = unit_f32(seed) * std::f32::consts::TAU;
-            let mid_wave_phase =
-                unit_f32(splitmix64(seed ^ 0x8412_91c3_5a77_9021)) * std::f32::consts::TAU;
-            let low_wave = (t * std::f32::consts::TAU * 1.5 + low_wave_phase).sin() * 0.46;
-            let mid_wave = (t * std::f32::consts::TAU * 4.0 + mid_wave_phase).sin() * 0.28;
-            let jitter = (unit_f32(hash_a) * 2.0 - 1.0) * 0.34;
-            let mut signed_noise = (low_wave + mid_wave + jitter).clamp(-1.0, 1.0);
-            if signed_noise.abs() < 0.42 {
-                let sign = if signed_noise.is_sign_negative() {
-                    -1.0
-                } else {
-                    1.0
-                };
-                signed_noise = sign * 0.42;
-            }
-            let offset = signed_noise * lateral_limit * envelope;
-            let along = (unit_f32(hash_b) * 2.0 - 1.0) * lateral_limit * 0.12 * envelope;
-            let first = WorldPlanePoint::new(
-                base.x + normal.x * offset + dx / length * along,
-                base.z + normal.z * offset + dz / length * along,
-            );
+            let offset = displacements[index];
+            let first =
+                WorldPlanePoint::new(base.x + normal.x * offset, base.z + normal.z * offset);
             let first_clamped = guard.clamp(first);
             let first_distance = perpendicular_distance_to_line(first_clamped, start, end);
-            let minimum_useful_distance = (lateral_limit * envelope * 0.25).min(1.0);
+            let minimum_useful_distance = (offset.abs() * 0.25).min(1.0);
             if first_distance >= minimum_useful_distance {
                 first_clamped
             } else {
-                WorldPlanePoint::new(
-                    base.x - normal.x * offset + dx / length * along,
-                    base.z - normal.z * offset + dz / length * along,
-                )
+                WorldPlanePoint::new(base.x - normal.x * offset, base.z - normal.z * offset)
             }
         };
         points.push(guard.clamp(point));
     }
 
     points
+}
+
+fn natural_displacement_series(seed: u64, lateral_limit: f32, segment_count: usize) -> Vec<f32> {
+    let mut values = (0..=segment_count)
+        .map(|index| {
+            let t = index as f32 / segment_count as f32;
+            if index == 0 || index == segment_count || lateral_limit <= f32::EPSILON {
+                return 0.0;
+            }
+
+            let envelope = endpoint_falloff(t);
+            let low_phase = unit_f32(seed) * std::f32::consts::TAU;
+            let mid_phase =
+                unit_f32(splitmix64(seed ^ 0x8412_91c3_5a77_9021)) * std::f32::consts::TAU;
+            let high_phase =
+                unit_f32(splitmix64(seed ^ 0x2f2d_091d_a871_1943)) * std::f32::consts::TAU;
+            let low_wave = (t * std::f32::consts::TAU * 1.15 + low_phase).sin() * 0.52;
+            let mid_wave = (t * std::f32::consts::TAU * 2.65 + mid_phase).sin() * 0.31;
+            let high_wave = (t * std::f32::consts::TAU * 5.20 + high_phase).sin() * 0.10;
+            let coarse = smooth_value_noise(seed ^ 0xc01d_cafe_7a11_0001, t, 5) * 0.30;
+            let fine = smooth_value_noise(seed ^ 0xf1b0_5eed_91ce_0002, t, 9) * 0.16;
+            let signed = (low_wave + mid_wave + high_wave + coarse + fine).clamp(-1.0, 1.0);
+
+            signed * lateral_limit * envelope
+        })
+        .collect::<Vec<_>>();
+
+    for _ in 0..2 {
+        values = smooth_displacements(&values);
+    }
+
+    values
+}
+
+fn endpoint_falloff(t: f32) -> f32 {
+    let sine = (t * std::f32::consts::PI).sin().max(0.0);
+    smoothstep(sine).powf(0.72)
+}
+
+fn smooth_value_noise(seed: u64, t: f32, knot_count: usize) -> f32 {
+    debug_assert!(knot_count >= 2);
+    let scaled = t.clamp(0.0, 1.0) * (knot_count - 1) as f32;
+    let left = scaled.floor() as usize;
+    let right = (left + 1).min(knot_count - 1);
+    let local_t = smoothstep(scaled - left as f32);
+    let a = signed_knot(seed, left);
+    let b = signed_knot(seed, right);
+    a + (b - a) * local_t
+}
+
+fn signed_knot(seed: u64, index: usize) -> f32 {
+    unit_f32(splitmix64(
+        seed ^ (index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15),
+    )) * 2.0
+        - 1.0
+}
+
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn smooth_displacements(values: &[f32]) -> Vec<f32> {
+    if values.len() <= 2 {
+        return values.to_vec();
+    }
+
+    let mut smoothed = Vec::with_capacity(values.len());
+    smoothed.push(0.0);
+    for index in 1..values.len() - 1 {
+        smoothed.push(values[index - 1] * 0.25 + values[index] * 0.50 + values[index + 1] * 0.25);
+    }
+    smoothed.push(0.0);
+    smoothed
 }
 
 fn visible_amplitude_blocks(
@@ -648,6 +698,31 @@ mod tests {
     }
 
     #[test]
+    fn noisy_curves_use_smooth_correlated_displacement() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+        let mut checked = 0;
+
+        for curve in boundary
+            .curves
+            .iter()
+            .filter(|curve| curve_chord_length(curve) >= 32.0 && curve.amplitude >= 8.0)
+        {
+            let roughness = average_normal_second_difference(curve);
+            assert!(
+                roughness <= curve.amplitude * 0.22,
+                "curve {:?} should avoid sawtooth jitter: roughness {:.2}, amplitude {:.2}",
+                curve.edge,
+                roughness,
+                curve.amplitude
+            );
+            checked += 1;
+        }
+
+        assert!(checked > 0);
+    }
+
+    #[test]
     fn selected_hydrology_does_not_create_extra_boundary_curves() {
         let (patch, macro_map) = test_inputs(42, 0, 0);
         let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
@@ -733,5 +808,30 @@ mod tests {
             .filter(|curve| edges.contains(&curve.edge))
             .map(|curve| (curve.edge, curve.points.clone()))
             .collect()
+    }
+
+    fn average_normal_second_difference(curve: &NoisyBoundaryCurve) -> f32 {
+        if curve.points.len() < 5 {
+            return 0.0;
+        }
+        let dx = curve.anchors.end.x - curve.anchors.start.x;
+        let dz = curve.anchors.end.z - curve.anchors.start.z;
+        let length = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
+        let normal = WorldPlanePoint::new(-dz / length, dx / length);
+        let offsets = curve
+            .points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let t = index as f32 / (curve.points.len() - 1) as f32;
+                let base = lerp_point(curve.anchors.start, curve.anchors.end, t);
+                (point.x - base.x) * normal.x + (point.z - base.z) * normal.z
+            })
+            .collect::<Vec<_>>();
+        let sum = offsets
+            .windows(3)
+            .map(|window| (window[2] - 2.0 * window[1] + window[0]).abs())
+            .sum::<f32>();
+        sum / (offsets.len() - 2) as f32
     }
 }

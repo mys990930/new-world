@@ -125,6 +125,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - `NoisyBoundaryCurve`는 graph edge 전체에 대해 생성되는 `edge id -> noisy polyline/spline` layer다.
    - noisy boundary는 straight edge 위에 sample만 늘리는 것이 아니라 endpoint anchor 사이의 interior
      point를 edge normal 방향으로 흔들어 울퉁불퉁한 visible boundary를 만든다.
+   - interior displacement는 sample별 독립 jitter가 아니라 low/mid frequency coherent wave,
+     deterministic value-noise knot, smoothing, endpoint falloff를 통해 자연스러운 curve로 만들어야 한다.
    - 기본 amplitude는 4K topdown preview에서 식별 가능해야 하며, 너무 짧은 edge를 제외한 curve가
      거의 직선으로 남으면 회귀다.
    - coast/ridge/fault/lake/ordinary boundary 차이는 curve 존재 여부가 아니라 profile/amplitude/constraint parameter에 반영한다.
