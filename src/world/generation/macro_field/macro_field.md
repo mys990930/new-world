@@ -197,6 +197,18 @@ height range를 기록한다. macro field stage에는 아직 micro Perlin이 없
 grain은 ridge/coast/river/boundary blend 또는 lighting contrast에서 온 것이다. ordinary cell
 interior가 micro detail처럼 보이면 ridge tail/lighting/contrast를 먼저 의심해야 한다.
 
+`macro`, `combined`, `lit` preview는 tile이나 image마다 local min/max를 잡아 색을 다시 늘리지
+않는다. height context가 이어져 보이도록 launch 기준 absolute normalized scale을 사용한다.
+
+```text
+macro elevation preview: -1.00 .. 1.00
+combined macro height preview: -0.75 .. 1.25
+```
+
+per-image min/max와 robust percentile은 metadata/stdout 진단값일 뿐 color scale의 source가 아니다.
+모든 channel은 macro-field cache tile boundary grid를 얇게 덮어 cache 단위를 보여주되, 이 grid가
+height normalization 단위처럼 보이면 회귀다.
+
 중간 단계 preview는 2D gradient map이면 충분하다. 이후 heightfield stage의 최종 산출물은 white
 texture 기반 top-down heightfield render와 simple lighting으로 검증한다.
 
@@ -214,6 +226,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
+9. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
+   normalized scale을 사용해야 한다.
 
 ---
 

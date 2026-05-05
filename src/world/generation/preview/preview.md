@@ -282,18 +282,23 @@ renderer/GPU 계약을 만들지 않는다.
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/boundary version,
-  channel name, min/max/avg, robust preview contrast range, noisy boundary displacement stats,
-  finite/NaN count, overlap guard width, source cache key, legend labels, influence source curve/pixel
-  count, tile generation timing을 기록한다.
+  channel name, min/max/avg, absolute preview scale, robust percentile diagnostic range, noisy
+  boundary displacement stats, finite/NaN count, overlap guard width, source cache key, legend
+  labels, influence source curve/pixel count, tile generation timing을 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
   direction만 표시한다.
+- 모든 `macro_field_preview` channel은 얇은 macro-field cache tile boundary overlay를 표시한다.
+  이 grid는 cache/tile 진단용이며, 각 tile 내부에서 height를 따로 low/high normalize한다는 뜻이
+  아니다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 검증 기준
 
 - determinism: 같은 seed/config/tile/channel은 같은 PNG와 metadata를 만든다.
 - adjacent tile overlap stability: 인접 tile overlap의 같은 world-space sample은 같은 값을 가진다.
+- preview scale continuity: `macro`, `combined`, `lit` channel은 preview image나 tile마다 local
+  min/max를 다시 잡지 않고 문서화된 absolute normalized scale로 렌더해야 한다.
 - finite/range sanity: 모든 channel은 finite 값이며 문서화된 range를 벗어나지 않는다.
 - hydrology endpoint attachment: river valley field는 selected segment의 canonical noisy curve와
   lake inlet/outlet endpoint를 따라가야 한다.

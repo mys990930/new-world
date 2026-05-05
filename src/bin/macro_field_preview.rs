@@ -24,6 +24,11 @@ const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "macro_field";
 const OUTPUT_DIR: &str = "target/macro-field-preview";
+const MACRO_PREVIEW_MIN_HEIGHT: f32 = -1.0;
+const MACRO_PREVIEW_MAX_HEIGHT: f32 = 1.0;
+const COMBINED_PREVIEW_MIN_HEIGHT: f32 = -0.75;
+const COMBINED_PREVIEW_MAX_HEIGHT: f32 = 1.25;
+const WHITE_SATURATION_THRESHOLD: u8 = 248;
 const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
     PreviewChannel::MacroElevation,
     PreviewChannel::Mask,
@@ -287,6 +292,13 @@ struct ChannelStats {
     contrast_span: f32,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct TileGridStats {
+    spacing_blocks: f32,
+    vertical_lines: usize,
+    horizontal_lines: usize,
+}
+
 #[derive(Debug, Clone)]
 struct MacroFieldTile {
     samples: Vec<FieldSample>,
@@ -324,6 +336,10 @@ struct PreviewHeader {
     tile_generation_ms: u128,
     render_encode_ms: u128,
     total_runtime_ms: u128,
+    tile_boundary_spacing_blocks: f32,
+    tile_boundary_vertical_lines: usize,
+    tile_boundary_horizontal_lines: usize,
+    white_saturation_fraction: f32,
     macro_stats: ChannelStats,
     ridge_stats: ChannelStats,
     river_stats: ChannelStats,
@@ -386,6 +402,25 @@ impl PreviewHeader {
             format!("render_encode_ms={}", self.render_encode_ms),
             format!("total_runtime_ms={}", self.total_runtime_ms),
             format!(
+                "preview_height_scale=absolute_normalized_macro_{:.2}_to_{:.2}_combined_{:.2}_to_{:.2}",
+                MACRO_PREVIEW_MIN_HEIGHT,
+                MACRO_PREVIEW_MAX_HEIGHT,
+                COMBINED_PREVIEW_MIN_HEIGHT,
+                COMBINED_PREVIEW_MAX_HEIGHT
+            ),
+            format!(
+                "tile_boundary_overlay=macro_field_cache_tile_grid_spacing_blocks_{:.1}",
+                self.tile_boundary_spacing_blocks
+            ),
+            format!(
+                "tile_boundary_lines_vertical_horizontal={},{}",
+                self.tile_boundary_vertical_lines, self.tile_boundary_horizontal_lines
+            ),
+            format!(
+                "white_saturation_fraction_channel={:.6}",
+                self.white_saturation_fraction
+            ),
+            format!(
                 "macro_elevation_min_max_avg={:.4},{:.4},{:.4}",
                 self.macro_stats.min, self.macro_stats.max, self.macro_stats.average
             ),
@@ -441,8 +476,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output_paths = output_paths_for_config(&config)?;
     let mut generated = Vec::with_capacity(output_paths.len());
     let render_start = Instant::now();
+    let tile_grid = tile_grid_stats(window, config.region_size_blocks as f32);
 
     for (channel, output) in output_paths {
+        let white_saturation_fraction = channel_white_saturation_fraction(
+            &tile,
+            channel,
+            config.width as usize,
+            config.height as usize,
+        );
         let header = PreviewHeader {
             seed: config.seed,
             generator_version: meta.generator_version,
@@ -475,6 +517,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             tile_generation_ms,
             render_encode_ms: render_start.elapsed().as_millis(),
             total_runtime_ms: total_start.elapsed().as_millis(),
+            tile_boundary_spacing_blocks: tile_grid.spacing_blocks,
+            tile_boundary_vertical_lines: tile_grid.vertical_lines,
+            tile_boundary_horizontal_lines: tile_grid.horizontal_lines,
+            white_saturation_fraction,
             macro_stats: tile.macro_stats,
             ridge_stats: tile.ridge_stats,
             river_stats: tile.river_stats,
@@ -482,6 +528,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             core_stats: tile.core_stats,
         };
         let mut image = render_channel(window, &tile, channel)?;
+        draw_tile_boundary_overlay(&mut image, window, tile_grid);
         draw_legend_overlay(&mut image, channel);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((channel, output, image.width(), image.height()));
@@ -571,6 +618,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         "combined height min/avg/max {:.3}/{:.3}/{:.3}",
         tile.combined_stats.min, tile.combined_stats.average, tile.combined_stats.max
     );
+    println!(
+        "absolute preview scale: macro {:.2}..{:.2}, combined {:.2}..{:.2}",
+        MACRO_PREVIEW_MIN_HEIGHT,
+        MACRO_PREVIEW_MAX_HEIGHT,
+        COMBINED_PREVIEW_MIN_HEIGHT,
+        COMBINED_PREVIEW_MAX_HEIGHT
+    );
+    println!(
+        "tile boundary overlay: spacing {:.1} blocks, vertical lines {}, horizontal lines {}",
+        tile_grid.spacing_blocks, tile_grid.vertical_lines, tile_grid.horizontal_lines
+    );
+    for channel in config.channel.channels() {
+        println!(
+            "{} white saturation fraction {:.4}",
+            channel.as_str(),
+            channel_white_saturation_fraction(
+                &tile,
+                *channel,
+                config.width as usize,
+                config.height as usize
+            )
+        );
+    }
     println!(
         "dry basin samples {} height min/avg/max {:.3}/{:.3}/{:.3}",
         tile.core_stats.dry_basin_sample_count,
@@ -897,6 +967,101 @@ fn render_channel(
         .ok_or_else(|| cli_error("failed to build RGB image"))
 }
 
+fn tile_grid_stats(window: PreviewWindow, spacing_blocks: f32) -> TileGridStats {
+    let spacing = spacing_blocks.max(1.0);
+    TileGridStats {
+        spacing_blocks: spacing,
+        vertical_lines: grid_line_count(window.min_x(), window.max_x(), spacing),
+        horizontal_lines: grid_line_count(window.min_z(), window.max_z(), spacing),
+    }
+}
+
+fn grid_line_count(min: f32, max: f32, spacing: f32) -> usize {
+    let first = (min / spacing).ceil() as i32;
+    let last = (max / spacing).floor() as i32;
+    if last < first {
+        0
+    } else {
+        (last - first + 1) as usize
+    }
+}
+
+fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid: TileGridStats) {
+    if grid.spacing_blocks <= 0.0 {
+        return;
+    }
+    let color = [248, 244, 214];
+    let major_color = [255, 255, 255];
+    let first_x = (window.min_x() / grid.spacing_blocks).ceil() as i32;
+    let last_x = (window.max_x() / grid.spacing_blocks).floor() as i32;
+    for gx in first_x..=last_x {
+        let world_x = gx as f32 * grid.spacing_blocks;
+        let px = ((world_x - window.min_x()) / window.world_span_x * image.width() as f32).round();
+        if !(0.0..image.width() as f32).contains(&px) {
+            continue;
+        }
+        let amount = if gx == 0 { 0.56 } else { 0.34 };
+        draw_vertical_line(
+            image,
+            px as u32,
+            if gx == 0 { major_color } else { color },
+            amount,
+        );
+    }
+
+    let first_z = (window.min_z() / grid.spacing_blocks).ceil() as i32;
+    let last_z = (window.max_z() / grid.spacing_blocks).floor() as i32;
+    for gz in first_z..=last_z {
+        let world_z = gz as f32 * grid.spacing_blocks;
+        let py = ((world_z - window.min_z()) / window.world_span_z * image.height() as f32).round();
+        if !(0.0..image.height() as f32).contains(&py) {
+            continue;
+        }
+        let amount = if gz == 0 { 0.56 } else { 0.34 };
+        draw_horizontal_line(
+            image,
+            py as u32,
+            if gz == 0 { major_color } else { color },
+            amount,
+        );
+    }
+}
+
+fn draw_vertical_line(image: &mut RgbImage, x: u32, color: [u8; 3], amount: f32) {
+    for y in 0..image.height() {
+        blend_pixel(image, x, y, color, amount);
+    }
+}
+
+fn draw_horizontal_line(image: &mut RgbImage, y: u32, color: [u8; 3], amount: f32) {
+    for x in 0..image.width() {
+        blend_pixel(image, x, y, color, amount);
+    }
+}
+
+fn channel_white_saturation_fraction(
+    tile: &MacroFieldTile,
+    channel: PreviewChannel,
+    width: usize,
+    height: usize,
+) -> f32 {
+    if width == 0 || height == 0 {
+        return 0.0;
+    }
+    let saturated = (0..width * height)
+        .into_par_iter()
+        .filter(|index| {
+            let x = index % width;
+            let y = index / width;
+            let color = color_for_channel(tile, channel, x, y, width, height);
+            color
+                .iter()
+                .all(|channel| *channel >= WHITE_SATURATION_THRESHOLD)
+        })
+        .count();
+    fraction(saturated, width * height)
+}
+
 fn color_for_channel(
     tile: &MacroFieldTile,
     channel: PreviewChannel,
@@ -909,15 +1074,14 @@ fn color_for_channel(
     let sample = tile.samples[index];
     match channel {
         PreviewChannel::MacroElevation => {
-            gradient_macro(normalize_contrast(sample.macro_elevation, tile.macro_stats))
+            gradient_macro(normalize_absolute_macro_height(sample.macro_elevation))
         }
         PreviewChannel::Mask => color_for_mask(sample),
         PreviewChannel::RidgeInfluence => gradient_fire(sample.ridge_influence),
         PreviewChannel::RiverValley => gradient_river(sample.river_valley),
-        PreviewChannel::CombinedMacroHeight => gradient_height(normalize_contrast(
-            sample.combined_height,
-            tile.combined_stats,
-        )),
+        PreviewChannel::CombinedMacroHeight => {
+            gradient_height(normalize_absolute_combined_height(sample.combined_height))
+        }
         PreviewChannel::LitHeightfield => lit_height_color(tile, x, y, width, height),
     }
 }
@@ -954,33 +1118,32 @@ fn lit_height_color(
     let normal = normalize3([-dx * 5.0, 1.0, -dz * 5.0]);
     let light = normalize3([-0.45, 0.78, -0.43]);
     let diffuse = dot3(normal, light).max(0.0);
-    let height_t = normalize_contrast(
-        tile.samples[y * width + x].combined_height,
-        tile.combined_stats,
-    );
-    let ambient = 0.34 + height_t * 0.20;
-    let shade = (ambient + diffuse * 0.70).clamp(0.0, 1.0);
+    let height_t = normalize_absolute_combined_height(tile.samples[y * width + x].combined_height);
+    let ambient = 0.30 + height_t * 0.14;
+    let shade = (ambient + diffuse * 0.52).clamp(0.0, 0.96);
     let value = (shade * 255.0).round() as u8;
     [value, value, value]
 }
 
-fn normalize(value: f32, stats: ChannelStats) -> f32 {
-    let span = stats.max - stats.min;
+fn normalize_absolute_macro_height(value: f32) -> f32 {
+    normalize_absolute(value, MACRO_PREVIEW_MIN_HEIGHT, MACRO_PREVIEW_MAX_HEIGHT)
+}
+
+fn normalize_absolute_combined_height(value: f32) -> f32 {
+    normalize_absolute(
+        value,
+        COMBINED_PREVIEW_MIN_HEIGHT,
+        COMBINED_PREVIEW_MAX_HEIGHT,
+    )
+}
+
+fn normalize_absolute(value: f32, min: f32, max: f32) -> f32 {
+    let span = max - min;
     if span.abs() <= f32::EPSILON {
         0.5
     } else {
-        ((value - stats.min) / span).clamp(0.0, 1.0)
+        ((value - min) / span).clamp(0.0, 1.0)
     }
-}
-
-fn normalize_contrast(value: f32, stats: ChannelStats) -> f32 {
-    let span = stats.robust_max - stats.robust_min;
-    let base = if span.abs() <= f32::EPSILON {
-        normalize(value, stats)
-    } else {
-        ((value - stats.robust_min) / span).clamp(0.0, 1.0)
-    };
-    ((base - 0.5) * 1.22 + 0.5).clamp(0.0, 1.0).powf(0.92)
 }
 
 fn gradient_macro(value: f32) -> [u8; 3] {
@@ -1413,6 +1576,47 @@ mod tests {
     }
 
     #[test]
+    fn tile_boundary_overlay_changes_pixels() {
+        let mut image = RgbImage::from_pixel(128, 64, image::Rgb([4, 5, 6]));
+        let before = image.as_raw().clone();
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 128,
+            height: 64,
+            world_span_x: 4096.0,
+            world_span_z: 2048.0,
+        };
+        let grid = tile_grid_stats(window, 1024.0);
+
+        draw_tile_boundary_overlay(&mut image, window, grid);
+
+        assert_ne!(image.as_raw(), &before);
+        assert_eq!(grid.vertical_lines, 5);
+        assert_eq!(grid.horizontal_lines, 3);
+    }
+
+    #[test]
+    fn height_preview_uses_absolute_scale() {
+        assert_eq!(
+            normalize_absolute_macro_height(MACRO_PREVIEW_MIN_HEIGHT),
+            0.0
+        );
+        assert_eq!(
+            normalize_absolute_macro_height(MACRO_PREVIEW_MAX_HEIGHT),
+            1.0
+        );
+        assert!(
+            normalize_absolute_combined_height(0.25) > normalize_absolute_combined_height(0.0),
+            "absolute combined preview scale should preserve world height ordering"
+        );
+        assert!(
+            normalize_absolute_combined_height(0.85) < 0.90,
+            "ordinary high terrain should not map straight to white"
+        );
+    }
+
+    #[test]
     fn selected_channel_output_has_nonblank_pixels() {
         let tile = MacroFieldTile {
             samples: vec![
@@ -1525,6 +1729,45 @@ mod tests {
         assert_ne!(
             left, right,
             "lit heightfield should respond to height gradients and height term"
+        );
+    }
+
+    #[test]
+    fn lit_heightfield_avoids_full_white_saturation() {
+        let samples = vec![
+            FieldSample {
+                combined_height: 0.85,
+                ..FieldSample::default()
+            };
+            9
+        ];
+        let tile = MacroFieldTile {
+            samples,
+            combined_stats: ChannelStats {
+                min: 0.85,
+                max: 0.85,
+                average: 0.85,
+                robust_min: 0.85,
+                robust_max: 0.85,
+                contrast_span: 0.0,
+            },
+            ..MacroFieldTile {
+                samples: Vec::new(),
+                macro_stats: ChannelStats::default(),
+                ridge_stats: ChannelStats::default(),
+                river_stats: ChannelStats::default(),
+                combined_stats: ChannelStats::default(),
+                core_stats: CoreMacroFieldTileStats::default(),
+            }
+        };
+
+        let color = lit_height_color(&tile, 1, 1, 3, 3);
+
+        assert!(
+            color
+                .iter()
+                .any(|channel| *channel < WHITE_SATURATION_THRESHOLD),
+            "lit preview should not turn normal high terrain into saturated white: {color:?}"
         );
     }
 }

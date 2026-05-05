@@ -48,6 +48,18 @@
 - `lit`: top-down white heightfield preview with simple directional lighting from combined height
   gradients. This is not a 3D render; it is shaded relief over the combined macro height field.
 
+`macro`, `combined`, and `lit` use a fixed absolute normalized preview scale rather than per-image
+min/max stretching. The launch preview scale is:
+
+```text
+macro elevation: -1.00 .. 1.00
+combined height: -0.75 .. 1.25
+```
+
+The renderer still records per-image min/max/robust percentiles as diagnostics, but those values do
+not drive the color ramp. This keeps adjacent macro-field tiles in the same terrain context instead
+of giving every tile its own artificial low and high.
+
 ## Output Path Rules
 
 - With no `--output`, a single channel writes the short default PNG path.
@@ -75,7 +87,8 @@
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
-9. Render the requested channel or all channels with a compact legend.
+9. Render the requested channel or all channels with a compact legend and a thin macro-field cache
+   tile boundary grid.
 10. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
@@ -108,6 +121,7 @@ Each PNG contains:
 - noisy boundary average/max displacement
 - min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
   valley, and combined macro height
+- fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
 - channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
 
 ## Interpretation Notes
@@ -116,6 +130,8 @@ Each PNG contains:
   noisy-boundary blend, ridge/coast/river influence, or the lighting contrast itself.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
+- The visible grid is the macro-field cache tile grid. It is diagnostic only: it should reveal cache
+  boundaries without implying that terrain height is normalized independently inside each tile.
 
 ## Example
 
