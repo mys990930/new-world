@@ -45,18 +45,22 @@
   - coast candidate edges are sandy overlays.
   - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
     corner-to-corner edge chains.
+  - selected river chains are drawn only for macro edges whose lake edge class is `NonLake`; lake
+    internal, lake boundary, and lake-adjacent land edges are never rendered as selected rivers.
   - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
     not `raw_flow_accumulation`; lake terminal discharge caps are therefore visible in the preview.
   - lake terminal/inlet selection is already reduced by hydrology before rendering: per-lake
     top-N chain limits, short visible inlet segments, and lake-area discharge caps all affect
     the displayed segment set.
   - lake, lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
-    overlay dots. Lake inlet/outlet markers are selected graph endpoint markers: inlet markers
+    overlay symbols whose colors are intentionally distinct from the selected river stroke. Lake
+    debug nodes use a non-water ring marker. Lake inlet/outlet markers are selected graph endpoint markers: inlet markers
     require an incoming selected segment on the land side of the lake boundary, and outlet markers
     require an outgoing selected segment on the land side. Lake boundary edges themselves are never
     drawn as selected river segments. Lake inlets and outlets also draw short directional arrows:
     inlet arrows point into the endpoint from the selected river side, and outlet arrows point away
-    from the endpoint toward downstream. These markers are drawn above the river line so topology
+    from the endpoint toward downstream. These arrows are shortened near the endpoint so they do not
+    lay a long shaft over a lake edge. These markers are drawn above the river line so topology
     changes are visible in the preview.
   - selected river occupancy is stricter than the raw flow ledger: if multiple selected upstream
     branches would share the same corner as separate visible chains, hydrology keeps the largest
@@ -120,7 +124,7 @@ high/low patterns, and selected rivers should follow continuous downstream chain
 explicit lake/sink resolution. Lake-bound selected rivers should terminate at `LakeInlet` vertices,
 and lake outlet rivers should start from separated `LakeOutlet` vertices. These vertices are
 land-side selected endpoints paired with a lake component; selected river segments must not skim
-along or cross lake boundary edges.
+along or cross lake boundary/internal/adjacent edges.
 
 If a future worker adds a preview-specific request type, keep this CLI and output path contract stable and replace only the internal map construction.
 

@@ -72,6 +72,12 @@ MacroEdgeGuide {
     drainage_divide_potential,
     river_potential,
 }
+MacroLakeEdgeClass::{
+    NonLake,
+    LakeAdjacentLand,
+    LakeBoundary,
+    LakeInternal,
+}
 ```
 
 `MacroMapConfig`는 land/ocean 비율을 진단하고 조율하기 위한 공개 tuning handle을 가진다.
@@ -89,6 +95,9 @@ patch guard 바깥의 더 먼 coast 탐색 차이가 overlap 영역의 public ma
 `Island` 또는 `CoastIsland` surface kind로 드러나며, 별도 island noise source에서 만들어지지 않는다.
 `MacroCorner`는 인접 site ownership과 corner base field를 읽어 같은 macro field를 샘플한다.
 `MacroEdge`는 두 site의 macro ownership과 elevation context를 읽어 coast/ridge/fault guide를 붙인다.
+또한 edge의 인접 site surface kind와 양 endpoint corner surface kind를 함께 읽어 `MacroLakeEdgeClass`를
+붙인다. 이 class는 preview nearest-site fill에서 보이는 lake edge와 hydrology가 금지하는 edge가
+서로 다른 기준을 보지 않도록 맞추기 위한 명시적 edge annotation이다.
 stage 3 macro_map은 river corridor를 선택하지 않는다. selected river chain, flow accumulation,
 lake/sink/outlet carve는 hydrology 단계가 확정한다.
 현재 구현에서도 `MacroEdgeGuide.is_river_candidate`는 selected river 의미로 사용하지 않는다.
@@ -136,9 +145,11 @@ launch 정책은 아래처럼 잡는다.
 - graph base field stage가 대륙성/해양성 site가 뭉치는 `continentality`를 먼저 만든다.
 - macro_map은 `continentality >= threshold`를 초기 land mask로 보고 connected component를 resolve한다.
 - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
-- 음수 `continentality` water component라도 patch/open boundary에 닿지 않고 land component 안에 고립되어
-  있으면 `OceanBasin`이 아니라 `LakeCandidate` 또는 `WetlandCandidate`로 분류한다.
-- patch/open boundary에 닿는 water component와 connected ocean basin은 ocean으로 유지한다.
+- 음수 `continentality` water component라도 explicit ocean basin과 연결되지 않으면 바다에 가까워 보여도
+  `OceanBasin`이 아니라 `LakeCandidate` 또는 `WetlandCandidate`로 분류한다.
+- patch/open boundary 또는 guard/padding boundary에 닿는다는 사실만으로 ocean이 되면 안 된다.
+  launch 구현은 가장 큰 장거리 water component와 충분히 큰/충분히 oceanic한 secondary component만
+  explicit ocean basin으로 보고, 나머지 고립 water component는 lake/wetland 후보로 유지한다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
@@ -257,9 +268,11 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 6. coast guide는 connected ocean basin과 land ownership의 경계를 우선한다.
 7. 내륙 water component는 signed elevation이 음수여도 connected ocean basin이 아니면 lake/wetland
    후보로 유지해야 한다.
-8. graph-derived ridge/fault/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
-9. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
-10. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
+8. lake edge는 site/corner 혼합 판정이 아니라 `MacroLakeEdgeClass`로 명시되어야 한다. hydrology가
+   selected river를 금지할 때도 이 edge class를 읽어야 한다.
+9. graph-derived ridge/fault/coast guide는 broad field로 확산되어야 하며 raw segment가 그대로 보이면 안 된다.
+10. selected river chain과 outlet/lake/sink resolution은 hydrology가 확정한다.
+11. ocean, lake, wetland, coast의 의미 구분은 surface policy와 preview에서 유지되어야 한다.
 
 ---
 
@@ -269,8 +282,9 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - `generate_macro_map`은 rayon으로 site/corner/edge annotation을 병렬 생성하고, id 정렬로 deterministic order를 유지한다.
 - continent/ocean ownership은 graph base `continentality`를 source of truth로 읽고, `land_bias`와
   `sea_level` offset만 적용해 정한다. macro_map은 독자적인 continent/island noise source를 만들지 않는다.
-- ocean/lake ownership은 water component connectivity를 함께 읽는다. patch/open boundary에 연결된
-  water component는 ocean이고, 고립된 내륙 water component는 lake candidate로 surface kind를 바꾼다.
+- ocean/lake ownership은 water component connectivity를 함께 읽는다. patch/open boundary에 연결된다는
+  사실만으로 ocean이 되지는 않으며, explicit ocean basin으로 분류되지 않은 고립 water component는
+  lake candidate로 surface kind를 바꾼다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는
@@ -278,5 +292,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
   inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.
   stage 3 macro_map은 hydrology 전 river candidate corridor를 선택하지 않으며, selected river chain,
   flow accumulation, lake/sink/outlet carve는 hydrology stage가 확정한다.
+- edge annotation은 `MacroLakeEdgeClass`를 포함한다. `LakeInternal`, `LakeBoundary`,
+  `LakeAdjacentLand`는 selected river segment가 사용할 수 없는 edge class다.
 - hydrology 구현은 macro_map의 signed elevation, coast guide, ridge/fault context를 입력으로 읽지만,
   macro_map이 river 연속성이나 outlet 정책을 소유하지는 않는다.

@@ -81,10 +81,14 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - continent/ocean/island의 source of truth는 graph의 smoothed `continentality`와 연결 component 해석이다.
    - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
    - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를 합성해 만든다.
+   - water component는 patch/guard boundary 접촉만으로 ocean이 되지 않는다. explicit ocean basin으로
+     분류된 장거리 water component와 연결되지 않은 물은 바다에 가까워도 lake/wetland 후보로 유지한다.
 4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault edge guide를 선정한다.
    - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness/mountainness context, drainage divide 가능성을 함께 만족해야 한다.
 5. land/ocean ownership 경계에서 coast edge guide를 선정한다.
    - coast는 signed elevation 부호만으로 찾지 않고, connected ocean basin과 land ownership의 경계를 우선한다.
+   - lake edge는 macro edge annotation인 `MacroLakeEdgeClass`로 별도 분류한다. 이 class는 인접 site와
+     endpoint corner를 함께 읽으며, hydrology의 selected river 금지 기준이 된다.
 6. macro elevation, ridge/coast guide, graph topology를 읽어 hydrology를 푼다.
    - 이 단계는 potential guide가 아니라 selected hydrology result를 만든다.
    - downhill, graph-stage local minima, lake/sink/outlet carve, watershed, flow accumulation을 계산한다.
@@ -96,7 +100,7 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      확연히 낮은 cap을 가진다.
    - lake와 river의 접점은 lake edge를 따라 스쳐 지나가는 선이 아니라 `LakeInlet`/`LakeOutlet`
      selected endpoint marker로 표현한다. selected river segment는 lake 내부 edge나 lake boundary
-     edge를 쓰지 않으며, 유입하천은 lake boundary 직전의 land-side endpoint에서 끝나고 유출하천은 같은
+     edge, lake-adjacent edge를 쓰지 않으며, 유입하천은 lake boundary 직전의 land-side endpoint에서 끝나고 유출하천은 같은
      lake component의 다른 boundary vertex 밖 land-side endpoint에서 시작한다. outlet pair는 유입하천의
      land-side approach corner보다 낮고 최소 hop 거리만큼 떨어져야 한다.
 7. visible feature edge만 noisy boundary로 현실화한다. raw graph topology는 그대로 보존한다.
@@ -136,8 +140,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   독자적인 continent/island noise source는 macro_map의 책임이 아니다. 현재 구현은 graph base
   `continentality`를 land/ocean ownership의 source of truth로 읽고, graph adjacency component와
   coast distance를 통해 stage 3 ownership과 signed macro elevation을 resolve한다. 음수 water component도
-  connectivity를 읽어 patch/open boundary에 닿으면 ocean, 고립되어 있으면 inland lake candidate로
-  분류한다. stage 4 guide는
+  connectivity를 읽되 patch/open boundary 접촉만으로 ocean을 만들지 않고, explicit ocean basin
+  component에 연결되지 않은 물은 inland lake candidate로 분류한다. stage 4 guide는
   같은 land component 내부성, signed elevation gradient, inlandness, mountainness/rugged context,
   drainage divide potential을 함께 읽어 ridge/fault edge candidate를 선택한다.
 - stage 6 hydrology: macro guide와 graph topology를 읽어 selected river chain을 확정한다. 현재
@@ -195,7 +199,7 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
   capacity에 따라 incoming chain 수, visible inlet segment 수, selected flow가 제한되어야 한다.
 - lake contact river는 lake 내부 edge나 lake boundary edge를 selected segment로 사용하지 않고,
   land-side inlet/outlet endpoint marker에서만 lake와 만나야 한다. selected river segment 자체는
-  lake corner를 endpoint로 삼지 않는다.
+  lake corner를 endpoint로 삼지 않고, macro edge의 lake class도 `NonLake`여야 한다.
 - selected river graph는 confluence/branch로 설명되지 않는 shared-corner intersection을 남기면 안 된다.
 - preview-visible selected river graph는 같은 corner에 여러 독립 incoming chain이 겹쳐 보이지 않도록
   occupancy/merge 정책을 적용해야 한다. 명시 confluence geometry가 생기기 전까지는 가장 큰 selected

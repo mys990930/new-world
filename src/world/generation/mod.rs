@@ -36,8 +36,8 @@ pub use hydrology::{
 pub use macro_map::{
     DEFAULT_MACRO_COAST_WIDTH_BLOCKS, DEFAULT_MACRO_RIDGE_CANDIDATE_THRESHOLD,
     DEFAULT_MACRO_RIVER_CANDIDATE_THRESHOLD, GraphMacroMap, MacroContinentId, MacroCorner,
-    MacroEdge, MacroEdgeGuide, MacroMapConfig, MacroOceanBasinId, MacroSite, MacroSurfaceKind,
-    generate_macro_map,
+    MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig, MacroOceanBasinId, MacroSite,
+    MacroSurfaceKind, generate_macro_map,
 };
 #[allow(unused_imports)]
 pub use pipeline::{

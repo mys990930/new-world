@@ -153,7 +153,11 @@
   land-side endpoint에 incoming selected segment가 있을 때만 생기고, outlet marker는 lake boundary
   바깥의 land-side endpoint에 outgoing selected segment가 있을 때만 생긴다. river segment 자체는
   lake boundary edge 위에 그려지지 않는다. marker와 화살표는 river line과 node dot 위에서도 보이도록
-  hydrology overlay의 마지막 쪽에서 그린다.
+  hydrology overlay의 마지막 쪽에서 그린다. inlet/outlet 화살표는 selected segment 전체 길이를 덮는
+  긴 shaft가 아니라 endpoint 근처의 짧은 방향 표시여야 하며, lake boundary edge 위에 선처럼 놓이면 안 된다.
+- selected river, `LakeInlet`, `LakeOutlet`, internal `Lake` debug node, `CoastOutlet`, lake fill 색은
+  서로 구분되어야 한다. 특히 internal `Lake` debug node는 river나 수면처럼 보이는 하늘색 fill이 아니라
+  비수면 ring/marker 색을 사용한다.
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
   invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
   disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
@@ -193,6 +197,9 @@
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
 - hydrology overlay도 같은 실제 graph corner segment를 사용한다. 따라서 selected river는 raw
   nearest-site raster boundary가 아니라 hydrology가 선택한 Voronoi edge chain 위에 놓인다.
+- hydrology overlay는 macro_map의 명시적 lake edge class를 통과한 selected segment만 그린다. 따라서
+  nearest-site lake fill 경계와 corner surface 기준이 어긋나도 selected river가 lake boundary/internal/
+  adjacent edge 위에 그려지면 회귀다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
 
 ---

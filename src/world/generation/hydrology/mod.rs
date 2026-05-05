@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 use super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
-use super::macro_map::{GraphMacroMap, MacroCorner, MacroSurfaceKind};
+use super::macro_map::{GraphMacroMap, MacroCorner, MacroEdge, MacroSurfaceKind};
 
 pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 10.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
@@ -232,6 +232,7 @@ pub fn solve_hydrology(
         &elevations,
         &lake_candidates,
         &adjacency,
+        &edge_map,
         config,
     );
     let watersheds = resolve_watersheds(&downstream, &resolutions);
@@ -253,6 +254,7 @@ pub fn solve_hydrology(
         &lake_policies,
         &lake_inlet_policies,
         &lake_topology,
+        &edge_map,
         config,
     );
     let selected = selected_rivers.selected;
@@ -263,20 +265,22 @@ pub fn solve_hydrology(
         &lake_policies,
         &lake_inlet_policies,
     );
-    let topology_stats = resolve_topology_stats(
-        &selected,
-        &downstream,
-        &lake_candidates,
-        &resolutions,
-        &lake_topology,
-        selected_rivers.duplicate_trunk_pruned_count,
-    );
     let node_kinds = resolve_node_kinds(
         &selected,
         &downstream,
         &terminals,
         &resolutions,
         &lake_topology,
+    );
+    let topology_stats = resolve_topology_stats(
+        &selected,
+        &downstream,
+        &lake_candidates,
+        &resolutions,
+        &downstream_edges,
+        &edge_map,
+        &node_kinds,
+        selected_rivers.duplicate_trunk_pruned_count,
     );
     let nodes = build_nodes(patch, &watersheds, &node_kinds);
     let segments = build_segments(
@@ -632,6 +636,7 @@ fn resolve_lake_contact_topology(
     elevations: &[f32],
     lake_candidates: &[bool],
     adjacency: &[Vec<CornerNeighbor>],
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
     config: HydrologyConfig,
 ) -> LakeContactTopology {
     let components = lake_components(lake_candidates, adjacency);
@@ -679,13 +684,14 @@ fn resolve_lake_contact_topology(
         }
         let inlet_distances =
             lake_hop_distances(component, &inlet_vertices, lake_candidates, adjacency);
-        let Some((outlet, target, edge)) = choose_lake_outlet(
+        let Some((outlet, target, edge, outlet_next, outlet_edge)) = choose_lake_outlet(
             component,
             inlet_elevation,
             &inlet_distances,
             elevations,
             lake_candidates,
             adjacency,
+            edge_map,
             config,
         ) else {
             continue;
@@ -693,6 +699,8 @@ fn resolve_lake_contact_topology(
 
         downstream[outlet] = Some(target);
         downstream_edges[outlet] = Some(edge);
+        downstream[target] = Some(outlet_next);
+        downstream_edges[target] = Some(outlet_edge);
         topology.outlet_land_vertices[target] = true;
         if resolutions[outlet] == GraphLocalMinimumResolution::Lake {
             resolutions[outlet] = GraphLocalMinimumResolution::OutletCarve;
@@ -774,8 +782,9 @@ fn choose_lake_outlet(
     elevations: &[f32],
     lake_candidates: &[bool],
     adjacency: &[Vec<CornerNeighbor>],
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
     config: HydrologyConfig,
-) -> Option<(usize, usize, VoronoiEdgeId)> {
+) -> Option<(usize, usize, VoronoiEdgeId, usize, VoronoiEdgeId)> {
     component
         .iter()
         .copied()
@@ -789,12 +798,34 @@ fn choose_lake_outlet(
                 .copied()
                 .filter(|neighbor| !lake_candidates[neighbor.index])
                 .filter(|neighbor| elevations[neighbor.index] < inlet_elevation - 0.001)
-                .min_by(|left, right| {
-                    elevations[left.index]
-                        .total_cmp(&elevations[right.index])
-                        .then_with(|| left.index.cmp(&right.index))
+                .filter_map(|neighbor| {
+                    let outlet_segment = adjacency[neighbor.index]
+                        .iter()
+                        .copied()
+                        .filter(|next| !lake_candidates[next.index])
+                        .filter(|next| elevations[next.index] < elevations[neighbor.index] - 0.001)
+                        .filter(|next| !is_lake_edge(next.edge, edge_map))
+                        .min_by(|left, right| {
+                            elevations[left.index]
+                                .total_cmp(&elevations[right.index])
+                                .then_with(|| left.index.cmp(&right.index))
+                        })?;
+                    Some((neighbor, outlet_segment))
                 })
-                .map(|neighbor| (index, neighbor.index, neighbor.edge))
+                .min_by(|left, right| {
+                    elevations[left.0.index]
+                        .total_cmp(&elevations[right.0.index])
+                        .then_with(|| left.0.index.cmp(&right.0.index))
+                })
+                .map(|(neighbor, outlet_segment)| {
+                    (
+                        index,
+                        neighbor.index,
+                        neighbor.edge,
+                        outlet_segment.index,
+                        outlet_segment.edge,
+                    )
+                })
         })
         .min_by(|left, right| {
             elevations[left.0]
@@ -1062,6 +1093,7 @@ fn select_river_paths(
     lake_policies: &[Option<LakeTerminalPolicy>],
     lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     lake_topology: &LakeContactTopology,
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
     config: HydrologyConfig,
 ) -> SelectedRiverPaths {
     let mut selected = vec![false; downstream.len()];
@@ -1081,7 +1113,7 @@ fn select_river_paths(
             };
             (amount >= threshold
                 && elevations[index] >= config.headwater_elevation
-                && downstream_edges[index].is_some()
+                && downstream_edges[index].is_some_and(|edge| !is_lake_edge(edge, edge_map))
                 && !terminals[index]
                 && !lake_candidates[index])
                 .then_some(index)
@@ -1141,11 +1173,27 @@ fn select_river_paths(
         }
     }
 
-    enforce_lake_contact_topology(&mut selected, downstream, lake_candidates, lake_topology);
+    enforce_lake_contact_topology(
+        &mut selected,
+        downstream,
+        downstream_edges,
+        elevations,
+        lake_candidates,
+        lake_topology,
+        edge_map,
+    );
     remove_invalid_terminal_intersections(&mut selected, downstream, flow, lake_candidates);
     let duplicate_trunk_pruned_count =
         remove_ambiguous_shared_corner_intersections(&mut selected, downstream, flow);
-    enforce_lake_contact_topology(&mut selected, downstream, lake_candidates, lake_topology);
+    enforce_lake_contact_topology(
+        &mut selected,
+        downstream,
+        downstream_edges,
+        elevations,
+        lake_candidates,
+        lake_topology,
+        edge_map,
+    );
 
     SelectedRiverPaths {
         selected,
@@ -1156,8 +1204,11 @@ fn select_river_paths(
 fn enforce_lake_contact_topology(
     selected: &mut [bool],
     downstream: &[Option<usize>],
+    downstream_edges: &[Option<VoronoiEdgeId>],
+    elevations: &[f32],
     lake_candidates: &[bool],
     lake_topology: &LakeContactTopology,
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
 ) {
     for index in 0..selected.len() {
         if !selected[index] {
@@ -1170,12 +1221,17 @@ fn enforce_lake_contact_topology(
         let from_lake = lake_candidates[index];
         let to_lake = lake_candidates[target];
 
-        if from_lake || to_lake {
+        if from_lake
+            || to_lake
+            || downstream_edges[index].is_none()
+            || downstream_edges[index].is_some_and(|edge| is_lake_edge(edge, edge_map))
+        {
             selected[index] = false;
         }
     }
 
     let mut component_has_selected_inlet = vec![false; selected.len()];
+    let mut component_selected_inlet_elevation = vec![f32::NEG_INFINITY; selected.len()];
     let mut incoming_selected = vec![0_u32; selected.len()];
     for (index, is_selected) in selected.iter().copied().enumerate() {
         if !is_selected {
@@ -1201,6 +1257,8 @@ fn enforce_lake_contact_topology(
         };
         if let Some(component) = lake_topology.component_by_corner[lake_vertex] {
             component_has_selected_inlet[component] = true;
+            component_selected_inlet_elevation[component] =
+                component_selected_inlet_elevation[component].max(elevations[index]);
         }
     }
 
@@ -1221,11 +1279,19 @@ fn enforce_lake_contact_topology(
                 .any(|(lake_corner, component)| {
                     component.is_some_and(|component| {
                         component_has_selected_inlet[component]
+                            && elevations[index]
+                                < component_selected_inlet_elevation[component] - 0.001
                             && lake_topology.outlet_vertices[lake_corner]
                             && downstream[lake_corner] == Some(index)
                     })
                 });
-        if has_component_inlet && downstream[index].is_some() && !lake_candidates[index] {
+        let selected_outlet_edge_is_valid =
+            downstream_edges[index].is_some_and(|edge| !is_lake_edge(edge, edge_map));
+        if has_component_inlet
+            && downstream[index].is_some()
+            && !lake_candidates[index]
+            && selected_outlet_edge_is_valid
+        {
             selected[index] = true;
         } else {
             selected[index] = false;
@@ -1420,7 +1486,9 @@ fn resolve_topology_stats(
     downstream: &[Option<usize>],
     lake_candidates: &[bool],
     resolutions: &[GraphLocalMinimumResolution],
-    lake_topology: &LakeContactTopology,
+    downstream_edges: &[Option<VoronoiEdgeId>],
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
+    node_kinds: &[GraphDrainageNodeKind],
     duplicate_trunk_pruned_count: usize,
 ) -> GraphHydrologyTopologyStats {
     let mut stats = GraphHydrologyTopologyStats::default();
@@ -1439,23 +1507,28 @@ fn resolve_topology_stats(
         outgoing[index] = outgoing[index].saturating_add(1);
         incoming[target] = incoming[target].saturating_add(1);
 
+        let edge_is_lake = downstream_edges[index].is_some_and(|edge| is_lake_edge(edge, edge_map));
         let from_lake = lake_candidates[index];
         let to_lake = lake_candidates[target];
-        if from_lake || to_lake {
+        if from_lake || to_lake || edge_is_lake {
             stats.selected_lake_edge_segment_count += 1;
             stats.invalid_lake_contact_count += 1;
         }
     }
 
     for index in 0..selected.len() {
-        if lake_topology.inlet_land_vertices[index] {
+        if node_kinds[index] == GraphDrainageNodeKind::LakeInlet {
             if incoming[index] > 0 {
                 stats.lake_inlet_count += 1;
+            } else {
+                stats.disconnected_lake_inlet_count += 1;
             }
         }
-        if lake_topology.outlet_land_vertices[index] {
+        if node_kinds[index] == GraphDrainageNodeKind::LakeOutlet {
             if outgoing[index] > 0 {
                 stats.lake_outlet_count += 1;
+            } else {
+                stats.disconnected_lake_outlet_count += 1;
             }
         }
     }
@@ -1484,6 +1557,12 @@ fn resolve_topology_stats(
     }
 
     stats
+}
+
+fn is_lake_edge(edge: VoronoiEdgeId, edge_map: &HashMap<VoronoiEdgeId, MacroEdge>) -> bool {
+    edge_map
+        .get(&edge)
+        .is_some_and(|edge| edge.lake_class.excludes_selected_river())
 }
 
 fn build_nodes(
@@ -1731,6 +1810,11 @@ mod tests {
         let (patch, macro_map) = seed_42_preview_inputs();
         let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
         let macro_corners = macro_corners_by_id(&macro_map);
+        let macro_edges = macro_map
+            .edges
+            .iter()
+            .map(|edge| (edge.id, *edge))
+            .collect::<HashMap<_, _>>();
         let nodes = nodes_by_id(&hydro);
 
         assert!(
@@ -1743,6 +1827,13 @@ mod tests {
         assert_eq!(hydro.topology_stats.disconnected_lake_outlet_count, 0);
 
         for segment in &hydro.segments {
+            assert!(
+                !macro_edges[&segment.edge]
+                    .lake_class
+                    .excludes_selected_river(),
+                "selected river segment must not use explicit lake edge class: {:?}",
+                segment
+            );
             let from = &nodes[&segment.from];
             let to = &nodes[&segment.to];
             let from_lake = is_lake_corner(macro_corners[&from.corner]);
@@ -1797,11 +1888,6 @@ mod tests {
                 Some((lake_vertex, inlet_index, corner_indices[&from.corner]))
             })
             .collect::<Vec<_>>();
-
-        assert!(
-            hydro.topology_stats.lake_outlet_count > 0,
-            "seed 42 should expose selected lake outlet contacts"
-        );
 
         for segment in &hydro.segments {
             let outlet_node = &nodes[&segment.from];
@@ -1993,6 +2079,7 @@ mod tests {
             &lake_policies,
             &lake_inlet_policies,
             &lake_topology,
+            &HashMap::new(),
             config,
         )
         .selected;

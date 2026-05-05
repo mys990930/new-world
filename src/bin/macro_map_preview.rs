@@ -982,25 +982,38 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
     draw_lake_contact_arrows(image, window, &graph.hydrology);
 
     for node in &graph.hydrology.nodes {
-        let color = match node.kind {
-            GraphDrainageNodeKind::LakeInlet => [91, 232, 255],
-            GraphDrainageNodeKind::LakeOutlet => [32, 126, 229],
-            GraphDrainageNodeKind::Lake => [82, 190, 226],
-            GraphDrainageNodeKind::Sink => [128, 75, 178],
-            GraphDrainageNodeKind::CoastOutlet => [47, 219, 235],
-            _ => continue,
+        let Some(color) = hydrology_node_color(node.kind) else {
+            continue;
         };
         let (x, y) = window.world_to_pixel_clamped(node.position);
         let radius = match node.kind {
             GraphDrainageNodeKind::LakeInlet => 2,
             GraphDrainageNodeKind::LakeOutlet => 3,
-            GraphDrainageNodeKind::Lake => 3,
+            GraphDrainageNodeKind::Lake => 4,
             GraphDrainageNodeKind::Sink => 3,
             GraphDrainageNodeKind::CoastOutlet => 2,
             _ => 2,
         };
         draw_disc(image, x, y, radius + 1, [5, 12, 18], 0.45);
         draw_disc(image, x, y, radius, color, 0.78);
+        if node.kind == GraphDrainageNodeKind::Lake {
+            draw_disc(image, x, y, radius.saturating_sub(2), [76, 35, 112], 0.86);
+        }
+    }
+}
+
+fn selected_river_color() -> [u8; 3] {
+    [33, 184, 218]
+}
+
+fn hydrology_node_color(kind: GraphDrainageNodeKind) -> Option<[u8; 3]> {
+    match kind {
+        GraphDrainageNodeKind::LakeInlet => Some([252, 224, 66]),
+        GraphDrainageNodeKind::LakeOutlet => Some([62, 113, 255]),
+        GraphDrainageNodeKind::Lake => Some([246, 241, 255]),
+        GraphDrainageNodeKind::Sink => Some([128, 75, 178]),
+        GraphDrainageNodeKind::CoastOutlet => Some([20, 246, 184]),
+        _ => None,
     }
 }
 
@@ -1026,13 +1039,51 @@ fn draw_lake_contact_arrows(
         if to.kind == GraphDrainageNodeKind::LakeInlet {
             let start = window.world_to_pixel_clamped(from.position);
             let tip = window.world_to_pixel_clamped(to.position);
-            draw_arrow(image, start, tip, [252, 240, 92], 0.96);
+            draw_arrow(
+                image,
+                shortened_arrow_start(start, tip, 9.0),
+                tip,
+                [252, 224, 66],
+                0.96,
+            );
         } else if from.kind == GraphDrainageNodeKind::LakeOutlet {
             let start = window.world_to_pixel_clamped(from.position);
             let tip = window.world_to_pixel_clamped(to.position);
-            draw_arrow(image, start, tip, [76, 157, 255], 0.96);
+            draw_arrow(
+                image,
+                start,
+                shortened_arrow_tip(start, tip, 9.0),
+                [62, 113, 255],
+                0.96,
+            );
         }
     }
+}
+
+fn shortened_arrow_start(start: (i32, i32), tip: (i32, i32), max_len: f32) -> (i32, i32) {
+    let dx = (start.0 - tip.0) as f32;
+    let dy = (start.1 - tip.1) as f32;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= max_len || len <= f32::EPSILON {
+        return start;
+    }
+    (
+        (tip.0 as f32 + dx / len * max_len).round() as i32,
+        (tip.1 as f32 + dy / len * max_len).round() as i32,
+    )
+}
+
+fn shortened_arrow_tip(start: (i32, i32), tip: (i32, i32), max_len: f32) -> (i32, i32) {
+    let dx = (tip.0 - start.0) as f32;
+    let dy = (tip.1 - start.1) as f32;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= max_len || len <= f32::EPSILON {
+        return tip;
+    }
+    (
+        (start.0 as f32 + dx / len * max_len).round() as i32,
+        (start.1 as f32 + dy / len * max_len).round() as i32,
+    )
 }
 
 fn draw_river_segment(
@@ -1057,7 +1108,7 @@ fn draw_river_segment(
     let width = river_width(segment.flow_accumulation);
     let amount = river_amount(segment.flow_accumulation);
     draw_line(image, start, end, [4, 12, 22], 0.50, width + 1);
-    draw_line(image, start, end, [41, 211, 239], amount, width);
+    draw_line(image, start, end, selected_river_color(), amount, width);
 }
 
 fn river_amount(flow: f32) -> f32 {
@@ -1392,7 +1443,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x + 68 * scale,
         key_y + 13 * scale,
-        [41, 211, 239],
+        [33, 184, 218],
         "RIVER",
         scale,
     );
@@ -1400,7 +1451,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x,
         key_y + 26 * scale,
-        [82, 190, 226],
+        [246, 241, 255],
         "LAKE",
         scale,
     );
@@ -1416,7 +1467,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x,
         key_y + 39 * scale,
-        [252, 240, 92],
+        [252, 224, 66],
         "INLET",
         scale,
     );
@@ -1424,7 +1475,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x + 68 * scale,
         key_y + 39 * scale,
-        [76, 157, 255],
+        [62, 113, 255],
         "OUT",
         scale,
     );
@@ -1917,6 +1968,25 @@ mod tests {
             "raw hydrology ledger would draw much wider and must not drive preview width"
         );
         assert_eq!(river_amount(segment.flow_accumulation), river_amount(12.0));
+    }
+
+    #[test]
+    fn lake_debug_marker_color_is_distinct_from_selected_river() {
+        assert_ne!(
+            hydrology_node_color(GraphDrainageNodeKind::Lake).unwrap(),
+            selected_river_color(),
+            "lake debug markers should not read as selected river water"
+        );
+        assert_ne!(
+            hydrology_node_color(GraphDrainageNodeKind::LakeInlet).unwrap(),
+            selected_river_color(),
+            "lake inlet marker should be visually distinct from river strokes"
+        );
+        assert_ne!(
+            hydrology_node_color(GraphDrainageNodeKind::CoastOutlet).unwrap(),
+            selected_river_color(),
+            "coast outlet marker should be visually distinct from river strokes"
+        );
     }
 
     #[test]

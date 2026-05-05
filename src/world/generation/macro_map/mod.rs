@@ -80,6 +80,20 @@ impl MacroSurfaceKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MacroLakeEdgeClass {
+    NonLake,
+    LakeAdjacentLand,
+    LakeBoundary,
+    LakeInternal,
+}
+
+impl MacroLakeEdgeClass {
+    pub const fn excludes_selected_river(self) -> bool {
+        !matches!(self, Self::NonLake)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroSite {
     pub id: VoronoiSiteId,
@@ -135,6 +149,7 @@ pub struct MacroEdge {
     pub sites: [VoronoiSiteId; 2],
     pub corners: [VoronoiCornerId; 2],
     pub guide: MacroEdgeGuide,
+    pub lake_class: MacroLakeEdgeClass,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -210,6 +225,10 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
         .map(|corner| macro_corner(corner, &corner_sites, &site_map, config))
         .collect::<Vec<_>>();
     corners.sort_by_key(|corner| corner.id.0);
+    let corner_map = corners
+        .iter()
+        .map(|corner| (corner.id, *corner))
+        .collect::<HashMap<_, _>>();
 
     let mut edges = patch
         .edges
@@ -222,6 +241,7 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
                 sites: edge.sites,
                 corners: edge.corners,
                 guide: macro_edge_guide(a, b, config),
+                lake_class: macro_edge_lake_class(a, b, edge.corners, &corner_map),
             }
         })
         .collect::<Vec<_>>();
@@ -279,7 +299,8 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
     let components = connected_components(&patch.sites, &adjacency, &land_mask);
     let coast_distances = graph_distances_to_coast(&adjacency, &land_mask);
     let component_sizes = component_sizes(&components);
-    let boundary_components = component_touches_patch_boundary(&patch.sites, &components);
+    let ocean_components =
+        explicit_ocean_components(&patch.sites, &components, &land_mask, &component_sizes);
     let largest_land_component = components
         .iter()
         .enumerate()
@@ -299,11 +320,8 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
         .map(|(index, site)| {
             let component = components[index];
             let component_size = component_sizes.get(&component).copied().unwrap_or(0);
-            let is_inland_water = !land_mask[index]
-                && !boundary_components
-                    .get(&component)
-                    .copied()
-                    .unwrap_or(false);
+            let is_inland_water =
+                !land_mask[index] && !ocean_components.get(&component).copied().unwrap_or(false);
             SiteContext {
                 base_fields: site.base_fields,
                 ruggedness: site.ruggedness,
@@ -328,35 +346,44 @@ fn component_sizes(components: &[u64]) -> HashMap<u64, usize> {
     sizes
 }
 
-fn component_touches_patch_boundary(
+fn explicit_ocean_components(
     sites: &[super::graph::VoronoiSite],
     components: &[u64],
+    land_mask: &[bool],
+    component_sizes: &HashMap<u64, usize>,
 ) -> HashMap<u64, bool> {
-    let Some(min_x) = sites.iter().map(|site| site.owner_region.x).min() else {
-        return HashMap::new();
-    };
-    let Some(max_x) = sites.iter().map(|site| site.owner_region.x).max() else {
-        return HashMap::new();
-    };
-    let Some(min_z) = sites.iter().map(|site| site.owner_region.z).min() else {
-        return HashMap::new();
-    };
-    let Some(max_z) = sites.iter().map(|site| site.owner_region.z).max() else {
-        return HashMap::new();
-    };
+    let largest_water_component = components
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !land_mask[*index])
+        .max_by_key(|(_, component)| component_sizes.get(component).copied().unwrap_or(0))
+        .map(|(_, component)| *component);
+    let largest_water_size = largest_water_component
+        .and_then(|component| component_sizes.get(&component).copied())
+        .unwrap_or(0);
+    let ocean_size_floor = ((largest_water_size as f32) * 0.18).round().max(64.0) as usize;
 
-    let mut touches = HashMap::new();
-    for (site, &component) in sites.iter().zip(components) {
-        let is_boundary = site.owner_region.x == min_x
-            || site.owner_region.x == max_x
-            || site.owner_region.z == min_z
-            || site.owner_region.z == max_z;
-        touches
-            .entry(component)
-            .and_modify(|value| *value |= is_boundary)
-            .or_insert(is_boundary);
+    let mut continentality_sum = HashMap::<u64, f32>::new();
+    let mut counts = HashMap::<u64, usize>::new();
+    for ((site, &component), &is_land) in sites.iter().zip(components).zip(land_mask) {
+        if is_land {
+            continue;
+        }
+        *continentality_sum.entry(component).or_default() += site.base_fields.continentality;
+        *counts.entry(component).or_default() += 1;
     }
-    touches
+
+    let mut ocean_components = HashMap::new();
+    for (&component, &count) in &counts {
+        let average_continentality =
+            continentality_sum.get(&component).copied().unwrap_or(0.0) / count.max(1) as f32;
+        let is_primary_ocean = Some(component) == largest_water_component;
+        let is_explicit_secondary_ocean =
+            count >= ocean_size_floor && average_continentality <= -0.18;
+        ocean_components.insert(component, is_primary_ocean || is_explicit_secondary_ocean);
+    }
+
+    ocean_components
 }
 
 fn is_land_base(fields: GraphBaseFields, config: MacroMapConfig) -> bool {
@@ -829,6 +856,41 @@ fn macro_edge_guide(
     }
 }
 
+fn macro_edge_lake_class(
+    a: Option<MacroSite>,
+    b: Option<MacroSite>,
+    corners: [VoronoiCornerId; 2],
+    corner_map: &HashMap<VoronoiCornerId, MacroCorner>,
+) -> MacroLakeEdgeClass {
+    let lake_sites = [a, b]
+        .into_iter()
+        .flatten()
+        .filter(|site| is_lake_surface(site.surface_kind))
+        .count();
+    let lake_corners = corners
+        .into_iter()
+        .filter(|corner| {
+            corner_map
+                .get(corner)
+                .is_some_and(|corner| is_lake_surface(corner.surface_kind))
+        })
+        .count();
+
+    match (lake_sites, lake_corners) {
+        (2, _) | (_, 2) => MacroLakeEdgeClass::LakeInternal,
+        (1, _) => MacroLakeEdgeClass::LakeBoundary,
+        (0, 1) => MacroLakeEdgeClass::LakeAdjacentLand,
+        _ => MacroLakeEdgeClass::NonLake,
+    }
+}
+
+fn is_lake_surface(surface: MacroSurfaceKind) -> bool {
+    matches!(
+        surface,
+        MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+    )
+}
+
 fn empty_edge_guide() -> MacroEdgeGuide {
     MacroEdgeGuide {
         is_coast: false,
@@ -1076,6 +1138,31 @@ mod tests {
         let map = generate_macro_map(&patch, test_macro_config(91));
 
         assert_eq!(map.river_candidate_edges().count(), 0);
+    }
+
+    #[test]
+    fn lake_edge_classification_uses_sites_and_corners() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let lake_edges = map
+            .edges
+            .iter()
+            .filter(|edge| edge.lake_class.excludes_selected_river())
+            .count();
+        let boundary_edges = map
+            .edges
+            .iter()
+            .filter(|edge| edge.lake_class == MacroLakeEdgeClass::LakeBoundary)
+            .count();
+
+        assert!(
+            lake_edges > 0,
+            "seed 42 preview-sized patch should expose explicit lake edge classes"
+        );
+        assert!(
+            boundary_edges > 0,
+            "lake edge classification should distinguish visible lake boundaries"
+        );
     }
 
     #[test]

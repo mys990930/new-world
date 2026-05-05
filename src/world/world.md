@@ -138,6 +138,8 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 4. graph region, Voronoi polygon, Voronoi edge, chunk boundary는 내부 소유/계산 구조이며 visible terrain primitive가 아니다.
 5. visible terrain은 hard polygon label이 아니라 blended continuous field와 warped boundary를 샘플한다.
 6. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
+   patch/guard boundary 접촉만으로 ocean을 만들지 않고, explicit ocean basin 연결성을 기준으로
+   ocean과 inland lake/wetland를 구분해야 한다.
 7. 각 generation stage는 topdown preview binary로 검토 가능해야 한다.
 8. legacy API는 migration bridge이며, 새 기능은 가능한 한 graph-first generation 모듈에 추가한다.
 9. 실시간 chunk fill은 graph/macro/hydrology stage를 chunk마다 재계산하지 않고, world-owned

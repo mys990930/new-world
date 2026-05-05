@@ -18,6 +18,8 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 - flow accumulation과 downstream progress 유지
 - lake, sink, outlet carve 같은 local minima 처리 계약 정의
 - heightfield와 surface plan이 읽을 valley/water constraint 제공
+- macro_map의 `MacroLakeEdgeClass`를 읽어 selected river가 lake internal/boundary/adjacent edge를
+  쓰지 않도록 강제
 
 ---
 
@@ -115,8 +117,9 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
 6. watershed와 flow accumulation을 계산한다.
 7. terminal 정책을 적용해 충분한 flow와 지형 조건을 만족하는 edge chain만 selected river로 선택한다.
 8. lake contact topology를 정리한다.
-   - selected river는 lake 내부 edge, lake-lake edge, lake-water edge, lake boundary edge를
-     어떤 경우에도 사용하지 않는다.
+   - selected river는 `MacroLakeEdgeClass::{LakeInternal,LakeBoundary,LakeAdjacentLand}` edge를
+     어떤 경우에도 사용하지 않는다. 이 판정은 corner surface만 보지 않고 macro edge의 인접 site와
+     endpoint corner annotation을 함께 읽은 결과다.
    - 유입하천은 lake boundary edge 직전의 land-side selected endpoint에서 `LakeInlet` node로
      종료된다. 해당 node는 반드시 incoming selected segment를 가져야 하며, lake edge segment
      자체는 selected river가 아니다.
@@ -161,7 +164,8 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `flow_accumulation`을 사용한다. 따라서 lake terminal river는 일반 ocean outlet trunk보다
   확연히 얇고 적어야 한다.
 - lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
-  흐름은 lake boundary edge를 selected segment로 쓰지 않는다. `LakeInlet`은 lake boundary 바로 바깥의
+  흐름은 `MacroLakeEdgeClass`가 lake 관련 edge로 분류한 edge를 selected segment로 쓰지 않는다.
+  `LakeInlet`은 lake boundary 바로 바깥의
   land-side selected endpoint에 붙고 incoming selected segment가 있을 때만 생성된다. `LakeOutlet`도
   lake boundary 바로 바깥의 land-side selected endpoint에 붙고 outgoing selected segment가 있을 때만
   생성된다. 실제 lake boundary corner는 marker 방향과 lake component pairing에만 쓰이며, selected
@@ -255,7 +259,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
    selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
 10. selected river는 lake 내부 edge를 관통하거나 lake boundary edge를 따라 스치지 않는다.
     lake와의 접촉은 land-side `LakeInlet`/`LakeOutlet` endpoint marker와 lake component pairing으로만
-    표현하며, selected segment 자체는 lake corner를 endpoint로 삼지 않는다.
+    표현하며, selected segment 자체는 lake corner를 endpoint로 삼지 않는다. selected segment가 쓰는
+    edge의 `MacroLakeEdgeClass`도 반드시 `NonLake`여야 한다.
 11. selected river graph의 shared corner는 confluence, branch, lake inlet/outlet, sink, coast outlet 중
     하나로 설명 가능해야 하며 독립 chain 교차는 허용하지 않는다.
 12. preview-visible selected river graph는 ambiguous shared corner count가 0이어야 한다. 제거된 중복
@@ -282,7 +287,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   selected segment endpoint에서만 생성되는 `LakeInlet`/`LakeOutlet` node와
   `GraphHydrologyTopologyStats`를 제공하며, preview와 테스트는 disconnected inlet/outlet, selected
   lake-edge river segment, invalid lake contact/intersection count와 ambiguous shared corner count가
-  0인지 확인한다. 같은 corner에서
+  0인지 확인한다. disconnected count는 실제 selected segment incoming/outgoing map에서 marker endpoint를
+  검사해 계산한다. 같은 corner에서
   겹쳐 보일 selected incoming은 가장 큰 flow branch만 남기고 나머지 upstream selected tree를 제거한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
