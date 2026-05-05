@@ -95,6 +95,7 @@ GraphHydrologyTopologyStats {
     invalid_river_intersection_count,
     ambiguous_shared_corner_count,
     duplicate_trunk_pruned_count,
+    repeated_lake_contact_pruned_count,
 }
 ```
 
@@ -166,12 +167,19 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
   흐름은 `MacroLakeEdgeClass`가 lake 관련 edge로 분류한 edge를 selected segment로 쓰지 않는다.
   `LakeInlet`은 lake boundary 바로 바깥의
-  land-side selected endpoint에 붙고 incoming selected segment가 있을 때만 생성된다. `LakeOutlet`도
+  land-side selected endpoint에 붙고 incoming selected segment가 있으며 raw flow가 일반 river threshold의
+  `lake_river_flow_threshold_multiplier`배 이상일 때만 생성된다. 작은 feeder는 raw ledger와 selected
+  segment에는 남을 수 있지만 preview-visible inlet marker로 승격되지 않는다. `LakeOutlet`은 lake별
+  0개부터 최대 2개까지 허용하는 launch 계약을 가진다. 현재 구현은 가장 낮고 유입부에서 떨어진 후보를
+  우선해 lake별 0개 또는 1개 outlet을 고른다. `LakeOutlet`도
   lake boundary 바로 바깥의 land-side selected endpoint에 붙고 outgoing selected segment가 있을 때만
   생성된다. 실제 lake boundary corner는 marker 방향과 lake component pairing에만 쓰이며, selected
   river segment endpoint가 되지 않는다. outlet corner의 높이 비교는 lake surface vertex가 아니라
   유입하천의 land-side approach corner elevation을 기준으로 한다. 이는 lake 후보 corner들이 같은
   수면/분지 값으로 평탄해질 수 있기 때문이다.
+- 같은 selected river chain은 lake와 두 번 접촉하지 않는다. lake inlet에서 끝난 chain과 lake outlet에서
+  시작하는 chain은 별도 chain으로 취급한다. outlet에서 시작한 chain이 다른 lake contact에 다시 닿으면
+  launch 정책은 그 selected outlet chain을 제거하고 `repeated_lake_contact_pruned_count`에 기록한다.
 - selected river occupancy는 `one selected outgoing per corner`인 downhill graph 위에서, preview-visible
   incoming도 기본적으로 `one incoming per corner`가 되도록 정리한다. 자연스러운 대규모 합류를 별도
   confluence geometry로 표현하기 전까지는 여러 headwater가 같은 trunk vertex에 따로 붙는 형태보다
@@ -265,7 +273,9 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     하나로 설명 가능해야 하며 독립 chain 교차는 허용하지 않는다.
 12. preview-visible selected river graph는 ambiguous shared corner count가 0이어야 한다. 제거된 중복
     upstream branch 수는 `duplicate_trunk_pruned_count`에 기록해 튜닝 가능하게 유지한다.
-13. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
+13. 같은 selected chain은 lake contact를 최대 한 번만 가져야 한다. 이 정책으로 제거된 selected segment는
+    `repeated_lake_contact_pruned_count`에 기록한다.
+14. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
     `selected_lake_edge_segment_count`는 정상 hydrology solve에서 0이어야 한다.
 
 ---
@@ -290,6 +300,10 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   0인지 확인한다. disconnected count는 실제 selected segment incoming/outgoing map에서 marker endpoint를
   검사해 계산한다. 같은 corner에서
   겹쳐 보일 selected incoming은 가장 큰 flow branch만 남기고 나머지 upstream selected tree를 제거한다.
+- `GraphDrainageNodeKind::Lake`는 selected river가 닿는 표시용 endpoint가 아니라, graph-stage local
+  minimum이 lake resolution으로 남았음을 나타내는 내부 drainage/debug node다. 기본 preview에서는 이
+  node를 그리지 않고, lake fill과 `LakeInlet`/`LakeOutlet` endpoint만 사용자가 보는 lake hydrology
+  표면으로 취급한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
   noisy river spline realization, valley carve와 heightfield coupling.

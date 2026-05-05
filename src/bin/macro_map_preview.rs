@@ -248,6 +248,7 @@ struct PreviewHydrologyStats {
     invalid_river_intersection_count: usize,
     ambiguous_shared_corner_count: usize,
     duplicate_trunk_pruned_count: usize,
+    repeated_lake_contact_pruned_count: usize,
     lake_terminal_segment_count: usize,
     lake_capped_segment_count: usize,
     ocean_terminal_segment_count: usize,
@@ -376,6 +377,10 @@ impl PreviewHeader {
             format!(
                 "duplicate_trunk_pruned_count={}",
                 self.hydrology_stats.duplicate_trunk_pruned_count
+            ),
+            format!(
+                "repeated_lake_contact_pruned_count={}",
+                self.hydrology_stats.repeated_lake_contact_pruned_count
             ),
             format!(
                 "lake_terminal_river_segment_count={}",
@@ -519,7 +524,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph_area.min.x, graph_area.max.x, graph_area.min.z, graph_area.max.z
     );
     println!(
-        "sites: {}, candidate edges: {} (coast {}, ridge {}, fault {}), rivers: {}, lakes: {}, sinks: {}, outlets: {}",
+        "sites: {}, candidate edges: {} (coast {}, ridge {}, fault {}), rivers: {}, lake debug nodes: {}, sinks: {}, outlets: {}",
         graph.patch.sites.len(),
         graph.edge_samples.len(),
         coast_edge_count,
@@ -550,7 +555,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_ocean_raw_flow
     );
     println!(
-        "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}",
+        "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}, repeated lake contact pruned {}",
         hydrology_stats.lake_inlet_count,
         hydrology_stats.lake_outlet_count,
         hydrology_stats.disconnected_lake_inlet_count,
@@ -559,7 +564,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.invalid_lake_contact_count,
         hydrology_stats.invalid_river_intersection_count,
         hydrology_stats.ambiguous_shared_corner_count,
-        hydrology_stats.duplicate_trunk_pruned_count
+        hydrology_stats.duplicate_trunk_pruned_count,
+        hydrology_stats.repeated_lake_contact_pruned_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -849,9 +855,9 @@ fn color_for_macro_site(site: MacroSite) -> [u8; 3] {
         MacroSurfaceKind::CoastOcean => gradient_color(
             elevation,
             &[
-                (0.00, [44, 128, 181]),
-                (0.62, [220, 205, 139]),
-                (1.00, [226, 212, 150]),
+                (0.00, [28, 98, 168]),
+                (0.62, [57, 154, 199]),
+                (1.00, [116, 196, 221]),
             ],
         ),
         MacroSurfaceKind::CoastLand => gradient_color(
@@ -1010,7 +1016,6 @@ fn hydrology_node_color(kind: GraphDrainageNodeKind) -> Option<[u8; 3]> {
     match kind {
         GraphDrainageNodeKind::LakeInlet => Some([252, 224, 66]),
         GraphDrainageNodeKind::LakeOutlet => Some([62, 113, 255]),
-        GraphDrainageNodeKind::Lake => Some([246, 241, 255]),
         GraphDrainageNodeKind::Sink => Some([128, 75, 178]),
         GraphDrainageNodeKind::CoastOutlet => Some([20, 246, 184]),
         _ => None,
@@ -1150,6 +1155,8 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
         hydrology.topology_stats.invalid_river_intersection_count;
     stats.ambiguous_shared_corner_count = hydrology.topology_stats.ambiguous_shared_corner_count;
     stats.duplicate_trunk_pruned_count = hydrology.topology_stats.duplicate_trunk_pruned_count;
+    stats.repeated_lake_contact_pruned_count =
+        hydrology.topology_stats.repeated_lake_contact_pruned_count;
 
     for segment in &hydrology.segments {
         if segment.raw_flow_accumulation > segment.flow_accumulation + 0.001 {
@@ -1382,8 +1389,8 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         1
     };
     let margin = 8 * scale;
-    let panel_width = (160 * scale).min(image.width());
-    let panel_height = (82 * scale).min(image.height());
+    let panel_width = (176 * scale).min(image.width());
+    let panel_height = (104 * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1421,19 +1428,27 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         scale,
     );
 
-    let key_y = y + panel_height.saturating_sub(34 * scale);
-    draw_key(image, bar_x, key_y, [247, 248, 242], "RIDGE", scale);
+    let key_y = y + 43 * scale;
+    draw_key(image, bar_x, key_y, [32, 104, 174], "OCEAN", scale);
     draw_key(
         image,
-        bar_x + 68 * scale,
+        bar_x + 82 * scale,
         key_y,
-        [231, 92, 88],
-        "FAULT",
+        [94, 188, 218],
+        "LAKE",
         scale,
     );
     draw_key(
         image,
         bar_x,
+        key_y + 13 * scale,
+        [112, 166, 82],
+        "LAND",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 82 * scale,
         key_y + 13 * scale,
         [236, 213, 128],
         "COAST",
@@ -1441,24 +1456,32 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     );
     draw_key(
         image,
-        bar_x + 68 * scale,
-        key_y + 13 * scale,
+        bar_x,
+        key_y + 26 * scale,
+        [247, 248, 242],
+        "RIDGE",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x + 82 * scale,
+        key_y + 26 * scale,
+        [231, 92, 88],
+        "FAULT",
+        scale,
+    );
+    draw_key(
+        image,
+        bar_x,
+        key_y + 39 * scale,
         [33, 184, 218],
         "RIVER",
         scale,
     );
     draw_key(
         image,
-        bar_x,
-        key_y + 26 * scale,
-        [246, 241, 255],
-        "LAKE",
-        scale,
-    );
-    draw_key(
-        image,
-        bar_x + 68 * scale,
-        key_y + 26 * scale,
+        bar_x + 82 * scale,
+        key_y + 39 * scale,
         [128, 75, 178],
         "SINK",
         scale,
@@ -1466,15 +1489,15 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     draw_key(
         image,
         bar_x,
-        key_y + 39 * scale,
+        key_y + 52 * scale,
         [252, 224, 66],
         "INLET",
         scale,
     );
     draw_key(
         image,
-        bar_x + 68 * scale,
-        key_y + 39 * scale,
+        bar_x + 82 * scale,
+        key_y + 52 * scale,
         [62, 113, 255],
         "OUT",
         scale,
@@ -1807,6 +1830,7 @@ mod tests {
                 invalid_river_intersection_count: 0,
                 ambiguous_shared_corner_count: 0,
                 duplicate_trunk_pruned_count: 4,
+                repeated_lake_contact_pruned_count: 0,
                 lake_terminal_segment_count: 1,
                 ocean_terminal_segment_count: 2,
                 max_lake_display_flow: 8.0,
@@ -1838,6 +1862,7 @@ mod tests {
         assert!(metadata.contains("invalid_river_intersection_count=0"));
         assert!(metadata.contains("ambiguous_shared_corner_count=0"));
         assert!(metadata.contains("duplicate_trunk_pruned_count=4"));
+        assert!(metadata.contains("repeated_lake_contact_pruned_count=0"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
@@ -1971,12 +1996,16 @@ mod tests {
     }
 
     #[test]
-    fn lake_debug_marker_color_is_distinct_from_selected_river() {
-        assert_ne!(
-            hydrology_node_color(GraphDrainageNodeKind::Lake).unwrap(),
-            selected_river_color(),
-            "lake debug markers should not read as selected river water"
+    fn lake_debug_marker_is_hidden_by_default() {
+        assert_eq!(
+            hydrology_node_color(GraphDrainageNodeKind::Lake),
+            None,
+            "internal lake-resolution debug nodes should not be visible in the default preview"
         );
+    }
+
+    #[test]
+    fn visible_hydrology_markers_are_distinct_from_selected_river() {
         assert_ne!(
             hydrology_node_color(GraphDrainageNodeKind::LakeInlet).unwrap(),
             selected_river_color(),
@@ -1986,6 +2015,32 @@ mod tests {
             hydrology_node_color(GraphDrainageNodeKind::CoastOutlet).unwrap(),
             selected_river_color(),
             "coast outlet marker should be visually distinct from river strokes"
+        );
+    }
+
+    #[test]
+    fn coast_ocean_color_stays_blue() {
+        let color = color_for_macro_site(MacroSite {
+            id: VoronoiSiteId(1),
+            owner_region: GraphRegionCoord::new(0, 0),
+            position: WorldPlanePoint::new(0.0, 0.0),
+            surface_kind: MacroSurfaceKind::CoastOcean,
+            continent: None,
+            ocean_basin: Some(new_world::world::generation::MacroOceanBasinId(1)),
+            signed_macro_elevation: 0.15,
+            continentality: -0.3,
+            coastness: 1.0,
+            distance_to_coast_blocks: 0.0,
+            distance_to_continent_core_blocks: 0.0,
+            distance_to_ocean_basin_blocks: 0.0,
+            mountainness: 0.0,
+            ridgeness: 0.0,
+            basinness: 0.8,
+        });
+
+        assert!(
+            color[2] > color[1] && color[1] > color[0],
+            "ocean-owned coast fill should read as blue instead of pale sand/green: {color:?}"
         );
     }
 

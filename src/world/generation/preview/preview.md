@@ -147,7 +147,10 @@
   ocean outlet river보다 보수적인 두께 cap을 가진다. lake terminal/inlet은 hydrology 단계에서
   chain 수와 lake 유입부 visible segment 수도 제한되므로, preview에는 cap 적용 후 남은 selected
   segment만 표시되어야 한다.
-- lake/sink/outlet node는 작은 marker로 표시한다.
+- lake fill은 파란색 계열로 표시한다. `CoastOcean`처럼 ocean-owned coast transition에 속하는 영역도
+  사용자 눈에는 바다로 읽히도록 파란 계열을 유지한다. sandy/pale yellow 계열은 land-side coast
+  overlay나 coast land fill에만 사용한다.
+- sink/outlet node는 작은 marker로 표시한다. internal lake debug node는 기본 preview에서 표시하지 않는다.
 - lake inlet과 lake outlet node가 있으면 서로 다른 marker 색과 짧은 방향 화살표로 표시한다.
   이 marker는 hydrology selected graph endpoint marker다. inlet marker는 lake boundary 직전의
   land-side endpoint에 incoming selected segment가 있을 때만 생기고, outlet marker는 lake boundary
@@ -155,15 +158,17 @@
   lake boundary edge 위에 그려지지 않는다. marker와 화살표는 river line과 node dot 위에서도 보이도록
   hydrology overlay의 마지막 쪽에서 그린다. inlet/outlet 화살표는 selected segment 전체 길이를 덮는
   긴 shaft가 아니라 endpoint 근처의 짧은 방향 표시여야 하며, lake boundary edge 위에 선처럼 놓이면 안 된다.
-- selected river, `LakeInlet`, `LakeOutlet`, internal `Lake` debug node, `CoastOutlet`, lake fill 색은
-  서로 구분되어야 한다. 특히 internal `Lake` debug node는 river나 수면처럼 보이는 하늘색 fill이 아니라
-  비수면 ring/marker 색을 사용한다.
+- selected river, `LakeInlet`, `LakeOutlet`, `CoastOutlet`, lake fill 색은 서로 구분되어야 한다.
+  `GraphDrainageNodeKind::Lake`는 local minimum lake resolution을 나타내는 내부 debug node이며,
+  기본 macro map preview legend와 overlay에는 표시하지 않는다.
 - metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
   invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count,
-  disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
+  repeated lake contact pruned count, disconnected lake inlet/outlet count, selected lake-edge river segment count를 포함한다. 정상 preview에서
   disconnected, selected lake-edge, invalid, ambiguous count는 0이어야 하며, duplicate trunk pruned count는
-  selected overlay에서 제거한 중복 upstream branch 수를 나타낸다.
-- 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
+  selected overlay에서 제거한 중복 upstream branch 수를 나타낸다. repeated lake contact pruned count는
+  같은 selected chain이 두 번째 lake contact에 닿지 않도록 제거한 segment 수를 나타낸다.
+- 작은 legend overlay는 ocean/lake/land fill, ridge/fault/coast edge, selected river, sink,
+  inlet/outlet marker key를 포함한다. 숨겨진 debug-only lake node는 legend에 넣지 않는다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
