@@ -103,7 +103,7 @@ miss에서만 worker thread가 수행한다.
 - `GraphRegionCache`: site/corner/edge topology와 base graph field
 - `MacroMapCache`: continent/ocean/island ownership, signed macro elevation, ridge/fault/coast guide
 - `HydrologyCache`: selected river chain, watershed, lake/sink/outlet resolution
-- `BoundaryCache`: selected visible edge의 noisy realization
+- `BoundaryCache`: graph/macro/hydrology output을 읽어 만든 selected visible edge의 noisy realization
 - `HeightfieldCache`: chunk column sampling이 읽을 height/water/constraint field
 
 초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
@@ -147,3 +147,6 @@ region cache의 내부 의미를 직접 결정하지 않는다.
 
 - 현재는 v2 pipeline compile-time scaffold 단계다.
 - legacy generation entrypoint는 migration 동안 `world::generation`을 통해 re-export된다.
+- stage 7 boundary realization은 `world::generation::boundary`에 구현되어 있으며, 현재는 graph patch,
+  macro map, hydrology graph를 입력으로 `BoundaryCache { curves, stats }`를 생성한다. chunk fill은 이
+  curve를 직접 만들지 않고 boundary cache를 읽는 방향을 유지한다.

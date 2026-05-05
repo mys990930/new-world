@@ -50,11 +50,22 @@ polygon boundary, coast, river, biome transition은 raw straight line으로 보�
 
 ---
 
-## 다음 구현 계획
+## 구현 계약
 
-다음 구현 단계는 pipeline 7단계인 noisy boundary realization이다. 이 단계는 graph, macro_map,
-hydrology 결과를 읽어 visible feature edge만 block-space curve로 바꾸고, raw graph topology는 그대로
-보존한다.
+pipeline 7단계는 noisy boundary realization이다. 이 단계는 graph, macro_map, hydrology 결과를 읽어
+visible feature edge만 block-space curve로 바꾸고, raw graph topology는 그대로 보존한다.
+
+현재 구현은 `src/world/generation/boundary/mod.rs`에 있다. public entrypoint는 아래다.
+
+```rust
+BoundaryConfig::new(seed, generator_version) -> BoundaryConfig
+generate_noisy_boundaries(
+    &VoronoiGraphPatch,
+    &GraphMacroMap,
+    &GraphHydrologyGraph,
+    BoundaryConfig,
+) -> BoundaryCache
+```
 
 ### 입력 데이터
 
@@ -65,11 +76,12 @@ hydrology 결과를 읽어 visible feature edge만 block-space curve로 바꾸�
 
 ### 출력 데이터 계약
 
-초기 출력은 id 기반 annotation layer로 둔다.
+출력은 id 기반 annotation layer다.
 
 ```rust
 BoundaryCache {
     curves: Vec<NoisyBoundaryCurve>,
+    stats: BoundaryStats,
 }
 
 NoisyBoundaryCurve {
@@ -78,7 +90,9 @@ NoisyBoundaryCurve {
     anchors: BoundaryAnchors,
     points: Vec<WorldPlanePoint>,
     width_hint_blocks: f32,
+    amplitude: f32,
     seed: u64,
+    guard: BoundaryGuard,
 }
 
 BoundaryRole::{
@@ -87,12 +101,14 @@ BoundaryRole::{
     Ridge,
     Fault,
     LakeShore,
-    BiomeTransition,
+    LandBoundary,
 }
 ```
 
 `points`는 world-space polyline/spline control point다. 이후 field/heightfield 단계는 이 curve와
 edge id mapping을 읽어 coast gradient, river corridor, ridge envelope, lake shore mask를 만든다.
+`BoundaryStats`는 role별 curve 수, guard violation 수, lake edge 위 river curve 수, river endpoint
+attachment mismatch 수를 제공한다.
 
 ### Deterministic Seed Policy
 
@@ -100,6 +116,33 @@ edge id mapping을 읽어 coast gradient, river corridor, ridge envelope, lake s
 - 같은 edge id와 role은 patch 요청 중심, chunk 요청 순서, worker thread scheduling에 관계없이 같은
   point sequence를 만든다.
 - 병렬 생성은 허용하지만 최종 `curves`는 `(role, edge id)` 기준으로 정렬한다.
+- 같은 edge라도 `Coast`, `River`, `LakeShore`처럼 role이 다르면 salt가 달라 다른 noisy path를 가진다.
+
+### 알고리즘
+
+구현은 Amit의 noisy edge 아이디어를 launch 수준으로 보수적으로 적용한다.
+
+- 하나의 Voronoi edge는 두 corner와 두 site center를 함께 읽는다.
+- 이 네 점의 bounding guard를 만들고, margin을 더해 수치적 guard 영역을 만든다.
+- corner-to-corner edge를 recursive midpoint displacement polyline으로 세분화한다.
+- noisy point는 edge normal 방향으로 흔들되, guard 영역으로 clamp한다.
+- endpoint는 항상 원본 corner 위치를 유지한다.
+- 기본 subdivision level은 4이며 curve당 17개의 point를 만든다.
+- amplitude는 role별로 다르며 0.5 이하로 제한한다.
+
+기본 amplitude:
+
+- coast: `0.24`
+- river: `0.16`
+- lake shore: `0.18`
+- ridge: `0.10`
+- fault: `0.08`
+- land boundary: `0.07`
+
+이 방식은 Amit의 사각형 내부 recursive subdivision을 그대로 베낀 것은 아니지만, 같은 핵심 원칙을
+따른다. 즉 noisy line은 raw Voronoi topology를 바꾸지 않고, 각 edge의 두 corner와 두 site가 만드는
+guard 안에서만 흔들린다. 이후 더 정교한 point-in-convex-quad clamp가 필요해지면 `BoundaryGuard`를
+axis-aligned guard에서 bilinear/convex guard로 좁힐 수 있다.
 
 ### Feature Constraints
 
@@ -131,20 +174,23 @@ graph region cache
 chunk fill은 boundary curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서
 graph/macro/hydrology와 같은 deterministic key/padding 정책으로 생성한다.
 
-### Preview 계획
+### Preview
 
-- `boundary_preview` 또는 `macro_map_preview --stage boundary`를 추가한다.
-- 같은 world window에서 straight graph edge와 noisy boundary를 함께 보여준다.
-- layer는 before/after overlay를 제공한다.
+- `macro_map_preview`는 같은 world window에서 faint raw Voronoi edge와 noisy boundary를 함께 보여준다.
+- 현재 layer는 before/after overlay를 제공한다.
   - faint raw Voronoi edge
+  - straight coast/ridge/fault guide
   - coast noisy curve
   - river noisy curve, width hint
   - lake shore curve
   - ridge/fault curve
-- PNG metadata에는 curve count, role별 count, max amplitude, self-intersection count, guard violation
-  count, hydrology endpoint attachment count를 기록한다.
+- PNG metadata에는 curve count, role별 count, guard violation count, lake edge river curve count,
+  hydrology endpoint attachment mismatch count를 기록한다.
 
-### 테스트 계획
+현재 preview는 selected river straight segment를 기본 표시에서 제외하고, boundary의 noisy river curve를
+river overlay로 사용한다. hydrology node와 inlet/outlet arrow는 그대로 마지막 layer에 그린다.
+
+### 테스트
 
 - determinism: 같은 seed/config/edge role은 같은 curve point를 만든다.
 - adjacent patch stability: 인접 graph patch overlap의 같은 edge curve가 동일해야 한다.
@@ -153,16 +199,6 @@ graph/macro/hydrology와 같은 deterministic key/padding 정책으로 생성한
 - hydrology attachment: river curve endpoint는 selected segment endpoint, `LakeInlet`, `LakeOutlet`,
   `CoastOutlet`, `Sink` node와 계속 붙어 있어야 한다.
 - lake constraint: lake edge에는 river curve가 생성되지 않는다.
-
-### 구현 순서
-
-1. `boundary` data type과 role/curve seed helper를 만든다.
-2. edge guard geometry와 deterministic recursive subdivision generator를 구현한다.
-3. coast, river, lake shore, ridge/fault별 amplitude/profile config를 붙인다.
-4. hydrology endpoint anchor와 lake/coast constraints를 검증한다.
-5. preview binary와 legend/metadata를 추가한다.
-6. determinism, adjacent overlap, guard containment, no crossing, hydrology attachment 테스트를 작성한다.
-7. pipeline runtime cache 문서와 연결하고, heightfield 단계가 읽을 sampling API를 노출한다.
 
 ---
 

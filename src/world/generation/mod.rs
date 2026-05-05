@@ -1,3 +1,4 @@
+pub mod boundary;
 pub mod field;
 pub mod graph;
 pub mod hydrology;
@@ -9,6 +10,12 @@ pub mod pipeline;
 #[allow(unused_imports)]
 pub use crate::world::legacy::generation::*;
 
+#[allow(unused_imports)]
+pub use boundary::{
+    BoundaryAnchors, BoundaryCache, BoundaryConfig, BoundaryGuard, BoundaryRole, BoundaryStats,
+    DEFAULT_BOUNDARY_GUARD_MARGIN_BLOCKS, DEFAULT_BOUNDARY_SUBDIVISION_LEVELS, NoisyBoundaryCurve,
+    generate_noisy_boundaries,
+};
 #[allow(unused_imports)]
 pub use field::{
     ContinuousFieldSample, GraphInfluence, VoronoiBlendSample, clamp_unit_field,
