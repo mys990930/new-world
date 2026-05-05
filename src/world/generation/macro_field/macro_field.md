@@ -124,6 +124,8 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 6. ridge guide edge의 rasterized distance field로 `ridge_influence`를 만든다.
    - ridge 자체는 Voronoi edge 위의 산맥 maxima guide다.
    - `ridge_influence`는 그 중심선 주변을 폭 있는 산맥 envelope로 끌어올리기 위한 거리 기반 scalar field다.
+   - 이 단계는 아직 Perlin micro relief 전이므로 낮은 꼬리값이 tile 전체에 grain처럼 깔리면 안 된다.
+     launch 구현은 ridge distance envelope의 낮은 값은 잘라내고, active fraction을 stats/preview에 기록한다.
 7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
@@ -141,6 +143,11 @@ combined_macro_height =
 
 `combined_macro_height`는 최종 terrain height가 아니다. 이후 meso feature, Perlin micro relief,
 heightfield/water surface composition이 이 값을 읽는다.
+
+Dry basin은 lake/ocean처럼 water flatten 대상이 아니다. `DryBasin` mask는 폐쇄 저지대라는
+surface/context를 드러내지만, combined height에서는 얕은 above-sea-level land floor로 clamp한다.
+주변 rim이나 사면은 이후 heightfield/water solve에서 더 정교하게 만들 수 있지만, macro field
+단계에서 dry basin 주변을 물처럼 낮추거나 분지 바깥이 분지 floor보다 낮아 보이게 만드는 것은 회귀다.
 
 ---
 
@@ -185,6 +192,11 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
   carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다.
 - combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 한다.
 
+preview metadata/stdout은 ridge active sample fraction, dry basin sample count와 dry basin combined
+height range를 기록한다. macro field stage에는 아직 micro Perlin이 없으므로 lit preview의 촘촘한
+grain은 ridge/coast/river/boundary blend 또는 lighting contrast에서 온 것이다. ordinary cell
+interior가 micro detail처럼 보이면 ridge tail/lighting/contrast를 먼저 의심해야 한다.
+
 중간 단계 preview는 2D gradient map이면 충분하다. 이후 heightfield stage의 최종 산출물은 white
 texture 기반 top-down heightfield render와 simple lighting으로 검증한다.
 
@@ -195,10 +207,13 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 1. `macro_field`는 graph/macro/hydrology/boundary를 대체하는 source of truth가 아니다.
 2. Perlin micro relief는 `macro_field` 이후에 합성되며 macro ownership을 뒤집으면 안 된다.
 3. ridge guide는 edge maxima skeleton이고, ridge influence는 heightfield가 읽는 주변 envelope다.
+   Perlin 전 단계에서 ridge influence가 거의 모든 tile sample에 nonzero low-level grain으로 깔리면
+   안 된다.
 4. river valley는 hydrology selected segment만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
 5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다.
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
+8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
 
 ---
 

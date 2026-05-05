@@ -9,14 +9,20 @@ use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
 
 pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
-pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 640.0;
+pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 192.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 192.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
-pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.42;
+pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.34;
 pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.48;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
+
+const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.18;
+const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.46;
+const DRY_BASIN_MIN_HEIGHT: f32 = 0.025;
+const DRY_BASIN_MAX_HEIGHT: f32 = 0.38;
+const DRY_BASIN_FLOOR_LOWERING: f32 = 0.035;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -95,10 +101,15 @@ pub struct MacroFieldTileStats {
     pub min_combined_macro_height: f32,
     pub max_combined_macro_height: f32,
     pub max_ridge_influence: f32,
+    pub average_ridge_influence: f32,
+    pub ridge_active_sample_count: usize,
     pub max_river_valley_strength: f32,
     pub ocean_sample_count: usize,
     pub lake_sample_count: usize,
     pub dry_basin_sample_count: usize,
+    pub min_dry_basin_height: f32,
+    pub max_dry_basin_height: f32,
+    pub average_dry_basin_height: f32,
     pub ridge_source_curve_count: usize,
     pub river_source_curve_count: usize,
     pub coast_source_curve_count: usize,
@@ -194,7 +205,7 @@ pub fn sample_macro_field_point(
         .into_iter()
         .filter_map(|index| context.ridge_curves.get(index))
         .map(|curve| {
-            envelope(
+            ridge_envelope(
                 polyline_distance(position, &curve.points),
                 config.ridge_radius_blocks,
             )
@@ -330,7 +341,7 @@ impl MacroFieldInfluenceFields {
             envelope(river_distance, config.river_radius_blocks) * (0.35 + river_flow_hint * 0.65);
 
         MacroFieldInfluenceSample {
-            ridge_influence: envelope(ridge_distance, config.ridge_radius_blocks),
+            ridge_influence: ridge_envelope(ridge_distance, config.ridge_radius_blocks),
             coast_influence: envelope(coast_distance, config.coast_radius_blocks),
             river_valley_strength: river_valley_strength.clamp(0.0, 1.0),
             river_distance_blocks: river_distance,
@@ -655,7 +666,10 @@ impl<'a> MacroFieldRasterContext<'a> {
             .filter_map(|edge| {
                 macro_edges
                     .get(&edge.id)
-                    .is_some_and(|macro_edge| macro_edge.guide.is_ridge_candidate)
+                    .is_some_and(|macro_edge| {
+                        macro_edge.guide.is_ridge_candidate
+                            && macro_edge.guide.ridgeness >= RIDGE_FIELD_SOURCE_MIN_RIDGENESS
+                    })
                     .then(|| boundary_curves.get(&edge.id).copied())
                     .flatten()
             })
@@ -1033,7 +1047,12 @@ fn combine_macro_height(
         * config.river_carve_scale
         * (0.45 + river_flow_hint * 0.55)
         * (1.0 - ocean_mask);
-    let coast_flatten = coast_mask * config.coast_flatten_strength;
+    let dry_basin = dry_basin_mask > 0.5;
+    let coast_flatten = if dry_basin {
+        0.0
+    } else {
+        coast_mask * config.coast_flatten_strength
+    };
     let lake_flatten = lake_mask * config.lake_flatten_strength;
     let flatten = coast_flatten.max(lake_flatten).clamp(0.0, 1.0);
     let flatten_target = if ocean_mask > 0.5 || lake_mask > 0.5 {
@@ -1043,8 +1062,9 @@ fn combine_macro_height(
     };
     let mut height = macro_elevation + ridge_raise - river_carve;
     height = height + (flatten_target - height) * flatten;
-    if dry_basin_mask > 0.5 {
-        height = height.max(-0.02);
+    if dry_basin {
+        height =
+            (height - DRY_BASIN_FLOOR_LOWERING).clamp(DRY_BASIN_MIN_HEIGHT, DRY_BASIN_MAX_HEIGHT);
     }
     height.clamp(-2.0, 2.0)
 }
@@ -1061,6 +1081,8 @@ fn macro_field_stats(
         sample_count: samples.len(),
         min_combined_macro_height: f32::INFINITY,
         max_combined_macro_height: f32::NEG_INFINITY,
+        min_dry_basin_height: f32::INFINITY,
+        max_dry_basin_height: f32::NEG_INFINITY,
         ridge_source_curve_count: influence_stats.ridge_source_curve_count,
         river_source_curve_count: influence_stats.river_source_curve_count,
         coast_source_curve_count: influence_stats.coast_source_curve_count,
@@ -1070,6 +1092,8 @@ fn macro_field_stats(
         ..MacroFieldTileStats::default()
     };
 
+    let mut ridge_sum = 0.0;
+    let mut dry_height_sum = 0.0;
     for sample in samples {
         stats.min_combined_macro_height = stats
             .min_combined_macro_height
@@ -1078,6 +1102,10 @@ fn macro_field_stats(
             .max_combined_macro_height
             .max(sample.combined_macro_height);
         stats.max_ridge_influence = stats.max_ridge_influence.max(sample.ridge_influence);
+        ridge_sum += sample.ridge_influence;
+        if sample.ridge_influence > 0.0 {
+            stats.ridge_active_sample_count += 1;
+        }
         stats.max_river_valley_strength = stats
             .max_river_valley_strength
             .max(sample.river_valley_strength);
@@ -1089,7 +1117,19 @@ fn macro_field_stats(
         }
         if sample.dry_basin_mask > 0.5 {
             stats.dry_basin_sample_count += 1;
+            stats.min_dry_basin_height =
+                stats.min_dry_basin_height.min(sample.combined_macro_height);
+            stats.max_dry_basin_height =
+                stats.max_dry_basin_height.max(sample.combined_macro_height);
+            dry_height_sum += sample.combined_macro_height;
         }
+    }
+    stats.average_ridge_influence = ridge_sum / samples.len() as f32;
+    if stats.dry_basin_sample_count > 0 {
+        stats.average_dry_basin_height = dry_height_sum / stats.dry_basin_sample_count as f32;
+    } else {
+        stats.min_dry_basin_height = 0.0;
+        stats.max_dry_basin_height = 0.0;
     }
 
     stats
@@ -1108,6 +1148,17 @@ fn envelope(distance: f32, radius: f32) -> f32 {
     }
     let t = (1.0 - distance / radius.max(f32::EPSILON)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn ridge_envelope(distance: f32, radius: f32) -> f32 {
+    let raw = envelope(distance, radius);
+    if raw <= RIDGE_INFLUENCE_VISIBLE_FLOOR {
+        0.0
+    } else {
+        let t = ((raw - RIDGE_INFLUENCE_VISIBLE_FLOOR) / (1.0 - RIDGE_INFLUENCE_VISIBLE_FLOOR))
+            .clamp(0.0, 1.0);
+        (t * t * (3.0 - 2.0 * t)).powf(1.15)
+    }
 }
 
 fn flow_hint(flow_accumulation: f32) -> f32 {
@@ -1260,6 +1311,22 @@ mod tests {
     }
 
     #[test]
+    fn dry_basin_height_is_shallow_land_floor_not_water_flatten() {
+        let config = test_tile_config();
+        let dry_height = combine_macro_height(0.18, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, config);
+        let water_height = combine_macro_height(0.18, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, config);
+
+        assert!(
+            dry_height >= DRY_BASIN_MIN_HEIGHT,
+            "dry basin should remain an above-sea-level land floor: {dry_height}"
+        );
+        assert!(
+            dry_height > water_height,
+            "dry basin should not use lake/ocean water flatten: dry={dry_height} water={water_height}"
+        );
+    }
+
+    #[test]
     fn ridge_influence_is_higher_near_ridge_curve_than_far_sample() {
         let inputs = test_inputs(42);
         let Some(ridge_curve) = inputs.boundary.curves.iter().find(|curve| {
@@ -1328,6 +1395,12 @@ mod tests {
         assert!(
             max > min,
             "splat ridge field should preserve a near/far gradient: max={max} min={min}"
+        );
+        let active_fraction =
+            tile.stats.ridge_active_sample_count as f32 / tile.stats.sample_count as f32;
+        assert!(
+            active_fraction < 0.60,
+            "pre-Perlin ridge influence should not cover almost every macro-field sample: {active_fraction}"
         );
     }
 

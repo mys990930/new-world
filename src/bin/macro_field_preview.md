@@ -101,11 +101,21 @@ Each PNG contains:
 - graph site count, macro edge count, boundary curve count, selected river feature sample count
 - ridge, river, and coast feature sample counts
 - ridge, river, and coast source curve/pixel counts from the influence raster pass
+- ridge active sample count/fraction so low-level ridge tails cannot masquerade as micro detail
+- dry basin sample count plus combined-height min/max/average so dry basins can be checked as
+  shallow land floors rather than water-flattened holes
 - macro field tile generation timing plus render/encode timing
 - noisy boundary average/max displacement
 - min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
   valley, and combined macro height
 - channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
+
+## Interpretation Notes
+
+- `lit` is still pre-Perlin. Any fine detail visible there comes from macro elevation gradients,
+  noisy-boundary blend, ridge/coast/river influence, or the lighting contrast itself.
+- `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
+  not as a lake/ocean surface and not as a mandatory deep carve.
 
 ## Example
 

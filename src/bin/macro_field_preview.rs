@@ -328,6 +328,7 @@ struct PreviewHeader {
     ridge_stats: ChannelStats,
     river_stats: ChannelStats,
     combined_stats: ChannelStats,
+    core_stats: CoreMacroFieldTileStats,
 }
 
 impl PreviewHeader {
@@ -366,6 +367,21 @@ impl PreviewHeader {
             format!("ridge_feature_samples={}", self.ridge_feature_samples),
             format!("river_feature_samples={}", self.river_feature_samples),
             format!("coast_feature_samples={}", self.coast_feature_samples),
+            format!(
+                "ridge_active_samples_fraction={},{:.4}",
+                self.core_stats.ridge_active_sample_count,
+                fraction(
+                    self.core_stats.ridge_active_sample_count,
+                    self.core_stats.sample_count
+                )
+            ),
+            format!(
+                "dry_basin_samples_height_min_max_avg={},{:.4},{:.4},{:.4}",
+                self.core_stats.dry_basin_sample_count,
+                self.core_stats.min_dry_basin_height,
+                self.core_stats.max_dry_basin_height,
+                self.core_stats.average_dry_basin_height
+            ),
             format!("tile_generation_ms={}", self.tile_generation_ms),
             format!("render_encode_ms={}", self.render_encode_ms),
             format!("total_runtime_ms={}", self.total_runtime_ms),
@@ -463,6 +479,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             ridge_stats: tile.ridge_stats,
             river_stats: tile.river_stats,
             combined_stats: tile.combined_stats,
+            core_stats: tile.core_stats,
         };
         let mut image = render_channel(window, &tile, channel)?;
         draw_legend_overlay(&mut image, channel);
@@ -538,12 +555,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         tile.ridge_stats.min, tile.ridge_stats.average, tile.ridge_stats.max
     );
     println!(
+        "ridge active samples {} / {} ({:.3})",
+        tile.core_stats.ridge_active_sample_count,
+        tile.core_stats.sample_count,
+        fraction(
+            tile.core_stats.ridge_active_sample_count,
+            tile.core_stats.sample_count
+        )
+    );
+    println!(
         "river valley min/avg/max {:.3}/{:.3}/{:.3}",
         tile.river_stats.min, tile.river_stats.average, tile.river_stats.max
     );
     println!(
         "combined height min/avg/max {:.3}/{:.3}/{:.3}",
         tile.combined_stats.min, tile.combined_stats.average, tile.combined_stats.max
+    );
+    println!(
+        "dry basin samples {} height min/avg/max {:.3}/{:.3}/{:.3}",
+        tile.core_stats.dry_basin_sample_count,
+        tile.core_stats.min_dry_basin_height,
+        tile.core_stats.average_dry_basin_height,
+        tile.core_stats.max_dry_basin_height
     );
     println!(
         "preview contrast macro robust {:.3}..{:.3} span {:.3}; combined robust {:.3}..{:.3} span {:.3}",
@@ -826,6 +859,14 @@ fn percentile_sorted(values: &[f32], t: f32) -> f32 {
     }
     let index = ((values.len() - 1) as f32 * t.clamp(0.0, 1.0)).round() as usize;
     values[index]
+}
+
+fn fraction(count: usize, total: usize) -> f32 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f32 / total as f32
+    }
 }
 
 fn render_channel(

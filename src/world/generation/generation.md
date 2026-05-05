@@ -152,6 +152,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      이 guide가 지형을 낮추는 효과를 보여야 한다.
    - combined macro height는 아직 Perlin이 섞이지 않은 pre-micro 높이이며, macro elevation,
      ridge raise, river carve, coast/lake flatten을 합성한다.
+   - dry basin은 lake/ocean water flatten 대상이 아니다. macro field에서는 폐쇄분지 surface mask와
+     얕은 above-sea-level floor로 표현하고, 큰 물웅덩이나 수면처럼 낮추지 않는다.
+   - 아직 micro Perlin이 없으므로 ordinary cell interior에 촘촘한 grain이 보이면 ridge/coast/river
+     influence의 낮은 꼬리값이나 lit preview contrast가 과장된 것이다. ridge influence는 ridge guide
+     주변에서만 active해야 하며 전역 low-level texture처럼 깔리면 안 된다.
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
 10. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
 11. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
