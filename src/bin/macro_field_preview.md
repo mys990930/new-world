@@ -87,8 +87,8 @@ of giving every tile its own artificial low and high.
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
-9. Render the requested channel or all channels with a compact legend and a thin macro-field cache
-   tile boundary grid.
+9. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
+   overlay, a scale bar, and a thin macro-field cache tile grid.
 10. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
@@ -122,16 +122,24 @@ Each PNG contains:
 - min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
   valley, and combined macro height
 - fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
+- noisy Voronoi edge overlay curve/segment count and scale bar length
+- lit raw gradient stats and smoothed-normal gradient stats
 - channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
 
 ## Interpretation Notes
 
 - `lit` is still pre-Perlin. Any fine detail visible there comes from macro elevation gradients,
   noisy-boundary blend, ridge/coast/river influence, or the lighting contrast itself.
+- `lit` uses smoothing only for preview normal calculation. It does not blur or rewrite
+  `combined_macro_height`; the goal is to stop sample-scale macro transitions from reading as
+  artificial bumps in the shaded relief.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
-- The visible grid is the macro-field cache tile grid. It is diagnostic only: it should reveal cache
-  boundaries without implying that terrain height is normalized independently inside each tile.
+- The primary visible boundary overlay is the canonical noisy Voronoi graph edge layer. The cache
+  grid is diagnostic only: it should reveal cache boundaries without implying that terrain height is
+  normalized independently inside each tile.
+- The scale bar is drawn on every channel so the world footprint can be read without checking
+  metadata.
 
 ## Example
 

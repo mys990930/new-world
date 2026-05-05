@@ -14,9 +14,9 @@ use new_world::world::generation::{
     GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HydrologyConfig,
     MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_macro_field_tile, generate_macro_map,
-    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
-    solve_hydrology,
+    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, generate_macro_field_tile,
+    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
+    graph_region_for_world_block, solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -29,6 +29,13 @@ const MACRO_PREVIEW_MAX_HEIGHT: f32 = 1.0;
 const COMBINED_PREVIEW_MIN_HEIGHT: f32 = -0.75;
 const COMBINED_PREVIEW_MAX_HEIGHT: f32 = 1.25;
 const WHITE_SATURATION_THRESHOLD: u8 = 248;
+const LIT_NORMAL_SAMPLE_RADIUS: usize = 3;
+const LIT_NORMAL_PREFILTER_RADIUS: usize = 2;
+const LIT_NORMAL_SLOPE_SCALE: f32 = 1.85;
+const LIT_DIFFUSE_STRENGTH: f32 = 0.38;
+const GRAPH_EDGE_OVERLAY_COLOR: [u8; 3] = [12, 18, 24];
+const GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.28;
+const TILE_GRID_OVERLAY_AMOUNT: f32 = 0.18;
 const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
     PreviewChannel::MacroElevation,
     PreviewChannel::Mask,
@@ -299,6 +306,26 @@ struct TileGridStats {
     horizontal_lines: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct GraphEdgeOverlayStats {
+    noisy_curve_count: usize,
+    drawn_segment_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ScaleBarStats {
+    length_blocks: f32,
+    length_pixels: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct LitGradientStats {
+    raw_average: f32,
+    raw_max: f32,
+    smoothed_average: f32,
+    smoothed_max: f32,
+}
+
 #[derive(Debug, Clone)]
 struct MacroFieldTile {
     samples: Vec<FieldSample>,
@@ -339,6 +366,14 @@ struct PreviewHeader {
     tile_boundary_spacing_blocks: f32,
     tile_boundary_vertical_lines: usize,
     tile_boundary_horizontal_lines: usize,
+    graph_edge_overlay_curve_count: usize,
+    graph_edge_overlay_segment_count: usize,
+    scale_bar_length_blocks: f32,
+    scale_bar_length_pixels: u32,
+    lit_raw_gradient_average: f32,
+    lit_raw_gradient_max: f32,
+    lit_smoothed_gradient_average: f32,
+    lit_smoothed_gradient_max: f32,
     white_saturation_fraction: f32,
     macro_stats: ChannelStats,
     ridge_stats: ChannelStats,
@@ -417,6 +452,22 @@ impl PreviewHeader {
                 self.tile_boundary_vertical_lines, self.tile_boundary_horizontal_lines
             ),
             format!(
+                "voronoi_noisy_edge_overlay_curves_segments={},{}",
+                self.graph_edge_overlay_curve_count, self.graph_edge_overlay_segment_count
+            ),
+            format!(
+                "scale_bar_blocks_pixels={:.1},{}",
+                self.scale_bar_length_blocks, self.scale_bar_length_pixels
+            ),
+            format!(
+                "lit_gradient_raw_avg_max={:.6},{:.6}",
+                self.lit_raw_gradient_average, self.lit_raw_gradient_max
+            ),
+            format!(
+                "lit_gradient_smoothed_avg_max={:.6},{:.6}",
+                self.lit_smoothed_gradient_average, self.lit_smoothed_gradient_max
+            ),
+            format!(
                 "white_saturation_fraction_channel={:.6}",
                 self.white_saturation_fraction
             ),
@@ -477,6 +528,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut generated = Vec::with_capacity(output_paths.len());
     let render_start = Instant::now();
     let tile_grid = tile_grid_stats(window, config.region_size_blocks as f32);
+    let edge_overlay = graph_edge_overlay_stats(window, &preview.boundary);
+    let scale_bar = scale_bar_stats(window);
+    let lit_gradient = lit_gradient_stats(&tile, config.width as usize, config.height as usize);
 
     for (channel, output) in output_paths {
         let white_saturation_fraction = channel_white_saturation_fraction(
@@ -520,6 +574,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             tile_boundary_spacing_blocks: tile_grid.spacing_blocks,
             tile_boundary_vertical_lines: tile_grid.vertical_lines,
             tile_boundary_horizontal_lines: tile_grid.horizontal_lines,
+            graph_edge_overlay_curve_count: edge_overlay.noisy_curve_count,
+            graph_edge_overlay_segment_count: edge_overlay.drawn_segment_count,
+            scale_bar_length_blocks: scale_bar.length_blocks,
+            scale_bar_length_pixels: scale_bar.length_pixels,
+            lit_raw_gradient_average: lit_gradient.raw_average,
+            lit_raw_gradient_max: lit_gradient.raw_max,
+            lit_smoothed_gradient_average: lit_gradient.smoothed_average,
+            lit_smoothed_gradient_max: lit_gradient.smoothed_max,
             white_saturation_fraction,
             macro_stats: tile.macro_stats,
             ridge_stats: tile.ridge_stats,
@@ -529,6 +591,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let mut image = render_channel(window, &tile, channel)?;
         draw_tile_boundary_overlay(&mut image, window, tile_grid);
+        draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary);
+        draw_scale_bar_overlay(&mut image, window, scale_bar);
         draw_legend_overlay(&mut image, channel);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((channel, output, image.width(), image.height()));
@@ -584,6 +648,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "timing: build world {} ms, macro field tile {} ms, render+encode {} ms, total {} ms",
         build_ms, tile_generation_ms, render_encode_ms, total_runtime_ms
+    );
+    println!(
+        "lit gradient raw avg/max {:.6}/{:.6}, smoothed normal avg/max {:.6}/{:.6}",
+        lit_gradient.raw_average,
+        lit_gradient.raw_max,
+        lit_gradient.smoothed_average,
+        lit_gradient.smoothed_max
+    );
+    println!(
+        "preview overlays: noisy voronoi curves {}, drawn segments {}, cache grid v/h {}/{}, scale bar {:.0} blocks ({} px)",
+        edge_overlay.noisy_curve_count,
+        edge_overlay.drawn_segment_count,
+        tile_grid.vertical_lines,
+        tile_grid.horizontal_lines,
+        scale_bar.length_blocks,
+        scale_bar.length_pixels
     );
     println!(
         "noisy boundary displacement avg/max {:.2}/{:.2} blocks",
@@ -986,6 +1066,47 @@ fn grid_line_count(min: f32, max: f32, spacing: f32) -> usize {
     }
 }
 
+fn graph_edge_overlay_stats(
+    window: PreviewWindow,
+    boundary: &BoundaryCache,
+) -> GraphEdgeOverlayStats {
+    let drawn_segment_count = boundary
+        .curves
+        .iter()
+        .flat_map(|curve| curve.points.windows(2))
+        .filter(|segment| clip_world_segment_to_window(segment[0], segment[1], window).is_some())
+        .count();
+
+    GraphEdgeOverlayStats {
+        noisy_curve_count: boundary.curves.len(),
+        drawn_segment_count,
+    }
+}
+
+fn scale_bar_stats(window: PreviewWindow) -> ScaleBarStats {
+    let target_blocks = window.world_span_x * 0.16;
+    let length_blocks = nice_scale_bar_length(target_blocks);
+    let length_pixels = (length_blocks / window.world_span_x * window.width as f32)
+        .round()
+        .max(1.0) as u32;
+
+    ScaleBarStats {
+        length_blocks,
+        length_pixels,
+    }
+}
+
+fn nice_scale_bar_length(target_blocks: f32) -> f32 {
+    const CANDIDATES: [f32; 11] = [
+        128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0,
+    ];
+    CANDIDATES
+        .into_iter()
+        .filter(|candidate| *candidate <= target_blocks.max(128.0))
+        .last()
+        .unwrap_or(128.0)
+}
+
 fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid: TileGridStats) {
     if grid.spacing_blocks <= 0.0 {
         return;
@@ -1000,7 +1121,11 @@ fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid:
         if !(0.0..image.width() as f32).contains(&px) {
             continue;
         }
-        let amount = if gx == 0 { 0.56 } else { 0.34 };
+        let amount = if gx == 0 {
+            TILE_GRID_OVERLAY_AMOUNT * 1.45
+        } else {
+            TILE_GRID_OVERLAY_AMOUNT
+        };
         draw_vertical_line(
             image,
             px as u32,
@@ -1017,13 +1142,210 @@ fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid:
         if !(0.0..image.height() as f32).contains(&py) {
             continue;
         }
-        let amount = if gz == 0 { 0.56 } else { 0.34 };
+        let amount = if gz == 0 {
+            TILE_GRID_OVERLAY_AMOUNT * 1.45
+        } else {
+            TILE_GRID_OVERLAY_AMOUNT
+        };
         draw_horizontal_line(
             image,
             py as u32,
             if gz == 0 { major_color } else { color },
             amount,
         );
+    }
+}
+
+fn draw_noisy_graph_edge_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    boundary: &BoundaryCache,
+) {
+    for curve in &boundary.curves {
+        for segment in curve.points.windows(2) {
+            let Some((start, end)) = clip_world_segment_to_window(segment[0], segment[1], window)
+            else {
+                continue;
+            };
+            let (sx, sy) = world_to_pixel(start, window, image.width(), image.height());
+            let (ex, ey) = world_to_pixel(end, window, image.width(), image.height());
+            draw_pixel_line(
+                image,
+                sx,
+                sy,
+                ex,
+                ey,
+                GRAPH_EDGE_OVERLAY_COLOR,
+                GRAPH_EDGE_OVERLAY_AMOUNT,
+            );
+        }
+    }
+}
+
+fn draw_scale_bar_overlay(image: &mut RgbImage, _window: PreviewWindow, stats: ScaleBarStats) {
+    if image.width() < 80 || image.height() < 48 || stats.length_pixels == 0 {
+        return;
+    }
+
+    let scale = if image.width() >= 640 && image.height() >= 360 {
+        2
+    } else {
+        1
+    };
+    let margin = 12 * scale;
+    let bar_width = stats
+        .length_pixels
+        .min(image.width().saturating_sub(margin * 2));
+    if bar_width < 8 {
+        return;
+    }
+
+    let panel_width = (bar_width + 24 * scale).min(image.width());
+    let panel_height = (28 * scale).min(image.height());
+    let x = image.width().saturating_sub(panel_width + margin);
+    let y = image.height().saturating_sub(panel_height + margin);
+    let bar_x = x + 12 * scale;
+    let bar_y = y + 10 * scale;
+    let label = scale_bar_label(stats.length_blocks);
+
+    blend_rect(image, x, y, panel_width, panel_height, [8, 11, 14], 0.62);
+    draw_scale_bar_line(image, bar_x, bar_y, bar_width, [242, 245, 235], 0.92);
+    draw_text(
+        image,
+        bar_x,
+        bar_y + 7 * scale,
+        &label,
+        [230, 235, 222],
+        scale,
+    );
+}
+
+fn draw_scale_bar_line(
+    image: &mut RgbImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    color: [u8; 3],
+    amount: f32,
+) {
+    for px in x..=(x + width).min(image.width().saturating_sub(1)) {
+        blend_pixel(image, px, y, color, amount);
+        blend_pixel(image, px, y + 1, color, amount);
+    }
+    for tick_x in [x, (x + width).min(image.width().saturating_sub(1))] {
+        for py in y.saturating_sub(3)..=(y + 4).min(image.height().saturating_sub(1)) {
+            blend_pixel(image, tick_x, py, color, amount);
+            if tick_x + 1 < image.width() {
+                blend_pixel(image, tick_x + 1, py, color, amount);
+            }
+        }
+    }
+}
+
+fn scale_bar_label(length_blocks: f32) -> String {
+    if length_blocks >= 1024.0 {
+        format!("{}K BLOCKS", (length_blocks / 1024.0).round() as u32)
+    } else {
+        format!("{} BLOCKS", length_blocks.round() as u32)
+    }
+}
+
+fn world_to_pixel(
+    point: WorldPlanePoint,
+    window: PreviewWindow,
+    width: u32,
+    height: u32,
+) -> (i32, i32) {
+    let x = ((point.x - window.min_x()) / window.world_span_x * width as f32).round() as i32;
+    let y = ((point.z - window.min_z()) / window.world_span_z * height as f32).round() as i32;
+    (x, y)
+}
+
+fn clip_world_segment_to_window(
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    window: PreviewWindow,
+) -> Option<(WorldPlanePoint, WorldPlanePoint)> {
+    let mut t0 = 0.0;
+    let mut t1 = 1.0;
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+
+    if !clip_axis(-dx, start.x - window.min_x(), &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip_axis(dx, window.max_x() - start.x, &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip_axis(-dz, start.z - window.min_z(), &mut t0, &mut t1) {
+        return None;
+    }
+    if !clip_axis(dz, window.max_z() - start.z, &mut t0, &mut t1) {
+        return None;
+    }
+
+    Some((
+        WorldPlanePoint::new(start.x + dx * t0, start.z + dz * t0),
+        WorldPlanePoint::new(start.x + dx * t1, start.z + dz * t1),
+    ))
+}
+
+fn clip_axis(p: f32, q: f32, t0: &mut f32, t1: &mut f32) -> bool {
+    if p.abs() <= f32::EPSILON {
+        return q >= 0.0;
+    }
+    let r = q / p;
+    if p < 0.0 {
+        if r > *t1 {
+            return false;
+        }
+        if r > *t0 {
+            *t0 = r;
+        }
+    } else {
+        if r < *t0 {
+            return false;
+        }
+        if r < *t1 {
+            *t1 = r;
+        }
+    }
+    true
+}
+
+fn draw_pixel_line(
+    image: &mut RgbImage,
+    start_x: i32,
+    start_y: i32,
+    end_x: i32,
+    end_y: i32,
+    color: [u8; 3],
+    amount: f32,
+) {
+    let mut x = start_x;
+    let mut y = start_y;
+    let dx = (end_x - start_x).abs();
+    let dy = -(end_y - start_y).abs();
+    let sx = if start_x < end_x { 1 } else { -1 };
+    let sy = if start_y < end_y { 1 } else { -1 };
+    let mut error = dx + dy;
+
+    loop {
+        if x >= 0 && y >= 0 {
+            blend_pixel(image, x as u32, y as u32, color, amount);
+        }
+        if x == end_x && y == end_y {
+            break;
+        }
+        let e2 = 2 * error;
+        if e2 >= dy {
+            error += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            error += dx;
+            y += sy;
+        }
     }
 }
 
@@ -1109,20 +1431,134 @@ fn lit_height_color(
     width: usize,
     height: usize,
 ) -> [u8; 3] {
+    let radius = LIT_NORMAL_SAMPLE_RADIUS.min(width.saturating_sub(1).max(1));
+    let left_x = x.saturating_sub(radius);
+    let right_x = (x + radius).min(width - 1);
+    let up_y = y.saturating_sub(radius);
+    let down_y = (y + radius).min(height - 1);
+    let dx_span = (right_x - left_x).max(1) as f32;
+    let dz_span = (down_y - up_y).max(1) as f32;
+    let dx = (smoothed_lit_height(tile, right_x, y, width, height)
+        - smoothed_lit_height(tile, left_x, y, width, height))
+        / dx_span;
+    let dz = (smoothed_lit_height(tile, x, down_y, width, height)
+        - smoothed_lit_height(tile, x, up_y, width, height))
+        / dz_span;
+    let normal = normalize3([
+        -dx * LIT_NORMAL_SLOPE_SCALE,
+        1.0,
+        -dz * LIT_NORMAL_SLOPE_SCALE,
+    ]);
+    let light = normalize3([-0.45, 0.78, -0.43]);
+    let diffuse = dot3(normal, light).max(0.0);
+    let height_t = normalize_absolute_combined_height(tile.samples[y * width + x].combined_height);
+    let ambient = 0.36 + height_t * 0.12;
+    let shade = (ambient + diffuse * LIT_DIFFUSE_STRENGTH).clamp(0.0, 0.94);
+    let value = (shade * 255.0).round() as u8;
+    [value, value, value]
+}
+
+fn smoothed_lit_height(
+    tile: &MacroFieldTile,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> f32 {
+    let radius = LIT_NORMAL_PREFILTER_RADIUS;
+    let min_x = x.saturating_sub(radius);
+    let max_x = (x + radius).min(width - 1);
+    let min_y = y.saturating_sub(radius);
+    let max_y = (y + radius).min(height - 1);
+    let mut weighted_sum = 0.0;
+    let mut weight_sum = 0.0;
+
+    for sample_y in min_y..=max_y {
+        for sample_x in min_x..=max_x {
+            let dx = sample_x.abs_diff(x) as f32;
+            let dy = sample_y.abs_diff(y) as f32;
+            let distance2 = dx * dx + dy * dy;
+            let weight = 1.0 / (1.0 + distance2);
+            weighted_sum += tile.samples[sample_y * width + sample_x].combined_height * weight;
+            weight_sum += weight;
+        }
+    }
+
+    weighted_sum / weight_sum.max(f32::EPSILON)
+}
+
+fn raw_height_gradient(
+    tile: &MacroFieldTile,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> f32 {
     let left = tile.samples[y * width + x.saturating_sub(1)].combined_height;
     let right = tile.samples[y * width + (x + 1).min(width - 1)].combined_height;
     let up = tile.samples[y.saturating_sub(1) * width + x].combined_height;
     let down = tile.samples[(y + 1).min(height - 1) * width + x].combined_height;
     let dx = right - left;
     let dz = down - up;
-    let normal = normalize3([-dx * 5.0, 1.0, -dz * 5.0]);
-    let light = normalize3([-0.45, 0.78, -0.43]);
-    let diffuse = dot3(normal, light).max(0.0);
-    let height_t = normalize_absolute_combined_height(tile.samples[y * width + x].combined_height);
-    let ambient = 0.30 + height_t * 0.14;
-    let shade = (ambient + diffuse * 0.52).clamp(0.0, 0.96);
-    let value = (shade * 255.0).round() as u8;
-    [value, value, value]
+    (dx * dx + dz * dz).sqrt()
+}
+
+fn smoothed_lit_gradient(
+    tile: &MacroFieldTile,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> f32 {
+    let radius = LIT_NORMAL_SAMPLE_RADIUS.min(width.saturating_sub(1).max(1));
+    let left_x = x.saturating_sub(radius);
+    let right_x = (x + radius).min(width - 1);
+    let up_y = y.saturating_sub(radius);
+    let down_y = (y + radius).min(height - 1);
+    let dx_span = (right_x - left_x).max(1) as f32;
+    let dz_span = (down_y - up_y).max(1) as f32;
+    let dx = (smoothed_lit_height(tile, right_x, y, width, height)
+        - smoothed_lit_height(tile, left_x, y, width, height))
+        / dx_span;
+    let dz = (smoothed_lit_height(tile, x, down_y, width, height)
+        - smoothed_lit_height(tile, x, up_y, width, height))
+        / dz_span;
+    (dx * dx + dz * dz).sqrt()
+}
+
+fn lit_gradient_stats(tile: &MacroFieldTile, width: usize, height: usize) -> LitGradientStats {
+    if width == 0 || height == 0 || tile.samples.is_empty() {
+        return LitGradientStats::default();
+    }
+
+    let (raw_sum, raw_max, smoothed_sum, smoothed_max) = (0..width * height)
+        .into_par_iter()
+        .map(|index| {
+            let x = index % width;
+            let y = index / width;
+            let raw = raw_height_gradient(tile, x, y, width, height);
+            let smoothed = smoothed_lit_gradient(tile, x, y, width, height);
+            (raw, raw, smoothed, smoothed)
+        })
+        .reduce(
+            || (0.0, 0.0, 0.0, 0.0),
+            |left, right| {
+                (
+                    left.0 + right.0,
+                    left.1.max(right.1),
+                    left.2 + right.2,
+                    left.3.max(right.3),
+                )
+            },
+        );
+    let count = (width * height) as f32;
+
+    LitGradientStats {
+        raw_average: raw_sum / count,
+        raw_max,
+        smoothed_average: smoothed_sum / count,
+        smoothed_max,
+    }
 }
 
 fn normalize_absolute_macro_height(value: f32) -> f32 {
@@ -1510,6 +1946,10 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use new_world::world::generation::{
+        BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve, VoronoiCornerId,
+        VoronoiEdgeId, VoronoiSiteId,
+    };
 
     fn test_config() -> PreviewConfig {
         PreviewConfig {
@@ -1594,6 +2034,50 @@ mod tests {
         assert_ne!(image.as_raw(), &before);
         assert_eq!(grid.vertical_lines, 5);
         assert_eq!(grid.horizontal_lines, 3);
+    }
+
+    #[test]
+    fn noisy_voronoi_edge_overlay_changes_pixels() {
+        let mut image = RgbImage::from_pixel(128, 64, image::Rgb([120, 120, 120]));
+        let before = image.as_raw().clone();
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 128,
+            height: 64,
+            world_span_x: 1024.0,
+            world_span_z: 512.0,
+        };
+        let boundary = test_boundary_cache();
+        let stats = graph_edge_overlay_stats(window, &boundary);
+
+        draw_noisy_graph_edge_overlay(&mut image, window, &boundary);
+
+        assert_ne!(image.as_raw(), &before);
+        assert_eq!(stats.noisy_curve_count, 1);
+        assert!(stats.drawn_segment_count > 0);
+    }
+
+    #[test]
+    fn scale_bar_overlay_changes_pixels_and_reports_length() {
+        let mut image = RgbImage::from_pixel(256, 128, image::Rgb([8, 8, 8]));
+        let before = image.as_raw().clone();
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 256,
+            height: 128,
+            world_span_x: 4096.0,
+            world_span_z: 2048.0,
+        };
+        let stats = scale_bar_stats(window);
+
+        draw_scale_bar_overlay(&mut image, window, stats);
+
+        assert_ne!(image.as_raw(), &before);
+        assert!(stats.length_blocks > 0.0);
+        assert!(stats.length_pixels > 0);
+        assert!(scale_bar_label(stats.length_blocks).contains("BLOCKS"));
     }
 
     #[test]
@@ -1733,6 +2217,44 @@ mod tests {
     }
 
     #[test]
+    fn lit_normal_smoothing_reduces_single_sample_spike_gradient() {
+        let mut samples = vec![
+            FieldSample {
+                combined_height: 0.0,
+                ..FieldSample::default()
+            };
+            49
+        ];
+        samples[3 * 7 + 3].combined_height = 1.0;
+        let tile = MacroFieldTile {
+            samples,
+            combined_stats: ChannelStats {
+                min: 0.0,
+                max: 1.0,
+                average: 1.0 / 49.0,
+                robust_min: 0.0,
+                robust_max: 1.0,
+                contrast_span: 1.0,
+            },
+            ..MacroFieldTile {
+                samples: Vec::new(),
+                macro_stats: ChannelStats::default(),
+                ridge_stats: ChannelStats::default(),
+                river_stats: ChannelStats::default(),
+                combined_stats: ChannelStats::default(),
+                core_stats: CoreMacroFieldTileStats::default(),
+            }
+        };
+        let raw = raw_height_gradient(&tile, 2, 3, 7, 7);
+        let smoothed = smoothed_lit_gradient(&tile, 2, 3, 7, 7);
+
+        assert!(
+            smoothed < raw,
+            "lit normal should smooth preview-only spikes: raw={raw} smoothed={smoothed}"
+        );
+    }
+
+    #[test]
     fn lit_heightfield_avoids_full_white_saturation() {
         let samples = vec![
             FieldSample {
@@ -1769,5 +2291,35 @@ mod tests {
                 .any(|channel| *channel < WHITE_SATURATION_THRESHOLD),
             "lit preview should not turn normal high terrain into saturated white: {color:?}"
         );
+    }
+
+    fn test_boundary_cache() -> BoundaryCache {
+        BoundaryCache {
+            curves: vec![NoisyBoundaryCurve {
+                edge: VoronoiEdgeId(1),
+                profile: BoundaryProfile::Ordinary,
+                anchors: BoundaryAnchors {
+                    corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                    sites: [VoronoiSiteId(1), VoronoiSiteId(2)],
+                    start: WorldPlanePoint::new(-300.0, -100.0),
+                    end: WorldPlanePoint::new(300.0, 100.0),
+                },
+                points: vec![
+                    WorldPlanePoint::new(-300.0, -100.0),
+                    WorldPlanePoint::new(-120.0, 40.0),
+                    WorldPlanePoint::new(80.0, -30.0),
+                    WorldPlanePoint::new(300.0, 100.0),
+                ],
+                amplitude: 32.0,
+                seed: 1,
+                guard: BoundaryGuard {
+                    min_x: -512.0,
+                    max_x: 512.0,
+                    min_z: -256.0,
+                    max_z: 256.0,
+                },
+            }],
+            stats: Default::default(),
+        }
     }
 }

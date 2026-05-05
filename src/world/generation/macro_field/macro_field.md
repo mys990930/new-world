@@ -206,8 +206,18 @@ combined macro height preview: -0.75 .. 1.25
 ```
 
 per-image min/max와 robust percentile은 metadata/stdout 진단값일 뿐 color scale의 source가 아니다.
-모든 channel은 macro-field cache tile boundary grid를 얇게 덮어 cache 단위를 보여주되, 이 grid가
-height normalization 단위처럼 보이면 회귀다.
+모든 channel은 canonical noisy Voronoi graph edge overlay를 기본으로 표시해야 한다. 사용자가
+terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field cache grid가 아니라, stage 7의
+`BoundaryCache`가 제공하는 noisy edge geometry다. 이 overlay는 field를 가리지 않도록 얇고
+반투명해야 하며, straight nearest-site 경계가 아니라 canonical noisy curve를 따른다.
+
+macro-field cache tile boundary grid는 보조 진단용으로 얇게 유지할 수 있다. 이 grid가 Voronoi graph
+edge보다 강하게 보이거나 height normalization 단위처럼 읽히면 회귀다.
+
+`lit` preview는 combined macro height 데이터를 바꾸지 않고, lighting normal 계산에만 더 넓은
+central-difference radius와 prefilter를 적용할 수 있다. 이는 pre-Perlin macro height의 sample 단위
+단절과 noisy-boundary/mask transition이 조명으로 과장되어 타일마다 오돌토돌하게 융기한 것처럼 보이는
+preview artifact를 줄이기 위한 것이다. combined/macro channel 값 자체를 무턱대고 blur하면 안 된다.
 
 중간 단계 preview는 2D gradient map이면 충분하다. 이후 heightfield stage의 최종 산출물은 white
 texture 기반 top-down heightfield render와 simple lighting으로 검증한다.
