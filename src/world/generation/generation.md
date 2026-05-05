@@ -195,6 +195,9 @@ contract에 따라 graph region cache, macro map cache, hydrology/boundary/heigh
 - lake contact river는 lake 내부 edge나 lake boundary edge를 selected segment로 사용하지 않고,
   inlet/outlet corner에서만 lake와 만나야 한다.
 - selected river graph는 confluence/branch로 설명되지 않는 shared-corner intersection을 남기면 안 된다.
+- preview-visible selected river graph는 같은 corner에 여러 독립 incoming chain이 겹쳐 보이지 않도록
+  occupancy/merge 정책을 적용해야 한다. 명시 confluence geometry가 생기기 전까지는 가장 큰 selected
+  incoming branch만 남기고 나머지 upstream selected tree를 제거한다.
 - selected river는 lake/sink/outlet 처리 없이 끊기지 않는다.
 - local minima는 lake, sink, outlet carve 중 하나로 명시된다.
 - river width는 flow와 안정적으로 연결된다.

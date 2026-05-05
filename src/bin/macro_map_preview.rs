@@ -243,6 +243,8 @@ struct PreviewHydrologyStats {
     lake_outlet_count: usize,
     invalid_lake_contact_count: usize,
     invalid_river_intersection_count: usize,
+    ambiguous_shared_corner_count: usize,
+    duplicate_trunk_pruned_count: usize,
     lake_terminal_segment_count: usize,
     lake_capped_segment_count: usize,
     ocean_terminal_segment_count: usize,
@@ -351,6 +353,14 @@ impl PreviewHeader {
             format!(
                 "invalid_river_intersection_count={}",
                 self.hydrology_stats.invalid_river_intersection_count
+            ),
+            format!(
+                "ambiguous_shared_corner_count={}",
+                self.hydrology_stats.ambiguous_shared_corner_count
+            ),
+            format!(
+                "duplicate_trunk_pruned_count={}",
+                self.hydrology_stats.duplicate_trunk_pruned_count
             ),
             format!(
                 "lake_terminal_river_segment_count={}",
@@ -525,11 +535,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_ocean_raw_flow
     );
     println!(
-        "river topology stats: lake inlets {}, lake outlets {}, invalid lake contacts {}, invalid intersections {}",
+        "river topology stats: lake inlets {}, lake outlets {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}",
         hydrology_stats.lake_inlet_count,
         hydrology_stats.lake_outlet_count,
         hydrology_stats.invalid_lake_contact_count,
-        hydrology_stats.invalid_river_intersection_count
+        hydrology_stats.invalid_river_intersection_count,
+        hydrology_stats.ambiguous_shared_corner_count,
+        hydrology_stats.duplicate_trunk_pruned_count
     );
     println!("metadata: new-world-preview-header iTXt chunk");
     println!(
@@ -949,6 +961,8 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
         draw_river_segment(image, window, segment, &patch_edges, &corners);
     }
 
+    draw_lake_contact_arrows(image, window, &graph.hydrology);
+
     for node in &graph.hydrology.nodes {
         let color = match node.kind {
             GraphDrainageNodeKind::LakeInlet => [91, 232, 255],
@@ -969,6 +983,37 @@ fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGr
         };
         draw_disc(image, x, y, radius + 1, [5, 12, 18], 0.45);
         draw_disc(image, x, y, radius, color, 0.78);
+    }
+}
+
+fn draw_lake_contact_arrows(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    hydrology: &GraphHydrologyGraph,
+) {
+    let nodes = hydrology
+        .nodes
+        .iter()
+        .map(|node| (node.id, node))
+        .collect::<HashMap<_, _>>();
+
+    for segment in &hydrology.segments {
+        let Some(from) = nodes.get(&segment.from).copied() else {
+            continue;
+        };
+        let Some(to) = nodes.get(&segment.to).copied() else {
+            continue;
+        };
+
+        if to.kind == GraphDrainageNodeKind::LakeInlet {
+            let start = window.world_to_pixel_clamped(from.position);
+            let tip = window.world_to_pixel_clamped(to.position);
+            draw_arrow(image, start, tip, [252, 240, 92], 0.96);
+        } else if from.kind == GraphDrainageNodeKind::LakeOutlet {
+            let start = window.world_to_pixel_clamped(from.position);
+            let tip = window.world_to_pixel_clamped(to.position);
+            draw_arrow(image, start, tip, [76, 157, 255], 0.96);
+        }
     }
 }
 
@@ -1030,6 +1075,8 @@ fn preview_hydrology_stats(hydrology: &GraphHydrologyGraph) -> PreviewHydrologyS
     stats.invalid_lake_contact_count = hydrology.topology_stats.invalid_lake_contact_count;
     stats.invalid_river_intersection_count =
         hydrology.topology_stats.invalid_river_intersection_count;
+    stats.ambiguous_shared_corner_count = hydrology.topology_stats.ambiguous_shared_corner_count;
+    stats.duplicate_trunk_pruned_count = hydrology.topology_stats.duplicate_trunk_pruned_count;
 
     for segment in &hydrology.segments {
         if segment.raw_flow_accumulation > segment.flow_accumulation + 0.001 {
@@ -1209,6 +1256,48 @@ fn draw_line(
     }
 }
 
+fn draw_arrow(
+    image: &mut RgbImage,
+    start: (i32, i32),
+    tip: (i32, i32),
+    color: [u8; 3],
+    amount: f32,
+) {
+    let dx = (tip.0 - start.0) as f32;
+    let dy = (tip.1 - start.1) as f32;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 2.0 {
+        draw_disc(image, tip.0, tip.1, 3, color, amount);
+        return;
+    }
+
+    let ux = dx / len;
+    let uy = dy / len;
+    let shaft_len = len.min(14.0);
+    let shaft_start = (
+        (tip.0 as f32 - ux * shaft_len).round() as i32,
+        (tip.1 as f32 - uy * shaft_len).round() as i32,
+    );
+    draw_line(image, shaft_start, tip, [5, 12, 18], 0.55, 2);
+    draw_line(image, shaft_start, tip, color, amount, 1);
+
+    let head_len = 5.0;
+    let wing = 3.5;
+    let left = (
+        (tip.0 as f32 - ux * head_len - uy * wing).round() as i32,
+        (tip.1 as f32 - uy * head_len + ux * wing).round() as i32,
+    );
+    let right = (
+        (tip.0 as f32 - ux * head_len + uy * wing).round() as i32,
+        (tip.1 as f32 - uy * head_len - ux * wing).round() as i32,
+    );
+    draw_line(image, left, tip, [5, 12, 18], 0.55, 2);
+    draw_line(image, right, tip, [5, 12, 18], 0.55, 2);
+    draw_line(image, left, tip, color, amount, 1);
+    draw_line(image, right, tip, color, amount, 1);
+    draw_disc(image, tip.0, tip.1, 2, color, amount);
+}
+
 fn draw_legend_overlay(image: &mut RgbImage) {
     if image.width() < 120 || image.height() < 72 {
         return;
@@ -1305,7 +1394,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x,
         key_y + 39 * scale,
-        [91, 232, 255],
+        [252, 240, 92],
         "INLET",
         scale,
     );
@@ -1313,7 +1402,7 @@ fn draw_legend_overlay(image: &mut RgbImage) {
         image,
         bar_x + 68 * scale,
         key_y + 39 * scale,
-        [32, 126, 229],
+        [76, 157, 255],
         "OUT",
         scale,
     );
@@ -1640,6 +1729,8 @@ mod tests {
                 lake_outlet_count: 1,
                 invalid_lake_contact_count: 0,
                 invalid_river_intersection_count: 0,
+                ambiguous_shared_corner_count: 0,
+                duplicate_trunk_pruned_count: 4,
                 lake_terminal_segment_count: 1,
                 ocean_terminal_segment_count: 2,
                 max_lake_display_flow: 8.0,
@@ -1666,6 +1757,8 @@ mod tests {
         assert!(metadata.contains("lake_outlet_count=1"));
         assert!(metadata.contains("invalid_lake_contact_count=0"));
         assert!(metadata.contains("invalid_river_intersection_count=0"));
+        assert!(metadata.contains("ambiguous_shared_corner_count=0"));
+        assert!(metadata.contains("duplicate_trunk_pruned_count=4"));
         assert!(metadata.contains("max_lake_display_flow=8.000"));
         assert!(!metadata.contains("mountain_edge_count"));
     }
@@ -1689,6 +1782,86 @@ mod tests {
         draw_legend_overlay(&mut image);
 
         assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(180 * 90));
+    }
+
+    #[test]
+    fn lake_inlet_outlet_arrows_change_image_pixels() {
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 80,
+            height: 60,
+            world_span_x: 80.0,
+            world_span_z: 60.0,
+        };
+        let hydro = GraphHydrologyGraph {
+            corners: Vec::new(),
+            nodes: vec![
+                new_world::world::generation::GraphDrainageNode {
+                    id: new_world::world::generation::GraphDrainageNodeId(1),
+                    kind: GraphDrainageNodeKind::Source,
+                    corner: VoronoiCornerId(1),
+                    position: WorldPlanePoint::new(-20.0, 0.0),
+                    watershed: new_world::world::generation::WatershedId(1),
+                },
+                new_world::world::generation::GraphDrainageNode {
+                    id: new_world::world::generation::GraphDrainageNodeId(2),
+                    kind: GraphDrainageNodeKind::LakeInlet,
+                    corner: VoronoiCornerId(2),
+                    position: WorldPlanePoint::new(-5.0, 0.0),
+                    watershed: new_world::world::generation::WatershedId(1),
+                },
+                new_world::world::generation::GraphDrainageNode {
+                    id: new_world::world::generation::GraphDrainageNodeId(3),
+                    kind: GraphDrainageNodeKind::LakeOutlet,
+                    corner: VoronoiCornerId(3),
+                    position: WorldPlanePoint::new(5.0, 0.0),
+                    watershed: new_world::world::generation::WatershedId(1),
+                },
+                new_world::world::generation::GraphDrainageNode {
+                    id: new_world::world::generation::GraphDrainageNodeId(4),
+                    kind: GraphDrainageNodeKind::CoastOutlet,
+                    corner: VoronoiCornerId(4),
+                    position: WorldPlanePoint::new(22.0, 0.0),
+                    watershed: new_world::world::generation::WatershedId(1),
+                },
+            ],
+            segments: vec![
+                GraphRiverSegment {
+                    id: new_world::world::generation::GraphRiverSegmentId(1),
+                    edge: VoronoiEdgeId(1),
+                    from: new_world::world::generation::GraphDrainageNodeId(1),
+                    to: new_world::world::generation::GraphDrainageNodeId(2),
+                    watershed: new_world::world::generation::WatershedId(1),
+                    role: new_world::world::generation::GraphHydrologyRole::Headwater,
+                    raw_flow_accumulation: 12.0,
+                    flow_accumulation: 12.0,
+                    downstream_progress: 0.1,
+                },
+                GraphRiverSegment {
+                    id: new_world::world::generation::GraphRiverSegmentId(2),
+                    edge: VoronoiEdgeId(2),
+                    from: new_world::world::generation::GraphDrainageNodeId(3),
+                    to: new_world::world::generation::GraphDrainageNodeId(4),
+                    watershed: new_world::world::generation::WatershedId(1),
+                    role: new_world::world::generation::GraphHydrologyRole::Headwater,
+                    raw_flow_accumulation: 12.0,
+                    flow_accumulation: 12.0,
+                    downstream_progress: 0.1,
+                },
+            ],
+            topology_stats: Default::default(),
+        };
+        let mut image = RgbImage::from_pixel(80, 60, image::Rgb([4, 5, 6]));
+        let before = image.as_raw().clone();
+
+        draw_lake_contact_arrows(&mut image, window, &hydro);
+
+        assert_ne!(
+            image.as_raw(),
+            &before,
+            "lake inlet/outlet directional markers should visibly affect preview pixels"
+        );
     }
 
     #[test]

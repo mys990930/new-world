@@ -51,15 +51,20 @@
     top-N chain limits, short visible inlet segments, and lake-area discharge caps all affect
     the displayed segment set.
   - lake, lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
-    overlay dots. Lake inlets and outlets use distinct colors so lake contact topology can be
-    checked without reading raw dumps.
+    overlay dots. Lake inlets and outlets also draw short directional arrows: inlet arrows point
+    into the lake vertex, and outlet arrows point away from the lake vertex toward downstream.
+    These markers are drawn above the river line so topology changes are visible in the preview.
+  - selected river occupancy is stricter than the raw flow ledger: if multiple selected upstream
+    branches would share the same corner as separate visible chains, hydrology keeps the largest
+    branch and prunes the losing upstream selected tree until explicit confluence geometry exists.
 - A compact in-image legend with an elevation color bar and overlay keys.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, candidate edge count, coast/ridge/fault edge counts, selected river/lake/sink/outlet counts,
   lake/ocean terminal segment counts, lake component count, inland water site count, ocean component
   count, lake-capped segment count, lake inlet/outlet count, invalid lake contact/intersection
-  count, lake/ocean max display/raw flow, sea level, and source notes.
+  count, ambiguous shared corner count, duplicate trunk pruned count, lake/ocean max display/raw
+  flow, sea level, and source notes.
 
 ## Output Path Rules
 

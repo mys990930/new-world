@@ -148,9 +148,14 @@
   chain 수와 lake 유입부 visible segment 수도 제한되므로, preview에는 cap 적용 후 남은 selected
   segment만 표시되어야 한다.
 - lake/sink/outlet node는 작은 marker로 표시한다.
-- lake inlet과 lake outlet node가 있으면 서로 다른 marker 색으로 표시한다. metadata/stdout에는
-  lake inlet count, lake outlet count, invalid lake contact count, invalid river intersection count를
-  포함하며 invalid count는 정상 preview에서 0이어야 한다.
+- lake inlet과 lake outlet node가 있으면 서로 다른 marker 색과 짧은 방향 화살표로 표시한다.
+  inlet arrow는 land-side river가 lake vertex로 들어가는 방향을, outlet arrow는 lake vertex에서
+  downstream land/ocean 쪽으로 나가는 방향을 보여준다. 이 marker는 river line과 node dot 위에서도
+  보이도록 hydrology overlay의 마지막 쪽에서 그린다.
+- metadata/stdout에는 lake inlet count, lake outlet count, invalid lake contact count,
+  invalid river intersection count, ambiguous shared corner count, duplicate trunk pruned count를
+  포함한다. 정상 preview에서 invalid/ambiguous count는 0이어야 하며, duplicate trunk pruned count는
+  selected overlay에서 제거한 중복 upstream branch 수를 나타낸다.
 - 작은 legend overlay는 elevation gradient와 ridge/fault/coast edge key를 포함한다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
@@ -158,8 +163,9 @@
   candidate edge count, coast/ridge/fault edge count, selected river segment count, lake/sink/outlet
   node count, lake component count, inland water site count, ocean component count,
   lake/ocean terminal river segment count, lake-capped segment count, lake inlet/outlet count,
-  invalid lake contact/intersection count, lake/ocean max display/raw flow, sea level, stage 4
-  guide input note, stage 6 hydrology raw/selected flow note, source note를 함께 기록한다.
+  invalid lake contact/intersection count, ambiguous shared corner count, duplicate trunk pruned
+  count, lake/ocean max display/raw flow, sea level, stage 4 guide input note, stage 6 hydrology
+  raw/selected flow note, source note를 함께 기록한다.
 - 단일 preview에서 `--output`이 확장자를 가진 경로이면 해당 PNG 파일에 쓴다. 확장자가 없는 경로이면
   디렉터리로 보고 기본 짧은 파일명을 그 아래에 쓴다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.

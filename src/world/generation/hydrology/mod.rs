@@ -125,6 +125,8 @@ pub struct GraphHydrologyTopologyStats {
     pub lake_outlet_count: usize,
     pub invalid_lake_contact_count: usize,
     pub invalid_river_intersection_count: usize,
+    pub ambiguous_shared_corner_count: usize,
+    pub duplicate_trunk_pruned_count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -236,7 +238,7 @@ pub fn solve_hydrology(
     let lake_policies =
         resolve_lake_terminal_policies(&terminal_indices, &lake_candidates, &resolutions, config);
     let lake_inlet_policies = resolve_lake_inlet_policies(&lake_candidates, &adjacency, config);
-    let selected = select_river_paths(
+    let selected_rivers = select_river_paths(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
@@ -250,6 +252,7 @@ pub fn solve_hydrology(
         &lake_topology,
         config,
     );
+    let selected = selected_rivers.selected;
     let selected_flow_accumulation = resolve_selected_flow_accumulation(
         &flow_accumulation,
         &terminal_indices,
@@ -263,6 +266,7 @@ pub fn solve_hydrology(
         &lake_candidates,
         &resolutions,
         &lake_topology,
+        selected_rivers.duplicate_trunk_pruned_count,
     );
     let node_kinds = resolve_node_kinds(
         &selected,
@@ -313,6 +317,12 @@ pub fn solve_hydrology(
 struct CornerNeighbor {
     index: usize,
     edge: VoronoiEdgeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SelectedRiverPaths {
+    selected: Vec<bool>,
+    duplicate_trunk_pruned_count: usize,
 }
 
 fn validate_hydrology_config(config: HydrologyConfig) {
@@ -1044,7 +1054,7 @@ fn select_river_paths(
     lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     lake_topology: &LakeContactTopology,
     config: HydrologyConfig,
-) -> Vec<bool> {
+) -> SelectedRiverPaths {
     let mut selected = vec![false; downstream.len()];
     let mut selected_lake_chains = vec![0_usize; downstream.len()];
     let mut candidates = flow
@@ -1130,8 +1140,13 @@ fn select_river_paths(
         lake_topology,
     );
     remove_invalid_terminal_intersections(&mut selected, downstream, flow, lake_candidates);
+    let duplicate_trunk_pruned_count =
+        remove_ambiguous_shared_corner_intersections(&mut selected, downstream, flow);
 
-    selected
+    SelectedRiverPaths {
+        selected,
+        duplicate_trunk_pruned_count,
+    }
 }
 
 fn enforce_lake_contact_topology(
@@ -1261,6 +1276,82 @@ fn remove_invalid_terminal_intersections(
     }
 }
 
+fn remove_ambiguous_shared_corner_intersections(
+    selected: &mut [bool],
+    downstream: &[Option<usize>],
+    flow: &[f32],
+) -> usize {
+    let mut pruned = 0_usize;
+
+    loop {
+        let mut incoming = vec![Vec::<usize>::new(); selected.len()];
+        for (index, is_selected) in selected.iter().copied().enumerate() {
+            if !is_selected {
+                continue;
+            }
+            if let Some(target) = downstream[index] {
+                incoming[target].push(index);
+            }
+        }
+
+        let Some((_, sources)) = incoming
+            .into_iter()
+            .enumerate()
+            .find(|(_, sources)| sources.len() > 1)
+        else {
+            break;
+        };
+
+        let keep = sources
+            .iter()
+            .copied()
+            .max_by(|&left, &right| {
+                flow[left]
+                    .total_cmp(&flow[right])
+                    .then_with(|| right.cmp(&left))
+            })
+            .expect("ambiguous shared corner should have at least one selected source");
+
+        for source in sources {
+            if source == keep || !selected[source] {
+                continue;
+            }
+            pruned += remove_selected_upstream_tree(source, selected, downstream);
+        }
+    }
+
+    pruned
+}
+
+fn remove_selected_upstream_tree(
+    root: usize,
+    selected: &mut [bool],
+    downstream: &[Option<usize>],
+) -> usize {
+    let mut incoming = vec![Vec::<usize>::new(); selected.len()];
+    for (index, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected {
+            continue;
+        }
+        if let Some(target) = downstream[index] {
+            incoming[target].push(index);
+        }
+    }
+
+    let mut removed = 0_usize;
+    let mut stack = vec![root];
+    while let Some(index) = stack.pop() {
+        if !selected[index] {
+            continue;
+        }
+        selected[index] = false;
+        removed += 1;
+        stack.extend(incoming[index].iter().copied());
+    }
+
+    removed
+}
+
 fn resolve_selected_flow_accumulation(
     raw_flow: &[f32],
     terminal_indices: &[usize],
@@ -1333,8 +1424,10 @@ fn resolve_topology_stats(
     lake_candidates: &[bool],
     resolutions: &[GraphLocalMinimumResolution],
     lake_topology: &LakeContactTopology,
+    duplicate_trunk_pruned_count: usize,
 ) -> GraphHydrologyTopologyStats {
     let mut stats = GraphHydrologyTopologyStats::default();
+    stats.duplicate_trunk_pruned_count = duplicate_trunk_pruned_count;
     let mut incoming = vec![0_u32; selected.len()];
     let mut outgoing = vec![0_u32; selected.len()];
 
@@ -1385,6 +1478,9 @@ fn resolve_topology_stats(
         }
         if lake_candidates[index] && incoming[index] > 1 {
             stats.invalid_river_intersection_count += incoming[index].saturating_sub(1) as usize;
+        }
+        if incoming[index] > 1 {
+            stats.ambiguous_shared_corner_count += incoming[index].saturating_sub(1) as usize;
         }
     }
 
@@ -1776,6 +1872,11 @@ mod tests {
 
         assert_eq!(hydro.topology_stats.invalid_river_intersection_count, 0);
         assert_eq!(hydro.topology_stats.invalid_lake_contact_count, 0);
+        assert_eq!(hydro.topology_stats.ambiguous_shared_corner_count, 0);
+        assert!(
+            hydro.topology_stats.duplicate_trunk_pruned_count > 0,
+            "seed 42 should exercise duplicate selected trunk pruning"
+        );
         assert_eq!(
             invalid_shared_corner_count(&hydro),
             0,
@@ -1831,7 +1932,8 @@ mod tests {
             &lake_inlet_policies,
             &lake_topology,
             config,
-        );
+        )
+        .selected;
 
         let incoming_to_lake = selected[..3].iter().filter(|&&selected| selected).count();
         assert_eq!(

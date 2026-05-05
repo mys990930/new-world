@@ -88,6 +88,8 @@ GraphHydrologyTopologyStats {
     lake_outlet_count,
     invalid_lake_contact_count,
     invalid_river_intersection_count,
+    ambiguous_shared_corner_count,
+    duplicate_trunk_pruned_count,
 }
 ```
 
@@ -118,6 +120,10 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
 9. selected river graph의 shared corner를 검증한다.
    - 둘 이상의 selected segment가 한 corner에서 만나는 경우는 downstream confluence 또는 명시 terminal로 설명 가능해야 한다.
    - branch를 명시적으로 모델링하기 전까지 selected graph는 한 corner에서 여러 독립 chain이 교차하는 형태를 제거한다.
+   - launch preview 정책은 ambiguous shared corner를 보수적으로 다룬다. 같은 corner로 여러 selected
+     incoming chain이 들어오면 raw flow가 가장 큰 winner만 selected로 남기고, 나머지 upstream selected
+     tree는 제거한다. 이렇게 해서 flow accumulation 원장은 합류를 보존하되, selected river overlay는
+     별도 강줄기가 같은 꼭짓점을 공유하며 겹쳐 보이지 않게 한다.
 10. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
 11. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
 
@@ -153,6 +159,10 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   non-lake corner`로 시작한다. outlet corner의 높이 비교는 lake surface vertex가 아니라 유입하천의
   land-side approach corner elevation을 기준으로 한다. 이는 lake 후보 corner들이 같은 수면/분지 값으로
   평탄해질 수 있기 때문이다.
+- selected river occupancy는 `one selected outgoing per corner`인 downhill graph 위에서, preview-visible
+  incoming도 기본적으로 `one incoming per corner`가 되도록 정리한다. 자연스러운 대규모 합류를 별도
+  confluence geometry로 표현하기 전까지는 여러 headwater가 같은 trunk vertex에 따로 붙는 형태보다
+  가장 큰 selected branch 하나를 남기는 쪽을 우선한다.
 
 최종 river geometry는 raw edge segment가 아니다.
 
@@ -238,6 +248,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     vertex에서만 lake와 접촉해야 한다.
 11. selected river graph의 shared corner는 confluence, branch, lake inlet/outlet, sink, coast outlet 중
     하나로 설명 가능해야 하며 독립 chain 교차는 허용하지 않는다.
+12. preview-visible selected river graph는 ambiguous shared corner count가 0이어야 한다. 제거된 중복
+    upstream branch 수는 `duplicate_trunk_pruned_count`에 기록해 튜닝 가능하게 유지한다.
 
 ---
 
@@ -256,7 +268,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   적용한다. raw corner accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다.
 - selected river topology는 lake contact와 shared-corner intersection을 후처리로 검증한다. 결과 graph는
   `LakeInlet`/`LakeOutlet` node와 `GraphHydrologyTopologyStats`를 제공하며, preview와 테스트는 invalid
-  lake contact/intersection count가 0인지 확인한다.
+  lake contact/intersection count와 ambiguous shared corner count가 0인지 확인한다. 같은 corner에서
+  겹쳐 보일 selected incoming은 가장 큰 flow branch만 남기고 나머지 upstream selected tree를 제거한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
   noisy river spline realization, valley carve와 heightfield coupling.
