@@ -250,7 +250,10 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   - `--height <u32>`: 기본 `2160`
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--stage macro_field`
-  - `--channel <all|macro|mask|ridge|river|combined|lit>`: 기본 `lit`
+  - `--channel <all|macro|mask|ridge|river|combined|lit|contour>`: 기본 `lit`
+  - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `8`
+  - `--contour-major-every <n>`: major contour 간격 multiplier, 기본 `5`
+  - `--contours`: `combined`/`lit` channel 위에 contour overlay를 추가
   - `--output <path>`
 
 ### Preview Checklist
@@ -272,6 +275,9 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   river carve가 얹힌 pre-Perlin terrain surface로 읽히도록 subtle terrain ramp를 사용한다.
 - `lit`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
+- `contour`: heightfield 직전 `combined_macro_height`를 block-height scale으로 변환한 뒤 Marching
+  Squares로 추출한 contour line preview. 기본 level step은 8 blocks이며, 5 level마다 major contour를
+  그린다. sea level `y=0` contour는 별도 blue 계열로 표시한다.
 
 중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
 간단한 normal/light shading을 입힌 top-down heightfield rendering이어야 한다. lighting은 진단용이며
@@ -290,7 +296,7 @@ renderer/GPU 계약을 만들지 않는다.
   labels, influence source curve/pixel count, tile generation timing을 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/dry/coast/land key를 서로 구분되는 색으로 표시한다. lit heightfield는 height range와 light
-  direction만 표시한다.
+  direction만 표시한다. contour channel은 minor/major/sea-level key와 contour step/major spacing을 표시한다.
 - 모든 `macro_field_preview` channel은 stage 7 `BoundaryCache`의 canonical noisy Voronoi graph edge
   overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
   field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
@@ -300,6 +306,8 @@ renderer/GPU 계약을 만들지 않는다.
 - macro-field cache tile grid는 보조 진단 overlay로 유지할 수 있지만, graph edge overlay보다 강하게
   읽히면 안 된다. 이 grid는 각 tile 내부에서 height를 따로 low/high normalize한다는 뜻이 아니다.
 - 모든 `macro_field_preview` output은 world footprint를 이해할 수 있도록 scale bar를 표시한다.
+- `--contours`가 지정되면 `combined`와 `lit` channel에 contour overlay를 추가할 수 있다. 이 overlay는
+  preview 진단용이며 macro field 값 자체를 바꾸지 않는다.
 - `lit` channel은 preview lighting artifact를 줄이기 위해 combined height 데이터를 변경하지 않고
   lighting normal 계산에만 smoothing/prefilter를 적용할 수 있다. 이때 목표는 tile 하나하나의
   sample-level lighting이 아니라, 전체 지형 고저차를 흰색 재질의 broad hillshade로 읽는 것이다.
@@ -321,6 +329,8 @@ renderer/GPU 계약을 만들지 않는다.
 - no lake-edge river invariant: river valley field는 `MacroLakeEdgeClass::NonLake` selected segment만
   rasterize해야 한다.
 - preview nonblank: 각 channel은 blank 단색 이미지가 아니어야 하며 legend와 metadata를 포함해야 한다.
+- contour sanity: contour segment는 finite world-space endpoint를 가져야 하며, flat field는 contour를
+  만들지 않고 simple ramp field는 crossing contour를 만들어야 한다.
 
 ---
 

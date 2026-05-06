@@ -57,12 +57,16 @@ pub use hydrology::{
 #[allow(unused_imports)]
 pub use macro_field::{
     DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH,
-    DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH,
+    DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+    DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH,
     DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE, DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS,
     DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE, DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS,
-    DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS, MacroFieldRasterContext, MacroFieldSample,
-    MacroFieldTile, MacroFieldTileConfig, MacroFieldTileStats, generate_macro_field_tile,
-    sample_macro_field_point,
+    DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
+    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MACRO_FIELD_CONTOUR_NORMALIZED_MAX,
+    MACRO_FIELD_CONTOUR_NORMALIZED_MIN, MacroFieldContourLevel, MacroFieldContourSegment,
+    MacroFieldContourSet, MacroFieldRasterContext, MacroFieldSample, MacroFieldTile,
+    MacroFieldTileConfig, MacroFieldTileStats, combined_macro_height_to_blocks,
+    extract_macro_field_contours, generate_macro_field_tile, sample_macro_field_point,
 };
 #[allow(unused_imports)]
 pub use macro_map::{

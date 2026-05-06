@@ -213,7 +213,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 - stage 8 macro field: graph/macro/hydrology/boundary cache를 읽어 tile 단위 raster field를 만든다.
   이 field는 새 noise source가 아니라 heightfield와 chunk fill이 읽을 cache다. macro elevation,
   coast/lake/ocean/dry basin mask, ridge/fault influence, river valley, combined macro height는 각각
-  독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다.
+  독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
+  직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
 - stage 11 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
   meso/perlin delta는 아직 `0`인 stub이며, ocean/lake mask는 water level hint로, river/ridge/dry basin
   channel은 terrain kind hint로 보존한다.

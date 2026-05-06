@@ -21,7 +21,10 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--stage macro_field`
-  - `--channel <all|macro|mask|ridge|river|combined|lit>`
+  - `--channel <all|macro|mask|ridge|river|combined|lit|contour>`
+  - `--contour-step <blocks>`
+  - `--contour-major-every <n>`
+  - `--contours`
   - `--output <path>`
 
 ## Defaults
@@ -34,6 +37,8 @@
 - `--land-bias MacroMapConfig::new(...).land_bias`
 - `--stage macro_field`
 - `--channel lit`
+- `--contour-step 8`
+- `--contour-major-every 5`
 - single-channel output: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>_<channel>.png`
 - all-channel output directory: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>/`
 
@@ -49,6 +54,10 @@
 - `lit`: top-down white heightfield preview with broad directional hillshade from combined height
   gradients. This is not a 3D render and it is not per-tile lighting; it is shaded relief over the
   overall combined macro height field.
+- `contour`: Marching Squares contour lines extracted from `combined_macro_height` after converting
+  it to the same block-height scale used by the current heightfield launch slice. Minor contours use
+  `--contour-step`, major contours use `--contour-step * --contour-major-every`, and sea level
+  `y=0` is drawn in a separate muted blue.
 
 `macro`, `combined`, and `lit` use a fixed absolute normalized preview scale rather than per-image
 min/max stretching. The launch preview scale is:
@@ -71,7 +80,7 @@ of giving every tile its own artificial low and high.
 - In `--channel all`, `--output <path>.png` is interpreted as a prefix directory using the file stem,
   so `--output target/macro-field-preview/field-smoke.png` writes
   `target/macro-field-preview/field-smoke/macro.png`, `mask.png`, `ridge.png`, `river.png`,
-  `combined.png`, and `lit.png`.
+  `combined.png`, `lit.png`, and `contour.png`.
 - Width, height, span, spacing, stage, and generator version stay in PNG metadata rather than
   default filenames.
 
@@ -88,10 +97,12 @@ of giving every tile its own artificial low and high.
    - ridge candidate noisy curves through a tile-local influence raster pass,
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
-8. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
-9. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
+8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
+   `combined_macro_height -0.75..1.25 -> -48..160 blocks`.
+9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
+10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a scale bar, and a thin macro-field cache tile grid.
-10. Encode PNG metadata in `new-world-preview-header`.
+11. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
 
@@ -125,9 +136,10 @@ Each PNG contains:
   valley, and combined macro height
 - fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
 - noisy Voronoi edge overlay curve/segment count and scale bar length
+- contour step, major interval, min/max level, level count, segment count, and overlay flag
 - lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
   min/average/max/stddev
-- channel meaning notes for macro, mask, ridge, river, combined, and lit outputs
+- channel meaning notes for macro, mask, ridge, river, combined, contour, and lit outputs
 
 ## Interpretation Notes
 
@@ -151,6 +163,10 @@ Each PNG contains:
   broad white-material hillshade, so graph edges there are only a barely visible registration aid.
 - The scale bar is drawn on every channel so the world footprint can be read without checking
   metadata.
+- The `contour` channel is a diagnostic layer, not a terrain source of truth. It should be used to
+  check whether the pre-heightfield combined macro height is continuous and readable before the
+  heightfield/water solve consumes it. The contour channel keeps noisy Voronoi edge overlay off so
+  contour continuity is not hidden by graph registration lines.
 
 ## Example
 
@@ -168,4 +184,16 @@ Release timing smoke:
 
 ```bash
 cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel lit --output target/macro-field-preview/field-splat-720p.png
+```
+
+Contour smoke:
+
+```bash
+cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel contour --output target/macro-field-preview/contour.png
+```
+
+Combined terrain ramp with contour overlay:
+
+```bash
+cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel combined --contours --output target/macro-field-preview/combined-contour.png
 ```

@@ -21,6 +21,7 @@ tile로 굽는다.
 - noisy boundary 이후의 canonical curve geometry를 읽어 ridge/coast/river distance envelope를 계산하되,
   chunk/preview sample마다 모든 curve 후보를 반복 탐색하지 않도록 tile 단위 influence pass를 먼저 만든다.
 - combined macro height를 만들어 heightfield 합성 전의 큰 지형 형태를 제공
+- combined macro height를 block-space로 해석한 contour 진단 layer 제공
 - chunk fill hot path가 graph/macro/hydrology/boundary를 직접 재탐색하지 않도록 중간 cache surface 제공
 - stage preview binary가 각 channel과 combined height를 2D topdown map으로 뽑을 수 있는 데이터 제공
 
@@ -93,6 +94,27 @@ MacroFieldTile {
     samples,
     stats,
 }
+
+MacroFieldContourSet {
+    step_blocks,
+    major_every,
+    min_level_blocks,
+    max_level_blocks,
+    total_segment_count,
+    levels,
+}
+```
+
+`MacroFieldContourSet`은 terrain source of truth가 아니다. 이 구조는 `MacroFieldTile.samples[].combined_macro_height`
+를 heightfield 직전 block-height scale로 변환한 뒤 Marching Squares로 추출한 진단 layer다. contour는
+macro field가 heightfield로 넘어가기 직전에 연속적으로 읽히는지 확인하는 preview surface이며, 이후
+heightfield/water/voxel fill이 contour segment를 직접 소비해서는 안 된다.
+
+Contour block-height scale은 heightfield launch slice와 맞춘다.
+
+```text
+combined_macro_height -0.75 .. 1.25
+-> -48 .. 160 blocks
 ```
 
 ---
@@ -154,6 +176,13 @@ surface/context를 드러내지만, combined height에서는 얕은 above-sea-le
 주변 rim이나 사면은 이후 heightfield/water solve에서 더 정교하게 만들 수 있지만, macro field
 단계에서 dry basin 주변을 물처럼 낮추거나 분지 바깥이 분지 floor보다 낮아 보이게 만드는 것은 회귀다.
 
+9. 필요한 경우 `combined_macro_height`에서 contour 진단 layer를 추출한다.
+   - contour 추출은 Marching Squares 기반이다.
+   - level은 normalized scalar가 아니라 heightfield 직전 block-height 기준이다.
+   - 기본 preview step은 8 blocks, major contour는 5 level마다 40 blocks 간격이다.
+   - sea level `y = 0` contour는 별도 preview 색상으로 구분할 수 있어야 한다.
+   - flat field는 contour를 만들지 않아야 하며, 모든 segment endpoint는 finite world-space point여야 한다.
+
 ---
 
 ## Runtime Cache
@@ -199,6 +228,9 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
 - combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
   subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
+- contour. heightfield 직전 block-height scale의 combined macro height 등고선을 보여준다. minor
+  contour, major contour, sea-level contour는 서로 구분되어야 하며, contour channel에서는 noisy
+  Voronoi edge overlay가 contour 판독을 방해하지 않아야 한다.
 
 preview metadata/stdout은 ridge active sample fraction, dry basin sample count와 dry basin combined
 height range를 기록한다. macro field stage에는 아직 micro Perlin이 없으므로 lit preview의 촘촘한
@@ -253,6 +285,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    mask는 connected ocean basin과 non-ocean terrain 사이의 explicit coast context만 읽는다.
 10. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
    normalized scale을 사용해야 한다.
+11. contour는 preview/debug layer이며, source graph/macro/hydrology/boundary나 heightfield output을
+    대체하지 않는다.
 
 ---
 

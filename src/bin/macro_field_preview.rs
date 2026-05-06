@@ -10,13 +10,15 @@ use rayon::prelude::*;
 
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HydrologyConfig,
+    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+    DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
+    GraphRegionCoord, HydrologyConfig, MacroFieldContourSet,
     MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, generate_macro_field_tile,
-    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, extract_macro_field_contours,
+    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
+    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 3840;
@@ -45,13 +47,22 @@ const MASK_LAKE_COLOR: [u8; 3] = [54, 150, 198];
 const MASK_DRY_BASIN_COLOR: [u8; 3] = [122, 105, 129];
 const MASK_COAST_COLOR: [u8; 3] = [220, 196, 125];
 const MASK_LAND_COLOR: [u8; 3] = [101, 154, 89];
-const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
+const CONTOUR_MINOR_COLOR: [u8; 3] = [228, 222, 199];
+const CONTOUR_MAJOR_COLOR: [u8; 3] = [255, 246, 210];
+const CONTOUR_SEA_COLOR: [u8; 3] = [96, 165, 204];
+const CONTOUR_MINOR_AMOUNT: f32 = 0.68;
+const CONTOUR_MAJOR_AMOUNT: f32 = 0.88;
+const CONTOUR_SEA_AMOUNT: f32 = 0.92;
+const COMBINED_CONTOUR_AMOUNT_SCALE: f32 = 0.72;
+const LIT_CONTOUR_AMOUNT_SCALE: f32 = 0.48;
+const RENDERABLE_CHANNELS: [PreviewChannel; 7] = [
     PreviewChannel::MacroElevation,
     PreviewChannel::Mask,
     PreviewChannel::RidgeInfluence,
     PreviewChannel::RiverValley,
     PreviewChannel::CombinedMacroHeight,
     PreviewChannel::LitHeightfield,
+    PreviewChannel::Contour,
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +78,9 @@ struct PreviewConfig {
     land_bias: f32,
     stage: String,
     channel: PreviewChannelSelection,
+    contour_step_blocks: f32,
+    contour_major_every: u32,
+    contours: bool,
     output: Option<PathBuf>,
 }
 
@@ -92,6 +106,12 @@ impl PreviewConfig {
                 "unsupported stage: {} (expected {DEFAULT_STAGE})",
                 self.stage
             )));
+        }
+        if !self.contour_step_blocks.is_finite() || self.contour_step_blocks <= 0.0 {
+            return Err(cli_error("contour-step must be finite and positive"));
+        }
+        if self.contour_major_every == 0 {
+            return Err(cli_error("contour-major-every must be >= 1"));
         }
         Ok(self)
     }
@@ -141,6 +161,7 @@ impl PreviewChannelSelection {
             Self::Single(PreviewChannel::RiverValley) => &RENDERABLE_CHANNELS[3..4],
             Self::Single(PreviewChannel::CombinedMacroHeight) => &RENDERABLE_CHANNELS[4..5],
             Self::Single(PreviewChannel::LitHeightfield) => &RENDERABLE_CHANNELS[5..6],
+            Self::Single(PreviewChannel::Contour) => &RENDERABLE_CHANNELS[6..7],
         }
     }
 }
@@ -153,6 +174,7 @@ enum PreviewChannel {
     RiverValley,
     CombinedMacroHeight,
     LitHeightfield,
+    Contour,
 }
 
 impl PreviewChannel {
@@ -175,6 +197,7 @@ impl PreviewChannel {
             "lit" | "heightfield" | "lit_heightfield" => {
                 Some(PreviewChannelSelection::Single(Self::LitHeightfield))
             }
+            "contour" | "contours" => Some(PreviewChannelSelection::Single(Self::Contour)),
             _ => None,
         }
     }
@@ -187,6 +210,7 @@ impl PreviewChannel {
             Self::RiverValley => "river",
             Self::CombinedMacroHeight => "combined",
             Self::LitHeightfield => "lit",
+            Self::Contour => "contour",
         }
     }
 
@@ -198,6 +222,7 @@ impl PreviewChannel {
             Self::RiverValley => "river valley field",
             Self::CombinedMacroHeight => "combined macro height",
             Self::LitHeightfield => "lit heightfield preview",
+            Self::Contour => "combined macro height contours",
         }
     }
 
@@ -209,6 +234,7 @@ impl PreviewChannel {
             Self::RiverValley => "RIVER",
             Self::CombinedMacroHeight => "COMBINED",
             Self::LitHeightfield => "LIT H",
+            Self::Contour => "CONTOUR",
         }
     }
 
@@ -220,6 +246,7 @@ impl PreviewChannel {
             Self::RiverValley => "NONE",
             Self::CombinedMacroHeight => "LOW",
             Self::LitHeightfield => "SHADE",
+            Self::Contour => "MINOR",
         }
     }
 
@@ -231,6 +258,7 @@ impl PreviewChannel {
             Self::RiverValley => "VALLEY",
             Self::CombinedMacroHeight => "HIGH",
             Self::LitHeightfield => "LIGHT",
+            Self::Contour => "MAJOR",
         }
     }
 }
@@ -347,6 +375,7 @@ struct MacroFieldTile {
     river_stats: ChannelStats,
     combined_stats: ChannelStats,
     core_stats: CoreMacroFieldTileStats,
+    contours: MacroFieldContourSet,
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +412,13 @@ struct PreviewHeader {
     graph_edge_overlay_segment_count: usize,
     scale_bar_length_blocks: f32,
     scale_bar_length_pixels: u32,
+    contour_step_blocks: f32,
+    contour_major_every: u32,
+    contour_min_level_blocks: f32,
+    contour_max_level_blocks: f32,
+    contour_level_count: usize,
+    contour_segment_count: usize,
+    contour_overlay_enabled: bool,
     lit_raw_gradient_average: f32,
     lit_raw_gradient_max: f32,
     lit_smoothed_gradient_average: f32,
@@ -485,6 +521,19 @@ impl PreviewHeader {
                 self.scale_bar_length_blocks, self.scale_bar_length_pixels
             ),
             format!(
+                "contour_step_major_every={:.2},{}",
+                self.contour_step_blocks, self.contour_major_every
+            ),
+            format!(
+                "contour_min_max_level_blocks={:.2},{:.2}",
+                self.contour_min_level_blocks, self.contour_max_level_blocks
+            ),
+            format!(
+                "contour_levels_segments={},{}",
+                self.contour_level_count, self.contour_segment_count
+            ),
+            format!("contour_overlay_enabled={}", self.contour_overlay_enabled),
+            format!(
                 "lit_gradient_raw_avg_max={:.6},{:.6}",
                 self.lit_raw_gradient_average, self.lit_raw_gradient_max
             ),
@@ -538,6 +587,8 @@ impl PreviewHeader {
             "ridge_influence=distance_to_ridge_noisy_edge_envelope".to_string(),
             "river_valley=distance_to_selected_river_noisy_edge_envelope".to_string(),
             "combined=macro_elevation_plus_ridge_minus_river_and_water_flatten".to_string(),
+            "contour=block_height_marching_squares_from_combined_macro_height_before_heightfield"
+                .to_string(),
             "lit=topdown_white_heightfield_shaded_from_combined_height_gradient".to_string(),
         ]
         .join("\n")
@@ -554,7 +605,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let preview = build_preview_world(&meta, &config, graph_area)?;
     let build_ms = build_start.elapsed().as_millis();
     let tile_start = Instant::now();
-    let tile = rasterize_macro_field(window, &preview)?;
+    let tile = rasterize_macro_field(window, &preview, &config)?;
     let tile_generation_ms = tile_start.elapsed().as_millis();
     let output_paths = output_paths_for_config(&config)?;
     let mut generated = Vec::with_capacity(output_paths.len());
@@ -610,6 +661,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             graph_edge_overlay_segment_count: edge_overlay.drawn_segment_count,
             scale_bar_length_blocks: scale_bar.length_blocks,
             scale_bar_length_pixels: scale_bar.length_pixels,
+            contour_step_blocks: tile.contours.step_blocks,
+            contour_major_every: tile.contours.major_every,
+            contour_min_level_blocks: tile.contours.min_level_blocks,
+            contour_max_level_blocks: tile.contours.max_level_blocks,
+            contour_level_count: tile.contours.levels.len(),
+            contour_segment_count: tile.contours.total_segment_count,
+            contour_overlay_enabled: config.contours,
             lit_raw_gradient_average: lit_gradient.raw_average,
             lit_raw_gradient_max: lit_gradient.raw_max,
             lit_smoothed_gradient_average: lit_gradient.smoothed_average,
@@ -627,9 +685,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let mut image = render_channel(window, &tile, channel)?;
         draw_tile_boundary_overlay(&mut image, window, tile_grid);
-        draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary, channel);
+        if channel != PreviewChannel::Contour {
+            draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary, channel);
+        }
+        if channel == PreviewChannel::Contour
+            || (config.contours
+                && matches!(
+                    channel,
+                    PreviewChannel::CombinedMacroHeight | PreviewChannel::LitHeightfield
+                ))
+        {
+            draw_contour_overlay(&mut image, window, &tile.contours, channel);
+        }
         draw_scale_bar_overlay(&mut image, window, scale_bar);
-        draw_legend_overlay(&mut image, channel);
+        draw_legend_overlay(
+            &mut image,
+            channel,
+            config.contour_step_blocks,
+            config.contour_major_every,
+        );
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((channel, output, image.width(), image.height()));
     }
@@ -751,6 +825,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         COMBINED_PREVIEW_MAX_HEIGHT
     );
     println!(
+        "contours: step {:.1} blocks, major every {}, levels {}, segments {}, level range {:.1}..{:.1}",
+        tile.contours.step_blocks,
+        tile.contours.major_every,
+        tile.contours.levels.len(),
+        tile.contours.total_segment_count,
+        tile.contours.min_level_blocks,
+        tile.contours.max_level_blocks
+    );
+    println!(
         "tile boundary overlay: spacing {:.1} blocks, vertical lines {}, horizontal lines {}",
         tile_grid.spacing_blocks, tile_grid.vertical_lines, tile_grid.horizontal_lines
     );
@@ -815,6 +898,9 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut land_bias = MacroMapConfig::new(seed, WorldMeta::new(seed).generator_version).land_bias;
     let mut stage = DEFAULT_STAGE.to_string();
     let mut channel = PreviewChannelSelection::Single(PreviewChannel::LitHeightfield);
+    let mut contour_step_blocks = DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS;
+    let mut contour_major_every = DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY;
+    let mut contours = false;
     let mut output = None;
 
     while let Some(flag) = args.first().cloned() {
@@ -833,6 +919,13 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
             }
             "--land-bias" => land_bias = parse_required::<f32>(&mut args, "land-bias")?,
             "--stage" => stage = parse_required::<String>(&mut args, "stage")?,
+            "--contour-step" => {
+                contour_step_blocks = parse_required::<f32>(&mut args, "contour-step")?
+            }
+            "--contour-major-every" => {
+                contour_major_every = parse_required::<u32>(&mut args, "contour-major-every")?
+            }
+            "--contours" => contours = true,
             "--channel" => {
                 let value = parse_required::<String>(&mut args, "channel")?;
                 channel = PreviewChannel::parse(&value).ok_or_else(|| {
@@ -860,6 +953,9 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         land_bias,
         stage,
         channel,
+        contour_step_blocks,
+        contour_major_every,
+        contours,
         output,
     })
 }
@@ -972,6 +1068,7 @@ fn required_padding_regions(
 fn rasterize_macro_field(
     window: PreviewWindow,
     preview: &PreviewWorld,
+    config: &PreviewConfig,
 ) -> Result<MacroFieldTile, Box<dyn Error>> {
     let sample_spacing = window.world_span_x / window.width as f32;
     let core_config = CoreMacroFieldTileConfig::new(
@@ -988,6 +1085,11 @@ fn rasterize_macro_field(
         &preview.boundary,
         core_config,
     );
+    let contours = extract_macro_field_contours(
+        &core_tile,
+        config.contour_step_blocks,
+        config.contour_major_every,
+    );
     let samples = core_tile
         .samples
         .iter()
@@ -1001,6 +1103,7 @@ fn rasterize_macro_field(
         river_stats: channel_stats(&samples, |sample| sample.river_valley),
         combined_stats: channel_stats(&samples, |sample| sample.combined_height),
         core_stats: core_tile.stats,
+        contours,
         samples,
     })
 }
@@ -1224,8 +1327,53 @@ fn draw_noisy_graph_edge_overlay(
 fn graph_edge_overlay_amount(channel: PreviewChannel) -> f32 {
     if channel == PreviewChannel::LitHeightfield {
         LIT_GRAPH_EDGE_OVERLAY_AMOUNT
+    } else if channel == PreviewChannel::Contour {
+        0.0
     } else {
         GRAPH_EDGE_OVERLAY_AMOUNT
+    }
+}
+
+fn draw_contour_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    contours: &MacroFieldContourSet,
+    channel: PreviewChannel,
+) {
+    let amount_scale = match channel {
+        PreviewChannel::LitHeightfield => LIT_CONTOUR_AMOUNT_SCALE,
+        PreviewChannel::CombinedMacroHeight => COMBINED_CONTOUR_AMOUNT_SCALE,
+        _ => 1.0,
+    };
+    for level in &contours.levels {
+        let sea_level = level.height_blocks.abs() <= contours.step_blocks * 0.5;
+        let color = if sea_level {
+            CONTOUR_SEA_COLOR
+        } else if level.is_major {
+            CONTOUR_MAJOR_COLOR
+        } else {
+            CONTOUR_MINOR_COLOR
+        };
+        let amount = if sea_level {
+            CONTOUR_SEA_AMOUNT
+        } else if level.is_major {
+            CONTOUR_MAJOR_AMOUNT
+        } else {
+            CONTOUR_MINOR_AMOUNT
+        } * amount_scale;
+        for segment in &level.segments {
+            let Some((start, end)) =
+                clip_world_segment_to_window(segment.start, segment.end, window)
+            else {
+                continue;
+            };
+            let (sx, sy) = world_to_pixel(start, window, image.width(), image.height());
+            let (ex, ey) = world_to_pixel(end, window, image.width(), image.height());
+            draw_pixel_line(image, sx, sy, ex, ey, color, amount);
+            if level.is_major || sea_level {
+                draw_pixel_line(image, sx + 1, sy, ex + 1, ey, color, amount * 0.72);
+            }
+        }
     }
 }
 
@@ -1452,7 +1600,13 @@ fn color_for_channel(
             combined_terrain_ramp(normalize_absolute_combined_height(sample.combined_height))
         }
         PreviewChannel::LitHeightfield => lit_height_color(tile, x, y, width, height),
+        PreviewChannel::Contour => contour_background_color(sample),
     }
+}
+
+fn contour_background_color(sample: FieldSample) -> [u8; 3] {
+    let base = combined_terrain_ramp(normalize_absolute_combined_height(sample.combined_height));
+    blend(base, [34, 36, 38], 0.58)
 }
 
 fn color_for_mask(sample: FieldSample) -> [u8; 3] {
@@ -1743,7 +1897,12 @@ fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
-fn draw_legend_overlay(image: &mut RgbImage, channel: PreviewChannel) {
+fn draw_legend_overlay(
+    image: &mut RgbImage,
+    channel: PreviewChannel,
+    contour_step_blocks: f32,
+    contour_major_every: u32,
+) {
     if image.width() < 48 || image.height() < 28 {
         return;
     }
@@ -1757,6 +1916,8 @@ fn draw_legend_overlay(image: &mut RgbImage, channel: PreviewChannel) {
     let panel_width = (164 * scale).min(image.width());
     let panel_height_units = if channel == PreviewChannel::Mask {
         66
+    } else if channel == PreviewChannel::Contour {
+        62
     } else {
         50
     };
@@ -1800,7 +1961,50 @@ fn draw_legend_overlay(image: &mut RgbImage, channel: PreviewChannel) {
 
     if channel == PreviewChannel::Mask {
         draw_mask_legend_keys(image, bar_x, bar_y + bar_height + 17 * scale, scale);
+    } else if channel == PreviewChannel::Contour {
+        draw_contour_legend_keys(
+            image,
+            bar_x,
+            bar_y + bar_height + 17 * scale,
+            scale,
+            contour_step_blocks,
+            contour_major_every,
+        );
     }
+}
+
+fn draw_contour_legend_keys(
+    image: &mut RgbImage,
+    x: u32,
+    y: u32,
+    scale: u32,
+    contour_step_blocks: f32,
+    contour_major_every: u32,
+) {
+    let keys = [
+        ("MIN", CONTOUR_MINOR_COLOR),
+        ("MAJ", CONTOUR_MAJOR_COLOR),
+        ("SEA", CONTOUR_SEA_COLOR),
+    ];
+    let mut cursor_x = x;
+    for (label, color) in keys {
+        draw_scale_bar_line(image, cursor_x, y + 3 * scale, 10 * scale, color, 0.9);
+        draw_text(
+            image,
+            cursor_x + 13 * scale,
+            y,
+            label,
+            [218, 224, 212],
+            scale,
+        );
+        cursor_x += 36 * scale;
+    }
+    let label = format!(
+        "{}B/{}B",
+        contour_step_blocks.round() as i32,
+        (contour_step_blocks * contour_major_every as f32).round() as i32
+    );
+    draw_text(image, x, y + 12 * scale, &label, [218, 224, 212], scale);
 }
 
 fn draw_mask_legend_keys(image: &mut RgbImage, x: u32, y: u32, scale: u32) {
@@ -1866,6 +2070,15 @@ fn draw_gradient_bar(
                 PreviewChannel::LitHeightfield => {
                     let v = (t * 255.0).round() as u8;
                     [v, v, v]
+                }
+                PreviewChannel::Contour => {
+                    if t < 0.33 {
+                        CONTOUR_MINOR_COLOR
+                    } else if t < 0.66 {
+                        CONTOUR_MAJOR_COLOR
+                    } else {
+                        CONTOUR_SEA_COLOR
+                    }
                 }
             };
             set_pixel(image, px, py, color);
@@ -2058,7 +2271,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_field_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit>] [--output <path>]"
+    "usage: cargo run --bin macro_field_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit|contour>] [--contour-step <blocks>] [--contour-major-every <n>] [--contours] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2069,8 +2282,9 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 mod tests {
     use super::*;
     use new_world::world::generation::{
-        BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve, VoronoiCornerId,
-        VoronoiEdgeId, VoronoiSiteId,
+        BoundaryAnchors, BoundaryGuard, BoundaryProfile, MacroFieldContourLevel,
+        MacroFieldContourSegment, NoisyBoundaryCurve, VoronoiCornerId, VoronoiEdgeId,
+        VoronoiSiteId,
     };
 
     fn test_config() -> PreviewConfig {
@@ -2086,6 +2300,9 @@ mod tests {
             land_bias: 0.14,
             stage: DEFAULT_STAGE.to_string(),
             channel: PreviewChannelSelection::Single(PreviewChannel::LitHeightfield),
+            contour_step_blocks: DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+            contour_major_every: DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+            contours: false,
             output: None,
         }
     }
@@ -2132,7 +2349,12 @@ mod tests {
         let mut image = RgbImage::from_pixel(180, 90, image::Rgb([4, 5, 6]));
         let before = image.as_raw().clone();
 
-        draw_legend_overlay(&mut image, PreviewChannel::CombinedMacroHeight);
+        draw_legend_overlay(
+            &mut image,
+            PreviewChannel::CombinedMacroHeight,
+            DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+            DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+        );
 
         assert_ne!(image.as_raw(), &before);
     }
@@ -2351,6 +2573,7 @@ mod tests {
                 contrast_span: 2.0,
             },
             core_stats: CoreMacroFieldTileStats::default(),
+            contours: MacroFieldContourSet::default(),
         };
         let window = PreviewWindow {
             center_x: 0.0,
@@ -2364,6 +2587,63 @@ mod tests {
         let image = render_channel(window, &tile, PreviewChannel::RiverValley).unwrap();
 
         assert!(image.as_raw().iter().any(|channel| *channel != 0));
+    }
+
+    #[test]
+    fn contour_channel_output_has_nonblank_pixels() {
+        let tile = contour_test_tile();
+        let window = PreviewWindow {
+            center_x: 32.0,
+            center_z: 32.0,
+            width: 2,
+            height: 2,
+            world_span_x: 64.0,
+            world_span_z: 64.0,
+        };
+
+        let image = render_channel(window, &tile, PreviewChannel::Contour).unwrap();
+
+        assert!(image.as_raw().iter().any(|channel| *channel != 0));
+    }
+
+    #[test]
+    fn contour_overlay_changes_pixels() {
+        let tile = contour_test_tile();
+        let window = PreviewWindow {
+            center_x: 32.0,
+            center_z: 32.0,
+            width: 128,
+            height: 128,
+            world_span_x: 64.0,
+            world_span_z: 64.0,
+        };
+        let mut image = RgbImage::from_pixel(128, 128, image::Rgb([24, 28, 31]));
+        let before = image.as_raw().clone();
+
+        draw_contour_overlay(&mut image, window, &tile.contours, PreviewChannel::Contour);
+
+        assert_ne!(image.as_raw(), &before);
+    }
+
+    #[test]
+    fn contour_preview_options_validate() {
+        let config = PreviewConfig {
+            channel: PreviewChannelSelection::Single(PreviewChannel::Contour),
+            contour_step_blocks: 12.0,
+            contour_major_every: 4,
+            contours: true,
+            ..test_config()
+        }
+        .validate()
+        .unwrap();
+
+        assert_eq!(
+            config.channel,
+            PreviewChannelSelection::Single(PreviewChannel::Contour)
+        );
+        assert_eq!(config.contour_step_blocks, 12.0);
+        assert_eq!(config.contour_major_every, 4);
+        assert!(config.contours);
     }
 
     #[test]
@@ -2394,6 +2674,7 @@ mod tests {
                 river_stats: ChannelStats::default(),
                 combined_stats: ChannelStats::default(),
                 core_stats: CoreMacroFieldTileStats::default(),
+                contours: MacroFieldContourSet::default(),
             }
         };
 
@@ -2438,6 +2719,7 @@ mod tests {
                 river_stats: ChannelStats::default(),
                 combined_stats: ChannelStats::default(),
                 core_stats: CoreMacroFieldTileStats::default(),
+                contours: MacroFieldContourSet::default(),
             }
         };
 
@@ -2480,6 +2762,7 @@ mod tests {
                 river_stats: ChannelStats::default(),
                 combined_stats: ChannelStats::default(),
                 core_stats: CoreMacroFieldTileStats::default(),
+                contours: MacroFieldContourSet::default(),
             }
         };
         let raw = raw_height_gradient(&tile, 2, 3, 7, 7);
@@ -2517,6 +2800,7 @@ mod tests {
                 river_stats: ChannelStats::default(),
                 combined_stats: ChannelStats::default(),
                 core_stats: CoreMacroFieldTileStats::default(),
+                contours: MacroFieldContourSet::default(),
             }
         };
 
@@ -2528,6 +2812,61 @@ mod tests {
                 .any(|channel| *channel < WHITE_SATURATION_THRESHOLD),
             "lit preview should not turn normal high terrain into saturated white: {color:?}"
         );
+    }
+
+    fn contour_test_tile() -> MacroFieldTile {
+        MacroFieldTile {
+            samples: vec![
+                FieldSample {
+                    combined_height: -0.2,
+                    ..FieldSample::default()
+                },
+                FieldSample {
+                    combined_height: 0.4,
+                    ..FieldSample::default()
+                },
+                FieldSample {
+                    combined_height: -0.1,
+                    ..FieldSample::default()
+                },
+                FieldSample {
+                    combined_height: 0.5,
+                    ..FieldSample::default()
+                },
+            ],
+            combined_stats: ChannelStats {
+                min: -0.2,
+                max: 0.5,
+                average: 0.15,
+                robust_min: -0.2,
+                robust_max: 0.5,
+                contrast_span: 0.7,
+            },
+            contours: MacroFieldContourSet {
+                step_blocks: 8.0,
+                major_every: 5,
+                min_level_blocks: 0.0,
+                max_level_blocks: 0.0,
+                total_segment_count: 1,
+                levels: vec![MacroFieldContourLevel {
+                    height_blocks: 0.0,
+                    is_major: true,
+                    segments: vec![MacroFieldContourSegment {
+                        start: WorldPlanePoint::new(16.0, 0.0),
+                        end: WorldPlanePoint::new(16.0, 64.0),
+                    }],
+                }],
+            },
+            ..MacroFieldTile {
+                samples: Vec::new(),
+                macro_stats: ChannelStats::default(),
+                ridge_stats: ChannelStats::default(),
+                river_stats: ChannelStats::default(),
+                combined_stats: ChannelStats::default(),
+                core_stats: CoreMacroFieldTileStats::default(),
+                contours: MacroFieldContourSet::default(),
+            }
+        }
     }
 
     fn test_boundary_cache() -> BoundaryCache {
