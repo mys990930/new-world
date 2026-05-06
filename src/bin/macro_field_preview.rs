@@ -38,7 +38,13 @@ const LIT_HEIGHT_STRENGTH: f32 = 0.44;
 const LIT_MAX_SHADE: f32 = 0.96;
 const GRAPH_EDGE_OVERLAY_COLOR: [u8; 3] = [8, 11, 15];
 const GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.075;
+const LIT_GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.025;
 const TILE_GRID_OVERLAY_AMOUNT: f32 = 0.18;
+const MASK_OCEAN_COLOR: [u8; 3] = [31, 90, 164];
+const MASK_LAKE_COLOR: [u8; 3] = [54, 150, 198];
+const MASK_DRY_BASIN_COLOR: [u8; 3] = [122, 105, 129];
+const MASK_COAST_COLOR: [u8; 3] = [220, 196, 125];
+const MASK_LAND_COLOR: [u8; 3] = [101, 154, 89];
 const RENDERABLE_CHANNELS: [PreviewChannel; 6] = [
     PreviewChannel::MacroElevation,
     PreviewChannel::Mask,
@@ -467,11 +473,12 @@ impl PreviewHeader {
                 self.graph_edge_overlay_curve_count, self.graph_edge_overlay_segment_count
             ),
             format!(
-                "voronoi_noisy_edge_overlay_style=color_{:02x}{:02x}{:02x}_amount_{:.3}",
+                "voronoi_noisy_edge_overlay_style=color_{:02x}{:02x}{:02x}_amount_{:.3}_lit_amount_{:.3}",
                 GRAPH_EDGE_OVERLAY_COLOR[0],
                 GRAPH_EDGE_OVERLAY_COLOR[1],
                 GRAPH_EDGE_OVERLAY_COLOR[2],
-                GRAPH_EDGE_OVERLAY_AMOUNT
+                GRAPH_EDGE_OVERLAY_AMOUNT,
+                LIT_GRAPH_EDGE_OVERLAY_AMOUNT
             ),
             format!(
                 "scale_bar_blocks_pixels={:.1},{}",
@@ -620,7 +627,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let mut image = render_channel(window, &tile, channel)?;
         draw_tile_boundary_overlay(&mut image, window, tile_grid);
-        draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary);
+        draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary, channel);
         draw_scale_bar_overlay(&mut image, window, scale_bar);
         draw_legend_overlay(&mut image, channel);
         write_png_with_metadata(&image, &output, &header)?;
@@ -693,10 +700,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         lit_gradient.brightness_stddev
     );
     println!(
-        "preview overlays: noisy voronoi curves {}, drawn segments {}, graph edge amount {:.3}, cache grid v/h {}/{}, scale bar {:.0} blocks ({} px)",
+        "preview overlays: noisy voronoi curves {}, drawn segments {}, graph edge amount {:.3} (lit {:.3}), cache grid v/h {}/{}, scale bar {:.0} blocks ({} px)",
         edge_overlay.noisy_curve_count,
         edge_overlay.drawn_segment_count,
         GRAPH_EDGE_OVERLAY_AMOUNT,
+        LIT_GRAPH_EDGE_OVERLAY_AMOUNT,
         tile_grid.vertical_lines,
         tile_grid.horizontal_lines,
         scale_bar.length_blocks,
@@ -1197,7 +1205,9 @@ fn draw_noisy_graph_edge_overlay(
     image: &mut RgbImage,
     window: PreviewWindow,
     boundary: &BoundaryCache,
+    channel: PreviewChannel,
 ) {
+    let amount = graph_edge_overlay_amount(channel);
     for curve in &boundary.curves {
         for segment in curve.points.windows(2) {
             let Some((start, end)) = clip_world_segment_to_window(segment[0], segment[1], window)
@@ -1206,16 +1216,16 @@ fn draw_noisy_graph_edge_overlay(
             };
             let (sx, sy) = world_to_pixel(start, window, image.width(), image.height());
             let (ex, ey) = world_to_pixel(end, window, image.width(), image.height());
-            draw_pixel_line(
-                image,
-                sx,
-                sy,
-                ex,
-                ey,
-                GRAPH_EDGE_OVERLAY_COLOR,
-                GRAPH_EDGE_OVERLAY_AMOUNT,
-            );
+            draw_pixel_line(image, sx, sy, ex, ey, GRAPH_EDGE_OVERLAY_COLOR, amount);
         }
+    }
+}
+
+fn graph_edge_overlay_amount(channel: PreviewChannel) -> f32 {
+    if channel == PreviewChannel::LitHeightfield {
+        LIT_GRAPH_EDGE_OVERLAY_AMOUNT
+    } else {
+        GRAPH_EDGE_OVERLAY_AMOUNT
     }
 }
 
@@ -1447,18 +1457,18 @@ fn color_for_channel(
 
 fn color_for_mask(sample: FieldSample) -> [u8; 3] {
     if sample.ocean_mask > 0.5 {
-        return [31, 90, 164];
+        return MASK_OCEAN_COLOR;
     }
     if sample.lake_mask > 0.5 {
-        return [54, 150, 198];
+        return MASK_LAKE_COLOR;
     }
     if sample.dry_mask > 0.5 {
-        return [143, 137, 83];
+        return MASK_DRY_BASIN_COLOR;
     }
     if sample.coast_mask > 0.45 {
-        return [220, 196, 125];
+        return MASK_COAST_COLOR;
     }
-    [101, 154, 89]
+    MASK_LAND_COLOR
 }
 
 fn lit_height_color(
@@ -1743,7 +1753,12 @@ fn draw_legend_overlay(image: &mut RgbImage, channel: PreviewChannel) {
     };
     let margin = 8 * scale;
     let panel_width = (164 * scale).min(image.width());
-    let panel_height = (50 * scale).min(image.height());
+    let panel_height_units = if channel == PreviewChannel::Mask {
+        66
+    } else {
+        50
+    };
+    let panel_height = (panel_height_units * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1780,6 +1795,38 @@ fn draw_legend_overlay(image: &mut RgbImage, channel: PreviewChannel) {
         [218, 224, 212],
         scale,
     );
+
+    if channel == PreviewChannel::Mask {
+        draw_mask_legend_keys(image, bar_x, bar_y + bar_height + 17 * scale, scale);
+    }
+}
+
+fn draw_mask_legend_keys(image: &mut RgbImage, x: u32, y: u32, scale: u32) {
+    let keys = [
+        ("OCN", MASK_OCEAN_COLOR),
+        ("LAK", MASK_LAKE_COLOR),
+        ("DRY", MASK_DRY_BASIN_COLOR),
+        ("CST", MASK_COAST_COLOR),
+        ("LND", MASK_LAND_COLOR),
+    ];
+    let mut cursor_x = x;
+    for (label, color) in keys {
+        let swatch = 5 * scale;
+        for sy in 0..swatch {
+            for sx in 0..swatch {
+                set_pixel(image, cursor_x + sx, y + sy, color);
+            }
+        }
+        draw_text(
+            image,
+            cursor_x + swatch + 2 * scale,
+            y,
+            label,
+            [218, 224, 212],
+            scale,
+        );
+        cursor_x += swatch + 15 * scale;
+    }
 }
 
 fn draw_gradient_bar(
@@ -1799,14 +1846,16 @@ fn draw_gradient_bar(
             let color = match channel {
                 PreviewChannel::MacroElevation => gradient_macro(t),
                 PreviewChannel::Mask => {
-                    if t < 0.25 {
-                        [31, 90, 164]
-                    } else if t < 0.50 {
-                        [54, 150, 198]
-                    } else if t < 0.75 {
-                        [220, 196, 125]
+                    if t < 0.20 {
+                        MASK_OCEAN_COLOR
+                    } else if t < 0.40 {
+                        MASK_LAKE_COLOR
+                    } else if t < 0.60 {
+                        MASK_DRY_BASIN_COLOR
+                    } else if t < 0.80 {
+                        MASK_COAST_COLOR
                     } else {
-                        [101, 154, 89]
+                        MASK_LAND_COLOR
                     }
                 }
                 PreviewChannel::RidgeInfluence => gradient_fire(t),
@@ -2087,6 +2136,23 @@ mod tests {
     }
 
     #[test]
+    fn mask_preview_distinguishes_dry_basin_from_coast() {
+        let dry = color_for_mask(FieldSample {
+            dry_mask: 1.0,
+            coast_mask: 1.0,
+            ..FieldSample::default()
+        });
+        let coast = color_for_mask(FieldSample {
+            coast_mask: 1.0,
+            ..FieldSample::default()
+        });
+
+        assert_eq!(dry, MASK_DRY_BASIN_COLOR);
+        assert_eq!(coast, MASK_COAST_COLOR);
+        assert_ne!(dry, coast);
+    }
+
+    #[test]
     fn tile_boundary_overlay_changes_pixels() {
         let mut image = RgbImage::from_pixel(128, 64, image::Rgb([4, 5, 6]));
         let before = image.as_raw().clone();
@@ -2122,7 +2188,12 @@ mod tests {
         let boundary = test_boundary_cache();
         let stats = graph_edge_overlay_stats(window, &boundary);
 
-        draw_noisy_graph_edge_overlay(&mut image, window, &boundary);
+        draw_noisy_graph_edge_overlay(
+            &mut image,
+            window,
+            &boundary,
+            PreviewChannel::CombinedMacroHeight,
+        );
 
         assert_ne!(image.as_raw(), &before);
         assert_eq!(stats.noisy_curve_count, 1);
@@ -2134,6 +2205,19 @@ mod tests {
         assert!(
             GRAPH_EDGE_OVERLAY_AMOUNT <= 0.10,
             "macro field graph edge overlay should be a faint reference layer, not a dominant line layer"
+        );
+    }
+
+    #[test]
+    fn lit_voronoi_edge_overlay_is_extra_faint() {
+        assert!(
+            graph_edge_overlay_amount(PreviewChannel::LitHeightfield)
+                < graph_edge_overlay_amount(PreviewChannel::CombinedMacroHeight),
+            "lit preview should keep broad hillshade above graph-edge reference lines"
+        );
+        assert!(
+            LIT_GRAPH_EDGE_OVERLAY_AMOUNT <= 0.03,
+            "lit graph edge overlay should be almost a reference line"
         );
     }
 

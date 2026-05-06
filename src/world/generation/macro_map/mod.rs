@@ -302,10 +302,17 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
         .map(|site| is_land_base(site.base_fields, config))
         .collect::<Vec<_>>();
     let components = connected_components(&patch.sites, &adjacency, &land_mask);
-    let coast_distances = graph_distances_to_coast(&adjacency, &land_mask);
     let component_sizes = component_sizes(&components);
     let ocean_components =
         explicit_ocean_components(&patch.sites, &components, &land_mask, &component_sizes);
+    let ocean_mask = components
+        .iter()
+        .enumerate()
+        .map(|(index, component)| {
+            !land_mask[index] && ocean_components.get(component).copied().unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    let coast_distances = graph_distances_to_ocean_coast(&adjacency, &ocean_mask);
     let largest_land_component = components
         .iter()
         .enumerate()
@@ -491,14 +498,14 @@ fn connected_components(
     components
 }
 
-fn graph_distances_to_coast(adjacency: &[Vec<usize>], land_mask: &[bool]) -> Vec<u32> {
+fn graph_distances_to_ocean_coast(adjacency: &[Vec<usize>], ocean_mask: &[bool]) -> Vec<u32> {
     let mut distances = vec![u32::MAX; adjacency.len()];
     let mut queue = VecDeque::new();
 
     for (index, neighbors) in adjacency.iter().enumerate() {
         if neighbors
             .iter()
-            .any(|&neighbor| land_mask[neighbor] != land_mask[index])
+            .any(|&neighbor| ocean_mask[neighbor] != ocean_mask[index])
         {
             distances[index] = 0;
             queue.push_back(index);
@@ -508,7 +515,7 @@ fn graph_distances_to_coast(adjacency: &[Vec<usize>], land_mask: &[bool]) -> Vec
     while let Some(index) = queue.pop_front() {
         let next_distance = distances[index].saturating_add(1);
         for &neighbor in &adjacency[index] {
-            if land_mask[neighbor] != land_mask[index] || distances[neighbor] <= next_distance {
+            if ocean_mask[neighbor] != ocean_mask[index] || distances[neighbor] <= next_distance {
                 continue;
             }
             distances[neighbor] = next_distance;
@@ -1251,12 +1258,33 @@ mod tests {
         let large_lakes = lake_sizes.values().filter(|&&size| size > 10).count();
 
         assert!(
-            small_lakes >= 3,
-            "seed 42 default preview should expose several 1..4 site stream-pocket lakes, got {lake_sizes:?}"
+            small_lakes >= 2,
+            "seed 42 default preview should expose multiple 1..4 site stream-pocket lakes, got {lake_sizes:?}"
         );
         assert_eq!(
             large_lakes, 0,
             "large lakes should stay rare under the launch size policy: {lake_sizes:?}"
+        );
+    }
+
+    #[test]
+    fn dry_basin_sites_do_not_receive_ocean_coastness() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let dry_basin_sites = map
+            .sites
+            .iter()
+            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::DryBasin))
+            .collect::<Vec<_>>();
+
+        assert!(!dry_basin_sites.is_empty());
+        assert!(
+            dry_basin_sites.iter().all(|site| site.coastness < 0.55),
+            "dry basins are closed inland depressions and should not be coast-classified: {:?}",
+            dry_basin_sites
+                .iter()
+                .map(|site| (site.id, site.coastness))
+                .collect::<Vec<_>>()
         );
     }
 

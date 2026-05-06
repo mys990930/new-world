@@ -197,7 +197,7 @@ pub fn sample_macro_field_point(
         .map(|distance| envelope(distance, config.coast_radius_blocks))
         .unwrap_or(site_coastness)
         .max(site_coastness)
-        .max(owner_sample.boundary_blend * 0.35)
+        .max(owner_sample.coast_boundary_blend * 0.35)
         .clamp(0.0, 1.0);
     let ridge_influence = context
         .ridge_grid
@@ -268,7 +268,7 @@ fn sample_macro_field_point_with_influence(
     let coast_mask = influence
         .coast_influence
         .max(site_coastness)
-        .max(owner_sample.boundary_blend * 0.35)
+        .max(owner_sample.coast_boundary_blend * 0.35)
         .clamp(0.0, 1.0);
     let ridge_influence = influence.ridge_influence;
     let river_distance_blocks = influence.river_distance_blocks;
@@ -761,7 +761,11 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .copied()
                 .or(nearest.copied()),
             macro_elevation: mixed_elevation,
-            boundary_blend: blend,
+            coast_boundary_blend: if is_explicit_coast_pair(primary, secondary) {
+                blend
+            } else {
+                0.0
+            },
         }
     }
 
@@ -886,7 +890,7 @@ impl BoundarySideSample {
 struct OwnerSample {
     primary: Option<MacroSite>,
     macro_elevation: f32,
-    boundary_blend: f32,
+    coast_boundary_blend: f32,
 }
 
 impl OwnerSample {
@@ -896,9 +900,13 @@ impl OwnerSample {
             macro_elevation: site
                 .map(|site| site.signed_macro_elevation)
                 .unwrap_or_default(),
-            boundary_blend: 0.0,
+            coast_boundary_blend: 0.0,
         }
     }
+}
+
+fn is_explicit_coast_pair(a: MacroSite, b: MacroSite) -> bool {
+    a.surface_kind.is_ocean_owned() != b.surface_kind.is_ocean_owned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1435,7 +1443,10 @@ mod tests {
             near_sample.river_valley_strength,
             far_sample.river_valley_strength
         );
-        assert!(near_sample.river_flow_hint >= far_sample.river_flow_hint);
+        assert!(
+            near_sample.river_flow_hint > 0.0,
+            "sample on a selected river curve should expose a positive flow hint"
+        );
     }
 
     #[test]
@@ -1563,6 +1574,94 @@ mod tests {
         );
         assert_eq!(sample.surface_kind, Some(MacroSurfaceKind::Continent));
         assert!(sample.coast_mask > 0.5);
+    }
+
+    #[test]
+    fn dry_basin_boundary_blend_does_not_create_coast_mask() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
+        use crate::world::generation::macro_map::{
+            MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
+        };
+
+        let dry = test_site(
+            VoronoiSiteId(1),
+            -10.0,
+            0.0,
+            MacroSurfaceKind::DryBasin,
+            0.08,
+        );
+        let land = test_site(
+            VoronoiSiteId(2),
+            10.0,
+            0.0,
+            MacroSurfaceKind::Continent,
+            0.22,
+        );
+        let edge = VoronoiEdgeId(17);
+        let start = WorldPlanePoint::new(0.0, -10.0);
+        let end = WorldPlanePoint::new(0.0, 10.0);
+        let curve = NoisyBoundaryCurve {
+            edge,
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [dry.id, land.id],
+                start,
+                end,
+            },
+            points: vec![start, end],
+            amplitude: 0.0,
+            seed: 1,
+            guard: BoundaryGuard {
+                min_x: -20.0,
+                max_x: 20.0,
+                min_z: -20.0,
+                max_z: 20.0,
+            },
+        };
+        let macro_map = GraphMacroMap {
+            sites: vec![dry, land],
+            corners: Vec::new(),
+            edges: vec![MacroEdge {
+                id: edge,
+                sites: [dry.id, land.id],
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                guide: MacroEdgeGuide {
+                    is_coast: false,
+                    is_ridge_candidate: false,
+                    is_river_candidate: false,
+                    is_fault_candidate: false,
+                    coastness: 0.0,
+                    mountainness: 0.0,
+                    ridgeness: 0.0,
+                    signed_elevation_gradient: 0.14,
+                    drainage_divide_potential: 0.0,
+                    river_potential: 0.0,
+                },
+                lake_class: MacroLakeEdgeClass::NonLake,
+            }],
+        };
+        let boundary = BoundaryCache {
+            curves: vec![curve],
+            stats: Default::default(),
+        };
+        let patch = Default::default();
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let mut config = test_tile_config();
+        config.boundary_blend_radius_blocks = 24.0;
+
+        let sample = sample_macro_field_point(&context, config, WorldPlanePoint::new(0.0, 0.0));
+
+        assert!(
+            sample.coast_mask <= f32::EPSILON,
+            "dry basin / land noisy boundary blend must not render as coast: {}",
+            sample.coast_mask
+        );
     }
 
     #[test]

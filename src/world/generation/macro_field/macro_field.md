@@ -120,7 +120,12 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - ownership/mask boundary는 정확도 유지를 위해 아직 per-sample noisy-boundary side query를 사용한다.
      후속 최적화는 이 side/blend 판정도 tile edge-classification field로 굽는 것이다.
 4. noisy-boundary owner의 `surface_kind`에서 ocean/coast/lake/dry basin mask를 만든다.
-5. coast guide edge의 rasterized distance field로 coast mask를 보강한다.
+   - 일반 boundary blend는 coast mask가 아니다. coast mask는 explicit ocean-owned surface와
+     non-ocean surface 사이의 coast guide 또는 ocean-coast site context에서만 올라가야 한다.
+   - dry basin, lake, wetland와 주변 land 사이의 noisy boundary는 ownership/macro elevation blend에는
+     참여할 수 있지만 shoreline/coast flatten으로 처리하면 안 된다.
+5. coast guide edge의 rasterized distance field로 coast mask를 보강한다. 이 source는 `macro_map`의
+   explicit coast guide만 사용하며, 모든 Voronoi boundary edge를 coast처럼 splat하면 회귀다.
 6. ridge guide edge의 rasterized distance field로 `ridge_influence`를 만든다.
    - ridge 자체는 Voronoi edge 위의 산맥 maxima guide다.
    - `ridge_influence`는 그 중심선 주변을 폭 있는 산맥 envelope로 끌어올리기 위한 거리 기반 scalar field다.
@@ -187,6 +192,7 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
 
 - macro elevation
 - ocean/coast/lake/dry basin mask. coast/lake/ocean 경계는 noisy boundary를 따라 보여야 한다.
+  dry basin은 별도 mask/color로 표시되며 coast 노란색과 구분되어야 한다.
 - ridge influence
 - river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
   carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다.
@@ -221,6 +227,8 @@ height와 central-difference radius를 적용할 수 있다. 목적은 개별 ti
 hillshade로 읽는 것이다. sample 단위 단절과 noisy-boundary/mask transition이 조명으로 과장되어
 타일마다 오돌토돌하게 융기한 것처럼 보이면 회귀지만, 반대로 broad relief contrast가 거의 사라져
 단색 회색처럼 보이는 것도 회귀다. combined/macro channel 값 자체를 무턱대고 blur하면 안 된다.
+lit channel의 Voronoi edge overlay는 다른 channel보다 더 희미해야 한다. lit은 graph 위치 확인보다
+broad hillshade 판독이 우선이며, edge는 거의 참조선 수준이어야 한다.
 
 중간 단계 preview는 2D gradient map이면 충분하다. 이후 heightfield stage의 최종 산출물은 white
 texture 기반 top-down heightfield render와 simple lighting으로 검증한다.
@@ -239,7 +247,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
-9. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
+9. dry basin 또는 lake/wetland와 land 사이의 boundary blend는 coast mask를 만들지 않는다. coast
+   mask는 connected ocean basin과 non-ocean terrain 사이의 explicit coast context만 읽는다.
+10. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
    normalized scale을 사용해야 한다.
 
 ---

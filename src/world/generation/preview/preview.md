@@ -258,8 +258,10 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
 각 channel은 독립 PNG로 뽑을 수 있어야 하며, `--channel all`은 아래 항목을 모두 생성한다.
 
 - `macro`: graph signed macro elevation을 noisy boundary/ownership context로 연속화한 field
-- `mask`: coast, lake, ocean, dry basin mask와 distance band. 경계는 straight nearest-site raster가
+- `mask`: ocean, lake, dry basin, explicit ocean coast, land mask와 distance band. 경계는 straight nearest-site raster가
   아니라 `BoundaryCache`의 canonical noisy curve를 따라 보여야 한다.
+  coast key는 connected ocean basin과 non-ocean terrain 사이의 shoreline만 의미하며, dry basin/lake와
+  land 사이의 경계가 노란 coast처럼 보이면 회귀다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
 - `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
   carve strength. 이 channel은 selected curve를 source pixel로 rasterize한 tile influence pass를
@@ -286,12 +288,14 @@ renderer/GPU 계약을 만들지 않는다.
   boundary displacement stats, finite/NaN count, overlap guard width, source cache key, legend
   labels, influence source curve/pixel count, tile generation timing을 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
-  mask channel은 ocean/lake/coast/dry basin key를 표시한다. lit heightfield는 height range와 light
+  mask channel은 ocean/lake/dry/coast/land key를 서로 구분되는 색으로 표시한다. lit heightfield는 height range와 light
   direction만 표시한다.
 - 모든 `macro_field_preview` channel은 stage 7 `BoundaryCache`의 canonical noisy Voronoi graph edge
   overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
   field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
   macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다.
+- `lit` channel은 broad hillshade가 우선 읽혀야 하므로 다른 channel보다 더 희미한 Voronoi edge
+  overlay를 사용한다. lit에서 edge가 조명/고저차보다 먼저 보이면 회귀다.
 - macro-field cache tile grid는 보조 진단 overlay로 유지할 수 있지만, graph edge overlay보다 강하게
   읽히면 안 된다. 이 grid는 각 tile 내부에서 height를 따로 low/high normalize한다는 뜻이 아니다.
 - 모든 `macro_field_preview` output은 world footprint를 이해할 수 있도록 scale bar를 표시한다.

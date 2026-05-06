@@ -40,7 +40,8 @@
 ## Channels
 
 - `macro`: signed macro elevation sampled through noisy-boundary owner/blend logic.
-- `mask`: ocean, lake/wetland, coast, dry basin, and land context following noisy boundaries.
+- `mask`: ocean, lake/wetland, dry basin, explicit ocean coast, and land context following noisy
+  boundaries. Dry basin is a land-owned closed basin context, not a shoreline.
 - `ridge`: distance-envelope influence around ridge noisy boundary curves.
 - `river`: distance-envelope valley influence around selected hydrology river curves.
 - `combined`: macro elevation plus ridge raise, minus visible river valley carve guide, coast
@@ -83,7 +84,7 @@ of giving every tile its own artificial low and high.
 5. Solve selected hydrology through `solve_hydrology(...)`.
 6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
 7. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
-   - noisy-boundary owner/blend for macro elevation and masks,
+  - noisy-boundary owner/blend for macro elevation and masks,
    - ridge candidate noisy curves through a tile-local influence raster pass,
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
@@ -137,10 +138,14 @@ Each PNG contains:
   broad continent/ridge/basin/coast height differences visible as white-material hillshade.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
+- In `mask`, the yellow/sandy key means explicit ocean coast only. Dry basin uses its own muted
+  mauve/gray key and must not be inferred from the coast color or coast gradient band.
 - The primary boundary overlay is the canonical noisy Voronoi graph edge layer, but it must remain a
   faint reference overlay so the field value stays visually dominant. The cache grid is diagnostic
   only: it should reveal cache boundaries without implying that terrain height is normalized
   independently inside each tile.
+- `lit` uses an even fainter Voronoi edge overlay than the other channels. Its first job is to show
+  broad white-material hillshade, so graph edges there are only a barely visible registration aid.
 - The scale bar is drawn on every channel so the world footprint can be read without checking
   metadata.
 

@@ -16,7 +16,7 @@ context를 resolve한다.
 
 - graph base `continentality`를 읽어 continent, ocean basin, island/archipelago ownership resolve
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
-- graph base `elevation_seed`, continentality, coast distance, basinness를 합성한 signed macro elevation resolve
+- graph base `elevation_seed`, continentality, explicit ocean-coast distance, basinness를 합성한 signed macro elevation resolve
 - edge 기반 ridge/fault guide 선택. mountainness/rugged context는 public edge guide가 아니라 점수 입력이다.
 - land/ocean ownership 경계 기반 coast guide 선택
 - ridge/fault/coast guide를 broad field로 확산
@@ -138,7 +138,7 @@ Land/ocean 판정은 아래 입력을 합성하되, source of truth는 graph bas
 - graph base `elevation_seed`
 - connected land/ocean component
 - component size와 ocean basin 연결성
-- coast distance / coastness
+- explicit ocean basin distance / coastness
 - sea-level contract
 - local lake/sink resolution
 
@@ -166,7 +166,7 @@ launch 정책은 아래처럼 잡는다.
   site/corner id 기반 deterministic roll을 함께 통과해야 한다. 목적은 강줄기 중간의 local-minima-like
   pocket을 드물게 만들되, 모든 local minimum을 물로 채우지 않고 dry basin / closed basin 표현을
   계속 유지하는 것이다.
-- signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를
+- signed macro elevation은 graph `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
 - launch 기본값에서도 큰 대륙만 만들지 않고, graph `continentality`가 ocean basin 안에 크고 작은
@@ -198,10 +198,11 @@ macro elevation resolve 순서:
 
 1. graph base `continentality`를 land/ocean mask로 해석한다.
 2. connected component를 resolve해 continent, ocean basin, island/archipelago ownership을 정한다.
-3. graph base `elevation_seed`, `continentality`, coast distance, basinness를 합성한다.
+3. graph base `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를 합성한다.
 4. signed macro elevation을 만들되, ownership과 sea level contract를 함께 저장한다.
 5. edge 기반 ridge/fault/plateau 후보를 먼저 정한다.
-6. coast는 signed macro elevation 경계가 아니라 land ownership과 connected-ocean basin 경계에서 우선 찾는다.
+6. coast는 signed macro elevation 경계가 아니라 connected ocean basin과 non-ocean terrain 경계에서 우선 찾는다.
+   내륙 lake/wetland/dry basin과 주변 land의 경계는 coast가 아니다.
 7. ridge/fault/coast skeleton을 broad field로 확산한다.
 8. hydrology가 사용할 divide, basin, outlet 후보를 annotation한다.
 
@@ -306,7 +307,7 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - 큰 lake는 드문 deep/wet basin 조건으로 제한하고, 1~4 site/cell stream-pocket lake는 land-owned
   저지대에서 deterministic low-probability 조건을 통과할 때만 추가한다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
-- site/corner annotation은 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
+- site/corner annotation은 explicit ocean-coast 기준 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는
   단순 high elevation edge가 아니라 같은 land component 내부성, signed elevation gradient,
   inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.
