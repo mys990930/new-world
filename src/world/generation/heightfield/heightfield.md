@@ -138,17 +138,28 @@ macro field tile cache
 
 ## Preview
 
-`heightfield_preview`는 이 모듈의 column을 진단용 voxel box로 바꿔 top-down isometric PNG를 만든다.
+`heightfield_preview`는 이 모듈의 column을 진단용 isometric column surface로 바꿔 PNG를 만든다.
 
 - 실제 `ChunkData` final fill이 아니다.
 - block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
 - water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
   gray/mauve 계열로 표시한다.
-- 기본 카메라는 orthographic top-down isometric view다. world X/Z grid가 균형 잡힌 대각선 축으로
-  먼저 읽히고, Y height는 `--vertical-scale`로 낮춘 relief로만 표현한다. 기본 scale은 `0.5`이며,
-  이는 실제 heightfield 값을 바꾸지 않는 preview-only mesh transform이다.
-- `--vertical-scale`을 크게 올리면 column side wall이 강조되어 side view처럼 보일 수 있으므로,
-  기본 preview는 terrain footprint와 top surface 판독을 우선한다.
+- 기본 preview는 offscreen 3D camera가 아니라 2D isometric projection을 직접 사용한다.
+
+```text
+screen_x = (x - z) * tile_w / 2
+screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+```
+
+- `vertical_px_per_block`은 현재 heightfield의 min/max surface range와 이미지 높이를 읽어 자동
+  산정한다. 기본 목표는 projected height span이 이미지 높이의 약 20-35%를 차지하는 것이다. 이 범위는
+  top surface가 평면처럼 죽지 않고, 동시에 side wall이 preview를 지배하지 않도록 하기 위한 진단용
+  계약이다.
+- `--vertical-scale`은 자동 산정값에 곱해지는 preview-only multiplier이며 기본은 `1.0`이다. 실제
+  heightfield 값을 바꾸지 않는다.
+- column은 top diamond와 보이는 east/south side face만 그린다. 모든 column을 전역 base plane까지
+  벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를 보여주는
+  terraced relief를 우선한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 

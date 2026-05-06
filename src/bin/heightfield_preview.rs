@@ -7,14 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use image::RgbaImage;
-use rayon::prelude::*;
-
-use new_world::ecs::QUARTER_VIEW_VERTICAL_WORLD_SIZE;
-use new_world::renderer::{
-    CpuMesh, MeshVertex, OffscreenRenderRequest, RenderBounds, RenderCameraState,
-    RenderEnvironment, RenderMaterialKind, RenderProjectionMode, RenderTextureArraySource,
-    RenderTextureSource, RenderTextureTile, RenderViewBasis, render_offscreen,
-};
+use new_world::renderer::OffscreenRenderOutput;
+use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HeightfieldColumn,
@@ -24,17 +18,17 @@ use new_world::world::generation::{
     generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
     graph_region_for_world_block, solve_hydrology,
 };
-use new_world::world::{BlockFace, WorldMeta};
 
 const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_COLUMNS_X: u32 = 192;
-const DEFAULT_VERTICAL_SCALE: f32 = 0.5;
-const BASE_Y_BLOCKS: f32 = -56.0;
+const DEFAULT_VERTICAL_SCALE: f32 = 1.0;
 const WATER_ALPHA: f32 = 0.72;
-const ISO_PREVIEW_CAMERA_DISTANCE: f32 = 520.0;
-const ISO_PREVIEW_ELEVATION_RADIANS: f32 = std::f32::consts::FRAC_PI_3;
+const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
+const ISO_TARGET_RELIEF_FRACTION: f32 = 0.28;
+const ISO_MIN_RELIEF_FRACTION: f32 = 0.20;
+const ISO_MAX_RELIEF_FRACTION: f32 = 0.35;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -170,6 +164,8 @@ struct PreviewHeader {
     min_surface: f32,
     avg_surface: f32,
     max_surface: f32,
+    vertical_px_per_block: f32,
+    projected_height_span_px: f32,
     water_columns: usize,
     ocean_columns: usize,
     lake_columns: usize,
@@ -196,11 +192,12 @@ impl PreviewHeader {
             format!("columns={}x{}", self.columns_x, self.columns_z),
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("vertical_scale={:.3}", self.vertical_scale),
-            "view=isometric".to_string(),
-            "projection=orthographic_topdown_isometric".to_string(),
+            "view=cpu_isometric_columns".to_string(),
+            "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px".to_string(),
+            format!("vertical_px_per_block={:.4}", self.vertical_px_per_block),
             format!(
-                "camera_elevation_degrees={:.3}",
-                ISO_PREVIEW_ELEVATION_RADIANS.to_degrees()
+                "projected_height_span_px={:.3}",
+                self.projected_height_span_px
             ),
             format!("graph_sites={}", self.graph_site_count),
             format!("macro_samples={}", self.macro_sample_count),
@@ -222,7 +219,7 @@ impl PreviewHeader {
             "micro_relief_blocks=0".to_string(),
             "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
             format!(
-                "timing_ms=build:{} macro_field:{} heightfield:{} mesh:{} render:{} total:{}",
+                "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
                 self.build_ms,
                 self.macro_field_ms,
                 self.heightfield_ms,
@@ -258,31 +255,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let heightfield_ms = heightfield_start.elapsed().as_millis();
 
     let mesh_start = Instant::now();
-    let meshes = build_heightfield_meshes(&heightfield, config.vertical_scale);
-    let mesh_ms = mesh_start.elapsed().as_millis();
-    if meshes.iter().all(|mesh| mesh.vertices.is_empty()) {
-        return Err(cli_error(
-            "heightfield preview produced no renderable meshes",
-        ));
-    }
-
-    let render_start = Instant::now();
-    let bounds = combined_render_bounds(&meshes).ok_or_else(|| cli_error("missing mesh bounds"))?;
-    let camera = build_preview_camera(
-        bounds,
+    let plan = IsoRenderPlan::new(
+        &heightfield,
         config.width,
         config.height,
         config.quarter_turns % 4,
-    );
-    let mut image = render_offscreen(OffscreenRenderRequest {
-        width: config.width,
-        height: config.height,
-        camera,
-        textures: white_render_textures(),
-        environment: preview_environment(),
-        chunk_meshes: meshes,
-        clear_color_override: Some([0.045, 0.052, 0.060, 1.0]),
-    })?;
+        config.vertical_scale,
+    )?;
+    let mesh_ms = mesh_start.elapsed().as_millis();
+
+    let render_start = Instant::now();
+    let (mut image, iso_stats) = render_heightfield_isometric(&heightfield, plan)?;
     let render_ms = render_start.elapsed().as_millis();
 
     let total_ms = total_start.elapsed().as_millis();
@@ -304,6 +287,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         min_surface: heightfield.stats.min_surface_height_blocks,
         avg_surface: heightfield.stats.average_surface_height_blocks,
         max_surface: heightfield.stats.max_surface_height_blocks,
+        vertical_px_per_block: iso_stats.vertical_px_per_block,
+        projected_height_span_px: iso_stats.projected_height_span_px,
         water_columns: heightfield.stats.water_column_count,
         ocean_columns: heightfield.stats.ocean_column_count,
         lake_columns: heightfield.stats.lake_column_count,
@@ -331,10 +316,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.sample_spacing()
     );
     println!(
-        "view: top-down isometric orthographic, quarter turns {}, camera elevation {:.1} deg, vertical scale {:.2}",
+        "view: cpu isometric columns, quarter turns {}, vertical scale multiplier {:.2}, vertical {:.3} px/block, relief span {:.1}px",
         config.quarter_turns % 4,
-        ISO_PREVIEW_ELEVATION_RADIANS.to_degrees(),
-        config.vertical_scale
+        config.vertical_scale,
+        iso_stats.vertical_px_per_block,
+        iso_stats.projected_height_span_px
     );
     println!(
         "surface height min/avg/max {:.2}/{:.2}/{:.2} blocks",
@@ -353,7 +339,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.ridge_column_count
     );
     println!(
-        "timing: build {} ms, macro field {} ms, heightfield {} ms, mesh {} ms, render {} ms, total {} ms",
+        "timing: build {} ms, macro field {} ms, heightfield {} ms, projection {} ms, render {} ms, total {} ms",
         build_ms, macro_field_ms, heightfield_ms, mesh_ms, render_ms, total_ms
     );
     println!("output: {}", output.display());
@@ -440,250 +426,328 @@ fn build_macro_field_tile(
     generate_macro_field_tile(patch, macro_map, hydrology, boundary, config)
 }
 
-fn build_heightfield_meshes(tile: &HeightfieldTile, vertical_scale: f32) -> Vec<CpuMesh> {
-    let terrain_mesh = build_terrain_mesh(tile, vertical_scale);
-    let water_mesh = build_water_mesh(tile, vertical_scale);
-    [terrain_mesh, water_mesh]
-        .into_iter()
-        .filter(|mesh| !mesh.vertices.is_empty())
-        .collect()
-}
-
-fn build_terrain_mesh(tile: &HeightfieldTile, vertical_scale: f32) -> CpuMesh {
-    let width = tile.width as usize;
-    let height = tile.height as usize;
-    let spacing = tile.sample_spacing_blocks;
-    let faces = (0..tile.columns.len())
-        .into_par_iter()
-        .map(|index| {
-            let x = index % width;
-            let z = index / width;
-            let column = tile.columns[index];
-            let min_x = column.position.x - spacing * 0.5;
-            let max_x = column.position.x + spacing * 0.5;
-            let min_z = column.position.z - spacing * 0.5;
-            let max_z = column.position.z + spacing * 0.5;
-            let top_y = column.surface_height_blocks.max(BASE_Y_BLOCKS + 1.0);
-            let color = terrain_color(column);
-            let mut local = Vec::with_capacity(5);
-            local.push(BoxFace {
-                min: [min_x, BASE_Y_BLOCKS, min_z],
-                max: [max_x, top_y, max_z],
-                face: BlockFace::PosY,
-                color,
-                material: RenderMaterialKind::GenericOpaque,
-            });
-            if x == 0 || tile.columns[index - 1].surface_height_blocks < top_y {
-                let neighbor = if x == 0 {
-                    BASE_Y_BLOCKS
-                } else {
-                    tile.columns[index - 1]
-                        .surface_height_blocks
-                        .max(BASE_Y_BLOCKS)
-                };
-                local.push(BoxFace {
-                    min: [min_x, neighbor, min_z],
-                    max: [max_x, top_y, max_z],
-                    face: BlockFace::NegX,
-                    color,
-                    material: RenderMaterialKind::GenericOpaque,
-                });
-            }
-            if x + 1 >= width || tile.columns[index + 1].surface_height_blocks < top_y {
-                let neighbor = if x + 1 >= width {
-                    BASE_Y_BLOCKS
-                } else {
-                    tile.columns[index + 1]
-                        .surface_height_blocks
-                        .max(BASE_Y_BLOCKS)
-                };
-                local.push(BoxFace {
-                    min: [min_x, neighbor, min_z],
-                    max: [max_x, top_y, max_z],
-                    face: BlockFace::PosX,
-                    color,
-                    material: RenderMaterialKind::GenericOpaque,
-                });
-            }
-            if z == 0 || tile.columns[index - width].surface_height_blocks < top_y {
-                let neighbor = if z == 0 {
-                    BASE_Y_BLOCKS
-                } else {
-                    tile.columns[index - width]
-                        .surface_height_blocks
-                        .max(BASE_Y_BLOCKS)
-                };
-                local.push(BoxFace {
-                    min: [min_x, neighbor, min_z],
-                    max: [max_x, top_y, max_z],
-                    face: BlockFace::NegZ,
-                    color,
-                    material: RenderMaterialKind::GenericOpaque,
-                });
-            }
-            if z + 1 >= height || tile.columns[index + width].surface_height_blocks < top_y {
-                let neighbor = if z + 1 >= height {
-                    BASE_Y_BLOCKS
-                } else {
-                    tile.columns[index + width]
-                        .surface_height_blocks
-                        .max(BASE_Y_BLOCKS)
-                };
-                local.push(BoxFace {
-                    min: [min_x, neighbor, min_z],
-                    max: [max_x, top_y, max_z],
-                    face: BlockFace::PosZ,
-                    color,
-                    material: RenderMaterialKind::GenericOpaque,
-                });
-            }
-            local
-        })
-        .reduce(Vec::new, |mut left, right| {
-            left.extend(right);
-            left
-        });
-    mesh_from_faces(&faces, vertical_scale)
-}
-
-fn build_water_mesh(tile: &HeightfieldTile, vertical_scale: f32) -> CpuMesh {
-    let spacing = tile.sample_spacing_blocks;
-    let faces = tile
-        .columns
-        .par_iter()
-        .filter_map(|column| {
-            let water = column.water_level_blocks?;
-            if water <= column.surface_height_blocks {
-                return None;
-            }
-            let min_x = column.position.x - spacing * 0.5;
-            let max_x = column.position.x + spacing * 0.5;
-            let min_z = column.position.z - spacing * 0.5;
-            let max_z = column.position.z + spacing * 0.5;
-            Some(BoxFace {
-                min: [min_x, column.surface_height_blocks + 0.05, min_z],
-                max: [max_x, water + 0.12, max_z],
-                face: BlockFace::PosY,
-                color: water_color(*column),
-                material: RenderMaterialKind::Water,
-            })
-        })
-        .collect::<Vec<_>>();
-    mesh_from_faces(&faces, vertical_scale)
+#[derive(Debug, Clone, Copy)]
+struct IsoRenderPlan {
+    width: u32,
+    height: u32,
+    quarter_turns: u8,
+    tile_w_px: f32,
+    tile_h_px: f32,
+    vertical_px_per_block: f32,
+    offset_x_px: f32,
+    offset_y_px: f32,
+    min_surface_blocks: f32,
+    max_surface_blocks: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct BoxFace {
-    min: [f32; 3],
-    max: [f32; 3],
-    face: BlockFace,
-    color: [f32; 4],
-    material: RenderMaterialKind,
+struct IsoRenderStats {
+    vertical_px_per_block: f32,
+    projected_height_span_px: f32,
 }
 
-fn mesh_from_faces(faces: &[BoxFace], vertical_scale: f32) -> CpuMesh {
-    let mut mesh = CpuMesh::default();
-    for face in faces {
-        append_box_face(&mut mesh, *face, vertical_scale);
+#[derive(Debug, Clone, Copy)]
+struct Point2 {
+    x: f32,
+    y: f32,
+}
+
+impl IsoRenderPlan {
+    fn new(
+        tile: &HeightfieldTile,
+        width: u32,
+        height: u32,
+        quarter_turns: u8,
+        vertical_scale: f32,
+    ) -> Result<Self, Box<dyn Error>> {
+        if tile.columns.is_empty() {
+            return Err(cli_error("heightfield preview cannot render an empty tile"));
+        }
+        let min_surface = tile.stats.min_surface_height_blocks;
+        let max_surface = tile.stats.max_surface_height_blocks;
+        let height_range = (max_surface - min_surface).max(1.0);
+        let relief_fraction = (ISO_TARGET_RELIEF_FRACTION * vertical_scale)
+            .clamp(ISO_MIN_RELIEF_FRACTION, ISO_MAX_RELIEF_FRACTION);
+        let target_relief_px = height as f32 * relief_fraction;
+        let footprint_axis_count = (tile.width + tile.height).max(2) as f32;
+        let tile_w_by_width = width as f32 * 1.64 / footprint_axis_count;
+        let height_budget = (height as f32 * 0.86 - target_relief_px).max(height as f32 * 0.34);
+        let tile_w_by_height = height_budget * 4.0 / footprint_axis_count;
+        let tile_w_px = tile_w_by_width.min(tile_w_by_height).clamp(2.0, 24.0);
+        let tile_h_px = tile_w_px * ISO_TILE_HEIGHT_RATIO;
+        let vertical_px_per_block = (target_relief_px / height_range).max(0.05);
+        let mut plan = Self {
+            width,
+            height,
+            quarter_turns: quarter_turns % 4,
+            tile_w_px,
+            tile_h_px,
+            vertical_px_per_block,
+            offset_x_px: 0.0,
+            offset_y_px: 0.0,
+            min_surface_blocks: min_surface,
+            max_surface_blocks: max_surface,
+        };
+        let (min_x, max_x, min_y, max_y) = plan.untranslated_bounds(tile);
+        plan.offset_x_px = width as f32 * 0.5 - (min_x + max_x) * 0.5;
+        plan.offset_y_px = height as f32 * 0.5 - (min_y + max_y) * 0.5;
+        Ok(plan)
     }
-    mesh
+
+    fn projected_height_span_px(self) -> f32 {
+        (self.max_surface_blocks - self.min_surface_blocks).max(0.0) * self.vertical_px_per_block
+    }
+
+    fn project_grid(self, x: f32, z: f32, y_blocks: f32, tile: &HeightfieldTile) -> Point2 {
+        let center_x = tile.width as f32 * 0.5;
+        let center_z = tile.height as f32 * 0.5;
+        let dx = x - center_x;
+        let dz = z - center_z;
+        let (rx, rz) = match self.quarter_turns {
+            0 => (dx, dz),
+            1 => (dz, -dx),
+            2 => (-dx, -dz),
+            3 => (-dz, dx),
+            _ => unreachable!(),
+        };
+        Point2 {
+            x: (rx - rz) * self.tile_w_px * 0.5 + self.offset_x_px,
+            y: (rx + rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
+                + self.offset_y_px,
+        }
+    }
+
+    fn untranslated_project_grid(
+        self,
+        x: f32,
+        z: f32,
+        y_blocks: f32,
+        tile: &HeightfieldTile,
+    ) -> Point2 {
+        let mut plan = self;
+        plan.offset_x_px = 0.0;
+        plan.offset_y_px = 0.0;
+        plan.project_grid(x, z, y_blocks, tile)
+    }
+
+    fn untranslated_bounds(self, tile: &HeightfieldTile) -> (f32, f32, f32, f32) {
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+        for x in [0.0, tile.width as f32] {
+            for z in [0.0, tile.height as f32] {
+                for y in [self.min_surface_blocks, self.max_surface_blocks, 0.0] {
+                    let p = self.untranslated_project_grid(x, z, y, tile);
+                    min_x = min_x.min(p.x);
+                    max_x = max_x.max(p.x);
+                    min_y = min_y.min(p.y);
+                    max_y = max_y.max(p.y);
+                }
+            }
+        }
+        (min_x, max_x, min_y, max_y)
+    }
 }
 
-fn append_box_face(mesh: &mut CpuMesh, face: BoxFace, vertical_scale: f32) {
-    if face.min[0] >= face.max[0] || face.min[1] >= face.max[1] || face.min[2] >= face.max[2] {
+fn render_heightfield_isometric(
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
+    let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
+    let width = tile.width as usize;
+    let height = tile.height as usize;
+    for diagonal in 0..(width + height - 1) {
+        for z in 0..height {
+            if diagonal < z {
+                continue;
+            }
+            let x = diagonal - z;
+            if x >= width {
+                continue;
+            }
+            let index = z * width + x;
+            draw_column_iso(&mut image, tile, plan, x, z, tile.columns[index]);
+        }
+    }
+    Ok((
+        OffscreenRenderOutput {
+            width: plan.width,
+            height: plan.height,
+            rgba: image.into_raw(),
+            draw_call_count: (tile.columns.len() * 3) as u32,
+        },
+        IsoRenderStats {
+            vertical_px_per_block: plan.vertical_px_per_block,
+            projected_height_span_px: plan.projected_height_span_px(),
+        },
+    ))
+}
+
+fn draw_column_iso(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    x: usize,
+    z: usize,
+    column: HeightfieldColumn,
+) {
+    let surface = column.surface_height_blocks;
+    let width = tile.width as usize;
+    let height = tile.height as usize;
+    let east = if x + 1 < width {
+        tile.columns[z * width + x + 1].surface_height_blocks
+    } else {
+        surface - 12.0
+    };
+    let south = if z + 1 < height {
+        tile.columns[(z + 1) * width + x].surface_height_blocks
+    } else {
+        surface - 12.0
+    };
+    let color = terrain_color_rgba(column);
+    if surface > east + 0.75 {
+        draw_side_face(
+            image,
+            tile,
+            plan,
+            [(x + 1) as f32, z as f32, (x + 1) as f32, (z + 1) as f32],
+            east,
+            surface,
+            shade_rgba(color, 0.68),
+        );
+    }
+    if surface > south + 0.75 {
+        draw_side_face(
+            image,
+            tile,
+            plan,
+            [x as f32, (z + 1) as f32, (x + 1) as f32, (z + 1) as f32],
+            south,
+            surface,
+            shade_rgba(color, 0.56),
+        );
+    }
+    draw_top_face(image, tile, plan, x, z, surface, shade_rgba(color, 1.05));
+
+    if let Some(water) = column.water_level_blocks {
+        if water > surface {
+            draw_top_face(
+                image,
+                tile,
+                plan,
+                x,
+                z,
+                water + 0.10,
+                water_color_rgba(column),
+            );
+        }
+    }
+}
+
+fn draw_top_face(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    x: usize,
+    z: usize,
+    y: f32,
+    color: [u8; 4],
+) {
+    let polygon = [
+        plan.project_grid(x as f32, z as f32, y, tile),
+        plan.project_grid((x + 1) as f32, z as f32, y, tile),
+        plan.project_grid((x + 1) as f32, (z + 1) as f32, y, tile),
+        plan.project_grid(x as f32, (z + 1) as f32, y, tile),
+    ];
+    fill_convex_polygon(image, &polygon, color);
+}
+
+fn draw_side_face(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    edge: [f32; 4],
+    lower_y: f32,
+    upper_y: f32,
+    color: [u8; 4],
+) {
+    let lower_y = lower_y.max(upper_y - 96.0);
+    let polygon = [
+        plan.project_grid(edge[0], edge[1], upper_y, tile),
+        plan.project_grid(edge[2], edge[3], upper_y, tile),
+        plan.project_grid(edge[2], edge[3], lower_y, tile),
+        plan.project_grid(edge[0], edge[1], lower_y, tile),
+    ];
+    fill_convex_polygon(image, &polygon, color);
+}
+
+fn fill_convex_polygon(image: &mut RgbaImage, points: &[Point2], color: [u8; 4]) {
+    if points.len() < 3 {
         return;
     }
-
-    let positions = scaled_face_positions(face.min, face.max, face.face, vertical_scale);
-    let base_index = mesh.vertices.len() as u32;
-    let normal = face_normal(face.face);
-    let uv = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-    extend_render_bounds(&mut mesh.bounds, &positions);
-
-    for (position, uv) in positions.into_iter().zip(uv) {
-        mesh.vertices.push(MeshVertex {
-            position,
-            color: face.color,
-            normal,
-            uv,
-            texture_layer: 0,
-            material_kind: face.material.as_u32(),
-            contour_edges: 0,
-        });
-    }
-
-    mesh.indices.extend_from_slice(&[
-        base_index,
-        base_index + 1,
-        base_index + 2,
-        base_index,
-        base_index + 2,
-        base_index + 3,
-    ]);
-}
-
-fn scaled_face_positions(
-    min: [f32; 3],
-    max: [f32; 3],
-    face: BlockFace,
-    vertical_scale: f32,
-) -> [[f32; 3]; 4] {
-    let ty = |y: f32| BASE_Y_BLOCKS + (y - BASE_Y_BLOCKS) * vertical_scale;
-    let min = [min[0], ty(min[1]), min[2]];
-    let max = [max[0], ty(max[1]), max[2]];
-
-    match face {
-        BlockFace::NegX => [
-            [min[0], min[1], min[2]],
-            [min[0], min[1], max[2]],
-            [min[0], max[1], max[2]],
-            [min[0], max[1], min[2]],
-        ],
-        BlockFace::PosX => [
-            [max[0], min[1], max[2]],
-            [max[0], min[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], max[1], max[2]],
-        ],
-        BlockFace::NegY => [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [max[0], min[1], min[2]],
-            [min[0], min[1], min[2]],
-        ],
-        BlockFace::PosY => [
-            [min[0], max[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], max[1], max[2]],
-            [min[0], max[1], max[2]],
-        ],
-        BlockFace::NegZ => [
-            [max[0], min[1], min[2]],
-            [min[0], min[1], min[2]],
-            [min[0], max[1], min[2]],
-            [max[0], max[1], min[2]],
-        ],
-        BlockFace::PosZ => [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [max[0], max[1], max[2]],
-            [min[0], max[1], max[2]],
-        ],
+    let min_y = points
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::MAX, f32::min)
+        .floor()
+        .max(0.0) as i32;
+    let max_y = points
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::MIN, f32::max)
+        .ceil()
+        .min(image.height() as f32 - 1.0) as i32;
+    for y in min_y..=max_y {
+        let scan_y = y as f32 + 0.5;
+        let mut xs = Vec::with_capacity(points.len());
+        for i in 0..points.len() {
+            let a = points[i];
+            let b = points[(i + 1) % points.len()];
+            if (a.y <= scan_y && b.y > scan_y) || (b.y <= scan_y && a.y > scan_y) {
+                let t = (scan_y - a.y) / (b.y - a.y);
+                xs.push(a.x + (b.x - a.x) * t);
+            }
+        }
+        if xs.len() < 2 {
+            continue;
+        }
+        xs.sort_by(|a, b| a.total_cmp(b));
+        let start = xs[0].floor().max(0.0) as i32;
+        let end = xs[xs.len() - 1].ceil().min(image.width() as f32 - 1.0) as i32;
+        for x in start..=end {
+            blend_rgba(image, x as u32, y as u32, color, color[3] as f32 / 255.0);
+        }
     }
 }
 
-fn face_normal(face: BlockFace) -> [f32; 3] {
-    match face {
-        BlockFace::NegX => [-1.0, 0.0, 0.0],
-        BlockFace::PosX => [1.0, 0.0, 0.0],
-        BlockFace::NegY => [0.0, -1.0, 0.0],
-        BlockFace::PosY => [0.0, 1.0, 0.0],
-        BlockFace::NegZ => [0.0, 0.0, -1.0],
-        BlockFace::PosZ => [0.0, 0.0, 1.0],
-    }
+fn terrain_color_rgba(column: HeightfieldColumn) -> [u8; 4] {
+    f32_color_to_rgba(terrain_color_raw(column))
 }
 
-fn terrain_color(column: HeightfieldColumn) -> [f32; 4] {
+fn water_color_rgba(column: HeightfieldColumn) -> [u8; 4] {
+    f32_color_to_rgba(water_color_raw(column))
+}
+
+fn f32_color_to_rgba(color: [f32; 4]) -> [u8; 4] {
+    [
+        (color[0].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+    ]
+}
+
+fn shade_rgba(color: [u8; 4], amount: f32) -> [u8; 4] {
+    [
+        (color[0] as f32 * amount).round().clamp(0.0, 255.0) as u8,
+        (color[1] as f32 * amount).round().clamp(0.0, 255.0) as u8,
+        (color[2] as f32 * amount).round().clamp(0.0, 255.0) as u8,
+        color[3],
+    ]
+}
+
+fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
     let t = ((column.combined_macro_height + 0.75) / 2.0).clamp(0.0, 1.0);
     let mut color = match column.terrain_kind {
         HeightfieldTerrainKind::Ocean => rgb8([45, 78, 102]),
@@ -698,10 +762,10 @@ fn terrain_color(column: HeightfieldColumn) -> [f32; 4] {
     for channel in color.iter_mut().take(3) {
         *channel = (*channel * (0.86 + altitude * 0.20)).clamp(0.0, 1.0);
     }
-    encode_vertex_tint(color, 0.16)
+    color
 }
 
-fn water_color(column: HeightfieldColumn) -> [f32; 4] {
+fn water_color_raw(column: HeightfieldColumn) -> [f32; 4] {
     let base = if matches!(column.terrain_kind, HeightfieldTerrainKind::Lake) {
         [54, 118, 150]
     } else {
@@ -709,17 +773,7 @@ fn water_color(column: HeightfieldColumn) -> [f32; 4] {
     };
     let mut color = rgb8(base);
     color[3] = WATER_ALPHA;
-    encode_vertex_tint(color, 0.16)
-}
-
-fn encode_vertex_tint(target: [f32; 4], tint_strength: f32) -> [f32; 4] {
-    let keep = 1.0 - tint_strength;
-    [
-        ((target[0] - keep) / tint_strength).clamp(-8.0, 1.0),
-        ((target[1] - keep) / tint_strength).clamp(-8.0, 1.0),
-        ((target[2] - keep) / tint_strength).clamp(-8.0, 1.0),
-        target[3],
-    ]
+    color
 }
 
 fn combined_terrain_ramp(value: f32) -> [f32; 4] {
@@ -774,142 +828,7 @@ fn rgb8(color: [u8; 3]) -> [f32; 4] {
     ]
 }
 
-fn extend_render_bounds(bounds: &mut Option<RenderBounds>, positions: &[[f32; 3]; 4]) {
-    for position in positions {
-        match bounds {
-            Some(bounds) => {
-                bounds.min[0] = bounds.min[0].min(position[0]);
-                bounds.min[1] = bounds.min[1].min(position[1]);
-                bounds.min[2] = bounds.min[2].min(position[2]);
-                bounds.max[0] = bounds.max[0].max(position[0]);
-                bounds.max[1] = bounds.max[1].max(position[1]);
-                bounds.max[2] = bounds.max[2].max(position[2]);
-            }
-            None => {
-                *bounds = Some(RenderBounds {
-                    min: *position,
-                    max: *position,
-                });
-            }
-        }
-    }
-}
-
-fn combined_render_bounds(meshes: &[CpuMesh]) -> Option<RenderBounds> {
-    let mut combined: Option<RenderBounds> = None;
-    for mesh in meshes {
-        let Some(bounds) = mesh.bounds else {
-            continue;
-        };
-        combined = Some(match combined {
-            Some(current) => RenderBounds {
-                min: [
-                    current.min[0].min(bounds.min[0]),
-                    current.min[1].min(bounds.min[1]),
-                    current.min[2].min(bounds.min[2]),
-                ],
-                max: [
-                    current.max[0].max(bounds.max[0]),
-                    current.max[1].max(bounds.max[1]),
-                    current.max[2].max(bounds.max[2]),
-                ],
-            },
-            None => bounds,
-        });
-    }
-    combined
-}
-
-fn build_preview_camera(
-    bounds: RenderBounds,
-    width: u32,
-    height: u32,
-    quarter_turns: u8,
-) -> RenderCameraState {
-    let aspect = if height == 0 {
-        1.0
-    } else {
-        width as f32 / height as f32
-    };
-    let basis = isometric_preview_basis(quarter_turns);
-    let target = [
-        (bounds.min[0] + bounds.max[0]) * 0.5,
-        bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.45,
-        (bounds.min[2] + bounds.max[2]) * 0.5,
-    ];
-    let mut right_extent = 0.0_f32;
-    let mut up_extent = 0.0_f32;
-    for corner in bounds_corners(bounds) {
-        let delta = [
-            corner[0] - target[0],
-            corner[1] - target[1],
-            corner[2] - target[2],
-        ];
-        right_extent = right_extent.max(dot3(delta, basis.right).abs());
-        up_extent = up_extent.max(dot3(delta, basis.up).abs());
-    }
-    let half_height =
-        (up_extent.max(right_extent / aspect) * 1.12).max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5);
-
-    RenderCameraState {
-        eye: add3(target, scale3(basis.forward, -ISO_PREVIEW_CAMERA_DISTANCE)),
-        target,
-        up: basis.up,
-        aspect_override: Some(aspect),
-        projection_mode: RenderProjectionMode::Orthographic {
-            vertical_world_size: half_height * 2.0,
-        },
-        basis_override: Some(RenderViewBasis {
-            right: basis.right,
-            up: basis.up,
-            forward: basis.forward,
-        }),
-    }
-}
-
-fn isometric_preview_basis(quarter_turns: u8) -> RenderViewBasis {
-    let inv_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
-    let sin_elevation = ISO_PREVIEW_ELEVATION_RADIANS.sin();
-    let cos_elevation = ISO_PREVIEW_ELEVATION_RADIANS.cos();
-    let right = rotate_y_quarter_turns([inv_sqrt_2, 0.0, -inv_sqrt_2], quarter_turns);
-    let forward = rotate_y_quarter_turns(
-        [
-            cos_elevation * inv_sqrt_2,
-            -sin_elevation,
-            cos_elevation * inv_sqrt_2,
-        ],
-        quarter_turns,
-    );
-    let up = normalize3(cross3(forward, right));
-
-    RenderViewBasis { right, up, forward }
-}
-
-fn bounds_corners(bounds: RenderBounds) -> [[f32; 3]; 8] {
-    [
-        [bounds.min[0], bounds.min[1], bounds.min[2]],
-        [bounds.max[0], bounds.min[1], bounds.min[2]],
-        [bounds.min[0], bounds.max[1], bounds.min[2]],
-        [bounds.max[0], bounds.max[1], bounds.min[2]],
-        [bounds.min[0], bounds.min[1], bounds.max[2]],
-        [bounds.max[0], bounds.min[1], bounds.max[2]],
-        [bounds.min[0], bounds.max[1], bounds.max[2]],
-        [bounds.max[0], bounds.max[1], bounds.max[2]],
-    ]
-}
-
-fn white_render_textures() -> RenderTextureArraySource {
-    RenderTextureArraySource {
-        tile_size: 16,
-        tiles: vec![RenderTextureTile {
-            layer: 0,
-            key: "diagnostic_white".to_string(),
-            source: RenderTextureSource::BuiltinWhite,
-        }],
-    }
-}
-
-fn draw_overlay(image: &mut new_world::renderer::OffscreenRenderOutput, header: &PreviewHeader) {
+fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
     let Some(mut rgba) =
         RgbaImage::from_raw(image.width, image.height, std::mem::take(&mut image.rgba))
     else {
@@ -1067,7 +986,7 @@ fn blend_rgba(image: &mut RgbaImage, x: u32, y: u32, color: [u8; 4], amount: f32
 }
 
 fn write_rgba_png_with_metadata(
-    image: &new_world::renderer::OffscreenRenderOutput,
+    image: &OffscreenRenderOutput,
     output: &Path,
     header: &PreviewHeader,
 ) -> Result<(), Box<dyn Error>> {
@@ -1090,58 +1009,6 @@ fn write_rgba_png_with_metadata(
     let mut writer = encoder.write_header()?;
     writer.write_image_data(&image.rgba)?;
     Ok(())
-}
-
-fn preview_environment() -> RenderEnvironment {
-    let mut environment = RenderEnvironment::sunset_quarter_view();
-    environment.time_of_day_hours = 15.0;
-    environment.sun_direction = normalize3([0.42, 0.72, -0.55]);
-    environment.sun_color = [0.92, 0.90, 0.84];
-    environment.sun_intensity = 0.78;
-    environment.ambient_color = [0.34, 0.37, 0.40];
-    environment.ambient_intensity = 0.72;
-    environment.fog_density = 0.0;
-    environment.top_face_boost = 0.18;
-    environment.side_shadow_strength = 0.55;
-    environment.saturation_boost = 0.10;
-    environment
-}
-
-fn normalize3(value: [f32; 3]) -> [f32; 3] {
-    let length = (value[0] * value[0] + value[1] * value[1] + value[2] * value[2])
-        .sqrt()
-        .max(f32::EPSILON);
-    [value[0] / length, value[1] / length, value[2] / length]
-}
-
-fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-fn scale3(value: [f32; 3], scalar: f32) -> [f32; 3] {
-    [value[0] * scalar, value[1] * scalar, value[2] * scalar]
-}
-
-fn rotate_y_quarter_turns(value: [f32; 3], quarter_turns: u8) -> [f32; 3] {
-    match quarter_turns % 4 {
-        0 => value,
-        1 => [value[2], value[1], -value[0]],
-        2 => [-value[0], value[1], -value[2]],
-        3 => [-value[2], value[1], value[0]],
-        _ => unreachable!(),
-    }
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
@@ -1294,97 +1161,98 @@ mod tests {
     }
 
     #[test]
-    fn mesh_builder_emits_vertices_for_simple_column_tile() {
-        let column = HeightfieldColumn {
-            position: new_world::world::WorldPlanePoint::new(0.0, 0.0),
-            surface_height_blocks: 12.0,
-            surface_y: 12,
+    fn default_vertical_scale_is_auto_fit_multiplier() {
+        assert!((DEFAULT_VERTICAL_SCALE - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn iso_plan_default_relief_uses_measurable_image_span() {
+        let tile = two_by_two_heightfield_tile();
+        let plan = IsoRenderPlan::new(&tile, 1280, 720, 0, DEFAULT_VERTICAL_SCALE)
+            .expect("iso render plan");
+        let span = plan.projected_height_span_px();
+
+        assert!(span > 720.0 * 0.19);
+        assert!(span < 720.0 * 0.36);
+        assert!(plan.tile_w_px > 2.0);
+    }
+
+    #[test]
+    fn cpu_iso_preview_is_nonblank() {
+        let tile = two_by_two_heightfield_tile();
+        let plan = IsoRenderPlan::new(&tile, 320, 180, 0, DEFAULT_VERTICAL_SCALE)
+            .expect("iso render plan");
+        let (image, stats) = render_heightfield_isometric(&tile, plan).expect("render");
+        let first = image.rgba.chunks_exact(4).next().expect("pixel");
+        let varied = image
+            .rgba
+            .chunks_exact(4)
+            .any(|pixel| pixel[0] != first[0] || pixel[1] != first[1] || pixel[2] != first[2]);
+
+        assert!(varied);
+        assert!(stats.projected_height_span_px > 0.0);
+    }
+
+    fn two_by_two_heightfield_tile() -> HeightfieldTile {
+        let columns = vec![
+            height_column(0.0, 0.0, -8.0, HeightfieldTerrainKind::Coast),
+            height_column(32.0, 0.0, 34.0, HeightfieldTerrainKind::Land),
+            height_column(0.0, 32.0, 72.0, HeightfieldTerrainKind::Ridge),
+            height_column(32.0, 32.0, 12.0, HeightfieldTerrainKind::River),
+        ];
+        HeightfieldTile {
+            width: 2,
+            height: 2,
+            sample_spacing_blocks: 32.0,
+            columns,
+            stats: new_world::world::generation::HeightfieldTileStats {
+                column_count: 4,
+                min_surface_height_blocks: -8.0,
+                max_surface_height_blocks: 72.0,
+                average_surface_height_blocks: 27.5,
+                water_column_count: 0,
+                ocean_column_count: 0,
+                lake_column_count: 0,
+                river_hint_column_count: 1,
+                dry_basin_column_count: 0,
+                ridge_column_count: 1,
+            },
+            config: HeightfieldConfig::default(),
+        }
+    }
+
+    fn height_column(
+        x: f32,
+        z: f32,
+        surface_height_blocks: f32,
+        terrain_kind: HeightfieldTerrainKind,
+    ) -> HeightfieldColumn {
+        HeightfieldColumn {
+            position: new_world::world::WorldPlanePoint::new(x, z),
+            surface_height_blocks,
+            surface_y: surface_height_blocks.floor() as i32,
             water_level_blocks: None,
             water_y: None,
-            terrain_kind: HeightfieldTerrainKind::Land,
-            macro_elevation: 0.2,
-            combined_macro_height: 0.2,
+            terrain_kind,
+            macro_elevation: 0.0,
+            combined_macro_height: surface_height_blocks / 160.0,
             ocean_mask: 0.0,
             lake_mask: 0.0,
             dry_basin_mask: 0.0,
             coast_mask: 0.0,
-            ridge_influence: 0.0,
-            river_valley_strength: 0.0,
+            ridge_influence: if matches!(terrain_kind, HeightfieldTerrainKind::Ridge) {
+                1.0
+            } else {
+                0.0
+            },
+            river_valley_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+                1.0
+            } else {
+                0.0
+            },
             river_flow_hint: 0.0,
             meso_delta_blocks: 0.0,
             micro_relief_blocks: 0.0,
-        };
-        let tile = HeightfieldTile {
-            width: 1,
-            height: 1,
-            sample_spacing_blocks: 32.0,
-            columns: vec![column],
-            stats: Default::default(),
-            config: HeightfieldConfig::default(),
-        };
-
-        let mesh = build_terrain_mesh(&tile, 2.0);
-
-        assert!(!mesh.vertices.is_empty());
-        assert!(mesh.bounds.is_some());
-    }
-
-    #[test]
-    fn isometric_basis_is_topdown_and_keeps_horizontal_axes_balanced() {
-        let basis = isometric_preview_basis(0);
-        let x = projected_axis_length([1.0, 0.0, 0.0], basis);
-        let y = projected_axis_length([0.0, 1.0, 0.0], basis);
-        let z = projected_axis_length([0.0, 0.0, 1.0], basis);
-
-        assert!((x - z).abs() < 1e-5);
-        assert!(y < x);
-        assert!(basis.forward[1] < -0.80);
-        assert!(dot3([1.0, 0.0, 0.0], basis.right) > 0.0);
-        assert!(dot3([0.0, 1.0, 0.0], basis.up) > 0.0);
-    }
-
-    #[test]
-    fn default_vertical_scale_is_relief_not_side_view_exaggeration() {
-        assert!((DEFAULT_VERTICAL_SCALE - 0.5).abs() < f32::EPSILON);
-        let basis = isometric_preview_basis(0);
-        let horizontal = projected_axis_length([1.0, 0.0, 0.0], basis);
-        let scaled_vertical = projected_axis_length([0.0, DEFAULT_VERTICAL_SCALE, 0.0], basis);
-
-        assert!(scaled_vertical < horizontal * 0.35);
-    }
-
-    #[test]
-    fn isometric_camera_bounds_contain_all_corners() {
-        let bounds = RenderBounds {
-            min: [-64.0, -16.0, -48.0],
-            max: [72.0, 128.0, 96.0],
-        };
-        let width = 1280;
-        let height = 720;
-        let camera = build_preview_camera(bounds, width, height, 0);
-        let basis = camera.basis_override.expect("preview basis");
-        let half_height = match camera.projection_mode {
-            RenderProjectionMode::Orthographic {
-                vertical_world_size,
-            } => vertical_world_size * 0.5,
-            RenderProjectionMode::Perspective => unreachable!(),
-        };
-        let half_width = half_height * width as f32 / height as f32;
-
-        for corner in bounds_corners(bounds) {
-            let delta = [
-                corner[0] - camera.target[0],
-                corner[1] - camera.target[1],
-                corner[2] - camera.target[2],
-            ];
-            assert!(dot3(delta, basis.right).abs() <= half_width + 0.001);
-            assert!(dot3(delta, basis.up).abs() <= half_height + 0.001);
         }
-    }
-
-    fn projected_axis_length(axis: [f32; 3], basis: RenderViewBasis) -> f32 {
-        let right = dot3(axis, basis.right);
-        let up = dot3(axis, basis.up);
-        (right * right + up * up).sqrt()
     }
 }

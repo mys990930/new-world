@@ -21,7 +21,7 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
-  - `--vertical-scale <f32>`: preview-only vertical relief scale, default `0.5`
+  - `--vertical-scale <f32>`: preview-only multiplier for automatic vertical relief fit, default `1.0`
   - `--output <path>`
 
 ## Flow
@@ -32,21 +32,28 @@
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile`.
-7. Build diagnostic terrain and water box meshes from columns.
-8. Render with an orthographic top-down isometric camera.
+7. Project columns with a CPU 2D isometric column renderer.
+8. Draw visible side faces, top faces, and water tops in painter order.
 
 ## Interpretation
 
 - This binary is not final voxel fill.
 - Meso features and Perlin micro relief are currently stubbed as zero in `heightfield`.
-- The default view is top-down isometric: world X/Z axes project at balanced diagonal lengths while
-  the camera looks down at about 60 degrees. Height is intentionally scaled down by
-  `--vertical-scale` so terrain relief reads over the horizontal footprint instead of turning the
-  preview into a side-view wall chart.
-- `--vertical-scale` changes preview mesh height only. It does not modify the `HeightfieldTile`
+- The default view is a CPU-rendered isometric column view, not a 3D orthographic camera. Projection
+  is explicit:
+
+```text
+screen_x = (x - z) * tile_w / 2
+screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+```
+
+- `vertical_px_per_block` is computed per preview so the visible height range occupies roughly
+  20-35% of the image height. This keeps top faces and relief visible at the same time.
+- `--vertical-scale` multiplies the automatic relief fit. It does not modify `HeightfieldTile`
   values or persisted generation data.
-- Columns are ordinary 3D diagnostic boxes, so the offscreen renderer depth buffer handles overlap
-  between terrain sides and water surfaces.
+- Columns are drawn as top diamonds plus only the visible east/south side faces where a neighbor is
+  lower. The preview does not draw every column down to a global base plane, because that reads as a
+  side-view wall chart instead of a macro terrain surface.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land

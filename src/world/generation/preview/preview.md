@@ -347,7 +347,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
-  - `--vertical-scale <f32>`: preview-only vertical relief scale, 기본 `0.5`
+  - `--vertical-scale <f32>`: automatic vertical relief fit multiplier, 기본 `1.0`
   - `--stage heightfield`
   - `--output <path>`
 
@@ -368,10 +368,19 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   중복 carve하지 않고 terrain kind/water hint로 보존한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
-- default camera is orthographic top-down isometric. World X/Z axes project as balanced diagonals,
-  the camera elevation is about 60 degrees, and Y height is reduced by `--vertical-scale` so the
-  output reads as a terrain footprint with relief instead of a side-view column wall. `--quarter-turns`
-  rotates the horizontal grid without changing height scale.
+- default renderer is a CPU 2D isometric column renderer, not a tunable 3D orthographic camera. It
+  uses:
+
+```text
+screen_x = (x - z) * tile_w / 2
+screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+```
+
+  `vertical_px_per_block` is fitted so the visible height range occupies about 20-35% of the output
+  height. `--vertical-scale` multiplies that automatic fit, and `--quarter-turns` rotates the
+  horizontal grid without changing height data.
+- The preview draws top diamonds and only visible neighbor-difference side faces. It must show top
+  surfaces and macro relief together; a side-wall chart and a flat topdown plane are both regressions.
 
 ### 검증 기준
 
