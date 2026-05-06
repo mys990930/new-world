@@ -12,7 +12,7 @@ pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 160.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
-pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.34;
+pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.48;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
@@ -1764,6 +1764,23 @@ mod tests {
         assert!(
             headwater <= 0.02,
             "headwater carve should fade quickly instead of using a fixed wide corridor: {headwater}"
+        );
+    }
+
+    #[test]
+    fn default_combined_height_does_not_apply_ridge_raise() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 1, 1, 32.0);
+        let without_ridge = combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
+        let with_ridge_influence =
+            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, config);
+
+        assert_eq!(
+            config.ridge_height_scale, 0.0,
+            "launch macro field keeps ridge influence diagnostic-only until broad mountain elevation is reintroduced"
+        );
+        assert_eq!(
+            without_ridge, with_ridge_influence,
+            "ridge influence should not create pinpoint combined-height maxima while ridge raise is disabled"
         );
     }
 

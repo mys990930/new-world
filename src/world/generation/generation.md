@@ -152,8 +152,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - river valley carve는 이 단계에서 2D scalar guide로 보이는 것이 정상이다. 최종 water surface와
      voxel carve는 heightfield/water/voxel 단계에서 확정하지만, combined macro height와 lit preview는
      이 guide가 지형을 낮추는 효과를 보여야 한다.
-   - combined macro height는 아직 Perlin이 섞이지 않은 pre-micro 높이이며, macro elevation,
-     ridge raise, river carve, coast/lake flatten을 합성한다.
+   - combined macro height는 아직 Perlin이 섞이지 않은 pre-micro 높이이며, 현재 launch slice에서는
+     macro elevation, river carve, coast/lake flatten을 합성한다.
+   - ridge guide와 ridge influence channel은 남아 있지만, narrow ridge envelope를 곧바로 높이에 더하면
+     1블록 contour 기준에서 pinpoint maxima와 불연속적인 등고선 밀도 변화를 만들 수 있어
+     `combined_macro_height`의 ridge raise는 broad mountain elevation model 재도입 전까지 disabled/stub으로 둔다.
    - dry basin은 lake/ocean water flatten 대상이 아니다. macro field에서는 폐쇄분지 surface mask와
      얕은 above-sea-level floor로 표현하고, 큰 물웅덩이나 수면처럼 낮추지 않는다.
    - 아직 micro Perlin이 없으므로 ordinary cell interior에 촘촘한 grain이 보이면 ridge/coast/river
@@ -295,8 +298,9 @@ column/window만 sample해 `ChunkData`를 채운다.
   height는 각각 finite 값과 문서화된 range를 유지해야 한다.
 - river valley width와 depth는 selected/display flow에 단조 증가해야 한다. 상류와 하류가 같은 폭으로
   보이면 회귀다.
-- ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 만들어야 하지만, 전역
-  low-level grain으로 퍼지면 안 된다.
+- ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 진단할 수 있어야 하지만,
+  broad mountain elevation model이 들어오기 전까지 combined macro height를 직접 올리지 않는다.
+  ridge가 전역 low-level grain으로 퍼지거나 pinpoint maxima로 보이면 안 된다.
 - selected hydrology endpoint, lake inlet/outlet, no lake-edge river invariant는 macro field
   rasterization 이후에도 유지되어야 한다.
 - Perlin micro relief는 macro ownership, lake surface, river continuity를 뒤집으면 안 된다.

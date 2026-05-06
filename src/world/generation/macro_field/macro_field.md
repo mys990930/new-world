@@ -153,6 +153,10 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - `ridge_influence`는 그 중심선 주변을 폭 있는 산맥 envelope로 끌어올리기 위한 거리 기반 scalar field다.
    - 이 단계는 아직 Perlin micro relief 전이므로 낮은 꼬리값이 tile 전체에 grain처럼 깔리면 안 된다.
      launch 구현은 ridge distance envelope의 낮은 값은 잘라내고, active fraction을 stats/preview에 기록한다.
+   - 현재 launch slice에서는 `ridge_influence`를 combined height에 더하지 않는다. ridge channel은
+     guide/source 진단용으로 유지하지만, ridge raise는 broad mountain elevation model이 들어올 때까지
+     disabled/stub 상태다. 기존 narrow ridge envelope가 1블록 등고선 기준에서 pinpoint maxima를 만들어
+     contour가 층마다 불연속적으로 튀어 보였기 때문이다.
 7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
@@ -167,11 +171,15 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 ```text
 combined_macro_height =
     macro_elevation
-  + ridge_influence * ridge_height_scale
   - river_valley_strength * river_carve_scale
   - coast_flatten
   - lake_flatten
 ```
+
+`ridge_height_scale`의 launch 기본값은 `0`이다. 즉 현재 `combined_macro_height`는 ridge guide를
+높이 maxima로 직접 더하지 않고, macro elevation과 river/coast/lake/dry-basin 제약만 합성한다.
+ridge guide는 여전히 별도 channel과 stats로 확인할 수 있으며, 이후 stage에서 연결된 broad mountain
+elevation model을 설계한 뒤 재도입한다.
 
 `combined_macro_height`는 최종 terrain height가 아니다. 이후 meso feature, Perlin micro relief,
 heightfield/water surface composition이 이 값을 읽는다.
@@ -233,7 +241,7 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
 - river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
   carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
   얕게, 하류는 넓고 깊게 보여야 한다.
-- combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 하며,
+- combined macro height. river valley carve가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
   subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
 - contour. heightfield 직전 block-height scale의 combined macro height 등고선을 보여준다. minor
@@ -282,10 +290,13 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 
 1. `macro_field`는 graph/macro/hydrology/boundary를 대체하는 source of truth가 아니다.
 2. Perlin micro relief는 `macro_field` 이후에 합성되며 macro ownership을 뒤집으면 안 된다.
-3. ridge guide는 edge maxima skeleton이고, ridge influence는 heightfield가 읽는 주변 envelope다.
+3. ridge guide는 edge maxima skeleton이고, ridge influence는 heightfield가 읽을 수 있는 주변 envelope
+   진단 channel이다. 현재 launch slice에서는 ridge raise가 combined height에서 disabled 상태다.
+   broad mountain elevation model 없이 narrow ridge envelope만 높이에 더하면 1블록 contour 기준에서
+   pinpoint maxima와 불연속적인 등고선 밀도 변화를 만들기 때문이다.
    Perlin 전 단계에서 ridge influence가 거의 모든 tile sample에 nonzero low-level grain으로 깔리면
-   안 된다. 반대로 guide 위 한 점만 밝은 pinpoint로 남아도 안 되며, selected ridge path를 따라
-   연결된 mountain belt shoulder가 보여야 한다.
+   안 된다. ridge를 높이로 재도입할 때는 guide 위 한 점만 밝은 pinpoint로 남지 않고, selected ridge
+   path를 따라 연결된 mountain belt shoulder가 보여야 한다.
 4. river valley는 hydrology selected segment만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
 5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다. river valley width와
    carve depth는 selected/display flow에 비례해야 하며, 고정 폭 corridor를 모든 강에 적용하면 안 된다.
