@@ -156,6 +156,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
+   - river valley width와 depth는 모두 selected/display flow에서 파생한다. launch 기본 정책은
+     `flow_hint = clamp(sqrt(flow_accumulation) / 32, 0, 1)`을 만들고,
+     `width = 20 + (144 - 20) * flow_hint^1.35` blocks 범위를 사용한다. 중심부 carve depth도
+     `0.18..1.0` 범위에서 `flow_hint^1.15`로 커진다. 따라서 상류는 좁고 얕게 빠르게 사라지고,
+     하류 trunk에서만 넓고 깊은 valley guide가 보여야 한다.
 8. 아래 계열로 combined macro height를 계산한다. 이 단계의 river carve는 최종 물/복셀 carve가
    아니라 heightfield가 읽을 2D valley/carve guide이며, preview에서 보여야 한다.
 
@@ -180,7 +185,9 @@ surface/context를 드러내지만, combined height에서는 얕은 above-sea-le
    - contour 추출은 Marching Squares 기반이다.
    - level은 normalized scalar가 아니라 heightfield 직전 block-height 기준이다.
    - 기본 preview step은 8 blocks, major contour는 5 level마다 40 blocks 간격이다.
-   - sea level `y = 0` contour는 별도 preview 색상으로 구분할 수 있어야 한다.
+   - preview contour 색은 height에 따라 달라져야 한다. 낮은/oceanward contour는 푸른 계열,
+     높은 contour는 붉은/주황 계열을 사용하고, sea level `y = 0` contour는 별도 preview 색상으로
+     구분할 수 있어야 한다.
    - flat field는 contour를 만들지 않아야 하며, 모든 segment endpoint는 finite world-space point여야 한다.
 
 ---
@@ -224,13 +231,15 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
   dry basin은 별도 mask/color로 표시되며 coast 노란색과 구분되어야 한다.
 - ridge influence
 - river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
-  carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다.
+  carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
+  얕게, 하류는 넓고 깊게 보여야 한다.
 - combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
   subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
 - contour. heightfield 직전 block-height scale의 combined macro height 등고선을 보여준다. minor
-  contour, major contour, sea-level contour는 서로 구분되어야 하며, contour channel에서는 noisy
-  Voronoi edge overlay가 contour 판독을 방해하지 않아야 한다.
+  contour, major contour, sea-level contour는 서로 구분되어야 하며, contour line 색상은 낮은 곳의
+  푸른 계열에서 높은 곳의 붉은 계열로 이어져야 한다. contour channel에서는 noisy Voronoi edge
+  overlay가 contour 판독을 방해하지 않아야 한다.
 
 preview metadata/stdout은 ridge active sample fraction, dry basin sample count와 dry basin combined
 height range를 기록한다. macro field stage에는 아직 micro Perlin이 없으므로 lit preview의 촘촘한
@@ -275,9 +284,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 2. Perlin micro relief는 `macro_field` 이후에 합성되며 macro ownership을 뒤집으면 안 된다.
 3. ridge guide는 edge maxima skeleton이고, ridge influence는 heightfield가 읽는 주변 envelope다.
    Perlin 전 단계에서 ridge influence가 거의 모든 tile sample에 nonzero low-level grain으로 깔리면
-   안 된다.
+   안 된다. 반대로 guide 위 한 점만 밝은 pinpoint로 남아도 안 되며, selected ridge path를 따라
+   연결된 mountain belt shoulder가 보여야 한다.
 4. river valley는 hydrology selected segment만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
-5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다.
+5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다. river valley width와
+   carve depth는 selected/display flow에 비례해야 하며, 고정 폭 corridor를 모든 강에 적용하면 안 된다.
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.

@@ -47,8 +47,11 @@
 - `macro`: signed macro elevation sampled through noisy-boundary owner/blend logic.
 - `mask`: ocean, lake/wetland, dry basin, explicit ocean coast, and land context following noisy
   boundaries. Dry basin is a land-owned closed basin context, not a shoreline.
-- `ridge`: distance-envelope influence around ridge noisy boundary curves.
-- `river`: distance-envelope valley influence around selected hydrology river curves.
+- `ridge`: connected distance-envelope influence around ridge noisy boundary curves. It should read
+  as a mountain belt shoulder around the ridge maxima guide, not isolated bright pixels and not
+  global low-level texture.
+- `river`: flow-scaled distance-envelope valley influence around selected hydrology river curves.
+  Upstream segments are narrow and shallow; downstream trunks are wider and deeper.
 - `combined`: macro elevation plus ridge raise, minus visible river valley carve guide, coast
   flatten, and water flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map.
 - `lit`: top-down white heightfield preview with broad directional hillshade from combined height
@@ -57,7 +60,9 @@
 - `contour`: Marching Squares contour lines extracted from `combined_macro_height` after converting
   it to the same block-height scale used by the current heightfield launch slice. Minor contours use
   `--contour-step`, major contours use `--contour-step * --contour-major-every`, and sea level
-  `y=0` is drawn in a separate muted blue.
+  `y=0` is drawn in a separate muted blue. Other contour lines use a height color ramp: low/oceanward
+  levels are blue and high levels move toward orange/red. Major contours keep the same height hue
+  but render stronger.
 
 `macro`, `combined`, and `lit` use a fixed absolute normalized preview scale rather than per-image
 min/max stretching. The launch preview scale is:
@@ -136,7 +141,7 @@ Each PNG contains:
   valley, and combined macro height
 - fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
 - noisy Voronoi edge overlay curve/segment count and scale bar length
-- contour step, major interval, min/max level, level count, segment count, and overlay flag
+- contour step, major interval, min/max level, level count, segment count, height color ramp, and overlay flag
 - lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
   min/average/max/stddev
 - channel meaning notes for macro, mask, ridge, river, combined, contour, and lit outputs

@@ -147,6 +147,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
    - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge 주변 distance,
      flow, carve strength를 저장한다. 강을 별도 noise curve로 다시 만들지 않는다.
+   - river valley field는 고정 폭으로 모든 강을 칠하지 않는다. selected/display flow가 작은 상류는
+     좁고 얕은 carve guide를 만들고, flow가 큰 하류 trunk에서만 넓고 깊은 carve guide를 만든다.
    - river valley carve는 이 단계에서 2D scalar guide로 보이는 것이 정상이다. 최종 water surface와
      voxel carve는 heightfield/water/voxel 단계에서 확정하지만, combined macro height와 lit preview는
      이 guide가 지형을 낮추는 효과를 보여야 한다.
@@ -291,6 +293,10 @@ column/window만 sample해 `ChunkData`를 채운다.
 - macro field tile overlap은 인접 tile에서 같은 world-space sample에 대해 같은 값을 내야 한다.
 - macro elevation, coast/lake/ocean/dry basin mask, ridge influence, river valley, combined macro
   height는 각각 finite 값과 문서화된 range를 유지해야 한다.
+- river valley width와 depth는 selected/display flow에 단조 증가해야 한다. 상류와 하류가 같은 폭으로
+  보이면 회귀다.
+- ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 만들어야 하지만, 전역
+  low-level grain으로 퍼지면 안 된다.
 - selected hydrology endpoint, lake inlet/outlet, no lake-edge river invariant는 macro field
   rasterization 이후에도 유지되어야 한다.
 - Perlin micro relief는 macro ownership, lake surface, river continuity를 뒤집으면 안 된다.

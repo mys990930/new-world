@@ -47,8 +47,6 @@ const MASK_LAKE_COLOR: [u8; 3] = [54, 150, 198];
 const MASK_DRY_BASIN_COLOR: [u8; 3] = [122, 105, 129];
 const MASK_COAST_COLOR: [u8; 3] = [220, 196, 125];
 const MASK_LAND_COLOR: [u8; 3] = [101, 154, 89];
-const CONTOUR_MINOR_COLOR: [u8; 3] = [228, 222, 199];
-const CONTOUR_MAJOR_COLOR: [u8; 3] = [255, 246, 210];
 const CONTOUR_SEA_COLOR: [u8; 3] = [96, 165, 204];
 const CONTOUR_MINOR_AMOUNT: f32 = 0.68;
 const CONTOUR_MAJOR_AMOUNT: f32 = 0.88;
@@ -1349,10 +1347,8 @@ fn draw_contour_overlay(
         let sea_level = level.height_blocks.abs() <= contours.step_blocks * 0.5;
         let color = if sea_level {
             CONTOUR_SEA_COLOR
-        } else if level.is_major {
-            CONTOUR_MAJOR_COLOR
         } else {
-            CONTOUR_MINOR_COLOR
+            contour_height_color(level.height_blocks, level.is_major)
         };
         let amount = if sea_level {
             CONTOUR_SEA_AMOUNT
@@ -1846,6 +1842,21 @@ fn combined_terrain_ramp(value: f32) -> [u8; 3] {
     )
 }
 
+fn contour_height_color(height_blocks: f32, is_major: bool) -> [u8; 3] {
+    let normalized = ((height_blocks + 48.0) / (160.0 + 48.0)).clamp(0.0, 1.0);
+    let base = gradient_color(
+        normalized,
+        &[
+            (0.00, [39, 90, 154]),
+            (0.22, [76, 142, 190]),
+            (0.48, [214, 207, 150]),
+            (0.70, [214, 125, 76]),
+            (1.00, [168, 48, 45]),
+        ],
+    );
+    if is_major { lighten(base, 0.18) } else { base }
+}
+
 fn gradient_fire(value: f32) -> [u8; 3] {
     gradient_color(
         value,
@@ -1982,8 +1993,8 @@ fn draw_contour_legend_keys(
     contour_major_every: u32,
 ) {
     let keys = [
-        ("MIN", CONTOUR_MINOR_COLOR),
-        ("MAJ", CONTOUR_MAJOR_COLOR),
+        ("LOW", contour_height_color(-48.0, false)),
+        ("HIGH", contour_height_color(160.0, true)),
         ("SEA", CONTOUR_SEA_COLOR),
     ];
     let mut cursor_x = x;
@@ -2072,12 +2083,10 @@ fn draw_gradient_bar(
                     [v, v, v]
                 }
                 PreviewChannel::Contour => {
-                    if t < 0.33 {
-                        CONTOUR_MINOR_COLOR
-                    } else if t < 0.66 {
-                        CONTOUR_MAJOR_COLOR
-                    } else {
+                    if (t - 0.5).abs() <= 0.025 {
                         CONTOUR_SEA_COLOR
+                    } else {
+                        contour_height_color(-48.0 + t * 208.0, false)
                     }
                 }
             };
@@ -2236,6 +2245,10 @@ fn blend(base: [u8; 3], tint: [u8; 3], amount: f32) -> [u8; 3] {
         mix_channel(base[1], tint[1], amount),
         mix_channel(base[2], tint[2], amount),
     ]
+}
+
+fn lighten(base: [u8; 3], amount: f32) -> [u8; 3] {
+    blend(base, [255, 248, 228], amount)
 }
 
 fn mix_channel(base: u8, tint: u8, amount: f32) -> u8 {
@@ -2623,6 +2636,26 @@ mod tests {
         draw_contour_overlay(&mut image, window, &tile.contours, PreviewChannel::Contour);
 
         assert_ne!(image.as_raw(), &before);
+    }
+
+    #[test]
+    fn contour_color_ramp_maps_low_blue_and_high_red() {
+        let low = contour_height_color(-48.0, false);
+        let high = contour_height_color(160.0, false);
+        let major_high = contour_height_color(160.0, true);
+
+        assert!(
+            low[2] > low[0] && low[2] > low[1],
+            "low/oceanward contours should read blue: {low:?}"
+        );
+        assert!(
+            high[0] > high[1] && high[0] > high[2],
+            "high contours should read red/orange: {high:?}"
+        );
+        assert!(
+            major_high[0] >= high[0] && major_high[1] >= high[1],
+            "major contours should keep the height hue while reading stronger"
+        );
     }
 
     #[test]

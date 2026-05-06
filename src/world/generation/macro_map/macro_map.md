@@ -253,6 +253,10 @@ drainage divide 가능성을 함께 점수화한다.
 산맥 선이 그대로 보이면 안 된다. ridge skeleton은 broad envelope로 확산되고, noisy boundary와
 Voronoi-derived gradient map을 거쳐 자연스러운 능선/봉우리/안부로 바뀌어야 한다. Perlin micro
 relief는 마지막에 이 구조 위에 얹히는 표면 디테일이다.
+macro_field 단계의 ridge influence는 이 skeleton을 heightfield가 읽을 수 있는 연결된 산맥 envelope로
+해석한다. 단일 edge pixel만 밝은 pinpoint로 남기면 안 되며, selected ridge chain을 따라 폭 있는
+mountain belt shoulder가 이어져야 한다. 동시에 ridge tail이 전역에 깔려 micro noise처럼 보이는 것도
+회귀다.
 
 ---
 

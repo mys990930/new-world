@@ -153,7 +153,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
 - selected river는 threshold를 넘은 headwater에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
-- ocean outlet으로 이어지는 river는 raw flow accumulation을 기준으로 넓어질 수 있다.
+- ocean outlet으로 이어지는 river는 raw/selected display flow accumulation을 기준으로 넓어질 수 있다.
+  이후 macro_field/heightfield 단계에서 이 값은 width와 depth를 함께 키운다. 상류는 좁고 얕고,
+  하류 trunk는 넓고 깊어야 하며, launch preview에서 모든 selected river가 같은 폭으로 보이면 회귀다.
 - lake로 끝나는 river와 lake/wetland component로 처음 들어가는 inlet river는 raw flow accumulation을
   보존하되 lake 면적에서 파생한 capacity를 기준으로 selected incoming chain 수, visible inlet segment
   수, 표시/폭 계산용 discharge를 제한한다. 기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,

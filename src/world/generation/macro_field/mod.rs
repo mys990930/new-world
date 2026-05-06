@@ -9,8 +9,8 @@ use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
 
 pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
-pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 192.0;
-pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 192.0;
+pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
+pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 160.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.34;
 pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.48;
@@ -24,8 +24,11 @@ pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 160.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 8.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
-const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.18;
-const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.46;
+const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
+const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
+const RIVER_MIN_WIDTH_BLOCKS: f32 = 20.0;
+const RIVER_MAX_WIDTH_BLOCKS: f32 = 144.0;
+const RIVER_HEADWATER_DEPTH_FACTOR: f32 = 0.18;
 const DRY_BASIN_MIN_HEIGHT: f32 = 0.025;
 const DRY_BASIN_MAX_HEIGHT: f32 = 0.38;
 const DRY_BASIN_FLOOR_LOWERING: f32 = 0.035;
@@ -536,8 +539,11 @@ impl MacroFieldInfluenceFields {
         let coast_distance = self.coast_distance_blocks[index];
         let river_distance = self.river_distance_blocks[index];
         let river_flow_hint = self.river_flow_hint[index];
-        let river_valley_strength =
-            envelope(river_distance, config.river_radius_blocks) * (0.35 + river_flow_hint * 0.65);
+        let river_valley_strength = river_valley_strength_for_distance(
+            river_distance,
+            river_flow_hint,
+            config.river_radius_blocks,
+        );
 
         MacroFieldInfluenceSample {
             ridge_influence: ridge_envelope(ridge_distance, config.ridge_radius_blocks),
@@ -1010,7 +1016,8 @@ impl<'a> MacroFieldRasterContext<'a> {
             return (f32::INFINITY, 0.0, 0.0);
         };
         let flow_hint = flow_hint(flow);
-        let valley = envelope(distance, config.river_radius_blocks) * (0.35 + flow_hint * 0.65);
+        let valley =
+            river_valley_strength_for_distance(distance, flow_hint, config.river_radius_blocks);
 
         (distance, flow_hint, valley.clamp(0.0, 1.0))
     }
@@ -1252,7 +1259,7 @@ fn combine_macro_height(
     let ridge_raise = ridge_influence * config.ridge_height_scale;
     let river_carve = river_valley_strength
         * config.river_carve_scale
-        * (0.45 + river_flow_hint * 0.55)
+        * (0.92 + river_flow_hint * 0.08)
         * (1.0 - ocean_mask);
     let dry_basin = dry_basin_mask > 0.5;
     let coast_flatten = if dry_basin {
@@ -1364,12 +1371,32 @@ fn ridge_envelope(distance: f32, radius: f32) -> f32 {
     } else {
         let t = ((raw - RIDGE_INFLUENCE_VISIBLE_FLOOR) / (1.0 - RIDGE_INFLUENCE_VISIBLE_FLOOR))
             .clamp(0.0, 1.0);
-        (t * t * (3.0 - 2.0 * t)).powf(1.15)
+        (t * t * (3.0 - 2.0 * t)).powf(0.92)
     }
 }
 
 fn flow_hint(flow_accumulation: f32) -> f32 {
     (flow_accumulation.max(0.0).sqrt() / 32.0).clamp(0.0, 1.0)
+}
+
+fn river_width_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
+    let t = flow_hint.clamp(0.0, 1.0).powf(1.35);
+    let width = RIVER_MIN_WIDTH_BLOCKS + (RIVER_MAX_WIDTH_BLOCKS - RIVER_MIN_WIDTH_BLOCKS) * t;
+    width.min(configured_radius_blocks.max(RIVER_MIN_WIDTH_BLOCKS))
+}
+
+fn river_depth_factor(flow_hint: f32) -> f32 {
+    RIVER_HEADWATER_DEPTH_FACTOR
+        + (1.0 - RIVER_HEADWATER_DEPTH_FACTOR) * flow_hint.clamp(0.0, 1.0).powf(1.15)
+}
+
+fn river_valley_strength_for_distance(
+    distance_blocks: f32,
+    flow_hint: f32,
+    configured_radius_blocks: f32,
+) -> f32 {
+    let width = river_width_blocks(flow_hint, configured_radius_blocks);
+    envelope(distance_blocks, width) * river_depth_factor(flow_hint)
 }
 
 fn polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f32 {
@@ -1606,8 +1633,26 @@ mod tests {
         let active_fraction =
             tile.stats.ridge_active_sample_count as f32 / tile.stats.sample_count as f32;
         assert!(
-            active_fraction < 0.60,
-            "pre-Perlin ridge influence should not cover almost every macro-field sample: {active_fraction}"
+            active_fraction < 0.85,
+            "a ridge-centered diagnostic tile may show a broad belt, but it should not be fully saturated: {active_fraction}"
+        );
+    }
+
+    #[test]
+    fn ridge_envelope_keeps_a_connected_mountain_belt_width() {
+        let radius = DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS;
+        let center = ridge_envelope(0.0, radius);
+        let shoulder = ridge_envelope(radius * 0.45, radius);
+        let far = ridge_envelope(radius * 1.25, radius);
+
+        assert!(center > 0.95);
+        assert!(
+            shoulder > 0.05,
+            "ridge envelope should keep a visible shoulder around the guide instead of a pinpoint: {shoulder}"
+        );
+        assert_eq!(
+            far, 0.0,
+            "ridge envelope should not become global low-level grain"
         );
     }
 
@@ -1682,6 +1727,43 @@ mod tests {
         assert!(
             max > min,
             "splat river field should preserve a near/far gradient: max={max} min={min}"
+        );
+    }
+
+    #[test]
+    fn river_width_and_depth_increase_with_flow() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let headwater_flow = flow_hint(12.0);
+        let trunk_flow = flow_hint(1024.0);
+
+        assert!(
+            river_width_blocks(headwater_flow, radius) < river_width_blocks(trunk_flow, radius),
+            "river corridor width should grow with selected/display flow"
+        );
+        assert!(
+            river_depth_factor(headwater_flow) < river_depth_factor(trunk_flow),
+            "river carve depth should grow with selected/display flow"
+        );
+        assert!(
+            river_width_blocks(headwater_flow, radius) < radius * 0.35,
+            "headwater rivers should be much narrower than the maximum downstream radius"
+        );
+    }
+
+    #[test]
+    fn river_valley_uses_flow_scaled_width() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let distance = radius * 0.45;
+        let headwater = river_valley_strength_for_distance(distance, flow_hint(12.0), radius);
+        let trunk = river_valley_strength_for_distance(distance, flow_hint(1024.0), radius);
+
+        assert!(
+            trunk > headwater,
+            "a downstream trunk should still carve at distances where a headwater has faded: headwater={headwater} trunk={trunk}"
+        );
+        assert!(
+            headwater <= 0.02,
+            "headwater carve should fade quickly instead of using a fixed wide corridor: {headwater}"
         );
     }
 
