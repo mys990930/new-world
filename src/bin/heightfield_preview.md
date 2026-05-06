@@ -21,7 +21,7 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
-  - `--vertical-scale <f32>`: preview-only vertical exaggeration, default `6.0`
+  - `--vertical-scale <f32>`: preview-only vertical relief scale, default `0.5`
   - `--output <path>`
 
 ## Flow
@@ -33,14 +33,18 @@
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile`.
 7. Build diagnostic terrain and water box meshes from columns.
-8. Render with an orthographic isometric camera.
+8. Render with an orthographic top-down isometric camera.
 
 ## Interpretation
 
 - This binary is not final voxel fill.
 - Meso features and Perlin micro relief are currently stubbed as zero in `heightfield`.
-- The default view is true isometric: world X, Y, and Z axes project to the same screen length, so
-  terrain height can be compared against the horizontal grid without perspective distortion.
+- The default view is top-down isometric: world X/Z axes project at balanced diagonal lengths while
+  the camera looks down at about 60 degrees. Height is intentionally scaled down by
+  `--vertical-scale` so terrain relief reads over the horizontal footprint instead of turning the
+  preview into a side-view wall chart.
+- `--vertical-scale` changes preview mesh height only. It does not modify the `HeightfieldTile`
+  values or persisted generation data.
 - Columns are ordinary 3D diagnostic boxes, so the offscreen renderer depth buffer handles overlap
   between terrain sides and water surfaces.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:

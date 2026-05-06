@@ -347,7 +347,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
-  - `--vertical-scale <f32>`: preview-only vertical exaggeration, 기본 `6.0`
+  - `--vertical-scale <f32>`: preview-only vertical relief scale, 기본 `0.5`
   - `--stage heightfield`
   - `--output <path>`
 
@@ -368,8 +368,10 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   중복 carve하지 않고 terrain kind/water hint로 보존한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
-- default camera is orthographic true-isometric. World X, Y, and Z axes project to the same screen
-  scale, and `--quarter-turns` rotates the horizontal grid without changing height scale.
+- default camera is orthographic top-down isometric. World X/Z axes project as balanced diagonals,
+  the camera elevation is about 60 degrees, and Y height is reduced by `--vertical-scale` so the
+  output reads as a terrain footprint with relief instead of a side-view column wall. `--quarter-turns`
+  rotates the horizontal grid without changing height scale.
 
 ### 검증 기준
 

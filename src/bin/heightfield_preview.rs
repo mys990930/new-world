@@ -30,10 +30,11 @@ const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_COLUMNS_X: u32 = 192;
-const DEFAULT_VERTICAL_SCALE: f32 = 6.0;
+const DEFAULT_VERTICAL_SCALE: f32 = 0.5;
 const BASE_Y_BLOCKS: f32 = -56.0;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_PREVIEW_CAMERA_DISTANCE: f32 = 520.0;
+const ISO_PREVIEW_ELEVATION_RADIANS: f32 = std::f32::consts::FRAC_PI_3;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -196,7 +197,11 @@ impl PreviewHeader {
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("vertical_scale={:.3}", self.vertical_scale),
             "view=isometric".to_string(),
-            "projection=orthographic_true_isometric".to_string(),
+            "projection=orthographic_topdown_isometric".to_string(),
+            format!(
+                "camera_elevation_degrees={:.3}",
+                ISO_PREVIEW_ELEVATION_RADIANS.to_degrees()
+            ),
             format!("graph_sites={}", self.graph_site_count),
             format!("macro_samples={}", self.macro_sample_count),
             format!("heightfield_columns={}", self.column_count),
@@ -326,8 +331,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.sample_spacing()
     );
     println!(
-        "view: isometric orthographic, quarter turns {}, vertical scale {:.2}",
+        "view: top-down isometric orthographic, quarter turns {}, camera elevation {:.1} deg, vertical scale {:.2}",
         config.quarter_turns % 4,
+        ISO_PREVIEW_ELEVATION_RADIANS.to_degrees(),
         config.vertical_scale
     );
     println!(
@@ -863,10 +869,18 @@ fn build_preview_camera(
 
 fn isometric_preview_basis(quarter_turns: u8) -> RenderViewBasis {
     let inv_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
-    let inv_sqrt_6 = 1.0 / 6.0_f32.sqrt();
+    let sin_elevation = ISO_PREVIEW_ELEVATION_RADIANS.sin();
+    let cos_elevation = ISO_PREVIEW_ELEVATION_RADIANS.cos();
     let right = rotate_y_quarter_turns([inv_sqrt_2, 0.0, -inv_sqrt_2], quarter_turns);
-    let up = rotate_y_quarter_turns([inv_sqrt_6, 2.0 * inv_sqrt_6, inv_sqrt_6], quarter_turns);
-    let forward = normalize3(cross3(right, up));
+    let forward = rotate_y_quarter_turns(
+        [
+            cos_elevation * inv_sqrt_2,
+            -sin_elevation,
+            cos_elevation * inv_sqrt_2,
+        ],
+        quarter_turns,
+    );
+    let up = normalize3(cross3(forward, right));
 
     RenderViewBasis { right, up, forward }
 }
@@ -1316,16 +1330,27 @@ mod tests {
     }
 
     #[test]
-    fn isometric_basis_projects_world_axes_to_equal_lengths() {
+    fn isometric_basis_is_topdown_and_keeps_horizontal_axes_balanced() {
         let basis = isometric_preview_basis(0);
         let x = projected_axis_length([1.0, 0.0, 0.0], basis);
         let y = projected_axis_length([0.0, 1.0, 0.0], basis);
         let z = projected_axis_length([0.0, 0.0, 1.0], basis);
 
-        assert!((x - y).abs() < 1e-5);
-        assert!((z - y).abs() < 1e-5);
+        assert!((x - z).abs() < 1e-5);
+        assert!(y < x);
+        assert!(basis.forward[1] < -0.80);
         assert!(dot3([1.0, 0.0, 0.0], basis.right) > 0.0);
         assert!(dot3([0.0, 1.0, 0.0], basis.up) > 0.0);
+    }
+
+    #[test]
+    fn default_vertical_scale_is_relief_not_side_view_exaggeration() {
+        assert!((DEFAULT_VERTICAL_SCALE - 0.5).abs() < f32::EPSILON);
+        let basis = isometric_preview_basis(0);
+        let horizontal = projected_axis_length([1.0, 0.0, 0.0], basis);
+        let scaled_vertical = projected_axis_length([0.0, DEFAULT_VERTICAL_SCALE, 0.0], basis);
+
+        assert!(scaled_vertical < horizontal * 0.35);
     }
 
     #[test]
