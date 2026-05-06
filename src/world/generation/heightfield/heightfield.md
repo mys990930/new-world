@@ -138,12 +138,14 @@ macro field tile cache
 
 ## Preview
 
-`heightfield_preview`는 이 모듈의 column을 진단용 voxel box로 바꿔 quarter-view PNG를 만든다.
+`heightfield_preview`는 이 모듈의 column을 진단용 voxel box로 바꿔 isometric PNG를 만든다.
 
 - 실제 `ChunkData` final fill이 아니다.
 - block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
 - water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
   gray/mauve 계열로 표시한다.
+- 기본 카메라는 orthographic true-isometric view다. world X/Z grid와 Y height가 같은 screen scale로
+  읽히도록 투영해서, macro level heightfield column의 고저차와 수면 분리를 확인한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 

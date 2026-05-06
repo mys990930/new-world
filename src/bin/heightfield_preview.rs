@@ -9,7 +9,7 @@ use std::time::Instant;
 use image::RgbaImage;
 use rayon::prelude::*;
 
-use new_world::ecs::{QUARTER_VIEW_VERTICAL_WORLD_SIZE, quarter_view_basis, quarter_view_eye};
+use new_world::ecs::QUARTER_VIEW_VERTICAL_WORLD_SIZE;
 use new_world::renderer::{
     CpuMesh, MeshVertex, OffscreenRenderRequest, RenderBounds, RenderCameraState,
     RenderEnvironment, RenderMaterialKind, RenderProjectionMode, RenderTextureArraySource,
@@ -33,6 +33,7 @@ const DEFAULT_COLUMNS_X: u32 = 192;
 const DEFAULT_VERTICAL_SCALE: f32 = 6.0;
 const BASE_Y_BLOCKS: f32 = -56.0;
 const WATER_ALPHA: f32 = 0.72;
+const ISO_PREVIEW_CAMERA_DISTANCE: f32 = 520.0;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -194,6 +195,8 @@ impl PreviewHeader {
             format!("columns={}x{}", self.columns_x, self.columns_z),
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("vertical_scale={:.3}", self.vertical_scale),
+            "view=isometric".to_string(),
+            "projection=orthographic_true_isometric".to_string(),
             format!("graph_sites={}", self.graph_site_count),
             format!("macro_samples={}", self.macro_sample_count),
             format!("heightfield_columns={}", self.column_count),
@@ -321,6 +324,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.columns_x,
         window.columns_z,
         window.sample_spacing()
+    );
+    println!(
+        "view: isometric orthographic, quarter turns {}, vertical scale {:.2}",
+        config.quarter_turns % 4,
+        config.vertical_scale
     );
     println!(
         "surface height min/avg/max {:.2}/{:.2}/{:.2} blocks",
@@ -817,10 +825,10 @@ fn build_preview_camera(
     } else {
         width as f32 / height as f32
     };
-    let basis = quarter_view_basis(quarter_turns);
+    let basis = isometric_preview_basis(quarter_turns);
     let target = [
         (bounds.min[0] + bounds.max[0]) * 0.5,
-        bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.35,
+        bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.45,
         (bounds.min[2] + bounds.max[2]) * 0.5,
     ];
     let mut right_extent = 0.0_f32;
@@ -838,7 +846,7 @@ fn build_preview_camera(
         (up_extent.max(right_extent / aspect) * 1.12).max(QUARTER_VIEW_VERTICAL_WORLD_SIZE * 0.5);
 
     RenderCameraState {
-        eye: quarter_view_eye(target, quarter_turns),
+        eye: add3(target, scale3(basis.forward, -ISO_PREVIEW_CAMERA_DISTANCE)),
         target,
         up: basis.up,
         aspect_override: Some(aspect),
@@ -851,6 +859,16 @@ fn build_preview_camera(
             forward: basis.forward,
         }),
     }
+}
+
+fn isometric_preview_basis(quarter_turns: u8) -> RenderViewBasis {
+    let inv_sqrt_2 = std::f32::consts::FRAC_1_SQRT_2;
+    let inv_sqrt_6 = 1.0 / 6.0_f32.sqrt();
+    let right = rotate_y_quarter_turns([inv_sqrt_2, 0.0, -inv_sqrt_2], quarter_turns);
+    let up = rotate_y_quarter_turns([inv_sqrt_6, 2.0 * inv_sqrt_6, inv_sqrt_6], quarter_turns);
+    let forward = normalize3(cross3(right, up));
+
+    RenderViewBasis { right, up, forward }
 }
 
 fn bounds_corners(bounds: RenderBounds) -> [[f32; 3]; 8] {
@@ -885,14 +903,7 @@ fn draw_overlay(image: &mut new_world::renderer::OffscreenRenderOutput, header: 
     };
     let scale = if image.width >= 1000 { 2 } else { 1 };
     draw_panel(&mut rgba, 8, 8, 218 * scale, 48 * scale);
-    draw_text(
-        &mut rgba,
-        16,
-        16,
-        "HEIGHTFIELD",
-        [230, 235, 226, 255],
-        scale,
-    );
+    draw_text(&mut rgba, 16, 16, "ISO HEIGHT", [230, 235, 226, 255], scale);
     draw_text(
         &mut rgba,
         16,
@@ -1093,6 +1104,32 @@ fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn scale3(value: [f32; 3], scalar: f32) -> [f32; 3] {
+    [value[0] * scalar, value[1] * scalar, value[2] * scalar]
+}
+
+fn rotate_y_quarter_turns(value: [f32; 3], quarter_turns: u8) -> [f32; 3] {
+    match quarter_turns % 4 {
+        0 => value,
+        1 => [value[2], value[1], -value[0]],
+        2 => [-value[0], value[1], -value[2]],
+        3 => [-value[2], value[1], value[0]],
+        _ => unreachable!(),
+    }
+}
+
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args.len() < 3 {
@@ -1276,5 +1313,53 @@ mod tests {
 
         assert!(!mesh.vertices.is_empty());
         assert!(mesh.bounds.is_some());
+    }
+
+    #[test]
+    fn isometric_basis_projects_world_axes_to_equal_lengths() {
+        let basis = isometric_preview_basis(0);
+        let x = projected_axis_length([1.0, 0.0, 0.0], basis);
+        let y = projected_axis_length([0.0, 1.0, 0.0], basis);
+        let z = projected_axis_length([0.0, 0.0, 1.0], basis);
+
+        assert!((x - y).abs() < 1e-5);
+        assert!((z - y).abs() < 1e-5);
+        assert!(dot3([1.0, 0.0, 0.0], basis.right) > 0.0);
+        assert!(dot3([0.0, 1.0, 0.0], basis.up) > 0.0);
+    }
+
+    #[test]
+    fn isometric_camera_bounds_contain_all_corners() {
+        let bounds = RenderBounds {
+            min: [-64.0, -16.0, -48.0],
+            max: [72.0, 128.0, 96.0],
+        };
+        let width = 1280;
+        let height = 720;
+        let camera = build_preview_camera(bounds, width, height, 0);
+        let basis = camera.basis_override.expect("preview basis");
+        let half_height = match camera.projection_mode {
+            RenderProjectionMode::Orthographic {
+                vertical_world_size,
+            } => vertical_world_size * 0.5,
+            RenderProjectionMode::Perspective => unreachable!(),
+        };
+        let half_width = half_height * width as f32 / height as f32;
+
+        for corner in bounds_corners(bounds) {
+            let delta = [
+                corner[0] - camera.target[0],
+                corner[1] - camera.target[1],
+                corner[2] - camera.target[2],
+            ];
+            assert!(dot3(delta, basis.right).abs() <= half_width + 0.001);
+            assert!(dot3(delta, basis.up).abs() <= half_height + 0.001);
+        }
+    }
+
+    fn projected_axis_length(axis: [f32; 3], basis: RenderViewBasis) -> f32 {
+        let right = dot3(axis, basis.right);
+        let up = dot3(axis, basis.up);
+        (right * right + up * up).sqrt()
     }
 }

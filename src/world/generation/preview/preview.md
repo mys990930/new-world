@@ -327,10 +327,10 @@ renderer/GPU 계약을 만들지 않는다.
 ## `heightfield_preview` CLI 계약
 
 `heightfield_preview`는 stage 11 heightfield / water surface vertical slice를 chunk 생성 없이 검사하는
-quarter-view preview binary다.
+isometric preview binary다.
 
 이 preview는 `MacroFieldTile`을 `HeightfieldTile` column cache로 변환한 뒤, column을 diagnostic box로
-voxelize해서 offscreen quarter-view renderer에 전달한다. 실제 `ChunkData` final fill은 아니며,
+voxelize해서 isometric camera를 가진 offscreen renderer에 전달한다. 실제 `ChunkData` final fill은 아니며,
 surface/material/vegetation stage도 아직 적용하지 않는다.
 
 ### 입력
@@ -346,7 +346,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
-  - `--quarter-turns <u8>`
+  - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
   - `--vertical-scale <f32>`: preview-only vertical exaggeration, 기본 `6.0`
   - `--stage heightfield`
   - `--output <path>`
@@ -356,7 +356,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
-  river/dry/ridge column count, meso/perlin stub 상태, timing을 기록한다.
+  river/dry/ridge column count, meso/perlin stub 상태, isometric view/projection, timing을 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key를 표시한다.
 
 ### 현재 구현 상태
@@ -368,6 +368,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   중복 carve하지 않고 terrain kind/water hint로 보존한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
+- default camera is orthographic true-isometric. World X, Y, and Z axes project to the same screen
+  scale, and `--quarter-turns` rotates the horizontal grid without changing height scale.
 
 ### 검증 기준
 

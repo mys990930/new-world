@@ -2,7 +2,7 @@
 
 ## Role
 
-- Render a quarter-view diagnostic preview for graph-first heightfield columns.
+- Render an isometric diagnostic preview for graph-first heightfield columns.
 - Reuse the same generation chain as `macro_field_preview` through stage 8, then convert the
   `MacroFieldTile` into a `HeightfieldTile`.
 - Voxelize heightfield columns into diagnostic block-like boxes without writing final `ChunkData`.
@@ -20,7 +20,7 @@
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
-  - `--quarter-turns <u8>`: quarter-view rotation, default `0`
+  - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
   - `--vertical-scale <f32>`: preview-only vertical exaggeration, default `6.0`
   - `--output <path>`
 
@@ -33,12 +33,16 @@
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile`.
 7. Build diagnostic terrain and water box meshes from columns.
-8. Render with the offscreen quarter-view renderer.
+8. Render with an orthographic isometric camera.
 
 ## Interpretation
 
 - This binary is not final voxel fill.
 - Meso features and Perlin micro relief are currently stubbed as zero in `heightfield`.
+- The default view is true isometric: world X, Y, and Z axes project to the same screen length, so
+  terrain height can be compared against the horizontal grid without perspective distortion.
+- Columns are ordinary 3D diagnostic boxes, so the offscreen renderer depth buffer handles overlap
+  between terrain sides and water surfaces.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land
