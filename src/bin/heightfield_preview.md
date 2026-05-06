@@ -37,7 +37,8 @@
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile`.
 7. Snap heightfield surface/water output to integer block heights.
-8. Project columns with a CPU 2D isometric column renderer.
+8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
+   their visible top for neighbor-delta side faces; the underwater bed remains stored separately.
 9. Draw visible side faces, top faces, water tops, chunk boundaries, macro-field tile boundaries,
    scale bar, and metadata legend in painter order.
 
@@ -68,6 +69,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Water boxes come from heightfield water hints, not final fluid simulation.
 - Sea level is fixed at `y = 0`. Coast-adjacent land is shoreline-ramped before integer snapping so
   ordinary ocean/land contact does not render as an immediate vertical wall.
+- Ocean/lake terrain `surface_height_blocks` is bed height. The preview compares adjacent columns by
+  visible top height, `max(surface_height_blocks, water_level_blocks)`, so a water bed does not look
+  like a shoreline cliff.
 - Chunk overlay uses the runtime chunk edge size, currently `32` blocks. Macro-field tile overlay
   uses the graph/cache tile scale, currently `1024` blocks. They are distinct diagnostic overlays:
   chunk lines show future `ChunkData` output windows, macro tile lines show generation cache scale.

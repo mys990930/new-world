@@ -206,6 +206,10 @@ struct PreviewHeader {
     min_surface: f32,
     avg_surface: f32,
     max_surface: f32,
+    max_raw_neighbor_delta: f32,
+    max_constrained_neighbor_delta: f32,
+    max_snapped_neighbor_delta: f32,
+    max_visible_neighbor_delta: f32,
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
     water_columns: usize,
@@ -269,6 +273,13 @@ impl PreviewHeader {
             format!(
                 "surface_min_avg_max_blocks={:.3},{:.3},{:.3}",
                 self.min_surface, self.avg_surface, self.max_surface
+            ),
+            format!(
+                "neighbor_delta_raw_constrained_snapped_visible_blocks={:.3},{:.3},{:.3},{:.3}",
+                self.max_raw_neighbor_delta,
+                self.max_constrained_neighbor_delta,
+                self.max_snapped_neighbor_delta,
+                self.max_visible_neighbor_delta
             ),
             format!(
                 "water_ocean_lake_river_dry_ridge_columns={},{},{},{},{},{}",
@@ -373,6 +384,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         min_surface: heightfield.stats.min_surface_height_blocks,
         avg_surface: heightfield.stats.average_surface_height_blocks,
         max_surface: heightfield.stats.max_surface_height_blocks,
+        max_raw_neighbor_delta: heightfield.stats.max_raw_neighbor_delta_blocks,
+        max_constrained_neighbor_delta: heightfield.stats.max_constrained_neighbor_delta_blocks,
+        max_snapped_neighbor_delta: heightfield.stats.max_snapped_neighbor_delta_blocks,
+        max_visible_neighbor_delta: max_visible_neighbor_delta(&heightfield),
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
         water_columns: heightfield.stats.water_column_count,
@@ -442,6 +457,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.min_surface_height_blocks,
         heightfield.stats.average_surface_height_blocks,
         heightfield.stats.max_surface_height_blocks
+    );
+    println!(
+        "neighbor delta raw/constrained/snapped/visible max {:.2}/{:.2}/{:.2}/{:.2} blocks",
+        heightfield.stats.max_raw_neighbor_delta_blocks,
+        heightfield.stats.max_constrained_neighbor_delta_blocks,
+        heightfield.stats.max_snapped_neighbor_delta_blocks,
+        header.max_visible_neighbor_delta
     );
     println!(
         "columns: total {}, water {}, ocean {}, lake {}, river {}, dry {}, ridge {}",
@@ -721,38 +743,39 @@ fn draw_column_iso(
     column: HeightfieldColumn,
 ) {
     let surface = column.surface_height_blocks;
+    let visible_surface = visible_surface_height(column);
     let width = tile.width as usize;
     let height = tile.height as usize;
     let east = if x + 1 < width {
-        tile.columns[z * width + x + 1].surface_height_blocks
+        visible_surface_height(tile.columns[z * width + x + 1])
     } else {
-        surface - 12.0
+        visible_surface - 12.0
     };
     let south = if z + 1 < height {
-        tile.columns[(z + 1) * width + x].surface_height_blocks
+        visible_surface_height(tile.columns[(z + 1) * width + x])
     } else {
-        surface - 12.0
+        visible_surface - 12.0
     };
     let color = terrain_color_rgba(column);
-    if surface > east + 0.75 {
+    if visible_surface > east + 0.75 {
         draw_side_face(
             image,
             tile,
             plan,
             [(x + 1) as f32, z as f32, (x + 1) as f32, (z + 1) as f32],
             east,
-            surface,
+            visible_surface,
             shade_rgba(color, 0.68),
         );
     }
-    if surface > south + 0.75 {
+    if visible_surface > south + 0.75 {
         draw_side_face(
             image,
             tile,
             plan,
             [x as f32, (z + 1) as f32, (x + 1) as f32, (z + 1) as f32],
             south,
-            surface,
+            visible_surface,
             shade_rgba(color, 0.56),
         );
     }
@@ -771,6 +794,34 @@ fn draw_column_iso(
             );
         }
     }
+}
+
+fn visible_surface_height(column: HeightfieldColumn) -> f32 {
+    column
+        .water_level_blocks
+        .filter(|water| *water > column.surface_height_blocks)
+        .unwrap_or(column.surface_height_blocks)
+}
+
+fn max_visible_neighbor_delta(tile: &HeightfieldTile) -> f32 {
+    let width = tile.width as usize;
+    let height = tile.height as usize;
+    let mut max_delta = 0.0f32;
+    for z in 0..height {
+        for x in 0..width {
+            let index = z * width + x;
+            let here = visible_surface_height(tile.columns[index]);
+            if x + 1 < width {
+                max_delta =
+                    max_delta.max((here - visible_surface_height(tile.columns[index + 1])).abs());
+            }
+            if z + 1 < height {
+                max_delta = max_delta
+                    .max((here - visible_surface_height(tile.columns[index + width])).abs());
+            }
+        }
+    }
+    max_delta
 }
 
 fn draw_top_face(
@@ -1698,6 +1749,9 @@ mod tests {
                 min_surface_height_blocks: -8.0,
                 max_surface_height_blocks: 72.0,
                 average_surface_height_blocks: 27.5,
+                max_raw_neighbor_delta_blocks: 80.0,
+                max_constrained_neighbor_delta_blocks: 80.0,
+                max_snapped_neighbor_delta_blocks: 80.0,
                 water_column_count: 0,
                 ocean_column_count: 0,
                 lake_column_count: 0,
@@ -1717,6 +1771,8 @@ mod tests {
     ) -> HeightfieldColumn {
         HeightfieldColumn {
             position: new_world::world::WorldPlanePoint::new(x, z),
+            raw_surface_height_blocks: surface_height_blocks,
+            constrained_surface_height_blocks: surface_height_blocks,
             surface_height_blocks,
             surface_y: surface_height_blocks.floor() as i32,
             water_level_blocks: None,

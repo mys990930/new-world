@@ -68,6 +68,8 @@ HeightfieldConfig {
 
 HeightfieldColumn {
     position,
+    raw_surface_height_blocks,
+    constrained_surface_height_blocks,
     surface_height_blocks,
     surface_y,
     water_level_blocks,
@@ -105,10 +107,20 @@ sea level                    ->   0 blocks
 river 정보는 water hint와 terrain kind hint로 보존하고, 실제 channel carve/water body 폭은 후속
 surface/voxel 단계에서 확정한다.
 
-heightfield column의 최종 surface/water output은 voxel fill이 바로 읽을 수 있도록 integer block
-height로 snap한다. launch 구현은 float macro value를 block-space로 변환한 뒤 `round`로 snap하고,
-`surface_height_blocks == surface_y as f32` 관계를 유지한다. raw macro 값은 `macro_elevation`과
-`combined_macro_height` diagnostic field에 남는다.
+heightfield column은 값을 세 단계로 보존한다.
+
+```text
+raw_surface_height_blocks
+  = combined_macro_height를 block-space로 변환한 연속 높이
+constrained_surface_height_blocks
+  = water bed / shoreline ramp / clamp를 적용한 snap 전 높이
+surface_height_blocks
+  = voxel fill이 바로 읽을 수 있게 round한 integer block 높이
+```
+
+launch 구현은 최종 surface/water output을 integer block height로 snap하고,
+`surface_height_blocks == surface_y as f32` 관계를 유지한다. raw macro 값은
+`macro_elevation`과 `combined_macro_height` diagnostic field에도 남는다.
 
 ---
 
@@ -123,7 +135,15 @@ height로 snap한다. launch 구현은 float macro value를 block-space로 변�
   explicit cliff/ridge/meso feature가 생기기 전까지 coast-adjacent land는 `coast_mask`를 읽어
   해수면에서 완만히 올라가는 shoreline ramp로 clamp한다. coast 바로 옆 land는 `y = 0` 근처에서
   시작하고, 내륙으로 갈수록 원래 macro height를 회복한다.
+- `coast_mask`가 coarse preview sample에서 충분히 잡히지 않는 경우를 보완하기 위해, tile 생성 후
+  water column으로부터의 grid distance를 계산하고 `shore_ramp_blocks` 안의 land column에 같은
+  shoreline constraint를 한 번 더 적용한다. 이 neighbor-aware pass는 raw macro height를 바꾸지 않고
+  `constrained_surface_height_blocks`와 snapped final output만 조정한다.
 - 지형 surface가 water level보다 낮으면 water column이 생긴다.
+- ocean/lake column의 `surface_height_blocks`는 수면이 아니라 bed 높이다. preview나 후속 voxel
+  fill이 visible top continuity를 판단할 때는 `max(surface_height_blocks, water_level_blocks)`를
+  별도 visible surface로 읽어야 한다. ocean bed와 land surface를 직접 비교해 해안 절벽으로
+  렌더하면 회귀다.
 - `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있지만, 현재 vertical
   slice에서는 height를 추가로 깎지 않는다.
 - dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
