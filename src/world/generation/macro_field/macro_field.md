@@ -196,7 +196,9 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
 - ridge influence
 - river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
   carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다.
-- combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 한다.
+- combined macro height. river valley carve와 ridge raise가 Perlin 전 높이에 반영되어야 하며,
+  preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
+  subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
 
 preview metadata/stdout은 ridge active sample fraction, dry basin sample count와 dry basin combined
 height range를 기록한다. macro field stage에는 아직 micro Perlin이 없으므로 lit preview의 촘촘한

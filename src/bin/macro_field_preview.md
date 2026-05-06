@@ -45,7 +45,7 @@
 - `ridge`: distance-envelope influence around ridge noisy boundary curves.
 - `river`: distance-envelope valley influence around selected hydrology river curves.
 - `combined`: macro elevation plus ridge raise, minus visible river valley carve guide, coast
-  flatten, and water flatten.
+  flatten, and water flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map.
 - `lit`: top-down white heightfield preview with broad directional hillshade from combined height
   gradients. This is not a 3D render and it is not per-tile lighting; it is shaded relief over the
   overall combined macro height field.
@@ -138,6 +138,9 @@ Each PNG contains:
   broad continent/ridge/basin/coast height differences visible as white-material hillshade.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
+- `combined` uses the same absolute height scale as before, but its colors should read like a
+  top-down pre-Perlin terrain surface: muted blue-gray low/ocean values, subdued green-gray low
+  land, olive/gray midlands, and pale gray high/ridge values without white saturation.
 - In `mask`, the yellow/sandy key means explicit ocean coast only. Dry basin uses its own muted
   mauve/gray key and must not be inferred from the coast color or coast gradient band.
 - The primary boundary overlay is the canonical noisy Voronoi graph edge layer, but it must remain a

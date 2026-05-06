@@ -268,7 +268,8 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   사용해야 하며, raw polyline distance를 preview pixel마다 반복 계산하면 안 된다.
 - `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과.
   이 단계의 river carve는 최종 water/voxel carve가 아니라 heightfield가 읽을 2D valley guide이며,
-  combined/lit preview에서 보여야 한다.
+  combined/lit preview에서 보여야 한다. `combined`는 진단용 heat map이 아니라 macro base 위에 ridge와
+  river carve가 얹힌 pre-Perlin terrain surface로 읽히도록 subtle terrain ramp를 사용한다.
 - `lit`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
 

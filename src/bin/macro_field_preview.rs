@@ -1449,7 +1449,7 @@ fn color_for_channel(
         PreviewChannel::RidgeInfluence => gradient_fire(sample.ridge_influence),
         PreviewChannel::RiverValley => gradient_river(sample.river_valley),
         PreviewChannel::CombinedMacroHeight => {
-            gradient_height(normalize_absolute_combined_height(sample.combined_height))
+            combined_terrain_ramp(normalize_absolute_combined_height(sample.combined_height))
         }
         PreviewChannel::LitHeightfield => lit_height_color(tile, x, y, width, height),
     }
@@ -1677,15 +1677,17 @@ fn gradient_macro(value: f32) -> [u8; 3] {
     )
 }
 
-fn gradient_height(value: f32) -> [u8; 3] {
+fn combined_terrain_ramp(value: f32) -> [u8; 3] {
     gradient_color(
         value,
         &[
-            (0.00, [38, 78, 119]),
-            (0.35, [80, 139, 102]),
-            (0.58, [168, 158, 96]),
-            (0.80, [127, 119, 112]),
-            (1.00, [245, 246, 240]),
+            (0.00, [45, 78, 102]),
+            (0.28, [67, 111, 123]),
+            (0.38, [101, 130, 117]),
+            (0.52, [112, 140, 102]),
+            (0.68, [143, 145, 116]),
+            (0.84, [168, 166, 151]),
+            (1.00, [226, 228, 218]),
         ],
     )
 }
@@ -1860,7 +1862,7 @@ fn draw_gradient_bar(
                 }
                 PreviewChannel::RidgeInfluence => gradient_fire(t),
                 PreviewChannel::RiverValley => gradient_river(t),
-                PreviewChannel::CombinedMacroHeight => gradient_height(t),
+                PreviewChannel::CombinedMacroHeight => combined_terrain_ramp(t),
                 PreviewChannel::LitHeightfield => {
                     let v = (t * 255.0).round() as u8;
                     [v, v, v]
@@ -2260,6 +2262,31 @@ mod tests {
         assert!(
             normalize_absolute_combined_height(0.85) < 0.90,
             "ordinary high terrain should not map straight to white"
+        );
+    }
+
+    #[test]
+    fn combined_preview_uses_subtle_terrain_ramp() {
+        let low = combined_terrain_ramp(0.08);
+        let low_land = combined_terrain_ramp(0.44);
+        let high = combined_terrain_ramp(0.92);
+
+        assert!(
+            low[2] > low[0] && low[2] > low[1],
+            "low combined terrain should read as muted blue-gray, not heat-map black/red: {low:?}"
+        );
+        assert!(
+            low_land[1] >= low_land[0] && low_land[1] >= low_land[2],
+            "low land should keep a subdued green-gray terrain bias: {low_land:?}"
+        );
+        assert!(
+            high.iter()
+                .all(|channel| *channel < WHITE_SATURATION_THRESHOLD),
+            "high combined terrain should be pale without white saturation: {high:?}"
+        );
+        assert_ne!(
+            low, high,
+            "combined terrain ramp should still expose macro+ridges-rivers height contrast"
         );
     }
 
