@@ -175,6 +175,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   column resolution, sample spacing, chunk range/radius, world footprint, sea level, height range를
   기록해야 한다. chunk boundary는 `CHUNK_EDGE` block 간격의 별도 선으로, macro field tile/cache
   boundary는 graph/cache region scale의 별도 선으로 표시한다.
+- `heightfield_preview`가 `--chunk-radius r`을 받으면 `center-x/center-z` world block이 속한 chunk를
+  중심으로 `center_chunk-r .. center_chunk+r` inclusive square range를 샘플링한다. 이 모드에서
+  `width/height`는 이미지 해상도만 정하고, world footprint는 chunk square가 정한다.
+- preview legend는 고정 픽셀 크기가 아니라 출력 이미지 크기에 비례해야 한다. 기본 metadata panel은
+  화면 높이의 약 1/5을 목표로 하며, 글꼴, swatch, scale bar도 같은 비율로 커져야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 

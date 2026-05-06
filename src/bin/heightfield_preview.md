@@ -15,8 +15,12 @@
   - `--width <u32>`: output image width, default `1280`
   - `--height <u32>`: output image height, default `720`
   - `--world-span-blocks <i32>`: horizontal world footprint, default `8192`
+  - `--chunk-radius <i32>`: square chunk radius around the chunk containing `center-x/center-z`.
+    When set, this overrides the preview footprint derived from `--world-span-blocks`; width/height
+    only control image resolution.
   - `--columns-x <u32>`: sampled heightfield columns across X, default `192`
-  - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect
+  - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
+    `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -67,11 +71,21 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Chunk overlay uses the runtime chunk edge size, currently `32` blocks. Macro-field tile overlay
   uses the graph/cache tile scale, currently `1024` blocks. They are distinct diagnostic overlays:
   chunk lines show future `ChunkData` output windows, macro tile lines show generation cache scale.
+- With `--chunk-radius r`, the preview range is inclusive in chunk coordinates:
+  `center_chunk-r .. center_chunk+r` on both X and Z. A radius of `0` shows exactly the chunk that
+  contains the world-block center. The world footprint is the covered chunk square times
+  `CHUNK_EDGE`.
 - The legend/header records `cx`, `cz`, world footprint, column count/spacing, chunk x/z range,
   chunk radius, height range, sea level, and a block scale bar.
+- The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
+  the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
 
 ## Example
 
 ```bash
 cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 720 --output target/heightfield-preview/heightfield-smoke.png
+```
+
+```bash
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 32 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r32.png
 ```

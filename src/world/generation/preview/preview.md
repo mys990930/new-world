@@ -341,8 +341,12 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--width <u32>`: 기본 `1280`
   - `--height <u32>`: 기본 `720`
   - `--world-span-blocks <i32>`: 가로 footprint, 기본 `8192`
+  - `--chunk-radius <i32>`: `center-x/center-z` world block이 속한 chunk를 중심으로 하는 square
+    chunk radius. 지정되면 `--world-span-blocks` 기반 footprint 대신
+    `center_chunk-r .. center_chunk+r` inclusive chunk range를 사용한다.
   - `--columns-x <u32>`: heightfield sample column 수, 기본 `192`
-  - `--columns-z <u32>`: 기본은 image aspect에서 계산
+  - `--columns-z <u32>`: 기본은 image aspect에서 계산. 단 `--chunk-radius` 모드에서는 square
+    footprint에 맞춰 기본값이 `columns-x`가 된다.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -363,6 +367,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   함께 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
   chunk boundary key, macro-field tile boundary key, scale bar를 표시한다.
+- legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
+  1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
 
 ### 현재 구현 상태
 
@@ -394,6 +400,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Chunk boundary overlay is drawn at the runtime chunk size (`CHUNK_EDGE`) and macro-field tile
   boundary overlay is drawn at the generation cache tile scale. These lines are diagnostic overlays,
   not terrain features.
+- `--chunk-radius r` is a square chunk-coordinate footprint, not separate x/z radii. It includes the
+  center chunk and covers `2r+1` chunks on each horizontal axis. A radius of `0` previews one chunk.
 
 ### 검증 기준
 

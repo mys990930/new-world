@@ -45,6 +45,7 @@ struct PreviewConfig {
     land_bias: f32,
     columns_x: u32,
     columns_z: Option<u32>,
+    chunk_radius: Option<i32>,
     quarter_turns: u8,
     vertical_scale: f32,
     output: Option<PathBuf>,
@@ -64,6 +65,9 @@ impl PreviewConfig {
         if self.columns_x == 0 || self.columns_z == Some(0) {
             return Err(cli_error("columns-x and columns-z must be positive"));
         }
+        if self.chunk_radius.is_some_and(|radius| radius < 0) {
+            return Err(cli_error("chunk-radius must be zero or positive"));
+        }
         if !self.vertical_scale.is_finite() || self.vertical_scale <= 0.0 {
             return Err(cli_error("vertical-scale must be a positive finite number"));
         }
@@ -71,19 +75,42 @@ impl PreviewConfig {
     }
 
     fn columns_z(&self) -> u32 {
-        self.columns_z.unwrap_or_else(|| {
-            ((self.columns_x as f32 * self.height as f32 / self.width as f32)
-                .round()
-                .max(1.0)) as u32
+        self.columns_z.unwrap_or_else(|| match self.chunk_radius {
+            Some(_) => self.columns_x,
+            None => {
+                ((self.columns_x as f32 * self.height as f32 / self.width as f32)
+                    .round()
+                    .max(1.0)) as u32
+            }
         })
     }
 
     fn window(&self) -> PreviewWindow {
-        let span_x = self.world_span_blocks as f32;
-        let span_z = span_x * self.columns_z() as f32 / self.columns_x as f32;
+        let (center_x, center_z, span_x, span_z) = if let Some(radius) = self.chunk_radius {
+            let center_chunk_x = self.center_x.div_euclid(CHUNK_EDGE_I32);
+            let center_chunk_z = self.center_z.div_euclid(CHUNK_EDGE_I32);
+            let min_chunk_x = center_chunk_x - radius;
+            let max_chunk_x = center_chunk_x + radius;
+            let min_chunk_z = center_chunk_z - radius;
+            let max_chunk_z = center_chunk_z + radius;
+            let min_x = min_chunk_x * CHUNK_EDGE_I32;
+            let max_x = (max_chunk_x + 1) * CHUNK_EDGE_I32;
+            let min_z = min_chunk_z * CHUNK_EDGE_I32;
+            let max_z = (max_chunk_z + 1) * CHUNK_EDGE_I32;
+            (
+                (min_x + max_x) as f32 * 0.5,
+                (min_z + max_z) as f32 * 0.5,
+                (max_x - min_x) as f32,
+                (max_z - min_z) as f32,
+            )
+        } else {
+            let span_x = self.world_span_blocks as f32;
+            let span_z = span_x * self.columns_z() as f32 / self.columns_x as f32;
+            (self.center_x as f32, self.center_z as f32, span_x, span_z)
+        };
         PreviewWindow {
-            center_x: self.center_x as f32,
-            center_z: self.center_z as f32,
+            center_x,
+            center_z,
             columns_x: self.columns_x,
             columns_z: self.columns_z(),
             world_span_x: span_x,
@@ -170,6 +197,7 @@ struct PreviewHeader {
     chunk_max_z: i32,
     chunk_radius_x: i32,
     chunk_radius_z: i32,
+    requested_chunk_radius: Option<i32>,
     macro_tile_edge_blocks: i32,
     vertical_scale: f32,
     graph_site_count: usize,
@@ -217,6 +245,11 @@ impl PreviewHeader {
             format!(
                 "chunk_radius_xz={},{}",
                 self.chunk_radius_x, self.chunk_radius_z
+            ),
+            format!(
+                "requested_chunk_radius={}",
+                self.requested_chunk_radius
+                    .map_or_else(|| "derived".to_string(), |radius| radius.to_string())
             ),
             format!(
                 "macro_field_tile_edge_blocks={}",
@@ -312,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         center_z: config.center_z,
         width: config.width,
         height: config.height,
-        world_span_blocks: config.world_span_blocks,
+        world_span_blocks: window.world_span_x.round() as i32,
         world_min_x: window.min_x(),
         world_max_x: window.max_x(),
         world_min_z: window.min_z(),
@@ -331,6 +364,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         chunk_radius_z: (center_chunk_z - chunk_range.2)
             .abs()
             .max((chunk_range.3 - center_chunk_z).abs()),
+        requested_chunk_radius: config.chunk_radius,
         macro_tile_edge_blocks: MACRO_FIELD_TILE_EDGE_BLOCKS,
         vertical_scale: config.vertical_scale,
         graph_site_count: patch.sites.len(),
@@ -360,14 +394,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("heightfield preview: seed {}", config.seed);
     println!(
-        "window: center=({}, {}), span={} blocks, columns={}x{}, spacing={:.2} blocks",
+        "window: center=({}, {}), span={:.0}x{:.0} blocks, columns={}x{}, spacing={:.2} blocks",
         config.center_x,
         config.center_z,
-        config.world_span_blocks,
+        window.world_span_x,
+        window.world_span_z,
         window.columns_x,
         window.columns_z,
         window.sample_spacing()
     );
+    if let Some(radius) = config.chunk_radius {
+        println!(
+            "chunk-radius input: square radius {} around center chunk ({}, {})",
+            radius, center_chunk_x, center_chunk_z
+        );
+    }
     println!(
         "footprint: x {:.1}..{:.1}, z {:.1}..{:.1} blocks",
         window.min_x(),
@@ -1031,64 +1072,111 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
     else {
         return;
     };
-    let scale = if image.width >= 1000 { 2 } else { 1 };
-    draw_panel(&mut rgba, 8, 8, 260 * scale, 86 * scale);
-    draw_text(&mut rgba, 16, 16, "ISO HEIGHT", [230, 235, 226, 255], scale);
+    let layout = OverlayLayout::new(image.width, image.height);
+    let x = layout.margin;
+    let y = layout.margin;
+    let text_x = x + 4 * layout.scale;
+    let mut text_y = y + 4 * layout.scale;
+    draw_panel(&mut rgba, x, y, layout.panel_width, layout.panel_height);
     draw_text(
         &mut rgba,
-        16,
-        16 + 12 * scale,
+        text_x,
+        text_y,
+        "ISO HEIGHT",
+        [230, 235, 226, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
         &format!("CX {} CZ {}", header.center_x, header.center_z),
         [204, 214, 203, 255],
-        scale,
+        layout.scale,
     );
+    text_y += layout.line_step;
     draw_text(
         &mut rgba,
-        16,
-        16 + 24 * scale,
+        text_x,
+        text_y,
         &format!(
             "COL {}X{} STEP {:.0}",
             header.columns_x, header.columns_z, header.sample_spacing_blocks
         ),
         [204, 214, 203, 255],
-        scale,
+        layout.scale,
     );
+    text_y += layout.line_step;
     draw_text(
         &mut rgba,
-        16,
-        16 + 36 * scale,
+        text_x,
+        text_y,
         &format!(
             "H {:.0}/{:.0}/{:.0}",
             header.min_surface, header.avg_surface, header.max_surface
         ),
         [204, 214, 203, 255],
-        scale,
+        layout.scale,
     );
+    text_y += layout.line_step;
     draw_text(
         &mut rgba,
-        16,
-        16 + 48 * scale,
+        text_x,
+        text_y,
         &format!(
             "CH {}..{} {}..{}",
             header.chunk_min_x, header.chunk_max_x, header.chunk_min_z, header.chunk_max_z
         ),
         [204, 214, 203, 255],
-        scale,
+        layout.scale,
     );
+    text_y += layout.line_step;
     draw_text(
         &mut rgba,
-        16,
-        16 + 60 * scale,
+        text_x,
+        text_y,
         &format!(
-            "RAD {}X{} BLK {}",
-            header.chunk_radius_x, header.chunk_radius_z, header.world_span_blocks
+            "RAD {} BLK {}",
+            header.chunk_radius_x.max(header.chunk_radius_z),
+            header.world_span_blocks
         ),
         [204, 214, 203, 255],
-        scale,
+        layout.scale,
     );
-    draw_legend_keys(&mut rgba, 16, 16 + 72 * scale, scale);
-    draw_scale_bar(&mut rgba, header, scale);
+    text_y += layout.line_step;
+    draw_legend_keys(&mut rgba, text_x, text_y, layout.scale);
+    draw_scale_bar(&mut rgba, header, layout.scale);
     image.rgba = rgba.into_raw();
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OverlayLayout {
+    scale: u32,
+    margin: u32,
+    panel_width: u32,
+    panel_height: u32,
+    line_step: u32,
+}
+
+impl OverlayLayout {
+    fn new(width: u32, height: u32) -> Self {
+        let min_axis = width.min(height).max(1);
+        let scale = ((min_axis as f32 / 360.0).round() as u32).clamp(2, 6);
+        let panel_width = ((width as f32 * 0.24).round() as u32)
+            .max(136 * scale)
+            .min((width as f32 * 0.45).round() as u32);
+        let panel_height = ((height as f32 * 0.20).round() as u32)
+            .max(58 * scale)
+            .min((height as f32 * 0.34).round() as u32);
+        Self {
+            scale,
+            margin: (4 * scale).max(8),
+            panel_width,
+            panel_height,
+            line_step: 8 * scale,
+        }
+    }
 }
 
 fn draw_panel(image: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32) {
@@ -1308,7 +1396,15 @@ fn write_rgba_png_with_metadata(
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
+    parse_args_from(env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(args: I) -> Result<PreviewConfig, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut args = args.into_iter().map(Into::into).collect::<Vec<_>>();
     if args.len() < 3 {
         return Err(cli_error(usage()));
     }
@@ -1327,6 +1423,7 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         land_bias: MacroMapConfig::new(seed, WorldMeta::new(seed).generator_version).land_bias,
         columns_x: DEFAULT_COLUMNS_X,
         columns_z: None,
+        chunk_radius: None,
         quarter_turns: 0,
         vertical_scale: DEFAULT_VERTICAL_SCALE,
         output: None,
@@ -1351,6 +1448,9 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
             "--columns-x" => config.columns_x = parse_required::<u32>(&mut args, "columns-x")?,
             "--columns-z" => {
                 config.columns_z = Some(parse_required::<u32>(&mut args, "columns-z")?)
+            }
+            "--chunk-radius" => {
+                config.chunk_radius = Some(parse_required::<i32>(&mut args, "chunk-radius")?)
             }
             "--quarter-turns" => {
                 config.quarter_turns = parse_required::<u8>(&mut args, "quarter-turns")?
@@ -1399,7 +1499,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--vertical-scale <f32>] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--vertical-scale <f32>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1435,6 +1535,7 @@ mod tests {
             land_bias: 0.14,
             columns_x: DEFAULT_COLUMNS_X,
             columns_z: None,
+            chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
             output: None,
@@ -1475,6 +1576,7 @@ mod tests {
             land_bias: 0.14,
             columns_x: DEFAULT_COLUMNS_X,
             columns_z: None,
+            chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
             output: None,
@@ -1485,6 +1587,70 @@ mod tests {
         assert_eq!(CHUNK_EDGE_I32, 32);
         assert_eq!(range, (-128, 127, -72, 71));
         assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
+    }
+
+    #[test]
+    fn parse_chunk_radius_option() {
+        let config = parse_args_from([
+            "42",
+            "64",
+            "-33",
+            "--chunk-radius",
+            "32",
+            "--width",
+            "1280",
+            "--height",
+            "720",
+        ])
+        .expect("parse args");
+
+        assert_eq!(config.chunk_radius, Some(32));
+        assert_eq!(config.center_x, 64);
+        assert_eq!(config.center_z, -33);
+    }
+
+    #[test]
+    fn chunk_radius_maps_to_square_chunk_footprint() {
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: 64,
+            center_z: -33,
+            width: DEFAULT_IMAGE_WIDTH,
+            height: DEFAULT_IMAGE_HEIGHT,
+            world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            land_bias: 0.14,
+            columns_x: DEFAULT_COLUMNS_X,
+            columns_z: None,
+            chunk_radius: Some(2),
+            quarter_turns: 0,
+            vertical_scale: DEFAULT_VERTICAL_SCALE,
+            output: None,
+        };
+        let window = config.window();
+        let range = chunk_range_for_window(window);
+
+        assert_eq!(config.columns_z(), DEFAULT_COLUMNS_X);
+        assert_eq!(range, (0, 4, -4, 0));
+        assert_eq!(window.world_span_x, 5.0 * CHUNK_EDGE_I32 as f32);
+        assert_eq!(window.world_span_z, 5.0 * CHUNK_EDGE_I32 as f32);
+        assert_eq!(window.min_x(), 0.0);
+        assert_eq!(window.max_x(), 160.0);
+        assert_eq!(window.min_z(), -128.0);
+        assert_eq!(window.max_z(), 32.0);
+    }
+
+    #[test]
+    fn overlay_layout_scales_with_image_size() {
+        let small = OverlayLayout::new(1280, 720);
+        let large = OverlayLayout::new(3840, 2160);
+
+        assert!(large.scale > small.scale);
+        assert!(large.panel_width > small.panel_width);
+        assert!(large.panel_height > small.panel_height);
+        assert!((small.panel_height as f32 / 720.0 - 0.20).abs() < 0.02);
+        assert!((large.panel_height as f32 / 2160.0 - 0.20).abs() < 0.02);
     }
 
     #[test]
