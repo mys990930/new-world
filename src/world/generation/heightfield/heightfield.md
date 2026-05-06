@@ -62,6 +62,8 @@ HeightfieldConfig {
     river_water_threshold,
     ocean_bed_blocks,
     lake_bed_blocks,
+    shore_ramp_blocks,
+    shore_min_land_blocks,
 }
 
 HeightfieldColumn {
@@ -103,6 +105,11 @@ sea level                    ->   0 blocks
 river 정보는 water hint와 terrain kind hint로 보존하고, 실제 channel carve/water body 폭은 후속
 surface/voxel 단계에서 확정한다.
 
+heightfield column의 최종 surface/water output은 voxel fill이 바로 읽을 수 있도록 integer block
+height로 snap한다. launch 구현은 float macro value를 block-space로 변환한 뒤 `round`로 snap하고,
+`surface_height_blocks == surface_y as f32` 관계를 유지한다. raw macro 값은 `macro_elevation`과
+`combined_macro_height` diagnostic field에 남는다.
+
 ---
 
 ## Water Policy
@@ -112,6 +119,10 @@ surface/voxel 단계에서 확정한다.
   ocean bed를 `sea_level - 12 blocks`, lake bed를 `sea_level - 2 blocks` 이하로 낮춘다. 이는 final
   bathymetry가 아니라 수면과 지형 bed를 분리해 preview/voxel fill이 물을 볼 수 있게 하는 launch
   정책이다.
+- 바다 수면은 `y = 0`이지만, 바다와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다.
+  explicit cliff/ridge/meso feature가 생기기 전까지 coast-adjacent land는 `coast_mask`를 읽어
+  해수면에서 완만히 올라가는 shoreline ramp로 clamp한다. coast 바로 옆 land는 `y = 0` 근처에서
+  시작하고, 내륙으로 갈수록 원래 macro height를 회복한다.
 - 지형 surface가 water level보다 낮으면 water column이 생긴다.
 - `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있지만, 현재 vertical
   slice에서는 height를 추가로 깎지 않는다.
@@ -160,6 +171,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - column은 top diamond와 보이는 east/south side face만 그린다. 모든 column을 전역 base plane까지
   벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를 보여주는
   terraced relief를 우선한다.
+- preview overlay는 실제 world-block 맥락을 함께 표시한다. legend/header는 `center-x/center-z`,
+  column resolution, sample spacing, chunk range/radius, world footprint, sea level, height range를
+  기록해야 한다. chunk boundary는 `CHUNK_EDGE` block 간격의 별도 선으로, macro field tile/cache
+  boundary는 graph/cache region scale의 별도 선으로 표시한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 
@@ -173,3 +188,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 4. water mask가 있는 column은 water level hint를 가져야 한다.
 5. meso/perlin stub 값은 현재 항상 0이다.
 6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/boundary를 직접 재해석하지 않는다.
+7. final column surface/water height는 integer block height로 snap되어야 한다.
+8. coast-adjacent land는 explicit cliff feature가 없는 한 sea level에서 완만히 올라가야 하며, ocean
+   water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.

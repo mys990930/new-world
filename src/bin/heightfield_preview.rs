@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use image::RgbaImage;
 use new_world::renderer::OffscreenRenderOutput;
+use new_world::world::CHUNK_EDGE_I32;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
@@ -29,6 +30,7 @@ const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const ISO_TARGET_RELIEF_FRACTION: f32 = 0.28;
 const ISO_MIN_RELIEF_FRACTION: f32 = 0.20;
 const ISO_MAX_RELIEF_FRACTION: f32 = 0.35;
+const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -154,9 +156,21 @@ struct PreviewHeader {
     width: u32,
     height: u32,
     world_span_blocks: i32,
+    world_min_x: f32,
+    world_max_x: f32,
+    world_min_z: f32,
+    world_max_z: f32,
     columns_x: u32,
     columns_z: u32,
     sample_spacing_blocks: f32,
+    chunk_edge_blocks: i32,
+    chunk_min_x: i32,
+    chunk_max_x: i32,
+    chunk_min_z: i32,
+    chunk_max_z: i32,
+    chunk_radius_x: i32,
+    chunk_radius_z: i32,
+    macro_tile_edge_blocks: i32,
     vertical_scale: f32,
     graph_site_count: usize,
     macro_sample_count: usize,
@@ -189,8 +203,25 @@ impl PreviewHeader {
             format!("center={},{}", self.center_x, self.center_z),
             format!("image={}x{}", self.width, self.height),
             format!("world_span_blocks={}", self.world_span_blocks),
+            format!(
+                "world_footprint_blocks=x:{:.1}..{:.1},z:{:.1}..{:.1}",
+                self.world_min_x, self.world_max_x, self.world_min_z, self.world_max_z
+            ),
             format!("columns={}x{}", self.columns_x, self.columns_z),
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
+            format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
+            format!(
+                "chunk_range_xz={}..{},{}..{}",
+                self.chunk_min_x, self.chunk_max_x, self.chunk_min_z, self.chunk_max_z
+            ),
+            format!(
+                "chunk_radius_xz={},{}",
+                self.chunk_radius_x, self.chunk_radius_z
+            ),
+            format!(
+                "macro_field_tile_edge_blocks={}",
+                self.macro_tile_edge_blocks
+            ),
             format!("vertical_scale={:.3}", self.vertical_scale),
             "view=cpu_isometric_columns".to_string(),
             "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px".to_string(),
@@ -217,6 +248,8 @@ impl PreviewHeader {
             ),
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
+            "height_snap=round_to_integer_block".to_string(),
+            "shoreline_policy=land_coast_mask_ramps_from_y0_without_vertical_sea_cliff".to_string(),
             "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
@@ -269,6 +302,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let render_ms = render_start.elapsed().as_millis();
 
     let total_ms = total_start.elapsed().as_millis();
+    let chunk_range = chunk_range_for_window(window);
+    let center_chunk_x = config.center_x.div_euclid(CHUNK_EDGE_I32);
+    let center_chunk_z = config.center_z.div_euclid(CHUNK_EDGE_I32);
     let header = PreviewHeader {
         seed: config.seed,
         generator_version: meta.generator_version,
@@ -277,9 +313,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         width: config.width,
         height: config.height,
         world_span_blocks: config.world_span_blocks,
+        world_min_x: window.min_x(),
+        world_max_x: window.max_x(),
+        world_min_z: window.min_z(),
+        world_max_z: window.max_z(),
         columns_x: window.columns_x,
         columns_z: window.columns_z,
         sample_spacing_blocks: window.sample_spacing(),
+        chunk_edge_blocks: CHUNK_EDGE_I32,
+        chunk_min_x: chunk_range.0,
+        chunk_max_x: chunk_range.1,
+        chunk_min_z: chunk_range.2,
+        chunk_max_z: chunk_range.3,
+        chunk_radius_x: (center_chunk_x - chunk_range.0)
+            .abs()
+            .max((chunk_range.1 - center_chunk_x).abs()),
+        chunk_radius_z: (center_chunk_z - chunk_range.2)
+            .abs()
+            .max((chunk_range.3 - center_chunk_z).abs()),
+        macro_tile_edge_blocks: MACRO_FIELD_TILE_EDGE_BLOCKS,
         vertical_scale: config.vertical_scale,
         graph_site_count: patch.sites.len(),
         macro_sample_count: macro_tile.samples.len(),
@@ -302,6 +354,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         render_ms,
         total_ms,
     };
+    draw_boundary_overlays(&mut image, &heightfield, plan, window);
     draw_overlay(&mut image, &header);
     write_rgba_png_with_metadata(&image, &output, &header)?;
 
@@ -314,6 +367,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.columns_x,
         window.columns_z,
         window.sample_spacing()
+    );
+    println!(
+        "footprint: x {:.1}..{:.1}, z {:.1}..{:.1} blocks",
+        window.min_x(),
+        window.max_x(),
+        window.min_z(),
+        window.max_z()
+    );
+    println!(
+        "chunk overlay: edge {} blocks, cx {}..{}, cz {}..{}, radius {}x{}",
+        CHUNK_EDGE_I32,
+        chunk_range.0,
+        chunk_range.1,
+        chunk_range.2,
+        chunk_range.3,
+        header.chunk_radius_x,
+        header.chunk_radius_z
+    );
+    println!(
+        "macro tile overlay: edge {} blocks",
+        MACRO_FIELD_TILE_EDGE_BLOCKS
     );
     println!(
         "view: cpu isometric columns, quarter turns {}, vertical scale multiplier {:.2}, vertical {:.3} px/block, relief span {:.1}px",
@@ -424,6 +498,19 @@ fn build_macro_field_tile(
     );
 
     generate_macro_field_tile(patch, macro_map, hydrology, boundary, config)
+}
+
+fn chunk_range_for_window(window: PreviewWindow) -> (i32, i32, i32, i32) {
+    let min_x = window.min_x().floor() as i32;
+    let max_x = (window.max_x().ceil() as i32).saturating_sub(1);
+    let min_z = window.min_z().floor() as i32;
+    let max_z = (window.max_z().ceil() as i32).saturating_sub(1);
+    (
+        min_x.div_euclid(CHUNK_EDGE_I32),
+        max_x.div_euclid(CHUNK_EDGE_I32),
+        min_z.div_euclid(CHUNK_EDGE_I32),
+        max_z.div_euclid(CHUNK_EDGE_I32),
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -682,6 +769,116 @@ fn draw_side_face(
     fill_convex_polygon(image, &polygon, color);
 }
 
+fn draw_boundary_overlays(
+    image: &mut OffscreenRenderOutput,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    window: PreviewWindow,
+) {
+    let Some(mut rgba) =
+        RgbaImage::from_raw(image.width, image.height, std::mem::take(&mut image.rgba))
+    else {
+        return;
+    };
+    draw_world_grid_overlay(
+        &mut rgba,
+        tile,
+        plan,
+        window,
+        MACRO_FIELD_TILE_EDGE_BLOCKS,
+        [222, 232, 244, 68],
+        1,
+    );
+    draw_world_grid_overlay(
+        &mut rgba,
+        tile,
+        plan,
+        window,
+        CHUNK_EDGE_I32,
+        [32, 44, 54, 84],
+        4,
+    );
+    image.rgba = rgba.into_raw();
+}
+
+fn draw_world_grid_overlay(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    window: PreviewWindow,
+    spacing_blocks: i32,
+    color: [u8; 4],
+    dash_period: i32,
+) {
+    if spacing_blocks <= 0 {
+        return;
+    }
+    let min_x = window.min_x();
+    let min_z = window.min_z();
+    let sample_spacing = window.sample_spacing();
+    let first_x = (window.min_x().floor() as i32).div_euclid(spacing_blocks) * spacing_blocks;
+    let last_x =
+        (window.max_x().ceil() as i32).div_euclid(spacing_blocks) * spacing_blocks + spacing_blocks;
+    let first_z = (window.min_z().floor() as i32).div_euclid(spacing_blocks) * spacing_blocks;
+    let last_z =
+        (window.max_z().ceil() as i32).div_euclid(spacing_blocks) * spacing_blocks + spacing_blocks;
+    let overlay_y = tile.stats.max_surface_height_blocks + 1.0;
+
+    let mut x = first_x;
+    while x <= last_x {
+        let gx = (x as f32 - min_x) / sample_spacing;
+        if gx >= -1.0 && gx <= tile.width as f32 + 1.0 {
+            draw_projected_line(
+                image,
+                plan.project_grid(gx, 0.0, overlay_y, tile),
+                plan.project_grid(gx, tile.height as f32, overlay_y, tile),
+                color,
+                dash_period,
+            );
+        }
+        x += spacing_blocks;
+    }
+
+    let mut z = first_z;
+    while z <= last_z {
+        let gz = (z as f32 - min_z) / sample_spacing;
+        if gz >= -1.0 && gz <= tile.height as f32 + 1.0 {
+            draw_projected_line(
+                image,
+                plan.project_grid(0.0, gz, overlay_y, tile),
+                plan.project_grid(tile.width as f32, gz, overlay_y, tile),
+                color,
+                dash_period,
+            );
+        }
+        z += spacing_blocks;
+    }
+}
+
+fn draw_projected_line(
+    image: &mut RgbaImage,
+    start: Point2,
+    end: Point2,
+    color: [u8; 4],
+    dash_period: i32,
+) {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let steps = dx.abs().max(dy.abs()).ceil().max(1.0) as i32;
+    for step in 0..=steps {
+        if dash_period > 1 && (step / dash_period) % 2 != 0 {
+            continue;
+        }
+        let t = step as f32 / steps as f32;
+        let x = (start.x + dx * t).round() as i32;
+        let y = (start.y + dy * t).round() as i32;
+        if x < 0 || y < 0 || x >= image.width() as i32 || y >= image.height() as i32 {
+            continue;
+        }
+        blend_rgba(image, x as u32, y as u32, color, color[3] as f32 / 255.0);
+    }
+}
+
 fn fill_convex_polygon(image: &mut RgbaImage, points: &[Point2], color: [u8; 4]) {
     if points.len() < 3 {
         return;
@@ -835,13 +1032,13 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         return;
     };
     let scale = if image.width >= 1000 { 2 } else { 1 };
-    draw_panel(&mut rgba, 8, 8, 218 * scale, 48 * scale);
+    draw_panel(&mut rgba, 8, 8, 260 * scale, 86 * scale);
     draw_text(&mut rgba, 16, 16, "ISO HEIGHT", [230, 235, 226, 255], scale);
     draw_text(
         &mut rgba,
         16,
         16 + 12 * scale,
-        &format!("{}x{} COLS", header.columns_x, header.columns_z),
+        &format!("CX {} CZ {}", header.center_x, header.center_z),
         [204, 214, 203, 255],
         scale,
     );
@@ -850,13 +1047,47 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         16,
         16 + 24 * scale,
         &format!(
+            "COL {}X{} STEP {:.0}",
+            header.columns_x, header.columns_z, header.sample_spacing_blocks
+        ),
+        [204, 214, 203, 255],
+        scale,
+    );
+    draw_text(
+        &mut rgba,
+        16,
+        16 + 36 * scale,
+        &format!(
             "H {:.0}/{:.0}/{:.0}",
             header.min_surface, header.avg_surface, header.max_surface
         ),
         [204, 214, 203, 255],
         scale,
     );
-    draw_legend_keys(&mut rgba, 16, 16 + 36 * scale, scale);
+    draw_text(
+        &mut rgba,
+        16,
+        16 + 48 * scale,
+        &format!(
+            "CH {}..{} {}..{}",
+            header.chunk_min_x, header.chunk_max_x, header.chunk_min_z, header.chunk_max_z
+        ),
+        [204, 214, 203, 255],
+        scale,
+    );
+    draw_text(
+        &mut rgba,
+        16,
+        16 + 60 * scale,
+        &format!(
+            "RAD {}X{} BLK {}",
+            header.chunk_radius_x, header.chunk_radius_z, header.world_span_blocks
+        ),
+        [204, 214, 203, 255],
+        scale,
+    );
+    draw_legend_keys(&mut rgba, 16, 16 + 72 * scale, scale);
+    draw_scale_bar(&mut rgba, header, scale);
     image.rgba = rgba.into_raw();
 }
 
@@ -876,6 +1107,8 @@ fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
         ("LOW", [101, 130, 117, 255]),
         ("HI", [190, 190, 181, 255]),
         ("DRY", [118, 111, 119, 255]),
+        ("CH", [32, 44, 54, 255]),
+        ("MT", [222, 232, 244, 255]),
     ];
     let mut cursor = x;
     for (label, color) in keys {
@@ -894,6 +1127,61 @@ fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
             scale,
         );
         cursor += swatch + 21 * scale;
+    }
+}
+
+fn draw_scale_bar(image: &mut RgbaImage, header: &PreviewHeader, scale: u32) {
+    let scale_blocks = nice_scale_blocks(header.world_span_blocks);
+    let px_len = ((scale_blocks as f32 / header.world_span_blocks as f32) * header.width as f32)
+        .round()
+        .clamp(24.0, header.width as f32 * 0.32) as u32;
+    let x: u32 = 16;
+    let y = header.height.saturating_sub(24 * scale);
+    draw_panel(
+        image,
+        x.saturating_sub(4),
+        y.saturating_sub(6),
+        px_len + 70 * scale,
+        18 * scale,
+    );
+    for dx in 0..=px_len {
+        for sy in 0..(2 * scale).max(1) {
+            set_rgba(image, x + dx, y + sy, [226, 232, 220, 255]);
+        }
+    }
+    for dy in 0..(7 * scale) {
+        set_rgba(
+            image,
+            x,
+            y.saturating_sub(2 * scale) + dy,
+            [226, 232, 220, 255],
+        );
+        set_rgba(
+            image,
+            x + px_len,
+            y.saturating_sub(2 * scale) + dy,
+            [226, 232, 220, 255],
+        );
+    }
+    draw_text(
+        image,
+        x + px_len + 6 * scale,
+        y.saturating_sub(4 * scale),
+        &format!("{} BLK", scale_blocks),
+        [226, 232, 220, 255],
+        scale,
+    );
+}
+
+fn nice_scale_blocks(world_span_blocks: i32) -> i32 {
+    if world_span_blocks >= 16_384 {
+        4096
+    } else if world_span_blocks >= 8192 {
+        2048
+    } else if world_span_blocks >= 4096 {
+        1024
+    } else {
+        512
     }
 }
 
@@ -937,14 +1225,22 @@ fn glyph_3x5(ch: char) -> [u8; 5] {
         'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
         'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
         'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'J' => [0b111, 0b001, 0b001, 0b101, 0b010],
+        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
         'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
         'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
         'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
         'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
         'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
         'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
         'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
         'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
         '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
         '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
         '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
@@ -1163,6 +1459,32 @@ mod tests {
     #[test]
     fn default_vertical_scale_is_auto_fit_multiplier() {
         assert!((DEFAULT_VERTICAL_SCALE - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn preview_window_reports_chunk_range_and_radius_context() {
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: 0,
+            center_z: 0,
+            width: DEFAULT_IMAGE_WIDTH,
+            height: DEFAULT_IMAGE_HEIGHT,
+            world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            land_bias: 0.14,
+            columns_x: DEFAULT_COLUMNS_X,
+            columns_z: None,
+            quarter_turns: 0,
+            vertical_scale: DEFAULT_VERTICAL_SCALE,
+            output: None,
+        };
+        let window = config.window();
+        let range = chunk_range_for_window(window);
+
+        assert_eq!(CHUNK_EDGE_I32, 32);
+        assert_eq!(range, (-128, 127, -72, 71));
+        assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
     }
 
     #[test]

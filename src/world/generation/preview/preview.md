@@ -356,14 +356,24 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
-  river/dry/ridge column count, meso/perlin stub 상태, isometric view/projection, timing을 기록한다.
-- overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key를 표시한다.
+  river/dry/ridge column count, integer height snap policy, shoreline ramp policy,
+  meso/perlin stub 상태, isometric view/projection, timing을 기록한다.
+- metadata/stdout은 `center-x/center-z`, world footprint, chunk x/z range, chunk radius,
+  chunk edge blocks, macro-field tile edge blocks, column step/resolution, sea level과 height range를
+  함께 기록한다.
+- overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
+  chunk boundary key, macro-field tile boundary key, scale bar를 표시한다.
 
 ### 현재 구현 상태
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
 - `combined_macro_height -0.75..1.25`를 `-48..160 block` preview scale로 매핑한다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다.
+- heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
+  macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
+- ocean water surface는 `y = 0`이지만, coast-adjacent land는 `coast_mask` 기반 shoreline ramp를 통해
+  해수면 근처에서 시작해야 한다. explicit cliff/meso feature가 없는 launch slice에서 바다 옆 land가
+  즉시 높은 vertical cliff로 솟으면 회귀다.
 - river valley는 이미 `combined_macro_height`에 carve guide로 반영되어 있으므로 heightfield stage에서
   중복 carve하지 않고 terrain kind/water hint로 보존한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
@@ -381,6 +391,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   horizontal grid without changing height data.
 - The preview draws top diamonds and only visible neighbor-difference side faces. It must show top
   surfaces and macro relief together; a side-wall chart and a flat topdown plane are both regressions.
+- Chunk boundary overlay is drawn at the runtime chunk size (`CHUNK_EDGE`) and macro-field tile
+  boundary overlay is drawn at the generation cache tile scale. These lines are diagnostic overlays,
+  not terrain features.
 
 ### 검증 기준
 
@@ -388,6 +401,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - output image는 blank가 아니어야 한다.
 - water mask가 있는 column은 water level hint를 가져야 한다.
 - meso/perlin stub 값은 0이어야 한다.
+- surface/water height output은 integer block height여야 한다.
+- coast-adjacent land는 sea level에서 완만히 올라가는 ramp를 가져야 한다.
 
 ---
 

@@ -11,6 +11,8 @@ pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.25;
 pub const DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD: f32 = 0.72;
 pub const DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS: f32 = -12.0;
 pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
+pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 48.0;
+pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldConfig {
@@ -22,6 +24,8 @@ pub struct HeightfieldConfig {
     pub river_water_threshold: f32,
     pub ocean_bed_blocks: f32,
     pub lake_bed_blocks: f32,
+    pub shore_ramp_blocks: f32,
+    pub shore_min_land_blocks: f32,
 }
 
 impl Default for HeightfieldConfig {
@@ -35,6 +39,8 @@ impl Default for HeightfieldConfig {
             river_water_threshold: DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD,
             ocean_bed_blocks: DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS,
             lake_bed_blocks: DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS,
+            shore_ramp_blocks: DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS,
+            shore_min_land_blocks: DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS,
         }
     }
 }
@@ -154,22 +160,26 @@ pub fn heightfield_column_from_sample(
     let mut surface_height_blocks = base_surface + meso_delta_blocks + micro_relief_blocks;
     if let Some(bed_ceiling) = water_bed_ceiling {
         surface_height_blocks = surface_height_blocks.min(bed_ceiling);
+    } else if sample.coast_mask > 0.0 {
+        surface_height_blocks =
+            apply_shoreline_ramp(surface_height_blocks, sample.coast_mask, config);
     }
     let surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
-    let surface_y = surface_height_blocks.floor() as i32;
+    let surface_y = snap_height_to_block(surface_height_blocks);
+    let surface_height_blocks = surface_y as f32;
     let is_river_hint = sample.river_valley_strength >= config.river_water_threshold
         && sample.river_flow_hint > 0.0
         && !is_ocean
         && !is_lake;
     let water_level_blocks = if is_ocean || is_lake {
-        Some(config.sea_level_blocks)
+        Some(snap_height_to_block(config.sea_level_blocks) as f32)
     } else if is_river_hint {
         Some(surface_height_blocks + 1.0)
     } else {
         None
     };
-    let water_y = water_level_blocks.map(|water| water.ceil() as i32);
+    let water_y = water_level_blocks.map(snap_height_to_block);
     let terrain_kind = if is_ocean {
         HeightfieldTerrainKind::Ocean
     } else if is_lake {
@@ -211,6 +221,28 @@ fn normalized_to_blocks(value: f32, config: HeightfieldConfig) -> f32 {
     let span = (config.normalized_max_height - config.normalized_min_height).max(f32::EPSILON);
     let t = ((value - config.normalized_min_height) / span).clamp(0.0, 1.0);
     config.min_height_blocks + (config.max_height_blocks - config.min_height_blocks) * t
+}
+
+fn apply_shoreline_ramp(
+    surface_height_blocks: f32,
+    coast_mask: f32,
+    config: HeightfieldConfig,
+) -> f32 {
+    let coast_t = coast_mask.clamp(0.0, 1.0);
+    if coast_t <= 0.0 {
+        return surface_height_blocks;
+    }
+    let inland_t = (1.0 - coast_t).clamp(0.0, 1.0);
+    let max_land_height = config.sea_level_blocks
+        + config.shore_min_land_blocks
+        + config.shore_ramp_blocks * inland_t.powf(1.65);
+    surface_height_blocks
+        .max(config.sea_level_blocks)
+        .min(max_land_height)
+}
+
+fn snap_height_to_block(value: f32) -> i32 {
+    value.round() as i32
 }
 
 fn heightfield_stats(columns: &[HeightfieldColumn]) -> HeightfieldTileStats {
@@ -272,6 +304,10 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.normalized_min_height < config.normalized_max_height);
     assert!(config.ocean_bed_blocks <= 0.0);
     assert!(config.lake_bed_blocks <= 0.0);
+    assert!(config.shore_ramp_blocks.is_finite());
+    assert!(config.shore_min_land_blocks.is_finite());
+    assert!(config.shore_ramp_blocks >= 0.0);
+    assert!(config.shore_min_land_blocks >= 0.0);
 }
 
 #[cfg(test)]
@@ -313,6 +349,30 @@ mod tests {
                 && column.micro_relief_blocks == 0.0
         }));
         assert!(tile.stats.min_surface_height_blocks <= tile.stats.max_surface_height_blocks);
+    }
+
+    #[test]
+    fn column_heights_are_snapped_to_integer_blocks() {
+        let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
+        let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
+
+        assert_eq!(column.surface_height_blocks.fract(), 0.0);
+        assert_eq!(column.surface_height_blocks, column.surface_y as f32);
+    }
+
+    #[test]
+    fn coast_adjacent_land_ramps_from_sea_level() {
+        let mut sample = sample(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0);
+        sample.coast_mask = 1.0;
+        let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
+
+        assert!(column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS);
+        assert!(
+            column.surface_height_blocks
+                <= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                    + DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS
+                    + 1.0
+        );
     }
 
     #[test]
