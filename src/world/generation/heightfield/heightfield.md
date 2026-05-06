@@ -2,93 +2,158 @@
 
 ## 역할
 
-`heightfield`는 Voronoi-derived macro map과 Perlin micro relief를 합성해 final column height를
-만드는 계약을 소유한다.
+`heightfield`는 graph-first generator의 11단계인 heightfield / water surface 합성 계약을 소유한다.
 
-macro elevation은 graph 기반으로 먼저 생성되고, Perlin은 그 위에 얹히는 국소 표면 디테일이다.
+현재 구현은 vertical slice다. stage 8 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
+heightfield cache로 바꾸며, stage 9 meso feature와 stage 10 Perlin micro relief는 아직 값을 더하지
+않는 stub으로 둔다.
+
+```text
+MacroFieldTile
+-> meso_delta = 0
+-> micro_relief = 0
+-> HeightfieldTile / HeightfieldColumn
+```
+
+이 단계는 아직 final surface material이나 `ChunkData` voxel fill을 결정하지 않는다. 다만 이후 voxel
+fill이 읽을 수 있는 surface height, water level, terrain kind hint, macro mask를 column 단위로 제공한다.
 
 ---
 
 ## 책임
 
-- macro elevation, continent/ocean gradient, ridge/fault field, hydrology valley field 합성
-- Voronoi-derived macro noise/gradient map 입력 계약
-- meso feature deformation plan 입력 계약
-- Perlin micro relief amplitude와 mask 정책 정의
-- river, lake, wetland, floodplain, coast flatten/terrace 반영
-- local depression cleanup 또는 clamp 정책 정의
-- voxel fill이 읽을 heightfield column output 제공
+- `MacroFieldTile` sample을 world-space column으로 변환한다.
+- `combined_macro_height`를 block-space surface height로 매핑한다.
+- ocean/lake mask에서 water level과 water column hint를 만든다.
+- river valley, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
+- meso/perlin stub 값이 0임을 데이터와 문서에 명시한다.
+- column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
 ---
 
 ## 비책임
 
-- graph topology 생성
-- hydrology routing 자체
-- final biome/material policy 선택
-- voxel fill
+- meso feature 생성
+- Perlin/fBM micro relief 생성
+- biome/material resolve
+- vegetation placement
+- final `ChunkData` fill
+- renderer/GPU 리소스 생성
 
 ---
 
-## Height Formula
+## 공개 API
 
-최종 높이 후보:
+```rust
+HeightfieldConfig::default()
+generate_heightfield_tile(&MacroFieldTile, HeightfieldConfig) -> HeightfieldTile
+heightfield_column_from_sample(&MacroFieldSample, HeightfieldConfig) -> HeightfieldColumn
+```
 
-```text
-height =
-    voronoi_macro_elevation
-  + continent_ocean_gradient
-  + edge_ridge_field
-  + edge_fault_plateau_field
-  + meso_feature_height_delta
-  - edge_hydrology_valley_field
-  - lake_basin_flatten_field
-  + noisy_boundary_displacement_field
-  + perlin_micro_relief
+주요 데이터:
+
+```rust
+HeightfieldConfig {
+    sea_level_blocks,
+    min_height_blocks,
+    max_height_blocks,
+    normalized_min_height,
+    normalized_max_height,
+    river_water_threshold,
+    ocean_bed_blocks,
+    lake_bed_blocks,
+}
+
+HeightfieldColumn {
+    position,
+    surface_height_blocks,
+    surface_y,
+    water_level_blocks,
+    water_y,
+    terrain_kind,
+    macro_elevation,
+    combined_macro_height,
+    ocean_mask,
+    lake_mask,
+    dry_basin_mask,
+    coast_mask,
+    ridge_influence,
+    river_valley_strength,
+    river_flow_hint,
+    meso_delta_blocks,
+    micro_relief_blocks,
+}
 ```
 
 ---
 
-## 생성 순서
+## Height Mapping
 
-1. graph base `continentality/elevation_seed`를 macro_map에서 resolve해 continent/ocean/island ownership과 signed macro elevation을 만든다.
-2. Voronoi edge 기반 ridge/fault/plateau guide와 coast guide를 먼저 정한다. ridge/fault guide 선택은 macro_map의 mountainness/rugged context를 읽는다.
-3. 이 edge guide와 macro elevation을 바탕으로 hydrology solve를 실행해 selected river, lake/sink/outlet, watershed, valley constraint를 확정한다.
-4. selected river, coast, biome boundary, cliff/fault boundary를 noisy boundary로 흔든다.
-5. 이 정보를 바탕으로 Voronoi-derived macro noise/gradient map을 만든다.
-6. meso feature plan을 만든다.
-7. Perlin noise를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
-8. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+현재 launch preview scale은 block-space 진단용 매핑이다. 실제 meter 단위 terrain scale은 final
+generator version에서 조정될 수 있지만, sea level은 pipeline 계약대로 world-space `y = 0`을 유지한다.
 
-heightfield 단계의 출력은 block 배치가 아니라 column별 높이 계약이다. 예를 들어
-`surface_y`, `water_surface_y`, `stone_floor_y`, `soil_depth_blocks`, `slope`, `floodplain_mask`,
-`cave_or_void_interval` 같은 값을 만들고, voxel fill은 이 값을 읽어 `ChunkData`를 채운다.
+```text
+combined_macro_height -0.75 -> -48 blocks
+combined_macro_height  1.25 -> 160 blocks
+sea level                    ->   0 blocks
+```
+
+`combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
+합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
+river 정보는 water hint와 terrain kind hint로 보존하고, 실제 channel carve/water body 폭은 후속
+surface/voxel 단계에서 확정한다.
 
 ---
 
-## Perlin Micro Relief
+## Water Policy
 
-Perlin noise 사용 규칙:
+- `ocean_mask > 0.5` 또는 `lake_mask > 0.5`이면 water level은 `sea_level_blocks`다.
+- ocean/lake column의 terrain surface는 water bed로 취급하며, preview vertical slice에서는 기본적으로
+  ocean bed를 `sea_level - 12 blocks`, lake bed를 `sea_level - 2 blocks` 이하로 낮춘다. 이는 final
+  bathymetry가 아니라 수면과 지형 bed를 분리해 preview/voxel fill이 물을 볼 수 있게 하는 launch
+  정책이다.
+- 지형 surface가 water level보다 낮으면 water column이 생긴다.
+- `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있지만, 현재 vertical
+  slice에서는 height를 추가로 깎지 않는다.
+- dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
 
-- Perlin은 지형의 큰 구조를 발명하지 않는다.
-- Perlin amplitude는 ruggedness, slope, hydrology role, coast/lake mask, meso feature mask로 제한한다.
-- octave별 seed/offset/rotation을 분리해 correlation artifact를 줄인다.
-- ocean, lake, river, wetland, floodplain 영역에서는 Perlin을 감쇠하거나 flatten한다.
-- mountain/ridge 주변에서는 Perlin이 능선 방향을 보조할 수 있지만, ridge ownership을 뒤집으면 안 된다.
+---
 
-중요한 위험:
+## Runtime Cache
 
-- macro elevation과 hydrology가 Perlin보다 먼저 정해지므로 순수 noise-first 방식보다 local minima 문제가 줄어든다.
-- 그래도 micro relief 때문에 국소적인 depression은 생길 수 있다.
-- river/lake 주변에서는 micro relief clamp, local fill, wetland/puddle 표현, flatten 중 하나 이상의 명시적 처리가 필요하다.
-- Perlin 이후 생긴 작은 depression은 graph hydrology의 lake/outlet을 새로 정의하지 않는다.
+`HeightfieldTile`은 chunk fill hot path가 읽는 cache surface다.
+
+```text
+macro field tile cache
+-> heightfield cache
+-> chunk generation samples column/window data
+-> voxel fill writes ChunkData
+```
+
+초기 구현에서는 preview binary가 하나의 macro field tile과 heightfield tile을 직접 생성한다. 런타임
+연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/boundary를
+반복 query하지 않는다.
+
+---
+
+## Preview
+
+`heightfield_preview`는 이 모듈의 column을 진단용 voxel box로 바꿔 quarter-view PNG를 만든다.
+
+- 실제 `ChunkData` final fill이 아니다.
+- block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
+- water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
+  gray/mauve 계열로 표시한다.
+- meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
+  의심한다.
 
 ---
 
 ## 불변식
 
-1. macro elevation은 graph base field resolve 기반으로 먼저 생성되어야 한다.
-2. Perlin micro relief는 macro structure를 뒤집으면 안 된다.
-3. hydrology는 final heightfield와 voxel fill 전에 valley/lake/coast 제약으로 반영되어야 한다.
-4. Perlin micro relief가 만든 국소 depression은 river/lake/coast policy와 충돌하지 않도록 clamp, fill, wetland/puddle 표현, flatten 중 하나로 처리되어야 한다.
-5. graph region 사각 경계가 heightfield에 보이면 회귀다.
+1. 같은 `MacroFieldTile`과 `HeightfieldConfig`는 같은 `HeightfieldTile`을 만든다.
+2. column count는 macro field sample count와 일치한다.
+3. 모든 height와 mask 값은 finite여야 한다.
+4. water mask가 있는 column은 water level hint를 가져야 한다.
+5. meso/perlin stub 값은 현재 항상 0이다.
+6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/boundary를 직접 재해석하지 않는다.

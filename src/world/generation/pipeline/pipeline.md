@@ -111,7 +111,7 @@ miss에서만 worker thread가 수행한다.
 - `BoundaryCache`: 모든 graph edge id에 대한 canonical noisy polyline/spline
 - `MacroFieldTileCache`: macro elevation, coast/lake/ocean/dry basin mask, ridge/fault influence,
   river valley field, combined macro height 같은 graph-derived raster field
-- `HeightfieldCache`: chunk column sampling이 읽을 height/water/constraint field
+- `HeightfieldCache`: chunk column sampling이 읽을 surface height, water level, terrain kind hint field
 
 초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
 계약은 “chunk fill이 graph/macro/hydrology를 생성하지 않고 읽는다”는 방향을 유지해야 한다.
@@ -134,6 +134,11 @@ macro field tile의 기본 channel은 아래를 포함해야 한다.
 - ridge/fault influence: ridge/fault guide edge의 canonical noisy curve 주변 envelope
 - river valley: selected hydrology segment의 noisy curve 주변 distance, flow, carve strength
 - combined macro height: macro elevation, ridge raise, river carve, coast/lake flatten을 합성한 pre-Perlin height
+
+heightfield cache는 macro field 이후에 생성된다. launch vertical slice에서는 meso feature plan과
+Perlin micro relief를 아직 실행하지 않고 `meso_delta = 0`, `micro_relief = 0`으로 둔다. 이 상태에서도
+heightfield cache는 `combined_macro_height`를 block-space column으로 매핑하고, ocean/lake mask에서
+water level hint를 만들며, ridge/river/dry basin channel을 terrain kind hint로 보존해야 한다.
 
 ### Job Boundary
 

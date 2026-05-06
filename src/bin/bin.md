@@ -15,6 +15,8 @@
 | `chunk_preview` | Quarter-view isometric chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
 | `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph and site-field preview maps | Works |
+| `heightfield_preview` | Quarter-view graph-first heightfield column preview from macro field cache | Works |
+| `macro_field_preview` | Top-down graph-first macro field rasterization channel preview | Works |
 | `macro_map_preview` | Top-down graph-first macro map composite with ocean/land/elevation and candidate edge overlays | Works |
 | `realization_field_preview` | Top-down realization/control-field preview | Works |
 | `region_topdown_preview` | Top-down atlas region-classification preview | Works |
@@ -157,6 +159,60 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
   - Graph construction uses `world::generation::graph::generate_voronoi_graph_patch(...)`; the binary only owns image sampling and PNG output.
   - Field-map modes read the smoothed `VoronoiSite::base_fields` values produced by the graph base-field stage.
   - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
+
+## heightfield_preview
+
+- Purpose: render a quarter-view diagnostic preview for stage 11 graph-first heightfield columns.
+- Parameters:
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--columns-x <u32>`,
+    `--columns-z <u32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`,
+    `--land-bias <f32>`, `--quarter-turns <u8>`, `--vertical-scale <f32>`, `--stage heightfield`,
+    `--output <path>`
+- Defaults:
+  - `--width 1280`
+  - `--height 720`
+  - `--world-span-blocks 8192`
+  - `--columns-x 192`
+  - `--columns-z` derived from image aspect
+  - `--vertical-scale 6.0`
+  - output `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`
+- Example:
+
+```bash
+cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 720 --output target/heightfield-preview/heightfield-smoke.png
+```
+
+- Notes:
+  - This is not final `ChunkData` voxel fill. It converts `MacroFieldTile` to `HeightfieldTile`,
+    then renders diagnostic voxelized columns.
+  - Meso feature and Perlin micro relief are currently stubbed to zero.
+  - Colors are diagnostic and follow the current subtle terrain ramp rather than final block materials.
+  - See [heightfield_preview.md](./heightfield_preview.md).
+
+## macro_field_preview
+
+- Purpose: render top-down PNG previews for stage 8 graph-first macro field rasterization.
+- Parameters:
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`,
+    `--site-spacing-blocks <i32>`, `--land-bias <f32>`, `--stage macro_field`,
+    `--channel <all|macro|mask|ridge|river|combined|lit>`, `--output <path>`
+- Defaults:
+  - `--width 3840`
+  - `--height 2160`
+  - `--world-span-blocks 32768`
+  - `--channel lit`
+- Example:
+
+```bash
+cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel combined --output target/macro-field-preview/combined.png
+```
+
+- Notes:
+  - `combined` uses the subtle pre-Perlin terrain ramp.
+  - `lit` is white-material broad hillshade from combined macro height.
+  - See [macro_field_preview.md](./macro_field_preview.md).
 
 ## macro_map_preview
 

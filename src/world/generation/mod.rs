@@ -1,6 +1,7 @@
 pub mod boundary;
 pub mod field;
 pub mod graph;
+pub mod heightfield;
 pub mod hydrology;
 pub mod macro_field;
 pub mod macro_map;
@@ -33,6 +34,15 @@ pub use graph::{
     VoronoiEdge, VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
     VoronoiSite, VoronoiSiteId, WorldPlanePoint, apply_base_graph_fields,
     generate_voronoi_graph_patch, graph_region_for_world_block, graph_site_spacing_stats,
+};
+#[allow(unused_imports)]
+pub use heightfield::{
+    DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
+    DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
+    DEFAULT_HEIGHTFIELD_NORMALIZED_MIN, DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS,
+    DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+    HeightfieldColumn, HeightfieldConfig, HeightfieldTerrainKind, HeightfieldTile,
+    HeightfieldTileStats, generate_heightfield_tile, heightfield_column_from_sample,
 };
 #[allow(unused_imports)]
 pub use hydrology::{

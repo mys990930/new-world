@@ -324,6 +324,60 @@ renderer/GPU 계약을 만들지 않는다.
 
 ---
 
+## `heightfield_preview` CLI 계약
+
+`heightfield_preview`는 stage 11 heightfield / water surface vertical slice를 chunk 생성 없이 검사하는
+quarter-view preview binary다.
+
+이 preview는 `MacroFieldTile`을 `HeightfieldTile` column cache로 변환한 뒤, column을 diagnostic box로
+voxelize해서 offscreen quarter-view renderer에 전달한다. 실제 `ChunkData` final fill은 아니며,
+surface/material/vegetation stage도 아직 적용하지 않는다.
+
+### 입력
+
+- 필수 positional 인자: `<seed> <center-x> <center-z>`
+  - `center-x`, `center-z`는 world-block 좌표다.
+- 선택 인자:
+  - `--width <u32>`: 기본 `1280`
+  - `--height <u32>`: 기본 `720`
+  - `--world-span-blocks <i32>`: 가로 footprint, 기본 `8192`
+  - `--columns-x <u32>`: heightfield sample column 수, 기본 `192`
+  - `--columns-z <u32>`: 기본은 image aspect에서 계산
+  - `--region-size-blocks <i32>`
+  - `--site-spacing-blocks <i32>`
+  - `--land-bias <f32>`
+  - `--quarter-turns <u8>`
+  - `--vertical-scale <f32>`: preview-only vertical exaggeration, 기본 `6.0`
+  - `--stage heightfield`
+  - `--output <path>`
+
+### 출력
+
+- 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
+- PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
+- metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
+  river/dry/ridge column count, meso/perlin stub 상태, timing을 기록한다.
+- overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key를 표시한다.
+
+### 현재 구현 상태
+
+- meso feature와 Perlin micro relief는 `0` stub이다.
+- `combined_macro_height -0.75..1.25`를 `-48..160 block` preview scale로 매핑한다.
+- ocean/lake mask는 sea-level `y = 0` water hint가 된다.
+- river valley는 이미 `combined_macro_height`에 carve guide로 반영되어 있으므로 heightfield stage에서
+  중복 carve하지 않고 terrain kind/water hint로 보존한다.
+- block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
+  green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
+
+### 검증 기준
+
+- 같은 seed/config는 같은 column과 metadata를 만든다.
+- output image는 blank가 아니어야 한다.
+- water mask가 있는 column은 water level hint를 가져야 한다.
+- meso/perlin stub 값은 0이어야 한다.
+
+---
+
 ## Determinism
 
 - 같은 seed, generator version, area, stage input은 같은 preview를 만든다.

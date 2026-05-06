@@ -160,6 +160,11 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
 9. meso feature plan을 만든다. 이 단계는 crater, ravine, dune field, hill cluster, terrace 같은 국소 지형 객체를 feature id와 world-space anchor로 배치한다.
 10. seed 기반 Perlin micro relief를 만들고 hydrology/coast/lake/ridge/meso mask로 amplitude를 제한한다.
 11. macro map, meso feature deformation, hydrology valley/lake/coast constraint, noisy boundary, Perlin micro relief를 합성해 heightfield와 water surface 후보를 만든다.
+   - 현재 vertical slice에서는 meso feature와 Perlin micro relief를 stub으로 두고 각각 `0` delta를 적용한다.
+   - `heightfield`는 stage 8 `MacroFieldTile`의 `combined_macro_height`와 mask/value channel을 column
+     oriented `HeightfieldTile`로 변환한다.
+   - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
+     voxel fill은 이후 stage에서 별도로 수행한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.
 14. vegetation/feature placement plan을 만든다.
@@ -209,6 +214,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   이 field는 새 noise source가 아니라 heightfield와 chunk fill이 읽을 cache다. macro elevation,
   coast/lake/ocean/dry basin mask, ridge/fault influence, river valley, combined macro height는 각각
   독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다.
+- stage 11 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
+  meso/perlin delta는 아직 `0`인 stub이며, ocean/lake mask는 water level hint로, river/ridge/dry basin
+  channel은 terrain kind hint로 보존한다.
 
 런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
 contract에 따라 graph region cache, macro map cache, hydrology/boundary cache, macro field tile cache,
