@@ -623,18 +623,26 @@ fn macro_field_sample_from_context(
     } else {
         clamp_unit((-continentality).max(0.0) * 0.70 + inlandness * 0.30)
     };
-    let signed_macro_elevation = if effective_land_owned {
-        (0.035
+    let raw_signed_macro_elevation = if effective_land_owned {
+        0.035
             + ((elevation_seed + 1.0) * 0.5) * 0.62
             + continentality.max(0.0) * 0.14
             + inlandness * 0.06
             + mountainness * 0.08
             + ridgeness * 0.04
-            - basinness * 0.06)
-            .max(0.01)
+            - basinness * 0.06
     } else {
         (-0.035 + continentality.min(0.0) * 0.32 + elevation_seed * 0.36 - basinness * 0.16)
             .min(-0.01)
+    };
+    let signed_macro_elevation = if effective_land_owned {
+        coastal_land_elevation_ramp(
+            raw_signed_macro_elevation.max(0.01),
+            distance_to_coast_blocks,
+            config.coast_width_blocks,
+        )
+    } else {
+        raw_signed_macro_elevation
     }
     .clamp(-1.0, 1.5);
 
@@ -647,7 +655,7 @@ fn macro_field_sample_from_context(
             context.inland_water_surface,
             coastness,
             basinness,
-            signed_macro_elevation,
+            raw_signed_macro_elevation.max(0.01),
             context.feature_hash,
         ),
         signed_macro_elevation,
@@ -658,6 +666,18 @@ fn macro_field_sample_from_context(
         ridgeness,
         basinness,
     }
+}
+
+fn coastal_land_elevation_ramp(
+    raw_elevation: f32,
+    distance_to_coast_blocks: f32,
+    coast_width_blocks: f32,
+) -> f32 {
+    let recovery_distance = (coast_width_blocks * 4.0).max(f32::EPSILON);
+    let recovery = smoothstep(0.0, 1.0, distance_to_coast_blocks / recovery_distance);
+    let coastal_floor = 0.006;
+
+    coastal_floor * (1.0 - recovery) + raw_elevation * recovery
 }
 
 fn corner_site_neighbors(
@@ -1286,6 +1306,43 @@ mod tests {
                 .map(|site| (site.id, site.coastness))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn coastal_land_elevation_starts_near_sea_level_and_recovers_inland() {
+        let config = test_macro_config(404);
+        let base = SiteContext {
+            base_fields: GraphBaseFields::new(0.82, 0.45, 0.20, 0.92),
+            ruggedness: 0.72,
+            feature_hash: 1,
+            is_land_owned: true,
+            is_island_owned: false,
+            is_inland_water: false,
+            inland_water_surface: None,
+            component_id: 10,
+            graph_distance_to_coast: 0,
+            spacing_blocks: DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS,
+        };
+        let coast = macro_field_sample_from_context(base, config);
+        let inland = macro_field_sample_from_context(
+            SiteContext {
+                graph_distance_to_coast: 8,
+                ..base
+            },
+            config,
+        );
+
+        assert!(
+            coast.signed_macro_elevation <= 0.02,
+            "coast-adjacent land should start near sea level, got {}",
+            coast.signed_macro_elevation
+        );
+        assert!(
+            inland.signed_macro_elevation > 0.45,
+            "same highland context should recover inland elevation, got {}",
+            inland.signed_macro_elevation
+        );
+        assert!(inland.signed_macro_elevation > coast.signed_macro_elevation);
     }
 
     #[test]

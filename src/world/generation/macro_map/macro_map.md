@@ -17,6 +17,7 @@ context를 resolve한다.
 - graph base `continentality`를 읽어 continent, ocean basin, island/archipelago ownership resolve
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
 - graph base `elevation_seed`, continentality, explicit ocean-coast distance, basinness를 합성한 signed macro elevation resolve
+- connected ocean coast에 인접한 land elevation을 해수면 근처에서 시작시키고 inland distance에 따라 원래 macro elevation을 회복하는 coastal elevation ramp 제공
 - edge 기반 ridge/fault guide 선택. mountainness/rugged context는 public edge guide가 아니라 점수 입력이다.
 - land/ocean ownership 경계 기반 coast guide 선택
 - ridge/fault/coast guide를 broad field로 확산
@@ -168,6 +169,11 @@ launch 정책은 아래처럼 잡는다.
   계속 유지하는 것이다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
+- land signed macro elevation은 coast-adjacent cell에서 바로 높은 양수값으로 시작하면 안 된다.
+  connected ocean coast까지의 graph distance가 짧은 land는 `0`에 가까운 낮은 양수 elevation으로 시작하고,
+  coast influence band를 벗어나며 `elevation_seed`, `continentality`, `mountainness`, `ridgeness` 기반
+  원래 macro elevation을 회복한다. 이 ramp는 해안 단차 억제를 위한 height profile이며, lake/wetland
+  승격에 쓰는 local-minima 판단을 인위적으로 늘리면 안 된다.
 - 작은 양수 land component는 기본적으로 island 또는 archipelago candidate다.
 - launch 기본값에서도 큰 대륙만 만들지 않고, graph `continentality`가 ocean basin 안에 크고 작은
   양수 component를 만들 수 있어야 한다.
@@ -199,7 +205,9 @@ macro elevation resolve 순서:
 1. graph base `continentality`를 land/ocean mask로 해석한다.
 2. connected component를 resolve해 continent, ocean basin, island/archipelago ownership을 정한다.
 3. graph base `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를 합성한다.
-4. signed macro elevation을 만들되, ownership과 sea level contract를 함께 저장한다.
+4. signed macro elevation을 만들되, connected ocean coast-adjacent land는 sea level 근처에서 시작하고
+   inland로 갈수록 원래 macro elevation을 회복하는 coastal ramp를 적용한다. ownership과 sea level
+   contract는 함께 저장한다.
 5. edge 기반 ridge/fault/plateau 후보를 먼저 정한다.
 6. coast는 signed macro elevation 경계가 아니라 connected ocean basin과 non-ocean terrain 경계에서 우선 찾는다.
    내륙 lake/wetland/dry basin과 주변 land의 경계는 coast가 아니다.

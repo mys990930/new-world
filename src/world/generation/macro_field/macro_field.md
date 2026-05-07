@@ -142,6 +142,10 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      `BoundaryCache`의 `NoisyBoundaryCurve`를 따라야 한다.
    - macro elevation은 primary owner의 값을 기준으로 하되 boundary blend band 안에서는 반대편 site
      elevation을 일부 섞어 계단형 단절을 줄인다.
+   - explicit coast pair는 일반 boundary blend를 쓰지 않는다. coast curve land-side는 curve 위에서
+     `0`에 붙고 blend radius 바깥으로 갈수록 land owner elevation을 회복하는 shoreline/foreshore
+     profile을 사용한다. coast curve ocean-side는 해수면 위로 land elevation을 섞지 않고 얕은 음수
+     수중 profile에서 ocean owner elevation으로 회복한다.
    - ownership/mask boundary는 정확도 유지를 위해 아직 per-sample noisy-boundary side query를 사용한다.
      후속 최적화는 이 side/blend 판정도 tile edge-classification field로 굽는 것이다.
 4. noisy-boundary owner의 `surface_kind`에서 ocean/coast/lake/dry basin mask를 만든다.
@@ -191,6 +195,11 @@ Dry basin은 lake/ocean처럼 water flatten 대상이 아니다. `DryBasin` mask
 surface/context를 드러내지만, combined height에서는 얕은 above-sea-level land floor로 clamp한다.
 주변 rim이나 사면은 이후 heightfield/water solve에서 더 정교하게 만들 수 있지만, macro field
 단계에서 dry basin 주변을 물처럼 낮추거나 분지 바깥이 분지 floor보다 낮아 보이게 만드는 것은 회귀다.
+
+Coast flatten은 일반 후처리 압축만으로 높은 coastal land를 억지로 낮추는 장치가 아니다.
+`macro_map`의 coastal elevation ramp와 `macro_field`의 coast-specific boundary profile이 먼저
+sea-level aligned shoreline scalar를 제공해야 한다. coast flatten은 그 profile을 보강하는 mask이며,
+해안 바로 안쪽 contour가 높은 층으로 급격히 몰리게 만들면 회귀다.
 
 9. 필요한 경우 `combined_macro_height`에서 contour 진단 layer를 추출한다.
    - contour 추출은 Marching Squares 기반이다.
@@ -317,6 +326,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 11. contour segment는 preview/debug layer이며, source graph/macro/hydrology/boundary나 heightfield
     scalar source를 대체하지 않는다. heightfield가 contour-guided mode를 사용할 때도 같은 level/step
     domain을 공유할 뿐, contour polyline을 새 terrain source로 삼지 않는다.
+12. explicit coast boundary profile은 signed sea level과 정렬되어야 한다. coast curve 위 land-side
+    sample은 `0` 근처에서 시작하고, ocean-side sample은 음수 수중 profile을 유지하며, land owner
+    elevation은 shoreline blend band 바깥에서 회복되어야 한다.
 
 ---
 

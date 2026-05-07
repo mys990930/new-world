@@ -957,9 +957,18 @@ impl<'a> MacroFieldRasterContext<'a> {
 
         let primary = boundary.primary_site();
         let secondary = boundary.secondary_site();
+        let is_coast_pair = is_explicit_coast_pair(primary, secondary);
         let blend = envelope(boundary.distance, config.boundary_blend_radius_blocks);
-        let mixed_elevation = primary.signed_macro_elevation * (1.0 - blend * 0.35)
-            + secondary.signed_macro_elevation * (blend * 0.35);
+        let mixed_elevation = if is_coast_pair {
+            coast_boundary_elevation_profile(
+                primary,
+                boundary.distance,
+                config.boundary_blend_radius_blocks,
+            )
+        } else {
+            primary.signed_macro_elevation * (1.0 - blend * 0.35)
+                + secondary.signed_macro_elevation * (blend * 0.35)
+        };
 
         OwnerSample {
             primary: self
@@ -968,11 +977,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .copied()
                 .or(nearest.copied()),
             macro_elevation: mixed_elevation,
-            coast_boundary_blend: if is_explicit_coast_pair(primary, secondary) {
-                blend
-            } else {
-                0.0
-            },
+            coast_boundary_blend: if is_coast_pair { blend } else { 0.0 },
         }
     }
 
@@ -1115,6 +1120,20 @@ impl OwnerSample {
 
 fn is_explicit_coast_pair(a: MacroSite, b: MacroSite) -> bool {
     a.surface_kind.is_ocean_owned() != b.surface_kind.is_ocean_owned()
+}
+
+fn coast_boundary_elevation_profile(
+    primary: MacroSite,
+    distance_to_curve_blocks: f32,
+    blend_radius_blocks: f32,
+) -> f32 {
+    let recovery = smoothstep01(distance_to_curve_blocks / blend_radius_blocks.max(f32::EPSILON));
+    if primary.surface_kind.is_ocean_owned() {
+        let shallow_water = -0.012;
+        shallow_water * (1.0 - recovery) + primary.signed_macro_elevation.min(-0.01) * recovery
+    } else {
+        primary.signed_macro_elevation.max(0.0) * recovery
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1363,6 +1382,11 @@ fn envelope(distance: f32, radius: f32) -> f32 {
         return 0.0;
     }
     let t = (1.0 - distance / radius.max(f32::EPSILON)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -1874,6 +1898,109 @@ mod tests {
         );
         assert_eq!(sample.surface_kind, Some(MacroSurfaceKind::Continent));
         assert!(sample.coast_mask > 0.5);
+    }
+
+    #[test]
+    fn coast_boundary_profile_starts_at_sea_level_and_recovers_on_land_side() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
+        use crate::world::generation::macro_map::{
+            MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
+        };
+
+        let land = test_site(
+            VoronoiSiteId(1),
+            -10.0,
+            0.0,
+            MacroSurfaceKind::Continent,
+            0.8,
+        );
+        let ocean = test_site(
+            VoronoiSiteId(2),
+            10.0,
+            0.0,
+            MacroSurfaceKind::OceanBasin,
+            -0.8,
+        );
+        let edge = VoronoiEdgeId(71);
+        let start = WorldPlanePoint::new(0.0, -10.0);
+        let end = WorldPlanePoint::new(0.0, 10.0);
+        let curve = NoisyBoundaryCurve {
+            edge,
+            profile: BoundaryProfile::Coast,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [land.id, ocean.id],
+                start,
+                end,
+            },
+            points: vec![start, end],
+            amplitude: 0.0,
+            seed: 1,
+            guard: BoundaryGuard {
+                min_x: -48.0,
+                max_x: 48.0,
+                min_z: -20.0,
+                max_z: 20.0,
+            },
+        };
+        let macro_map = GraphMacroMap {
+            sites: vec![land, ocean],
+            corners: Vec::new(),
+            edges: vec![MacroEdge {
+                id: edge,
+                sites: [land.id, ocean.id],
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                guide: MacroEdgeGuide {
+                    is_coast: true,
+                    is_ridge_candidate: false,
+                    is_river_candidate: false,
+                    is_fault_candidate: false,
+                    coastness: 1.0,
+                    mountainness: 0.0,
+                    ridgeness: 0.0,
+                    signed_elevation_gradient: 1.6,
+                    drainage_divide_potential: 0.0,
+                    river_potential: 0.0,
+                },
+                lake_class: MacroLakeEdgeClass::NonLake,
+            }],
+        };
+        let boundary = BoundaryCache {
+            curves: vec![curve],
+            stats: Default::default(),
+        };
+        let patch = Default::default();
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let mut config = test_tile_config();
+        config.boundary_blend_radius_blocks = 24.0;
+
+        let shoreline_land =
+            sample_macro_field_point(&context, config, WorldPlanePoint::new(-1.0, 0.0));
+        let recovered_land =
+            sample_macro_field_point(&context, config, WorldPlanePoint::new(-32.0, 0.0));
+        let shoreline_ocean =
+            sample_macro_field_point(&context, config, WorldPlanePoint::new(1.0, 0.0));
+
+        assert!(
+            shoreline_land.macro_elevation <= 0.02,
+            "land side of coast curve should begin at sea level, got {}",
+            shoreline_land.macro_elevation
+        );
+        assert!(
+            recovered_land.macro_elevation >= 0.75,
+            "land owner elevation should recover outside the shoreline blend, got {}",
+            recovered_land.macro_elevation
+        );
+        assert!(
+            shoreline_ocean.macro_elevation < 0.0,
+            "ocean side should remain an underwater profile, got {}",
+            shoreline_ocean.macro_elevation
+        );
     }
 
     #[test]

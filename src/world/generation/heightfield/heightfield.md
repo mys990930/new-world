@@ -128,6 +128,11 @@ terrace로 튀어서는 안 된다.
 river 정보는 water hint와 terrain kind hint로 보존하고, 실제 channel carve/water body 폭은 후속
 surface/voxel 단계에서 확정한다.
 
+입력 `MacroFieldTile`은 sea-level aligned coastal ramp를 제공해야 한다. 즉 connected ocean coast의
+land-side scalar는 `0` 근처에서 시작하고 내륙으로 갈수록 회복되어야 한다. heightfield는 이 원천
+scalar를 우회적으로 clamp해서 해안 단차를 숨기는 계층이 아니라, 이미 정렬된 macro scalar를 contour
+step/integer block domain으로 옮기는 계층이다.
+
 heightfield column은 값을 세 단계로 보존한다.
 
 ```text

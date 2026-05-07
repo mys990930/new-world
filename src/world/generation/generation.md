@@ -82,6 +82,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - continent/ocean/island의 source of truth는 graph의 smoothed `continentality`와 연결 component 해석이다.
    - 큰 land component는 continent, ocean basin 안의 작은 land component는 island 또는 archipelago로 분류한다.
    - signed macro elevation은 graph `elevation_seed`, `continentality`, coast distance, basinness를 합성해 만든다.
+   - connected ocean coast에 인접한 land signed elevation은 해수면 `0` 근처에서 시작해야 한다.
+     coast-adjacent site/corner는 낮은 양수 elevation을 갖고, graph coast distance가 커질수록 원래
+     highland/mountain macro elevation을 회복한다. 이 coastal ramp는 높이 profile 전용이며, lake/wetland
+     승격 정책을 과하게 넓히는 근거가 되어서는 안 된다.
    - water component는 patch/guard boundary 접촉만으로 ocean이 되지 않는다. explicit ocean basin으로
      분류된 장거리 water component와 연결되지 않은 물은 바다에 가까워도 lake/wetland/dry basin 후보로 유지한다.
    - 고립 저지대가 모두 호수가 되어서는 안 된다. 작은 호수는 일반적으로 10 site/cell 이내를 목표로
@@ -142,6 +146,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - macro elevation은 graph signed elevation을 noisy boundary와 ownership context로 연속화한 값이다.
    - macro elevation과 ownership/mask 경계는 nearest-site 직선 경계가 아니라 stage 7
      `NoisyBoundaryCurve`의 side/blend 판정을 따라야 한다.
+   - explicit coast edge는 일반 Voronoi boundary blend와 분리해 shoreline/foreshore profile로 샘플한다.
+     canonical noisy coast curve 위와 아주 가까운 land-side sample은 `0`에 붙고, land 쪽으로 갈수록
+     land owner elevation을 회복한다. ocean-side sample은 해수면 위로 섞이지 않고 얕은 음수/수중
+     profile에서 ocean owner elevation으로 회복한다.
    - coast/lake/ocean/dry basin mask는 water surface, shoreline flatten, lake flatten, dry basin
      material policy가 읽는 distance/mask다.
    - ridge influence는 ridge edge가 산맥 local maxima guide라는 사실을 heightfield로 옮기기 위한
