@@ -50,14 +50,9 @@
 
 ## Candidate Workflow
 
-- `meso_preview` does not search for promising terrain on its own
-- use `terrain_find` first when you want strong candidates:
-
-```bash
-cargo run --bin terrain_find -- 42 --meso hill_cluster --top 5
-```
-
-- then inspect a chosen candidate directly in the isolated preview:
+- `meso_preview` does not search for promising terrain on its own.
+- Pass explicit seed coordinates that came from manual inspection, saved notes, or another currently active preview.
+- Inspect a chosen candidate directly in the isolated preview:
 
 ```bash
 cargo run --bin meso_preview -- 42 --center-x -57 --center-z 93 --radius 10 --feature hill_cluster

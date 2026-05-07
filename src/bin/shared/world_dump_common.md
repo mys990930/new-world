@@ -2,7 +2,7 @@
 
 ## Role
 
-- Share created-world persistence helpers across `world_create`, `world_coords`, `chunk_preview`, and `chunk_topdown_preview`.
+- Share created-world persistence helpers across `world_create`, `chunk_preview`, and `chunk_topdown_preview`.
 
 ## Responsibilities
 
