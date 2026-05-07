@@ -31,6 +31,8 @@ const ISO_TARGET_RELIEF_FRACTION: f32 = 0.28;
 const ISO_MIN_RELIEF_FRACTION: f32 = 0.20;
 const ISO_MAX_RELIEF_FRACTION: f32 = 0.35;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
+const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
+const PREVIEW_MAJOR_CHUNK_GRID_BLOCKS: i32 = CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -198,6 +200,7 @@ struct PreviewHeader {
     chunk_radius_x: i32,
     chunk_radius_z: i32,
     requested_chunk_radius: Option<i32>,
+    major_grid_edge_blocks: i32,
     macro_tile_edge_blocks: i32,
     vertical_scale: f32,
     graph_site_count: usize,
@@ -242,6 +245,7 @@ impl PreviewHeader {
             format!("columns={}x{}", self.columns_x, self.columns_z),
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
+            format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
             format!(
                 "chunk_range_xz={}..{},{}..{}",
                 self.chunk_min_x, self.chunk_max_x, self.chunk_min_z, self.chunk_max_z
@@ -376,6 +380,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .abs()
             .max((chunk_range.3 - center_chunk_z).abs()),
         requested_chunk_radius: config.chunk_radius,
+        major_grid_edge_blocks: PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
         macro_tile_edge_blocks: MACRO_FIELD_TILE_EDGE_BLOCKS,
         vertical_scale: config.vertical_scale,
         graph_site_count: patch.sites.len(),
@@ -432,18 +437,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.max_z()
     );
     println!(
-        "chunk overlay: edge {} blocks, cx {}..{}, cz {}..{}, radius {}x{}",
-        CHUNK_EDGE_I32,
+        "grid overlay: chunk {} blocks faint, major {} blocks, macro tile {} blocks",
+        CHUNK_EDGE_I32, PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, MACRO_FIELD_TILE_EDGE_BLOCKS
+    );
+    println!(
+        "chunk range: cx {}..{}, cz {}..{}, radius {}x{}",
         chunk_range.0,
         chunk_range.1,
         chunk_range.2,
         chunk_range.3,
         header.chunk_radius_x,
         header.chunk_radius_z
-    );
-    println!(
-        "macro tile overlay: edge {} blocks",
-        MACRO_FIELD_TILE_EDGE_BLOCKS
     );
     println!(
         "view: cpu isometric columns, quarter turns {}, vertical scale multiplier {:.2}, vertical {:.3} px/block, relief span {:.1}px",
@@ -877,8 +881,17 @@ fn draw_boundary_overlays(
         tile,
         plan,
         window,
-        MACRO_FIELD_TILE_EDGE_BLOCKS,
-        [222, 232, 244, 68],
+        CHUNK_EDGE_I32,
+        [24, 32, 39, 30],
+        6,
+    );
+    draw_world_grid_overlay(
+        &mut rgba,
+        tile,
+        plan,
+        window,
+        PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
+        [84, 112, 126, 82],
         1,
     );
     draw_world_grid_overlay(
@@ -886,9 +899,9 @@ fn draw_boundary_overlays(
         tile,
         plan,
         window,
-        CHUNK_EDGE_I32,
-        [32, 44, 54, 84],
-        4,
+        MACRO_FIELD_TILE_EDGE_BLOCKS,
+        [226, 236, 246, 92],
+        1,
     );
     image.rgba = rgba.into_raw();
 }
@@ -1197,6 +1210,8 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
     );
     text_y += layout.line_step;
     draw_legend_keys(&mut rgba, text_x, text_y, layout.scale);
+    text_y += layout.line_step;
+    draw_grid_legend_keys(&mut rgba, header, text_x, text_y, layout.scale);
     draw_scale_bar(&mut rgba, header, layout.scale);
     image.rgba = rgba.into_raw();
 }
@@ -1214,7 +1229,7 @@ impl OverlayLayout {
     fn new(width: u32, height: u32) -> Self {
         let min_axis = width.min(height).max(1);
         let scale = ((min_axis as f32 / 360.0).round() as u32).clamp(2, 6);
-        let panel_width = ((width as f32 * 0.24).round() as u32)
+        let panel_width = ((width as f32 * 0.30).round() as u32)
             .max(136 * scale)
             .min((width as f32 * 0.45).round() as u32);
         let panel_height = ((height as f32 * 0.20).round() as u32)
@@ -1246,8 +1261,6 @@ fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
         ("LOW", [101, 130, 117, 255]),
         ("HI", [190, 190, 181, 255]),
         ("DRY", [118, 111, 119, 255]),
-        ("CH", [32, 44, 54, 255]),
-        ("MT", [222, 232, 244, 255]),
     ];
     let mut cursor = x;
     for (label, color) in keys {
@@ -1265,7 +1278,45 @@ fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
             [218, 224, 212, 255],
             scale,
         );
-        cursor += swatch + 21 * scale;
+        cursor += swatch + (label.len() as u32 * 4 + 6) * scale;
+    }
+}
+
+fn draw_grid_legend_keys(
+    image: &mut RgbaImage,
+    header: &PreviewHeader,
+    x: u32,
+    y: u32,
+    scale: u32,
+) {
+    let keys = [
+        (format!("C{}B", header.chunk_edge_blocks), [24, 32, 39, 255]),
+        (
+            format!("M{}B", header.major_grid_edge_blocks),
+            [84, 112, 126, 255],
+        ),
+        (
+            format!("T{}B", header.macro_tile_edge_blocks),
+            [226, 236, 246, 255],
+        ),
+    ];
+    let mut cursor = x;
+    for (label, color) in keys {
+        let swatch = 5 * scale;
+        for sy in 0..swatch {
+            for sx in 0..swatch {
+                set_rgba(image, cursor + sx, y + sy, color);
+            }
+        }
+        draw_text(
+            image,
+            cursor + swatch + 2 * scale,
+            y,
+            &label,
+            [218, 224, 212, 255],
+            scale,
+        );
+        cursor += swatch + (label.len() as u32 * 4 + 8) * scale;
     }
 }
 
@@ -1636,8 +1687,24 @@ mod tests {
         let range = chunk_range_for_window(window);
 
         assert_eq!(CHUNK_EDGE_I32, 32);
+        assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, 256);
+        assert_eq!(MACRO_FIELD_TILE_EDGE_BLOCKS, 1024);
         assert_eq!(range, (-128, 127, -72, 71));
         assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
+    }
+
+    #[test]
+    fn preview_grid_spacing_keeps_chunk_major_and_macro_layers_distinct() {
+        assert_eq!(
+            PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
+            CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER
+        );
+        assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER, 8);
+        assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, 256);
+        assert_eq!(
+            MACRO_FIELD_TILE_EDGE_BLOCKS % PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
+            0
+        );
     }
 
     #[test]

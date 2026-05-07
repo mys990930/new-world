@@ -39,8 +39,9 @@
 7. Snap heightfield surface/water output to integer block heights.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
    their visible top for neighbor-delta side faces; the underwater bed remains stored separately.
-9. Draw visible side faces, top faces, water tops, chunk boundaries, macro-field tile boundaries,
-   scale bar, and metadata legend in painter order.
+9. Draw visible side faces, top faces, water tops, faint 32-block chunk boundaries, readable
+   256-block major chunk grid, 1024-block macro-field tile boundaries, scale bar, and metadata
+   legend in painter order.
 
 ## Interpretation
 
@@ -72,15 +73,18 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Ocean/lake terrain `surface_height_blocks` is bed height. The preview compares adjacent columns by
   visible top height, `max(surface_height_blocks, water_level_blocks)`, so a water bed does not look
   like a shoreline cliff.
-- Chunk overlay uses the runtime chunk edge size, currently `32` blocks. Macro-field tile overlay
-  uses the graph/cache tile scale, currently `1024` blocks. They are distinct diagnostic overlays:
-  chunk lines show future `ChunkData` output windows, macro tile lines show generation cache scale.
+- Chunk overlay has three diagnostic layers. The runtime chunk edge is currently `32` blocks and is
+  drawn very faintly. A major preview grid is drawn every `256` blocks, equal to 8 chunks, so the
+  macro footprint remains readable. Macro-field tile overlay uses the graph/cache tile scale,
+  currently `1024` blocks. These are distinct overlays: minor chunk lines show future `ChunkData`
+  output windows, major lines show chunk groups, and macro tile lines show generation cache scale.
 - With `--chunk-radius r`, the preview range is inclusive in chunk coordinates:
   `center_chunk-r .. center_chunk+r` on both X and Z. A radius of `0` shows exactly the chunk that
   contains the world-block center. The world footprint is the covered chunk square times
   `CHUNK_EDGE`.
 - The legend/header records `cx`, `cz`, world footprint, column count/spacing, chunk x/z range,
-  chunk radius, height range, sea level, and a block scale bar.
+  chunk radius, height range, sea level, `chunk 32 blk`, `major 256 blk`, `macro tile 1024 blk`,
+  and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
 

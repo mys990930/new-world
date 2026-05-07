@@ -193,8 +193,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   terraced relief를 우선한다.
 - preview overlay는 실제 world-block 맥락을 함께 표시한다. legend/header는 `center-x/center-z`,
   column resolution, sample spacing, chunk range/radius, world footprint, sea level, height range를
-  기록해야 한다. chunk boundary는 `CHUNK_EDGE` block 간격의 별도 선으로, macro field tile/cache
-  boundary는 graph/cache region scale의 별도 선으로 표시한다.
+  기록해야 한다. chunk boundary는 `CHUNK_EDGE` block 간격의 very faint minor line으로 유지하고,
+  `CHUNK_EDGE * 8`인 256-block major grid를 더 잘 보이는 line으로 표시한다. macro field tile/cache
+  boundary는 graph/cache region scale인 1024-block line으로, major grid와 다른 스타일로 표시한다.
 - `heightfield_preview`가 `--chunk-radius r`을 받으면 `center-x/center-z` world block이 속한 chunk를
   중심으로 `center_chunk-r .. center_chunk+r` inclusive square range를 샘플링한다. 이 모드에서
   `width/height`는 이미지 해상도만 정하고, world footprint는 chunk square가 정한다.
