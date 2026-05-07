@@ -11,7 +11,8 @@ use new_world::renderer::OffscreenRenderOutput;
 use new_world::world::CHUNK_EDGE_I32;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
+    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+    DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HeightfieldColumn,
     HeightfieldConfig, HeightfieldTerrainKind, HeightfieldTile, MacroFieldTile,
     MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig, VoronoiGraphPatch,
@@ -324,6 +325,7 @@ struct PreviewHeader {
     river_uphill_flow_neighbors: usize,
     contour_step_blocks: f32,
     contour_min_gap_blocks: f32,
+    contour_river_min_gap_blocks: f32,
     contour_band_smoothing: f32,
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
@@ -473,13 +475,20 @@ impl PreviewHeader {
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
             format!(
-                "contour_band_heightfield=step:{:.2}_blocks,min_gap:{:.2}_blocks,smoothing_disabled:{:.2}",
-                self.contour_step_blocks, self.contour_min_gap_blocks, self.contour_band_smoothing
+                "contour_band_heightfield=step:{:.2}_blocks,land_min_gap:{:.2}_blocks,river_min_gap:{:.2}_blocks,smoothing_disabled:{:.2}",
+                self.contour_step_blocks,
+                self.contour_min_gap_blocks,
+                self.contour_river_min_gap_blocks,
+                self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
             format!("block_lines={}", self.block_lines),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
-            "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_-48_to_0_to_160_blocks".to_string(),
+            format!(
+                "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_{:.0}_to_0_to_{:.0}_blocks",
+                DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
+                DEFAULT_HEIGHTFIELD_MAX_BLOCKS
+            ),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
                 self.build_ms,
@@ -602,6 +611,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         river_uphill_flow_neighbors: heightfield.stats.river_uphill_flow_neighbor_count,
         contour_step_blocks: heightfield.stats.contour_step_blocks,
         contour_min_gap_blocks: heightfield.stats.contour_min_gap_blocks,
+        contour_river_min_gap_blocks: heightfield.stats.contour_river_min_gap_blocks,
         contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
@@ -714,9 +724,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.river_uphill_flow_neighbors
     );
     println!(
-        "contour-band heightfield: step {:.1} blocks, min gap {:.1} blocks, smoothing disabled {:.2}",
+        "contour-band heightfield: step {:.1} blocks, land gap {:.1} blocks, river gap {:.1} blocks, smoothing disabled {:.2}",
         heightfield.stats.contour_step_blocks,
         heightfield.stats.contour_min_gap_blocks,
+        heightfield.stats.contour_river_min_gap_blocks,
         heightfield.stats.contour_band_smoothing
     );
     println!(
@@ -1462,7 +1473,7 @@ fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
         HeightfieldTerrainKind::Coast => rgb8([138, 148, 118]),
         HeightfieldTerrainKind::Land => combined_terrain_ramp(t),
     };
-    let altitude = (column.surface_height_blocks / 160.0).clamp(-0.2, 0.6);
+    let altitude = (column.surface_height_blocks / DEFAULT_HEIGHTFIELD_MAX_BLOCKS).clamp(-0.2, 0.6);
     for channel in color.iter_mut().take(3) {
         *channel = (*channel * (0.86 + altitude * 0.20)).clamp(0.0, 1.0);
     }
@@ -1612,10 +1623,10 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         text_x,
         text_y,
         &format!(
-            "BAND {:.0}B GAP {:.0}B SM {:.1}",
+            "BAND {:.0}B LAND GAP {:.0}B RIV {:.0}B",
             header.contour_step_blocks,
             header.contour_min_gap_blocks,
-            header.contour_band_smoothing
+            header.contour_river_min_gap_blocks
         ),
         [204, 214, 203, 255],
         layout.scale,
@@ -2585,6 +2596,9 @@ mod tests {
                 average_surface_height_blocks: 27.5,
                 contour_step_blocks: HeightfieldConfig::default().contour.step_blocks,
                 contour_min_gap_blocks: HeightfieldConfig::default().contour.min_gap_blocks,
+                contour_river_min_gap_blocks: HeightfieldConfig::default()
+                    .contour
+                    .river_min_gap_blocks,
                 contour_band_smoothing: HeightfieldConfig::default().contour.band_smoothing,
                 max_raw_neighbor_delta_blocks: 80.0,
                 max_contour_guided_neighbor_delta_blocks: 80.0,
@@ -2626,7 +2640,7 @@ mod tests {
             river_water_height_blocks: None,
             terrain_kind,
             macro_elevation: 0.0,
-            combined_macro_height: surface_height_blocks / 160.0,
+            combined_macro_height: surface_height_blocks / DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
             ocean_mask: 0.0,
             lake_mask: 0.0,
             dry_basin_mask: 0.0,

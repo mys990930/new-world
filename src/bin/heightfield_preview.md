@@ -95,11 +95,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   steps.
 - Heightfield columns are resolved to contour bands before water/shore constraints. The raw block
   height from `combined_macro_height` remains stored for diagnostics, but final land surface does
-  not directly use the continuous scalar. Default contour step is `1` block, default minimum raw
-  gap is `1` block, and smoothing is disabled. The visible result still uses integer terraces, but
-  not every raw one-block interval opens a new visible height. This is not contour-line
-  reconstruction; it is scalar-to-band quantization in the same block-height domain as the contour
-  preview.
+  not directly use the continuous scalar. Default contour step is `1` block, general land uses a
+  `4` block minimum raw gap, river corridors keep a `1` block minimum gap, and smoothing is
+  disabled. The visible result still uses integer terraces, but not every raw one-block interval
+  opens a new visible height. This is not contour-line reconstruction; it is scalar-to-band
+  quantization in the same block-height domain as the contour preview.
 - River columns receive an integer preliminary water height. Before preview, neighboring river or
   standing-water surfaces clamp river water so adjacent river-water steps descend by at most one
   block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.

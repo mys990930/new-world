@@ -13,7 +13,8 @@ use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
     DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
-    GraphRegionCoord, HydrologyConfig, MacroFieldContourSet,
+    GraphRegionCoord, HydrologyConfig, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
+    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MacroFieldContourSet,
     MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
     VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, extract_macro_field_contours,
@@ -1849,7 +1850,9 @@ fn combined_terrain_ramp(value: f32) -> [u8; 3] {
 }
 
 fn contour_height_color(height_blocks: f32, is_major: bool) -> [u8; 3] {
-    let normalized = ((height_blocks + 48.0) / (160.0 + 48.0)).clamp(0.0, 1.0);
+    let normalized = ((height_blocks - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS)
+        / (MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS))
+        .clamp(0.0, 1.0);
     let base = gradient_color(
         normalized,
         &[
@@ -1999,8 +2002,14 @@ fn draw_contour_legend_keys(
     contour_major_every: u32,
 ) {
     let keys = [
-        ("LOW", contour_height_color(-48.0, false)),
-        ("HIGH", contour_height_color(160.0, true)),
+        (
+            "LOW",
+            contour_height_color(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, false),
+        ),
+        (
+            "HIGH",
+            contour_height_color(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, true),
+        ),
         ("SEA", CONTOUR_SEA_COLOR),
     ];
     let mut cursor_x = x;
@@ -2092,7 +2101,12 @@ fn draw_gradient_bar(
                     if (t - 0.5).abs() <= 0.025 {
                         CONTOUR_SEA_COLOR
                     } else {
-                        contour_height_color(-48.0 + t * 208.0, false)
+                        contour_height_color(
+                            MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS
+                                + t * (MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS
+                                    - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS),
+                            false,
+                        )
                     }
                 }
             };
@@ -2646,9 +2660,9 @@ mod tests {
 
     #[test]
     fn contour_color_ramp_maps_low_blue_and_high_red() {
-        let low = contour_height_color(-48.0, false);
-        let high = contour_height_color(160.0, false);
-        let major_high = contour_height_color(160.0, true);
+        let low = contour_height_color(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, false);
+        let high = contour_height_color(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, false);
+        let major_high = contour_height_color(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, true);
 
         assert!(
             low[2] > low[0] && low[2] > low[1],

@@ -404,17 +404,20 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 ### 현재 구현 상태
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
-- `combined_macro_height -0.75..0.0..1.25`를 `-48..0..160 block` signed sea-level scale로 매핑한다.
+- `combined_macro_height -0.75..0.0..1.25`를 `-24..0..80 block` signed sea-level scale로 매핑한다.
+  이 launch scale은 macro heightfield가 micro terrain처럼 과도하게 세밀하게 보이지 않도록 이전
+  실험 스케일보다 약 50% 완만하다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
   ocean/lake visible surface도 `y = 0`이며, bathymetry/bed depression을 preview terrain으로 렌더하지
   않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
-  1 block이고 기본 minimum gap도 1 block이다. `combined_macro_height`에서 얻은 raw block height를
-  직접 final surface로 쓰지 않고 해당 contour band의 lower level로 quantize한다. 다음 integer
-  terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 전체 높이 사용량은
-  압축될 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
+  1 block이고 일반 land terrain의 기본 minimum gap은 4 block이다. `combined_macro_height`에서 얻은
+  raw block height를 직접 final surface로 쓰지 않고 해당 contour band의 lower level로 quantize한다.
+  다음 integer terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 전체 높이
+  사용량은 압축될 수 있다. river corridor는 water descent를 보존하기 위해 별도 minimum gap 1 block을
+  사용한다. smoothing/interpolation은 현재 disabled/stub이다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.

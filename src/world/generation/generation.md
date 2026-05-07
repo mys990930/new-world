@@ -187,9 +187,15 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      만든다. 이 block-height domain은 signed sea level과 정렬되어 `combined_macro_height = 0`이
      `y = 0`이 되어야 한다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column
      output은 같은 contour level domain과 일관되어야 한다.
+   - launch macro heightfield는 macro preview가 micro terrain처럼 너무 구체적인 블럭 단위 지형으로
+     읽히지 않도록 block-height relief를 이전 실험 스케일의 약 50%로 압축한다. 현재 기본 signed
+     scale은 `combined_macro_height -0.75..0.0..1.25 -> -24..0..80 blocks`이며, 이 값은
+     `macro_field` contour와 `heightfield` band resolve가 공유한다.
    - launch contour terrace는 smoothing 없이 integer step을 유지하되, 모든 raw 1-block band를 바로
-     쓰지 않는다. `step + min_gap` stride로 다음 terrace를 열어 전체 높이를 압축할 수 있으며, 이 정책은
-     등고선/계단이 서로 과밀하게 붙어 보이는 문제를 줄이기 위한 heightfield band 계약이다.
+     쓰지 않는다. 일반 land terrain은 기본 `min_gap = 4`를 사용해 raw height가 5 block 진행될 때
+     visible terrain이 1 block 올라가고, river corridor와 river-adjacent carve 영역은 water descent가
+     끊기지 않도록 작은 `river_min_gap = 1`을 사용한다. 이 정책은 등고선/계단이 서로 과밀하게 붙어
+     보이는 문제를 줄이면서 selected river의 1-block descent를 보존하기 위한 heightfield band 계약이다.
    - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
      final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
      올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을

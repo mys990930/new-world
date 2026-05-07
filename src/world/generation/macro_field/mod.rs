@@ -19,8 +19,8 @@ pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.75;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.25;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -48.0;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 160.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -24.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 80.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 8.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
@@ -2216,6 +2216,13 @@ mod tests {
             combined_macro_height_to_blocks(MACRO_FIELD_CONTOUR_NORMALIZED_MAX),
             MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS
         );
+    }
+
+    #[test]
+    fn contour_block_scale_uses_compressed_macro_relief() {
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, -24.0);
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, 80.0);
+        assert_eq!(combined_macro_height_to_blocks(0.625), 40.0);
     }
 
     #[test]

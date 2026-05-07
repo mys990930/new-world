@@ -78,6 +78,7 @@ HeightfieldConfig {
 HeightfieldContourConfig {
     step_blocks,
     min_gap_blocks,
+    river_min_gap_blocks,
     band_smoothing,
 }
 
@@ -121,16 +122,20 @@ subdivision 값과 무관하게 같은 integer `surface_y`/`water_y`를 가져�
 generator version에서 조정될 수 있지만, sea level은 pipeline 계약대로 world-space `y = 0`을 유지한다.
 
 ```text
-combined_macro_height -0.75 -> -48 blocks
+combined_macro_height -0.75 -> -24 blocks
 combined_macro_height  0.00 ->   0 blocks = sea level
-combined_macro_height  1.25 -> 160 blocks
+combined_macro_height  1.25 ->  80 blocks
 ```
 
 이 매핑은 단일 선형 remap이 아니라 signed sea-level을 기준으로 한 piecewise remap이다. 음수
-macro height는 `-0.75..0.0` 범위에서 `-48..0` block으로, 양수 macro height는 `0.0..1.25`
-범위에서 `0..160` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
+macro height는 `-0.75..0.0` 범위에서 `-24..0` block으로, 양수 macro height는 `0.0..1.25`
+범위에서 `0..80` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
 height를 가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은
 terrace로 튀어서는 안 된다.
+
+이 launch scale은 macro heightfield가 micro terrain처럼 세밀한 블럭 지형으로 읽히지 않도록 이전
+실험 스케일의 약 50% relief로 압축한 값이다. preview 렌더링에서만 세로 비율을 속이는 것이 아니라,
+macro field contour 추출과 heightfield band resolve가 같은 완만한 block-height domain을 공유한다.
 
 `combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
 합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
@@ -163,15 +168,22 @@ launch 구현은 최종 surface/water output을 integer block height로 snap하�
 
 ```text
 contour.step_blocks = 1 block
-contour.min_gap_blocks = 1 block
+contour.min_gap_blocks = 4 blocks
+contour.river_min_gap_blocks = 1 block
 contour.band_smoothing = 0.0
 ```
 
 각 land column은 `raw_surface_height_blocks`가 속한 contour band의 lower level로 떨어진다. 기본
-launch 정책은 모든 1-block band를 바로 쓰지 않고, 다음 terrace로 올라가려면 raw block-height가
-`step_blocks + min_gap_blocks`만큼 더 진행되어야 한다. 출력 높이는 여전히 `0, 1, 2, ...` integer
-step이지만, 전체 height 사용량은 압축되어 등고선/계단이 과밀하게 붙어 보이는 현상을 줄인다. smoothing,
-smoothstep, band-local interpolation은 현재 사용하지 않는다. raw continuous height는
+launch 정책은 모든 1-block band를 바로 쓰지 않고, 일반 land terrain은 다음 terrace로 올라가려면
+raw block-height가 `step_blocks + min_gap_blocks`, 즉 기본 5 blocks만큼 더 진행되어야 한다. 출력
+높이는 여전히 `0, 1, 2, ...` integer step이지만, 전체 height 사용량은 더 강하게 압축되어
+등고선/계단이 과밀하게 붙어 보이는 현상을 줄인다.
+
+단, river corridor와 river-adjacent carve 영역은 `river_min_gap_blocks = 1`을 사용한다. 강 주변까지
+일반 land gap `4`를 적용하면 river water hint의 1-block descent가 사라지고 물길이 계단을 잃을 수
+있기 때문이다. river corridor 예외는 hydrology/macro_field가 이미 제공한 selected river valley
+strength와 display flow hint를 읽어 적용하며, final river routing을 heightfield에서 다시 풀지는 않는다.
+smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다. raw continuous height는
 `raw_surface_height_blocks`와 `combined_macro_height`에 남지만 final terrain surface 결정에는 직접 쓰지 않는다.
 
 ---
@@ -295,8 +307,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
 13. contour gap 정책은 final height를 렌더링으로 속이는 값이 아니라 heightfield band resolve 계약이다.
-    `step_blocks = 1`, `min_gap_blocks = 1`이면 raw height가 2 block 진행될 때마다 visible terrain은
-    1 integer step 올라가며, sea level `y=0`, shoreline ceiling, river descent는 이 snap 결과 위에서
+    `step_blocks = 1`, 일반 `min_gap_blocks = 4`이면 raw height가 5 block 진행될 때마다 visible
+    terrain은 1 integer step 올라가며, river corridor는 `river_min_gap_blocks = 1`로 더 촘촘한
+    descent를 유지한다. sea level `y=0`, shoreline ceiling, river descent는 이 snap 결과 위에서
     유지되어야 한다.
 14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
     바꾸지 않는다. 같은 world-space `MacroFieldSample`은 subdivision 1과 2에서 같은 `surface_y`와

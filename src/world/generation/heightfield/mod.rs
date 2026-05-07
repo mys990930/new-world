@@ -4,8 +4,8 @@ use super::graph::WorldPlanePoint;
 use super::macro_field::{MacroFieldSample, MacroFieldTile};
 
 pub const DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS: f32 = 0.0;
-pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -48.0;
-pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 160.0;
+pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -24.0;
+pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 80.0;
 pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MIN: f32 = -0.75;
 pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.25;
 pub const DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD: f32 = 0.72;
@@ -14,7 +14,8 @@ pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
-pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 4.0;
+pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS: u32 = 1;
 
@@ -22,6 +23,7 @@ pub const DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS: u32 = 1;
 pub struct HeightfieldContourConfig {
     pub step_blocks: f32,
     pub min_gap_blocks: f32,
+    pub river_min_gap_blocks: f32,
     pub band_smoothing: f32,
 }
 
@@ -30,6 +32,7 @@ impl Default for HeightfieldContourConfig {
         Self {
             step_blocks: DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
             min_gap_blocks: DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS,
+            river_min_gap_blocks: DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS,
             band_smoothing: DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING,
         }
     }
@@ -126,6 +129,7 @@ pub struct HeightfieldTileStats {
     pub average_surface_height_blocks: f32,
     pub contour_step_blocks: f32,
     pub contour_min_gap_blocks: f32,
+    pub contour_river_min_gap_blocks: f32,
     pub contour_band_smoothing: f32,
     pub max_raw_neighbor_delta_blocks: f32,
     pub max_contour_guided_neighbor_delta_blocks: f32,
@@ -208,8 +212,9 @@ pub fn heightfield_column_from_sample(
 ) -> HeightfieldColumn {
     validate_heightfield_config(config);
     let raw_surface_height_blocks = normalized_to_blocks(sample.combined_macro_height, config);
+    let contour = contour_config_for_sample(sample, config);
     let contour_guided_surface_height_blocks =
-        resolve_contour_band_height(raw_surface_height_blocks, config.contour);
+        resolve_contour_band_height(raw_surface_height_blocks, contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
     let meso_delta_blocks = 0.0;
@@ -224,7 +229,7 @@ pub fn heightfield_column_from_sample(
     let constrained_surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
     let final_surface_height_blocks =
-        snap_to_contour_step(constrained_surface_height_blocks, config.contour);
+        snap_to_contour_step(constrained_surface_height_blocks, contour);
     let surface_y = snap_height_to_block(final_surface_height_blocks);
     let surface_height_blocks = surface_y as f32;
     let is_river_hint = sample.river_valley_strength >= config.river_water_threshold
@@ -302,6 +307,21 @@ fn resolve_contour_band_height(value: f32, contour: HeightfieldContourConfig) ->
     } else {
         -((-value / stride).floor() * step)
     }
+}
+
+fn contour_config_for_sample(
+    sample: &MacroFieldSample,
+    config: HeightfieldConfig,
+) -> HeightfieldContourConfig {
+    let mut contour = config.contour;
+    if sample.river_valley_strength >= config.river_water_threshold * 0.5
+        && sample.river_flow_hint > 0.0
+    {
+        contour.min_gap_blocks = contour
+            .min_gap_blocks
+            .min(contour.river_min_gap_blocks.max(0.0));
+    }
+    contour
 }
 
 fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {
@@ -654,6 +674,7 @@ fn heightfield_stats(
         average_surface_height_blocks: sum / columns.len() as f32,
         contour_step_blocks: config.contour.step_blocks,
         contour_min_gap_blocks: config.contour.min_gap_blocks,
+        contour_river_min_gap_blocks: config.contour.river_min_gap_blocks,
         contour_band_smoothing: config.contour.band_smoothing,
         max_raw_neighbor_delta_blocks: max_neighbor_delta(columns, |column| {
             column.raw_surface_height_blocks
@@ -856,9 +877,11 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.shore_min_land_blocks >= 0.0);
     assert!(config.contour.step_blocks.is_finite());
     assert!(config.contour.min_gap_blocks.is_finite());
+    assert!(config.contour.river_min_gap_blocks.is_finite());
     assert!(config.contour.band_smoothing.is_finite());
     assert!(config.contour.step_blocks > 0.0);
     assert!(config.contour.min_gap_blocks >= 0.0);
+    assert!(config.contour.river_min_gap_blocks >= 0.0);
     assert!(config.contour.band_smoothing >= 0.0);
 }
 
@@ -920,7 +943,8 @@ mod tests {
         let contour = HeightfieldContourConfig::default();
 
         assert_eq!(contour.step_blocks, 1.0);
-        assert_eq!(contour.min_gap_blocks, 1.0);
+        assert_eq!(contour.min_gap_blocks, 4.0);
+        assert_eq!(contour.river_min_gap_blocks, 1.0);
         assert_eq!(contour.band_smoothing, 0.0);
     }
 
@@ -972,24 +996,70 @@ mod tests {
     }
 
     #[test]
-    fn contour_gap_requires_extra_raw_height_before_next_terrace() {
+    fn general_land_contour_gap_requires_four_raw_blocks_before_next_terrace() {
         let config = HeightfieldConfig::default();
         let just_below_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.015, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.077, 0.0, 0.0, 0.0, 0.0), config);
         let after_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.016, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.079, 0.0, 0.0, 0.0, 0.0), config);
 
         assert!(
-            just_below_next_stride.raw_surface_height_blocks > 1.0,
-            "raw height should already cross the old one-block terrace"
+            just_below_next_stride.raw_surface_height_blocks > 4.0,
+            "raw height should already cross several one-block terraces"
         );
         assert_eq!(
             just_below_next_stride.surface_height_blocks, 0.0,
-            "default one-block gap keeps the next integer terrace unused until raw height crosses two blocks"
+            "default four-block land gap keeps the next integer terrace unused until raw height crosses five raw blocks"
         );
         assert_eq!(
             after_next_stride.surface_height_blocks, 1.0,
             "after raw height crosses step+gap, the next integer terrace becomes available"
+        );
+    }
+
+    #[test]
+    fn river_corridor_uses_smaller_contour_gap_than_general_land() {
+        let config = HeightfieldConfig::default();
+        let land =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
+        let river =
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.032, 0.75), config);
+
+        assert!(
+            land.raw_surface_height_blocks
+                > config.contour.step_blocks + config.contour.river_min_gap_blocks,
+            "the sample should be high enough for the river corridor's finer stride"
+        );
+        assert_eq!(
+            land.surface_height_blocks, 0.0,
+            "general terrain should still wait for the wider macro terrace gap"
+        );
+        assert_eq!(
+            river.surface_height_blocks, 1.0,
+            "river corridors keep the smaller gap so water descent does not lose one-block steps"
+        );
+    }
+
+    #[test]
+    fn launch_relief_scale_is_compressed_by_half() {
+        let high = heightfield_column_from_sample(
+            &sample(
+                0.0,
+                0.0,
+                DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
+            HeightfieldConfig::default(),
+        );
+
+        assert_eq!(DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 80.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_MIN_BLOCKS, -24.0);
+        assert_eq!(
+            high.raw_surface_height_blocks, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
+            "macro relief should be 50% lower than the previous 160-block launch scale"
         );
     }
 
@@ -1038,6 +1108,7 @@ mod tests {
                 contour: HeightfieldContourConfig {
                     step_blocks: 4.0,
                     min_gap_blocks: 0.0,
+                    river_min_gap_blocks: 0.0,
                     band_smoothing: 0.0,
                 },
                 ..HeightfieldConfig::default()
@@ -1137,7 +1208,7 @@ mod tests {
         let coast = tile.column(1, 0).expect("coast column");
         let inland = tile.column(2, 0).expect("inland column");
 
-        assert!(coast.raw_surface_height_blocks > 100.0);
+        assert!(coast.raw_surface_height_blocks > 50.0);
         assert_eq!(
             coast.surface_height_blocks, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
             "first land sample next to water should start at sea level in contour-step mode"
