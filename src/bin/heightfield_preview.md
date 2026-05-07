@@ -39,8 +39,8 @@
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile` with contour-band terrace resolve. The preview always uses
-   fixed XZ scale `2`, so X/Z sample spacing and column count are doubled internally while Y block
-   height is never rescaled.
+   fixed XZ scale `4`, so X/Z sample spacing and column count are quadrupled internally while Y block
+   height is resolved in the doubled block-domain before rendering.
 7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
    fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
@@ -64,14 +64,14 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `vertical_px_per_block`은 preview 렌더링 전용 값이지만, XZ density에 맞춰 같은 Y 값을 다시 낮추는
   normalization 계수가 아니다. 이 binary는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   cubic scale로 렌더한다.
-- 고정 XZ scale `2`에 대응하는 낮은 macro relief는 preview 렌더링이 아니라 `macro_field` contour와
+- 고정 XZ scale `4`에 대응하는 macro relief는 preview 렌더링이 아니라 `macro_field` contour와
   `heightfield` band resolve가 공유하는 block-height domain에서 이미 산출된다. 현재 기본 scale은
-  `combined_macro_height -0.75..0.0..1.25 -> -32..0..112 blocks`이며, preview에서 같은 Y 값을 다시
-  절반으로 그리면 중복 압축이다.
-- XZ scale is not a CLI knob. With the default base `192` columns and fixed XZ scale `2`, the
-  effective X column count is `384`; Z is scaled the same way after aspect or chunk-radius
+  `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`이며, preview에서 같은 Y 값을 다시
+  낮춰 그리면 중복 압축이다.
+- XZ scale is not a CLI knob. With the default base `192` columns and fixed XZ scale `4`, the
+  effective X column count is `768`; Z is scaled the same way after aspect or chunk-radius
   resolution. Sea level, contour step, surface `y`, and river water `y` are resolved in the
-  compressed block domain before rendering. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective
+  doubled block domain before rendering. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective
   column count, footprint, image size에서 자동으로 파생된다.
 - Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
   visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
@@ -81,7 +81,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
   `x+z` painter order is a regression because it only works for one quarter view.
 - Very thin block lines are drawn on top/visible side polygons by default to make the block scale
-  readable with fixed XZ scale `2`. They are diagnostic overlay lines, not final mesh edges.
+  readable with fixed XZ scale `4`. They are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land

@@ -37,7 +37,7 @@
 - `--land-bias MacroMapConfig::new(...).land_bias`
 - `--stage macro_field`
 - `--channel lit`
-- `--contour-step 8`
+- `--contour-step 4`
 - `--contour-major-every 5`
 - single-channel output: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>_<channel>.png`
 - all-channel output directory: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>/`
@@ -106,7 +106,7 @@ of giving every tile its own artificial low and high.
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
-   `combined_macro_height -0.75..1.25 -> -32..112 blocks`.
+   `combined_macro_height -0.75..1.25 -> -64..224 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a scale bar, a compass overlay, and a thin macro-field cache tile grid.

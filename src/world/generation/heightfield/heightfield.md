@@ -122,20 +122,20 @@ subdivision 값과 무관하게 같은 integer `surface_y`/`water_y`를 가져�
 generator version에서 조정될 수 있지만, sea level은 pipeline 계약대로 world-space `y = 0`을 유지한다.
 
 ```text
-combined_macro_height -0.75 -> -32 blocks
+combined_macro_height -0.75 -> -64 blocks
 combined_macro_height  0.00 ->   0 blocks = sea level
-combined_macro_height  1.25 -> 112 blocks
+combined_macro_height  1.25 -> 224 blocks
 ```
 
 이 매핑은 단일 선형 remap이 아니라 signed sea-level을 기준으로 한 piecewise remap이다. 음수
-macro height는 `-0.75..0.0` 범위에서 `-32..0` block으로, 양수 macro height는 `0.0..1.25`
-범위에서 `0..112` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
+macro height는 `-0.75..0.0` 범위에서 `-64..0` block으로, 양수 macro height는 `0.0..1.25`
+범위에서 `0..224` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
 height를 가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은
 terrace로 튀어서는 안 된다.
 
-이 launch scale은 macro heightfield가 micro terrain처럼 세밀한 블럭 지형으로 읽히지 않도록 이전
-full 실험 스케일보다 낮춘 중간 압축값이다. preview 렌더링에서만 세로 비율을 속이는 것이 아니라,
-macro field contour 추출과 heightfield band resolve가 같은 block-height domain을 공유한다.
+이 launch scale은 같은 world footprint 안에서 X/Z와 Y block resolution을 함께 2배 높인 block-domain
+계약이다. preview 렌더링에서만 세로 비율을 속이는 것이 아니라, macro field contour 추출과
+heightfield band resolve가 같은 block-height domain을 공유한다.
 
 `combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
 합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
@@ -246,12 +246,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `vertical_px_per_block`은 preview 렌더링 전용 투영 값이지만, XZ density에 맞춰 따로 눌러지는 보정
   계수가 아니다. `heightfield_preview`는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   `vertical_px_per_block == tile_h_px`인 cubic scale로 그린다.
-- 고정 XZ scale `2`에 대응해 macro relief를 낮추는 정책은 preview 렌더링이 아니라
-  `macro_field`/`heightfield`가 공유하는 block-height 변환이 소유한다. 현재 launch scale은 이미
-  `-0.75..0.0..1.25 -> -32..0..112 blocks`로 중간 압축되어 있으므로 preview에서 같은 Y 값을 다시
-  절반으로 그리면 중복 압축이다.
-- heightfield preview의 XZ scale은 사용자 CLI 옵션이 아니다. 고정값 `2`는 같은 world footprint에서 각
-  축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다. preview는 이 산출 `y` height
+- 고정 XZ scale `4`에 대응하는 macro relief는 preview 렌더링이 아니라
+  `macro_field`/`heightfield`가 공유하는 block-height 변환이 소유한다. 현재 launch scale은
+  `-0.75..0.0..1.25 -> -64..0..224 blocks`이며 preview에서 같은 Y 값을 다시
+  낮춰 그리면 중복 압축이다.
+- heightfield preview의 XZ scale은 사용자 CLI 옵션이 아니다. 고정값 `4`는 같은 world footprint에서
+  base column 대비 각 축 column 수를 네 배로 만들며, effective sample spacing은 1/4이 된다. preview는 이 산출 `y` height
   block, sea level, contour step, river water descent 값을 cubic block scale로 렌더한다.
   X/Z 렌더링 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image size에서
   자동으로 파생된다.
@@ -312,7 +312,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`, shoreline ceiling,
     river descent는 이 snap 결과 위에서 유지되어야 한다.
 14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, 그 자체가 per-sample
-    vertical rescale knob가 아니다. fixed XZ scale `2`에 맞춘 launch relief 완만화는 shared
-    block-height domain의 `-32..112` 기본 범위가 소유한다. preview 렌더러는 산출된 `surface_y`와
+    vertical rescale knob가 아니다. fixed XZ scale `4`에 맞춘 launch relief는 shared
+    block-height domain의 `-64..224` 기본 범위가 소유한다. preview 렌더러는 산출된 `surface_y`와
     water hint를 cubic block scale로 그려야 하며, subdivision 값으로 같은 Y 값을 다시 낮춰 보이면
     중복 압축이다.

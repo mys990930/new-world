@@ -27,7 +27,7 @@ const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_COLUMNS_X: u32 = 192;
-const HEIGHTFIELD_PREVIEW_XZ_SCALE: u32 = 2;
+const HEIGHTFIELD_PREVIEW_XZ_SCALE: u32 = 4;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
@@ -392,7 +392,7 @@ impl PreviewHeader {
                 "effective_sample_spacing_blocks={:.3}",
                 self.sample_spacing_blocks
             ),
-            "height_values=partially_compressed_relief_before_preview".to_string(),
+            "height_values=doubled_block_domain_relief_before_preview".to_string(),
             "render_scale_policy=cubic_block_pixels_no_vertical_normalization".to_string(),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
             format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
@@ -754,7 +754,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
     println!(
-        "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y relief is compressed in heightfield block-domain before cubic preview rendering",
+        "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y relief is resolved in heightfield block-domain before cubic preview rendering",
         HEIGHTFIELD_PREVIEW_XZ_SCALE
     );
     println!(
@@ -2179,7 +2179,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>] (fixed xz scale 2)"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>] (fixed xz scale 4)"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2405,7 +2405,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_xz_scale_doubles_effective_columns_without_changing_footprint() {
+    fn fixed_xz_scale_quadruples_axis_columns_without_changing_footprint() {
         let config = PreviewConfig {
             seed: 42,
             center_x: 0,
@@ -2427,6 +2427,7 @@ mod tests {
         .window();
 
         assert_eq!(config.world_span_x, DEFAULT_WORLD_SPAN_BLOCKS as f32);
+        assert_eq!(HEIGHTFIELD_PREVIEW_XZ_SCALE, 4);
         assert_eq!(
             config.world_span_z,
             DEFAULT_WORLD_SPAN_BLOCKS as f32 * 24.0 / 32.0
@@ -2503,30 +2504,30 @@ mod tests {
         assert!(plan.tile_w_px > 2.0);
         assert_eq!(
             plan.vertical_px_per_block, plan.tile_h_px,
-            "isometric preview should render blocks with cubic x/y/z visual scale; height relief must be compressed before rendering"
+            "isometric preview should render blocks with cubic x/y/z visual scale; height relief must be resolved before rendering"
         );
     }
 
     #[test]
-    fn xz_scale_two_keeps_cubic_render_scale() {
+    fn fixed_xz_scale_four_keeps_cubic_render_scale() {
         let scale_one = two_by_two_heightfield_tile();
-        let mut scale_two = two_by_two_heightfield_tile();
-        scale_two.horizontal_subdivisions = 2;
-        scale_two.sample_spacing_blocks *= 0.5;
-        scale_two.config.horizontal_subdivisions = 2;
+        let mut scale_four = two_by_two_heightfield_tile();
+        scale_four.horizontal_subdivisions = 4;
+        scale_four.sample_spacing_blocks *= 0.25;
+        scale_four.config.horizontal_subdivisions = 4;
 
         let plan_one = IsoRenderPlan::new(&scale_one, 1280, 720, 0).expect("scale one plan");
-        let plan_two = IsoRenderPlan::new(&scale_two, 1280, 720, 0).expect("scale two plan");
+        let plan_four = IsoRenderPlan::new(&scale_four, 1280, 720, 0).expect("scale four plan");
 
         assert_eq!(plan_one.vertical_px_per_block, plan_one.tile_h_px);
-        assert_eq!(plan_two.vertical_px_per_block, plan_two.tile_h_px);
+        assert_eq!(plan_four.vertical_px_per_block, plan_four.tile_h_px);
         assert_eq!(
-            plan_one.vertical_px_per_block, plan_two.vertical_px_per_block,
+            plan_one.vertical_px_per_block, plan_four.vertical_px_per_block,
             "horizontal subdivisions alone must not add artificial vertical preview normalization"
         );
         assert_eq!(
             scale_one.columns[1].surface_y,
-            scale_two.columns[1].surface_y
+            scale_four.columns[1].surface_y
         );
     }
 

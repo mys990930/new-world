@@ -115,9 +115,9 @@ Contour block-height scale은 heightfield launch slice와 맞춘다. `combined_m
 항상 signed sea level인 `0 block`이다.
 
 ```text
-combined_macro_height -0.75 -> -32 blocks
+combined_macro_height -0.75 -> -64 blocks
 combined_macro_height  0.00 ->   0 blocks
-combined_macro_height  1.25 -> 112 blocks
+combined_macro_height  1.25 -> 224 blocks
 ```
 
 launch macro preview는 macro 단계가 micro terrain처럼 너무 구체적으로 보이지 않도록 이
@@ -210,9 +210,9 @@ sea-level aligned shoreline scalar를 제공해야 한다. coast flatten은 그 
 9. 필요한 경우 `combined_macro_height`에서 contour 진단 layer를 추출한다.
    - contour 추출은 Marching Squares 기반이다.
    - level은 normalized scalar가 아니라 heightfield 직전 block-height 기준이다.
-   - 기본 preview step은 8 blocks, major contour는 5 level마다 40 blocks 간격이다. contour가 읽는
-     block-height relief는 `-32..0..112` block scale로 압축되어, 같은 macro context를 유지하되
-     1-block terrace가 과도하게 촘촘한 micro 지형처럼 보이지 않게 한다.
+   - 기본 preview step은 4 blocks, major contour는 5 level마다 20 blocks 간격이다. contour가 읽는
+     block-height relief는 `-64..0..224` block scale로 2배 촘촘해진 vertical block domain을 사용해,
+     같은 macro context 안에서 contour와 heightfield 계단을 더 세밀하게 진단한다.
    - preview contour 색은 height에 따라 달라져야 한다. 낮은/oceanward contour는 푸른 계열,
      높은 contour는 붉은/주황 계열을 사용하고, sea level `y = 0` contour는 별도 preview 색상으로
      구분할 수 있어야 한다.

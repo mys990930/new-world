@@ -255,7 +255,7 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--stage macro_field`
   - `--channel <all|macro|mask|ridge|river|combined|lit|contour>`: 기본 `lit`
-  - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `8`
+  - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `4`
   - `--contour-major-every <n>`: major contour 간격 multiplier, 기본 `5`
   - `--contours`: `combined`/`lit` channel 위에 contour overlay를 추가
   - `--output <path>`
@@ -282,7 +282,7 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
 - `lit`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
 - `contour`: heightfield 직전 `combined_macro_height`를 block-height scale으로 변환한 뒤 Marching
-  Squares로 추출한 contour line preview. 기본 level step은 8 blocks이며, 5 level마다 major contour를
+  Squares로 추출한 contour line preview. 기본 level step은 4 blocks이며, 5 level마다 major contour를
   그린다. sea level `y=0` contour는 별도 blue 계열로 표시한다.
 
 중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
@@ -392,7 +392,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
   32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
-  column resolution은 effective column count를 뜻하며, legend에는 fixed `XZ2`와 base/effective spacing도
+  column resolution은 effective column count를 뜻하며, legend에는 fixed `XZ4`와 base/effective spacing도
   함께 표시한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
@@ -404,7 +404,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 ### 현재 구현 상태
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
-- `combined_macro_height -0.75..0.0..1.25`를 `-32..0..112 block` signed sea-level scale로 매핑한다.
+- `combined_macro_height -0.75..0.0..1.25`를 `-64..0..224 block` signed sea-level scale로 매핑한다.
   이 launch scale은 macro heightfield가 micro terrain처럼 과도하게 세밀하게 보이지 않도록 이전
   full 실험 스케일보다 낮춘 중간 압축값이다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
@@ -438,9 +438,9 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-  `vertical_px_per_block`은 preview 렌더링 전용 값이지만, fixed XZ scale `2` 때문에 별도 세로
-  normalization을 적용하지 않는다. XZ scale `2`에 대응하는 완만한 높이는 macro/heightfield
-  block-domain의 relief compression에서 이미 산출되며, preview는 그 `surface_y`를 cubic block
+  `vertical_px_per_block`은 preview 렌더링 전용 값이지만, fixed XZ scale `4` 때문에 별도 세로
+  normalization을 적용하지 않는다. XZ scale `4`에 대응하는 높이는 macro/heightfield
+  block-domain에서 이미 산출되며, preview는 그 `surface_y`를 cubic block
   scale로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image
   size에서 파생된다.
 - The preview draws top diamonds and only visible neighbor-difference side faces. The visible side

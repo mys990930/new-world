@@ -19,9 +19,9 @@ pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.75;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.25;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -32.0;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 112.0;
-pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 8.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -64.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 224.0;
+pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 4.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
@@ -2219,28 +2219,37 @@ mod tests {
     }
 
     #[test]
-    fn contour_block_scale_uses_partially_compressed_macro_relief() {
-        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, -32.0);
-        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, 112.0);
-        assert_eq!(combined_macro_height_to_blocks(0.625), 56.0);
+    fn contour_block_scale_uses_doubled_macro_block_resolution() {
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, -64.0);
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, 224.0);
+        assert_eq!(combined_macro_height_to_blocks(0.625), 112.0);
+    }
+
+    #[test]
+    fn default_contour_preview_step_is_twice_as_dense() {
+        assert_eq!(DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, 4.0);
     }
 
     #[test]
     fn simple_ramp_field_produces_contour_crossing() {
         let tile = test_contour_tile(&[0.0, 16.0, 0.0, 16.0], 2, 2);
 
-        let contours = extract_macro_field_contours(&tile, 8.0, 5);
+        let contours =
+            extract_macro_field_contours(&tile, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, 5);
 
         let level = contours
             .levels
             .iter()
-            .find(|level| (level.height_blocks - 8.0).abs() <= f32::EPSILON)
-            .expect("ramp should produce an 8-block contour");
+            .find(|level| {
+                (level.height_blocks - DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS).abs()
+                    <= f32::EPSILON
+            })
+            .expect("ramp should produce a default-step contour");
         assert_eq!(level.segments.len(), 1);
         assert!(
-            (level.segments[0].start.x - 32.0).abs() <= 0.01
-                || (level.segments[0].end.x - 32.0).abs() <= 0.01,
-            "contour should cross halfway across a 64-block sample cell: {:?}",
+            (level.segments[0].start.x - 16.0).abs() <= 0.01
+                || (level.segments[0].end.x - 16.0).abs() <= 0.01,
+            "default 4-block contour should cross one quarter across a 64-block sample cell: {:?}",
             level.segments[0]
         );
     }
