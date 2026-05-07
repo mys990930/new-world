@@ -392,7 +392,7 @@ impl PreviewHeader {
                 "effective_sample_spacing_blocks={:.3}",
                 self.sample_spacing_blocks
             ),
-            "height_values=relief_compressed_before_preview".to_string(),
+            "height_values=partially_compressed_relief_before_preview".to_string(),
             "render_scale_policy=cubic_block_pixels_no_vertical_normalization".to_string(),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
             format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
@@ -1629,7 +1629,7 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         &mut rgba,
         text_x,
         text_y,
-        "CUBE 1:1:1 RELIEF50",
+        "CUBE 1:1:1 RELIEF70",
         [204, 214, 203, 255],
         layout.scale,
     );

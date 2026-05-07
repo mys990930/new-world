@@ -188,8 +188,8 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      `y = 0`이 되어야 한다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column
      output은 같은 contour level domain과 일관되어야 한다.
    - launch macro heightfield는 macro preview가 micro terrain처럼 너무 구체적인 블럭 단위 지형으로
-     읽히지 않도록 block-height relief를 이전 실험 스케일의 약 50%로 압축한다. 현재 기본 signed
-     scale은 `combined_macro_height -0.75..0.0..1.25 -> -24..0..80 blocks`이며, 이 값은
+     읽히지 않도록 block-height relief를 이전 full 실험 스케일보다 낮춘 중간 압축값으로 사용한다.
+     현재 기본 signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -32..0..112 blocks`이며, 이 값은
      `macro_field` contour와 `heightfield` band resolve가 공유한다.
    - launch contour terrace는 smoothing 없이 integer step을 유지하되, raw 1-block band를 그대로
      surface로 쓰지는 않고 `step + min_gap` stride로 visible terrace를 연다. 현재 기본 land
@@ -208,7 +208,7 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      눌러서는 안 된다.
    - fixed XZ scale `2`에 대응하는 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와
      `heightfield` band resolve가 공유하는 block-height domain에서 이미 적용한다. 현재 launch 기본
-     signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -24..0..80 blocks`다. preview는 이
+     signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -32..0..112 blocks`다. preview는 이
      산출 `surface_y`를 정육면체에 가까운 block primitive로 그대로 렌더한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.

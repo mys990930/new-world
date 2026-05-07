@@ -106,7 +106,7 @@ of giving every tile its own artificial low and high.
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
-   `combined_macro_height -0.75..1.25 -> -24..80 blocks`.
+   `combined_macro_height -0.75..1.25 -> -32..112 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a scale bar, a compass overlay, and a thin macro-field cache tile grid.

@@ -66,7 +66,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   cubic scale로 렌더한다.
 - 고정 XZ scale `2`에 대응하는 낮은 macro relief는 preview 렌더링이 아니라 `macro_field` contour와
   `heightfield` band resolve가 공유하는 block-height domain에서 이미 산출된다. 현재 기본 scale은
-  `combined_macro_height -0.75..0.0..1.25 -> -24..0..80 blocks`이며, preview에서 같은 Y 값을 다시
+  `combined_macro_height -0.75..0.0..1.25 -> -32..0..112 blocks`이며, preview에서 같은 Y 값을 다시
   절반으로 그리면 중복 압축이다.
 - XZ scale is not a CLI knob. With the default base `192` columns and fixed XZ scale `2`, the
   effective X column count is `384`; Z is scaled the same way after aspect or chunk-radius

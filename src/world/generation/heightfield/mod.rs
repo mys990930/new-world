@@ -4,8 +4,8 @@ use super::graph::WorldPlanePoint;
 use super::macro_field::{MacroFieldSample, MacroFieldTile};
 
 pub const DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS: f32 = 0.0;
-pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -24.0;
-pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 80.0;
+pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -32.0;
+pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 112.0;
 pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MIN: f32 = -0.75;
 pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.25;
 pub const DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD: f32 = 0.72;
@@ -999,9 +999,9 @@ mod tests {
     fn general_land_contour_gap_uses_one_raw_block_before_next_terrace() {
         let config = HeightfieldConfig::default();
         let just_below_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.031, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.022, 0.0, 0.0, 0.0, 0.0), config);
         let after_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.023, 0.0, 0.0, 0.0, 0.0), config);
 
         assert!(
             just_below_next_stride.raw_surface_height_blocks > 1.0,
@@ -1021,9 +1021,9 @@ mod tests {
     fn default_river_corridor_gap_matches_land_gap() {
         let config = HeightfieldConfig::default();
         let land =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.023, 0.0, 0.0, 0.0, 0.0), config);
         let river =
-            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.032, 0.75), config);
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.023, 0.75), config);
 
         assert_eq!(
             config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
@@ -1046,9 +1046,9 @@ mod tests {
             ..HeightfieldConfig::default()
         };
         let land =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.023, 0.0, 0.0, 0.0, 0.0), config);
         let river =
-            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.032, 0.75), config);
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.023, 0.75), config);
 
         assert_eq!(
             land.surface_height_blocks, 0.0,
@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_relief_scale_is_compressed_by_half() {
+    fn launch_relief_scale_is_partially_compressed() {
         let high = heightfield_column_from_sample(
             &sample(
                 0.0,
@@ -1075,11 +1075,11 @@ mod tests {
             HeightfieldConfig::default(),
         );
 
-        assert_eq!(DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 80.0);
-        assert_eq!(DEFAULT_HEIGHTFIELD_MIN_BLOCKS, -24.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 112.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_MIN_BLOCKS, -32.0);
         assert_eq!(
             high.raw_surface_height_blocks, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
-            "macro relief should be 50% lower than the previous 160-block launch scale"
+            "macro relief should stay below the previous 160-block launch scale while exposing denser contours"
         );
     }
 
