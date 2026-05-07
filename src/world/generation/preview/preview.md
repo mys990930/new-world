@@ -381,7 +381,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - 기본 출력은 `target/heightfield-preview/s<seed>_cx<center-x>_cz<center-z>_q<quarter>_r<radius>.png`다.
   `--output`이 명시되면 해당 경로를 그대로 사용하고 suffix를 강제로 붙이지 않는다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
-- metadata/stdout은 base/effective column resolution, XZ scale, base/effective sample spacing,
+- metadata/stdout은 column resolution, columns-per-chunk 또는 explicit column override, sample spacing,
   block height min/avg/max, water/ocean/lake/
   river/dry/ridge column count, contour-band heightfield policy, contour minimum gap, integer height snap policy, ocean
   visible `y=0` policy, river water descent stats, meso/perlin stub 상태, isometric view/projection,
@@ -393,8 +393,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
   32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
-  column resolution은 effective column count를 뜻하며, legend에는 fixed `XZ4`와 base/effective spacing도
-  함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
+  column resolution은 실제 샘플링된 column count를 뜻하며, legend에는 sample spacing과
+  chunk-radius 모드의 columns-per-chunk도 함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
   line이 표시된다는 것을 기록해야 한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
@@ -440,11 +440,10 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-  `vertical_px_per_block`은 preview 렌더링 전용 값이지만, fixed XZ scale `4` 때문에 별도 세로
-  normalization을 적용하지 않는다. XZ scale `4`에 대응하는 높이는 macro/heightfield
-  block-domain에서 이미 산출되며, preview는 그 `surface_y`를 cubic block
-  scale로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image
-  size에서 파생된다.
+  `vertical_px_per_block`은 preview 렌더링 전용 값이지만, column density 때문에 별도 세로
+  normalization을 적용하지 않는다. 높이는 macro/heightfield block-domain에서 이미 산출되며,
+  preview는 그 `surface_y`를 cubic block scale로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라
+  column count, footprint, image size에서 파생된다.
 - The preview draws top diamonds and only visible neighbor-difference side faces. The visible side
   set and painter order are derived from the current `--quarter-turns` projection, not from fixed
   east/south faces. It must show top surfaces and macro relief together; a side-wall chart, a flat

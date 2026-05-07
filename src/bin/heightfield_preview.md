@@ -40,9 +40,10 @@
 3. Solve hydrology.
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
-6. Convert it to `HeightfieldTile` with contour-band terrace resolve. The preview always uses
-   fixed XZ scale `4`, so X/Z sample spacing and column count are quadrupled internally while Y block
-   height is resolved in the doubled block-domain before rendering.
+6. Convert it to `HeightfieldTile` with contour-band terrace resolve. The preview does not use a
+   hidden X/Z scale layer; the `MacroFieldTile` column count and `sample_spacing_blocks` directly
+   define the horizontal density while Y block height is resolved in the shared block-domain before
+   rendering.
 7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
    fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
@@ -66,15 +67,17 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `vertical_px_per_block`은 preview 렌더링 전용 값이지만, XZ density에 맞춰 같은 Y 값을 다시 낮추는
   normalization 계수가 아니다. 이 binary는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   cubic scale로 렌더한다.
-- 고정 XZ scale `4`에 대응하는 macro relief는 preview 렌더링이 아니라 `macro_field` contour와
-  `heightfield` band resolve가 공유하는 block-height domain에서 이미 산출된다. 현재 기본 scale은
+- Macro relief는 preview 렌더링이 아니라 `macro_field` contour와 `heightfield` band resolve가
+  공유하는 block-height domain에서 이미 산출된다. 현재 기본 scale은
   `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`이며, preview에서 같은 Y 값을 다시
   낮춰 그리면 중복 압축이다.
-- XZ scale is not a CLI knob. With the default base `192` columns and fixed XZ scale `4`, the
-  effective X column count is `768`; Z is scaled the same way after aspect or chunk-radius
-  resolution. Sea level, contour step, surface `y`, and river water `y` are resolved in the
-  doubled block domain before rendering. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective
-  column count, footprint, image size에서 자동으로 파생된다.
+- Horizontal density is a direct column-count contract. In free-window mode the default X column
+  count is `768`; Z is derived from the image aspect unless `--columns-z` is provided. In
+  `--chunk-radius` mode, the default grid uses `128` columns per chunk on each axis, so a radius
+  `r` covers `(2r+1) * 128` columns per axis unless `--columns-x`/`--columns-z` explicitly override
+  the final count. Sea level, contour step, surface `y`, and river water `y` are resolved in the
+  block domain before rendering. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 column count, footprint,
+  image size에서 자동으로 파생된다.
 - Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
   visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
   sees the +X/+Z faces, quarter `1` sees -X/+Z, quarter `2` sees -X/-Z, and quarter `3` sees +X/-Z.
@@ -83,7 +86,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
   `x+z` painter order is a regression because it only works for one quarter view.
 - Very thin block lines are drawn on top/visible side polygons by default to make the block scale
-  readable with fixed XZ scale `4`. Top faces get a subtle face-edge outline, visible side faces
+  readable at dense column counts. Top faces get a subtle face-edge outline, visible side faces
   get a subtle face-edge outline plus one-pixel horizontal guides at integer `y` block steps. They
   are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
@@ -124,8 +127,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - When `--output` is omitted, the auto filename includes the projected quarter and chunk radius
   suffix, for example `s42_cx0_cz0_q0_r4.png`. Explicit `--output` paths are respected exactly.
 - The legend/header records input center, input unit, center chunk, center world block, world
-  footprint, column count/spacing, chunk x/z range, base/effective column count, fixed XZ scale,
-  base/effective spacing, chunk radius, height range, contour step/smoothing-disabled value, sea
+  footprint, column count/spacing, chunk x/z range, columns-per-chunk or explicit column override,
+  chunk radius, height range, contour step/smoothing-disabled value, sea
   level, block outline state, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint
   `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of

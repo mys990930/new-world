@@ -203,11 +203,12 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      만들지 않아야 한다.
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
-   - `heightfield_preview`는 preview 정책상 XZ scale `4`를 고정으로 사용한다. 같은 world footprint에서
-     base column 대비 각 축 column 수를 네 배로 늘리고 sample spacing을 줄이지만, preview 렌더러가 Y 픽셀 스케일을 따로
-     눌러서는 안 된다.
-   - fixed XZ scale `4`에 대응하는 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와
-     `heightfield` band resolve가 공유하는 block-height domain에서 적용한다. 현재 launch 기본
+   - `heightfield_preview`는 별도 수평 scale 계층을 쓰지 않는다. 같은 world footprint를 더 촘촘히
+     보려면 해당 footprint를 더 많은 column으로 직접 샘플링한다. chunk-radius preview의 기본값은
+     chunk 하나당 128개 column이며, free window preview는 기본 768개 X column을 사용한다.
+     `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
+   - 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와 `heightfield` band resolve가
+     공유하는 block-height domain에서 적용한다. 현재 launch 기본
      signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`다. preview는 이
      산출 `surface_y`를 정육면체에 가까운 block primitive로 그대로 렌더한다.
    - heightfield preview의 block outline은 기본 on이다. top/visible side face 외곽선과 side face의

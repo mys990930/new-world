@@ -26,8 +26,8 @@ mod common;
 const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
-const DEFAULT_COLUMNS_X: u32 = 192;
-const HEIGHTFIELD_PREVIEW_XZ_SCALE: u32 = 4;
+const DEFAULT_WINDOW_COLUMNS_X: u32 = 768;
+const DEFAULT_COLUMNS_PER_CHUNK: u32 = CHUNK_EDGE_I32 as u32 * 4;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
@@ -50,7 +50,7 @@ struct PreviewConfig {
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
-    columns_x: u32,
+    columns_x: Option<u32>,
     columns_z: Option<u32>,
     chunk_radius: Option<i32>,
     quarter_turns: u8,
@@ -69,43 +69,36 @@ impl PreviewConfig {
         if self.region_size_blocks <= 0 || self.site_spacing_blocks <= 0 {
             return Err(cli_error("region and site spacing must be positive"));
         }
-        if self.columns_x == 0 || self.columns_z == Some(0) {
+        if self.columns_x == Some(0) || self.columns_z == Some(0) {
             return Err(cli_error("columns-x and columns-z must be positive"));
         }
+        let columns_x = self.columns_x();
         let columns_z = self.columns_z();
-        self.columns_x
-            .checked_mul(HEIGHTFIELD_PREVIEW_XZ_SCALE)
-            .ok_or_else(|| cli_error("columns-x * fixed xz-scale is too large"))?;
-        columns_z
-            .checked_mul(HEIGHTFIELD_PREVIEW_XZ_SCALE)
-            .ok_or_else(|| cli_error("columns-z * fixed xz-scale is too large"))?;
+        columns_x
+            .checked_mul(columns_z)
+            .ok_or_else(|| cli_error("column count is too large"))?;
         if self.chunk_radius.is_some_and(|radius| radius < 0) {
             return Err(cli_error("chunk-radius must be zero or positive"));
         }
         Ok(self)
     }
 
+    fn columns_x(&self) -> u32 {
+        self.columns_x.unwrap_or_else(|| match self.chunk_radius {
+            Some(radius) => columns_for_chunk_radius(radius),
+            None => DEFAULT_WINDOW_COLUMNS_X,
+        })
+    }
+
     fn columns_z(&self) -> u32 {
         self.columns_z.unwrap_or_else(|| match self.chunk_radius {
-            Some(_) => self.columns_x,
+            Some(radius) => columns_for_chunk_radius(radius),
             None => {
-                ((self.columns_x as f32 * self.height as f32 / self.width as f32)
+                ((self.columns_x() as f32 * self.height as f32 / self.width as f32)
                     .round()
                     .max(1.0)) as u32
             }
         })
-    }
-
-    fn effective_columns_x(&self) -> u32 {
-        self.columns_x
-            .checked_mul(HEIGHTFIELD_PREVIEW_XZ_SCALE)
-            .expect("validated fixed xz-scale and columns-x")
-    }
-
-    fn effective_columns_z(&self) -> u32 {
-        self.columns_z()
-            .checked_mul(HEIGHTFIELD_PREVIEW_XZ_SCALE)
-            .expect("validated fixed xz-scale and columns-z")
     }
 
     fn window(&self) -> PreviewWindow {
@@ -128,7 +121,7 @@ impl PreviewConfig {
             )
         } else {
             let span_x = self.world_span_blocks as f32;
-            let span_z = span_x * self.columns_z() as f32 / self.columns_x as f32;
+            let span_z = span_x * self.columns_z() as f32 / self.columns_x() as f32;
             (
                 self.center_world_x() as f32,
                 self.center_world_z() as f32,
@@ -139,11 +132,8 @@ impl PreviewConfig {
         PreviewWindow {
             center_x,
             center_z,
-            base_columns_x: self.columns_x,
-            base_columns_z: self.columns_z(),
-            xz_scale: HEIGHTFIELD_PREVIEW_XZ_SCALE,
-            columns_x: self.effective_columns_x(),
-            columns_z: self.effective_columns_z(),
+            columns_x: self.columns_x(),
+            columns_z: self.columns_z(),
             world_span_x: span_x,
             world_span_z: span_z,
         }
@@ -217,13 +207,17 @@ impl PreviewConfig {
     }
 }
 
+fn columns_for_chunk_radius(radius: i32) -> u32 {
+    let chunks_per_axis = radius.saturating_mul(2).saturating_add(1).max(1) as u32;
+    chunks_per_axis
+        .saturating_mul(DEFAULT_COLUMNS_PER_CHUNK)
+        .max(1)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PreviewWindow {
     center_x: f32,
     center_z: f32,
-    base_columns_x: u32,
-    base_columns_z: u32,
-    xz_scale: u32,
     columns_x: u32,
     columns_z: u32,
     world_span_x: f32,
@@ -249,10 +243,6 @@ impl PreviewWindow {
 
     fn sample_spacing(self) -> f32 {
         self.world_span_x / self.columns_x as f32
-    }
-
-    fn base_sample_spacing(self) -> f32 {
-        self.world_span_x / self.base_columns_x as f32
     }
 
     fn graph_area(self, region_size_blocks: i32) -> Result<GraphRegionArea, Box<dyn Error>> {
@@ -288,13 +278,10 @@ struct PreviewHeader {
     world_max_x: f32,
     world_min_z: f32,
     world_max_z: f32,
-    base_columns_x: u32,
-    base_columns_z: u32,
-    xz_scale: u32,
     columns_x: u32,
     columns_z: u32,
-    base_sample_spacing_blocks: f32,
     sample_spacing_blocks: f32,
+    columns_per_chunk: Option<u32>,
     chunk_edge_blocks: i32,
     chunk_min_x: i32,
     chunk_max_x: i32,
@@ -380,20 +367,15 @@ impl PreviewHeader {
                 "world_footprint_blocks=x:{:.1}..{:.1},z:{:.1}..{:.1}",
                 self.world_min_x, self.world_max_x, self.world_min_z, self.world_max_z
             ),
+            format!("columns={}x{}", self.columns_x, self.columns_z),
             format!(
-                "base_columns={}x{}",
-                self.base_columns_x, self.base_columns_z
-            ),
-            format!("xz_scale={}_fixed", self.xz_scale),
-            format!("horizontal_subdivisions={}_fixed", self.xz_scale),
-            format!("effective_columns={}x{}", self.columns_x, self.columns_z),
-            format!(
-                "base_sample_spacing_blocks={:.3}",
-                self.base_sample_spacing_blocks
-            ),
-            format!(
-                "effective_sample_spacing_blocks={:.3}",
+                "sample_spacing_blocks={:.3}",
                 self.sample_spacing_blocks
+            ),
+            format!(
+                "columns_per_chunk={}",
+                self.columns_per_chunk
+                    .map_or_else(|| "not_chunk_derived".to_string(), |value| value.to_string())
             ),
             "height_values=doubled_block_domain_relief_before_preview".to_string(),
             "render_scale_policy=cubic_block_pixels_no_vertical_normalization".to_string(),
@@ -539,13 +521,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let macro_field_ms = macro_start.elapsed().as_millis();
 
     let heightfield_start = Instant::now();
-    let heightfield = generate_heightfield_tile(
-        &macro_tile,
-        HeightfieldConfig {
-            horizontal_subdivisions: HEIGHTFIELD_PREVIEW_XZ_SCALE,
-            ..HeightfieldConfig::default()
-        },
-    );
+    let heightfield = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
     let heightfield_ms = heightfield_start.elapsed().as_millis();
 
     let mesh_start = Instant::now();
@@ -585,13 +561,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         world_max_x: window.max_x(),
         world_min_z: window.min_z(),
         world_max_z: window.max_z(),
-        base_columns_x: window.base_columns_x,
-        base_columns_z: window.base_columns_z,
-        xz_scale: window.xz_scale,
         columns_x: window.columns_x,
         columns_z: window.columns_z,
-        base_sample_spacing_blocks: window.base_sample_spacing(),
         sample_spacing_blocks: window.sample_spacing(),
+        columns_per_chunk: config.chunk_radius.map(|_| DEFAULT_COLUMNS_PER_CHUNK),
         chunk_edge_blocks: CHUNK_EDGE_I32,
         chunk_min_x: chunk_range.0,
         chunk_max_x: chunk_range.1,
@@ -653,19 +626,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("heightfield preview: seed {}", config.seed);
     println!(
-        "window: center chunk=({}, {}), center world=({}, {}), span={:.0}x{:.0} blocks, base columns={}x{}, fixed xz scale={}x, effective columns={}x{}, spacing {:.2}->{:.2} blocks",
+        "window: center chunk=({}, {}), center world=({}, {}), span={:.0}x{:.0} blocks, columns={}x{}, sample spacing {:.3} blocks",
         center_chunk_x,
         center_chunk_z,
         center_world_x,
         center_world_z,
         window.world_span_x,
         window.world_span_z,
-        window.base_columns_x,
-        window.base_columns_z,
-        window.xz_scale,
         window.columns_x,
         window.columns_z,
-        window.base_sample_spacing(),
         window.sample_spacing()
     );
     if config.center_is_world_blocks {
@@ -757,10 +726,20 @@ fn main() -> Result<(), Box<dyn Error>> {
             heightfield.stats.contour_band_smoothing
         );
     }
-    println!(
-        "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y relief is resolved in heightfield block-domain before cubic preview rendering",
-        HEIGHTFIELD_PREVIEW_XZ_SCALE
-    );
+    if config.chunk_radius.is_some() {
+        println!(
+            "column density: {} columns per chunk, sample spacing {:.3} blocks",
+            DEFAULT_COLUMNS_PER_CHUNK,
+            window.sample_spacing()
+        );
+    } else {
+        println!(
+            "column density: direct window columns {}x{}, sample spacing {:.3} blocks",
+            window.columns_x,
+            window.columns_z,
+            window.sample_spacing()
+        );
+    }
     println!(
         "columns: total {}, water {}, ocean {}, lake {}, river {}, dry {}, ridge {}",
         heightfield.stats.column_count,
@@ -1619,10 +1598,7 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         &mut rgba,
         text_x,
         text_y,
-        &format!(
-            "COL {}X{} XZ{}F",
-            header.columns_x, header.columns_z, header.xz_scale
-        ),
+        &format!("COL {}X{}", header.columns_x, header.columns_z),
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -1631,10 +1607,7 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         &mut rgba,
         text_x,
         text_y,
-        &format!(
-            "STEP {:.0}/{:.0}",
-            header.base_sample_spacing_blocks, header.sample_spacing_blocks
-        ),
+        &format!("SPC {:.2}B", header.sample_spacing_blocks),
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -2134,7 +2107,7 @@ where
         region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
         site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
         land_bias: MacroMapConfig::new(seed, WorldMeta::new(seed).generator_version).land_bias,
-        columns_x: DEFAULT_COLUMNS_X,
+        columns_x: None,
         columns_z: None,
         chunk_radius: None,
         quarter_turns: 0,
@@ -2158,7 +2131,9 @@ where
                     parse_required::<i32>(&mut args, "site-spacing-blocks")?
             }
             "--land-bias" => config.land_bias = parse_required::<f32>(&mut args, "land-bias")?,
-            "--columns-x" => config.columns_x = parse_required::<u32>(&mut args, "columns-x")?,
+            "--columns-x" => {
+                config.columns_x = Some(parse_required::<u32>(&mut args, "columns-x")?)
+            }
             "--columns-z" => {
                 config.columns_z = Some(parse_required::<u32>(&mut args, "columns-z")?)
             }
@@ -2218,7 +2193,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>] (fixed xz scale 4)"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2253,7 +2228,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
-            columns_x: DEFAULT_COLUMNS_X,
+            columns_x: None,
             columns_z: None,
             chunk_radius: None,
             quarter_turns: 0,
@@ -2280,7 +2255,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
-            columns_x: DEFAULT_COLUMNS_X,
+            columns_x: None,
             columns_z: None,
             chunk_radius: Some(4),
             quarter_turns: 2,
@@ -2317,7 +2292,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
-            columns_x: DEFAULT_COLUMNS_X,
+            columns_x: None,
             columns_z: None,
             chunk_radius: None,
             quarter_turns: 0,
@@ -2330,14 +2305,11 @@ mod tests {
         assert_eq!(CHUNK_EDGE_I32, 32);
         assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, 256);
         assert_eq!(MACRO_FIELD_TILE_EDGE_BLOCKS, 1024);
-        assert_eq!(window.base_columns_x, DEFAULT_COLUMNS_X);
-        assert_eq!(
-            window.columns_x,
-            DEFAULT_COLUMNS_X * HEIGHTFIELD_PREVIEW_XZ_SCALE
-        );
+        assert_eq!(window.columns_x, DEFAULT_WINDOW_COLUMNS_X);
+        assert_eq!(window.columns_z, 432);
         assert_eq!(
             window.sample_spacing(),
-            window.base_sample_spacing() / HEIGHTFIELD_PREVIEW_XZ_SCALE as f32
+            DEFAULT_WORLD_SPAN_BLOCKS as f32 / DEFAULT_WINDOW_COLUMNS_X as f32
         );
         assert_eq!(range, (-128, 128, -72, 72));
         assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
@@ -2384,7 +2356,7 @@ mod tests {
         assert_eq!(config.center_chunk_z(), -3);
         assert_eq!(config.center_world_x(), 80);
         assert_eq!(config.center_world_z(), -80);
-        assert_eq!(config.window().xz_scale, HEIGHTFIELD_PREVIEW_XZ_SCALE);
+        assert_eq!(config.window().columns_x, columns_for_chunk_radius(32));
     }
 
     #[test]
@@ -2417,7 +2389,7 @@ mod tests {
     }
 
     #[test]
-    fn xz_scale_options_are_not_user_facing() {
+    fn removed_scale_options_are_rejected() {
         let xz = parse_args_from(["42", "0", "0", "--xz-scale", "1"])
             .expect_err("xz-scale should be rejected");
         let horizontal = parse_args_from(["42", "0", "0", "--horizontal-subdivisions", "1"])
@@ -2444,7 +2416,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_xz_scale_quadruples_axis_columns_without_changing_footprint() {
+    fn explicit_column_count_sets_sample_spacing_without_scale_layer() {
         let config = PreviewConfig {
             seed: 42,
             center_x: 0,
@@ -2456,7 +2428,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
-            columns_x: 32,
+            columns_x: Some(128),
             columns_z: Some(24),
             chunk_radius: None,
             quarter_turns: 0,
@@ -2466,16 +2438,15 @@ mod tests {
         .window();
 
         assert_eq!(config.world_span_x, DEFAULT_WORLD_SPAN_BLOCKS as f32);
-        assert_eq!(HEIGHTFIELD_PREVIEW_XZ_SCALE, 4);
         assert_eq!(
             config.world_span_z,
-            DEFAULT_WORLD_SPAN_BLOCKS as f32 * 24.0 / 32.0
+            DEFAULT_WORLD_SPAN_BLOCKS as f32 * 24.0 / 128.0
         );
-        assert_eq!(config.columns_x, 32 * HEIGHTFIELD_PREVIEW_XZ_SCALE);
-        assert_eq!(config.columns_z, 24 * HEIGHTFIELD_PREVIEW_XZ_SCALE);
+        assert_eq!(config.columns_x, 128);
+        assert_eq!(config.columns_z, 24);
         assert_eq!(
             config.sample_spacing(),
-            config.base_sample_spacing() / HEIGHTFIELD_PREVIEW_XZ_SCALE as f32
+            DEFAULT_WORLD_SPAN_BLOCKS as f32 / 128.0
         );
     }
 
@@ -2492,7 +2463,7 @@ mod tests {
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
-            columns_x: DEFAULT_COLUMNS_X,
+            columns_x: None,
             columns_z: None,
             chunk_radius: Some(2),
             quarter_turns: 0,
@@ -2502,15 +2473,9 @@ mod tests {
         let window = config.window();
         let range = chunk_range_for_window(window);
 
-        assert_eq!(config.columns_z(), DEFAULT_COLUMNS_X);
-        assert_eq!(
-            window.columns_x,
-            DEFAULT_COLUMNS_X * HEIGHTFIELD_PREVIEW_XZ_SCALE
-        );
-        assert_eq!(
-            window.columns_z,
-            DEFAULT_COLUMNS_X * HEIGHTFIELD_PREVIEW_XZ_SCALE
-        );
+        assert_eq!(config.columns_z(), 5 * DEFAULT_COLUMNS_PER_CHUNK);
+        assert_eq!(window.columns_x, 5 * DEFAULT_COLUMNS_PER_CHUNK);
+        assert_eq!(window.columns_z, 5 * DEFAULT_COLUMNS_PER_CHUNK);
         assert_eq!(range, (0, 4, -4, 0));
         assert_eq!(window.world_span_x, 5.0 * CHUNK_EDGE_I32 as f32);
         assert_eq!(window.world_span_z, 5.0 * CHUNK_EDGE_I32 as f32);
@@ -2548,26 +2513,21 @@ mod tests {
     }
 
     #[test]
-    fn fixed_xz_scale_four_keeps_cubic_render_scale() {
-        let scale_one = two_by_two_heightfield_tile();
-        let mut scale_four = two_by_two_heightfield_tile();
-        scale_four.horizontal_subdivisions = 4;
-        scale_four.sample_spacing_blocks *= 0.25;
-        scale_four.config.horizontal_subdivisions = 4;
+    fn sample_spacing_does_not_change_cubic_render_scale() {
+        let coarse = two_by_two_heightfield_tile();
+        let mut dense = two_by_two_heightfield_tile();
+        dense.sample_spacing_blocks *= 0.25;
 
-        let plan_one = IsoRenderPlan::new(&scale_one, 1280, 720, 0).expect("scale one plan");
-        let plan_four = IsoRenderPlan::new(&scale_four, 1280, 720, 0).expect("scale four plan");
+        let plan_one = IsoRenderPlan::new(&coarse, 1280, 720, 0).expect("coarse plan");
+        let plan_four = IsoRenderPlan::new(&dense, 1280, 720, 0).expect("dense plan");
 
         assert_eq!(plan_one.vertical_px_per_block, plan_one.tile_h_px);
         assert_eq!(plan_four.vertical_px_per_block, plan_four.tile_h_px);
         assert_eq!(
             plan_one.vertical_px_per_block, plan_four.vertical_px_per_block,
-            "horizontal subdivisions alone must not add artificial vertical preview normalization"
+            "column sample spacing alone must not add artificial vertical preview normalization"
         );
-        assert_eq!(
-            scale_one.columns[1].surface_y,
-            scale_four.columns[1].surface_y
-        );
+        assert_eq!(coarse.columns[1].surface_y, dense.columns[1].surface_y);
     }
 
     #[test]
@@ -2685,7 +2645,6 @@ mod tests {
             width: 2,
             height: 2,
             sample_spacing_blocks: 32.0,
-            horizontal_subdivisions: 1,
             columns,
             stats: new_world::world::generation::HeightfieldTileStats {
                 column_count: 4,

@@ -132,9 +132,10 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
   - The compass follows the current quarter-view projection, and thin block lines are on by default
     to make column scale readable. They draw subtle top/side face edges plus integer side-step
     guides; `--no-block-lines` disables only this diagnostic overlay.
-  - Horizontal density is fixed at XZ scale `4` for this preview and is not a CLI option.
-    Heightfield Y relief is resolved in the doubled macro/heightfield block-domain, and preview
-    rendering keeps block primitives visually cubic instead of applying an extra vertical scale.
+  - Horizontal density is expressed as direct column count. Free-window mode defaults to `768` X
+    columns; chunk-radius mode defaults to `128` columns per chunk on each axis. Heightfield Y
+    relief is resolved in the doubled macro/heightfield block-domain, and preview rendering keeps
+    block primitives visually cubic instead of applying an extra vertical scale.
   - Heightfield terrace resolve uses integer contour steps with a one-block raw minimum gap for
     both general land and river corridors; the river override structure remains available for later
     tuning.

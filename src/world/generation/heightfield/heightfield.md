@@ -61,7 +61,6 @@ heightfield_column_from_sample(&MacroFieldSample, HeightfieldConfig) -> Heightfi
 
 ```rust
 HeightfieldConfig {
-    horizontal_subdivisions,
     sea_level_blocks,
     min_height_blocks,
     max_height_blocks,
@@ -107,12 +106,11 @@ HeightfieldColumn {
 }
 ```
 
-`horizontal_subdivisions`는 X/Z 방향 sampling density 계약이다. 기본값 `1`은 입력
-`MacroFieldTile`의 sample grid를 그대로 column으로 변환한다. preview나 runtime cache가 같은
-world footprint를 더 촘촘히 보고 싶으면 macro field tile의 `width/height`를 각 축에서
-`horizontal_subdivisions`배로 만들고 `sample_spacing_blocks`를 같은 비율로 줄인 뒤 heightfield로
-넘긴다. 이 값은 heightfield 데이터의 vertical scale이 아니며, 같은 world-space sample과 같은 scalar는
-subdivision 값과 무관하게 같은 integer `surface_y`/`water_y`를 가져야 한다.
+Heightfield는 별도 수평 scale 값을 소유하지 않는다. X/Z 방향 해상도는 입력 `MacroFieldTile`의
+`width`, `height`, `sample_spacing_blocks`가 직접 정의한다. preview나 runtime cache가 같은 world
+footprint를 더 촘촘히 보고 싶으면 더 많은 column을 가진 `MacroFieldTile`을 만들고 그에 맞는
+`sample_spacing_blocks`를 넘긴다. 같은 world-space sample과 같은 scalar는 column grid 밀도와 무관하게
+같은 integer `surface_y`/`water_y`를 가져야 한다.
 
 ---
 
@@ -246,15 +244,15 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `vertical_px_per_block`은 preview 렌더링 전용 투영 값이지만, XZ density에 맞춰 따로 눌러지는 보정
   계수가 아니다. `heightfield_preview`는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   `vertical_px_per_block == tile_h_px`인 cubic scale로 그린다.
-- 고정 XZ scale `4`에 대응하는 macro relief는 preview 렌더링이 아니라
-  `macro_field`/`heightfield`가 공유하는 block-height 변환이 소유한다. 현재 launch scale은
+- macro relief는 preview 렌더링이 아니라 `macro_field`/`heightfield`가 공유하는 block-height 변환이
+  소유한다. 현재 launch scale은
   `-0.75..0.0..1.25 -> -64..0..224 blocks`이며 preview에서 같은 Y 값을 다시
   낮춰 그리면 중복 압축이다.
-- heightfield preview의 XZ scale은 사용자 CLI 옵션이 아니다. 고정값 `4`는 같은 world footprint에서
-  base column 대비 각 축 column 수를 네 배로 만들며, effective sample spacing은 1/4이 된다. preview는 이 산출 `y` height
-  block, sea level, contour step, river water descent 값을 cubic block scale로 렌더한다.
-  X/Z 렌더링 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image size에서
-  자동으로 파생된다.
+- heightfield preview의 X/Z 밀도는 scale 계층이 아니라 column count로 직접 표현한다. chunk-radius
+  preview의 기본값은 chunk 하나를 `128`개 column으로 샘플링하고, free window preview는 기본
+  `768`개 X column을 사용한다. `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
+  sample spacing은 world footprint / column count에서 파생된다. preview는 산출 `y` height block,
+  sea level, contour step, river water descent 값을 cubic block scale로 렌더한다.
 - column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
   전역 base plane까지 벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를
   보여주는 terraced relief를 우선한다. quarter view가 바뀌면 painter order와 visible side도 함께 바뀌어야 한다.
@@ -315,8 +313,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     raw height가 2 block 진행될 때마다 visible terrain은 1 integer step 올라간다. river corridor
     override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`, shoreline ceiling,
     river descent는 이 snap 결과 위에서 유지되어야 한다.
-14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, 그 자체가 per-sample
-    vertical rescale knob가 아니다. fixed XZ scale `4`에 맞춘 launch relief는 shared
-    block-height domain의 `-64..224` 기본 범위가 소유한다. preview 렌더러는 산출된 `surface_y`와
-    water hint를 cubic block scale로 그려야 하며, subdivision 값으로 같은 Y 값을 다시 낮춰 보이면
-    중복 압축이다.
+14. X/Z column density는 입력 macro field tile의 column count와 sample spacing이 직접 소유한다.
+    별도 fixed scale이나 horizontal subdivision 값으로 heightfield Y를 해석하면 안 된다. launch relief는
+    shared block-height domain의 `-64..224` 기본 범위가 소유한다. preview 렌더러는 산출된
+    `surface_y`와 water hint를 cubic block scale로 그려야 하며, column density로 같은 Y 값을 다시
+    낮춰 보이면 중복 압축이다.
