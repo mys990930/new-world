@@ -376,8 +376,9 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   chunk edge blocks, macro-field tile edge blocks, column step/resolution, sea level과 height range를
   함께 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
-  chunk 32-block minor boundary key, 256-block major grid key, 1024-block macro-field tile boundary
-  key, scale bar를 표시한다.
+  primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
+  32-block chunk boundary key, scale bar를 표시한다. `heightfield_preview`에서 terrain scale을
+  읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
 
@@ -408,10 +409,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   horizontal grid without changing height data.
 - The preview draws top diamonds and only visible neighbor-difference side faces. It must show top
   surfaces and macro relief together; a side-wall chart and a flat topdown plane are both regressions.
-- Chunk boundary overlay is drawn at the runtime chunk size (`CHUNK_EDGE`, currently 32 blocks) as a
-  very faint minor grid. A stronger major grid is drawn every 256 blocks, equal to 8 chunks.
-  Macro-field tile boundary overlay is drawn at the generation cache tile scale, currently 1024
-  blocks. These lines are diagnostic overlays, not terrain features.
+- Macro-field tile boundary overlay is drawn at the generation cache tile scale, currently 1024
+  blocks, and is the primary readable grid so the scale matches `macro_field_preview`. Chunk
+  boundary overlay is still drawn at the runtime chunk size (`CHUNK_EDGE`, currently 32 blocks) as a
+  very faint minor grid. A secondary major chunk-group grid is drawn every 256 blocks, equal to
+  8 chunks, but it must not visually dominate the 1024-block macro tile grid. These lines are
+  diagnostic overlays, not terrain features.
 - `--chunk-radius r` is a square chunk-coordinate footprint, not separate x/z radii. It includes the
   center chunk and covers `2r+1` chunks on each horizontal axis. A radius of `0` previews one chunk.
 

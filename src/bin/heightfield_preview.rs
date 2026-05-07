@@ -263,6 +263,12 @@ impl PreviewHeader {
                 "macro_field_tile_edge_blocks={}",
                 self.macro_tile_edge_blocks
             ),
+            format!(
+                "grid_overlay=primary_macro_tile_{}blocks_secondary_major_{}blocks_faint_chunk_{}blocks",
+                self.macro_tile_edge_blocks,
+                self.major_grid_edge_blocks,
+                self.chunk_edge_blocks
+            ),
             format!("vertical_scale={:.3}", self.vertical_scale),
             "view=cpu_isometric_columns".to_string(),
             "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px".to_string(),
@@ -437,8 +443,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.max_z()
     );
     println!(
-        "grid overlay: chunk {} blocks faint, major {} blocks, macro tile {} blocks",
-        CHUNK_EDGE_I32, PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, MACRO_FIELD_TILE_EDGE_BLOCKS
+        "grid overlay: primary macro tile {} blocks, secondary major {} blocks, chunk {} blocks very faint",
+        MACRO_FIELD_TILE_EDGE_BLOCKS, PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, CHUNK_EDGE_I32
     );
     println!(
         "chunk range: cx {}..{}, cz {}..{}, radius {}x{}",
@@ -882,7 +888,7 @@ fn draw_boundary_overlays(
         plan,
         window,
         CHUNK_EDGE_I32,
-        [24, 32, 39, 30],
+        [20, 27, 33, 18],
         6,
     );
     draw_world_grid_overlay(
@@ -891,8 +897,8 @@ fn draw_boundary_overlays(
         plan,
         window,
         PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
-        [84, 112, 126, 82],
-        1,
+        [70, 91, 104, 38],
+        4,
     );
     draw_world_grid_overlay(
         &mut rgba,
@@ -900,7 +906,7 @@ fn draw_boundary_overlays(
         plan,
         window,
         MACRO_FIELD_TILE_EDGE_BLOCKS,
-        [226, 236, 246, 92],
+        [226, 236, 246, 132],
         1,
     );
     image.rgba = rgba.into_raw();
@@ -1290,15 +1296,15 @@ fn draw_grid_legend_keys(
     scale: u32,
 ) {
     let keys = [
-        (format!("C{}B", header.chunk_edge_blocks), [24, 32, 39, 255]),
-        (
-            format!("M{}B", header.major_grid_edge_blocks),
-            [84, 112, 126, 255],
-        ),
         (
             format!("T{}B", header.macro_tile_edge_blocks),
             [226, 236, 246, 255],
         ),
+        (
+            format!("G{}B", header.major_grid_edge_blocks),
+            [70, 91, 104, 255],
+        ),
+        (format!("C{}B", header.chunk_edge_blocks), [20, 27, 33, 255]),
     ];
     let mut cursor = x;
     for (label, color) in keys {
@@ -1694,16 +1700,21 @@ mod tests {
     }
 
     #[test]
-    fn preview_grid_spacing_keeps_chunk_major_and_macro_layers_distinct() {
+    fn preview_grid_spacing_uses_macro_tile_as_primary_scale() {
         assert_eq!(
             PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
             CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER
         );
         assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER, 8);
         assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, 256);
+        assert_eq!(MACRO_FIELD_TILE_EDGE_BLOCKS, 1024);
         assert_eq!(
             MACRO_FIELD_TILE_EDGE_BLOCKS % PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
             0
+        );
+        assert_eq!(
+            MACRO_FIELD_TILE_EDGE_BLOCKS / PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
+            4
         );
     }
 
