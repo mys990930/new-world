@@ -16,6 +16,10 @@ use new_world::world::{
     region_archetype_def, sample_meso_guides,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_rgb;
+
 const DEFAULT_CENTER_X: i32 = 0;
 const DEFAULT_CENTER_Z: i32 = 0;
 const DEFAULT_RADIUS: i32 = 4;
@@ -405,7 +409,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .ok_or_else(|| cli_error("center chunk patch was not generated"))?;
     let summary = summarize_preview(&patches);
     let peak_candidates = collect_unique_peak_candidates(window, &patches);
-    let image = render_preview(window, config, &patches, summary, &peak_candidates)?;
+    let mut image = render_preview(window, config, &patches, summary, &peak_candidates)?;
+    draw_compass_rgb(&mut image);
 
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;

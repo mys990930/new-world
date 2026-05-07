@@ -113,9 +113,15 @@ generator version에서 조정될 수 있지만, sea level은 pipeline 계약대
 
 ```text
 combined_macro_height -0.75 -> -48 blocks
+combined_macro_height  0.00 ->   0 blocks = sea level
 combined_macro_height  1.25 -> 160 blocks
-sea level                    ->   0 blocks
 ```
+
+이 매핑은 단일 선형 remap이 아니라 signed sea-level을 기준으로 한 piecewise remap이다. 음수
+macro height는 `-0.75..0.0` 범위에서 `-48..0` block으로, 양수 macro height는 `0.0..1.25`
+범위에서 `0..160` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
+height를 가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은
+terrace로 튀어서는 안 된다.
 
 `combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
 합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
@@ -228,6 +234,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `width/height`는 이미지 해상도만 정하고, world footprint는 chunk square가 정한다.
 - preview legend는 고정 픽셀 크기가 아니라 출력 이미지 크기에 비례해야 한다. 기본 metadata panel은
   화면 높이의 약 1/5을 목표로 하며, 글꼴, swatch, scale bar도 같은 비율로 커져야 한다.
+- preview는 방향 compass overlay를 포함한다. 방향 기준은 macro field와 같은 화면/world topdown
+  등록 기준으로, 이미지 위=N, 오른쪽=E, 아래=S, 왼쪽=W다. isometric projection과 `--quarter-turns`는
+  column 표시 방식이고, compass는 preview가 덮는 world footprint를 읽기 위한 고정 방향 표식이다.
 - preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, smoothing disabled
   값을 기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저

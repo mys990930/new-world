@@ -79,6 +79,8 @@
   - connected selected flow adjacent to a lake must be classified as either a `LakeInlet` or a
     `LakeOutlet`; unclassified lake-connected flow is reported in metadata/stdout and should be 0.
 - A compact in-image legend with an elevation color bar and overlay keys.
+- A compact compass overlay using the common macro-field/world topdown orientation: image top=N,
+  right=E, bottom=S, left=W.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
   center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
   count, visible site count, land site count, land ratio, candidate edge count, coast/ridge/fault

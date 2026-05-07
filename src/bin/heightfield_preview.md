@@ -42,7 +42,7 @@
    their visible top for neighbor-delta side faces.
 9. Draw visible side faces, top faces, water tops, the primary 1024-block macro-field tile grid,
    secondary/faint 256-block chunk-group references, very faint 32-block chunk boundaries, scale
-   bar, and metadata legend in painter order.
+   bar, metadata legend, and compass overlay in painter order.
 
 ## Interpretation
 
@@ -101,6 +101,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   secondary `major 256 blk`, faint `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
+- The compass overlay uses the same orientation as macro field topdown previews: image top=N,
+  right=E, bottom=S, left=W. It is a world-footprint registration marker and does not modify
+  heightfield data.
 
 ## Example
 

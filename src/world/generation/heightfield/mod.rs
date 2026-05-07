@@ -273,9 +273,13 @@ pub fn heightfield_column_from_sample(
 }
 
 fn normalized_to_blocks(value: f32, config: HeightfieldConfig) -> f32 {
-    let span = (config.normalized_max_height - config.normalized_min_height).max(f32::EPSILON);
-    let t = ((value - config.normalized_min_height) / span).clamp(0.0, 1.0);
-    config.min_height_blocks + (config.max_height_blocks - config.min_height_blocks) * t
+    if value >= 0.0 {
+        let t = (value / config.normalized_max_height.max(f32::EPSILON)).clamp(0.0, 1.0);
+        config.sea_level_blocks + (config.max_height_blocks - config.sea_level_blocks) * t
+    } else {
+        let t = (value / config.normalized_min_height.min(-f32::EPSILON)).clamp(0.0, 1.0);
+        config.sea_level_blocks + (config.min_height_blocks - config.sea_level_blocks) * t
+    }
 }
 
 fn resolve_contour_band_height(value: f32, contour: HeightfieldContourConfig) -> f32 {
@@ -910,6 +914,42 @@ mod tests {
     }
 
     #[test]
+    fn signed_macro_zero_maps_to_sea_level_before_contour_snap() {
+        let column = heightfield_column_from_sample(
+            &sample(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            HeightfieldConfig::default(),
+        );
+
+        assert_eq!(
+            column.raw_surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+        );
+        assert_eq!(
+            column.surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+        );
+    }
+
+    #[test]
+    fn small_positive_coastal_macro_height_starts_near_sea_level() {
+        let column = heightfield_column_from_sample(
+            &sample(0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0),
+            HeightfieldConfig::default(),
+        );
+
+        assert!(
+            column.raw_surface_height_blocks <= 2.0,
+            "signed macro height just above sea level should not become a high terrace: {}",
+            column.raw_surface_height_blocks
+        );
+        assert!(
+            column.surface_height_blocks <= 2.0,
+            "signed macro height just above sea level should snap to the first few contour steps: {}",
+            column.surface_height_blocks
+        );
+    }
+
+    #[test]
     fn changing_contour_step_snaps_land_surface_to_step_multiples() {
         let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
         let column = heightfield_column_from_sample(
@@ -1036,6 +1076,47 @@ mod tests {
             tile.stats.max_constrained_neighbor_delta_blocks
                 < tile.stats.max_raw_neighbor_delta_blocks,
             "shoreline continuity should reduce the raw neighbor jump"
+        );
+    }
+
+    #[test]
+    fn coast_adjacent_land_jump_is_bounded_even_when_raw_macro_is_high() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 2, 32.0);
+        let samples = vec![
+            sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0),
+            sample(32.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(64.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(96.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(0.0, 32.0, -0.8, 1.0, 0.0, 0.0, 0.0),
+            sample(32.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(64.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(96.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+        ];
+        let macro_tile = MacroFieldTile {
+            config,
+            samples,
+            stats: MacroFieldTileStats::default(),
+        };
+        let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+
+        for z in 0..2 {
+            let first_land = tile.column(1, z).expect("first land ring");
+            let second_land = tile.column(2, z).expect("second land ring");
+            assert_eq!(
+                first_land.surface_height_blocks, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+                "first land ring at z={z} should start at sea level"
+            );
+            assert_eq!(
+                second_land.surface_height_blocks,
+                DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS + DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+                "second land ring at z={z} should rise by one contour step"
+            );
+        }
+        assert!(
+            tile.stats.max_shore_visible_neighbor_delta_blocks
+                <= DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+            "standing-water shoreline jump should stay within one contour step, got {}",
+            tile.stats.max_shore_visible_neighbor_delta_blocks
         );
     }
 

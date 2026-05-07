@@ -26,6 +26,7 @@ Aliases such as `tundra`, `taiga`, `oak`, `birch`, `olive`, `swamp`, `acacia`, a
 ## Outputs
 
 - a PNG image rendered through the renderer offscreen path
+- a compass overlay using the shared preview orientation: image top=N, right=E, bottom=S, left=W
 - stdout summary of kind, preview seed, generated per-tree seeds, voxel counts, bounds, and output path
 
 ## Defaults

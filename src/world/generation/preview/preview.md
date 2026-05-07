@@ -88,6 +88,8 @@
   owner region count, mode/map name, nearest-site spacing min/avg/max/stddev/CV를 함께 기록한다.
 - 각 PNG는 작은 legend overlay를 가진다. field map은 gradient color bar와 양끝 의미 label을 표시하고,
   identity map은 간단한 header만 표시한다.
+- 각 PNG는 방향 compass overlay를 가진다. macro field/world topdown 기준으로 이미지 위쪽은 북(N,
+  `world -Z`), 오른쪽은 동(E, `world +X`), 아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 현재 구현 상태
@@ -180,6 +182,8 @@
   같은 selected chain이 두 번째 lake contact에 닿지 않도록 제거한 segment 수를 나타낸다.
 - 작은 legend overlay는 ocean/lake/land/dry fill, ridge/fault/coast edge, selected river, sink,
   inlet/outlet marker key를 포함한다. 숨겨진 debug-only lake node는 legend에 넣지 않는다.
+- 방향 compass overlay는 legend와 겹치지 않는 위치에 표시하며, 이미지 위=N(`world -Z`),
+  오른쪽=E(`world +X`), 아래=S, 왼쪽=W의 macro field 기준을 따른다.
 - width, height, generator version, stage, world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어가며 graph area, site count,
@@ -297,6 +301,8 @@ renderer/GPU 계약을 만들지 않는다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/dry/coast/land key를 서로 구분되는 색으로 표시한다. lit heightfield는 height range와 light
   direction만 표시한다. contour channel은 minor/major/sea-level key와 contour step/major spacing을 표시한다.
+- 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
+  같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
 - 모든 `macro_field_preview` channel은 stage 7 `BoundaryCache`의 canonical noisy Voronoi graph edge
   overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
   field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
@@ -378,15 +384,18 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   함께 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
-  32-block chunk boundary key, scale bar를 표시한다. `heightfield_preview`에서 terrain scale을
+  32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
+- 방향 compass는 이미지 위=N(`world -Z`), 오른쪽=E(`world +X`), 아래=S, 왼쪽=W라는 macro field
+  기준을 유지한다. isometric preview에서도 이 표기는 화면/월드 topdown 기준의 등록 보조 overlay이며,
+  height 값을 바꾸지 않는다.
 
 ### 현재 구현 상태
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
-- `combined_macro_height -0.75..1.25`를 `-48..160 block` preview scale로 매핑한다.
+- `combined_macro_height -0.75..0.0..1.25`를 `-48..0..160 block` signed sea-level scale로 매핑한다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
   ocean/lake visible surface도 `y = 0`이며, bathymetry/bed depression을 preview terrain으로 렌더하지
   않는다.

@@ -111,11 +111,13 @@ macro field가 heightfield로 넘어가기 직전에 연속적으로 읽히는�
 heightfield는 같은 block-height contour level domain을 사용해 column band interpolation을 할 수 있지만,
 Marching Squares segment 자체를 terrain source로 직접 소비해서는 안 된다.
 
-Contour block-height scale은 heightfield launch slice와 맞춘다.
+Contour block-height scale은 heightfield launch slice와 맞춘다. `combined_macro_height = 0`은
+항상 signed sea level인 `0 block`이다.
 
 ```text
-combined_macro_height -0.75 .. 1.25
--> -48 .. 160 blocks
+combined_macro_height -0.75 -> -48 blocks
+combined_macro_height  0.00 ->   0 blocks
+combined_macro_height  1.25 -> 160 blocks
 ```
 
 ---
@@ -269,6 +271,10 @@ terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field 
 `BoundaryCache`가 제공하는 noisy edge geometry다. 이 overlay는 field 값을 가리지 않는 faint
 reference layer여야 하며, 기본 alpha는 강한 선 레이어가 아니라 위치 확인용 수준이어야 한다.
 straight nearest-site 경계가 아니라 canonical noisy curve를 따른다.
+
+모든 macro field preview output은 방향 compass overlay를 포함한다. 기준은 world topdown 좌표계이며
+이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은 남(S), 왼쪽은 서(W)다. compass는 legend와 scale bar를
+가리지 않는 보조 overlay여야 하고 field channel 값을 바꾸지 않는다.
 
 macro-field cache tile boundary grid는 보조 진단용으로 얇게 유지할 수 있다. 이 grid가 Voronoi graph
 edge보다 강하게 보이거나 height normalization 단위처럼 읽히면 회귀다.

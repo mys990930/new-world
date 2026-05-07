@@ -168,11 +168,13 @@ pub struct MacroFieldContourSet {
 }
 
 pub fn combined_macro_height_to_blocks(value: f32) -> f32 {
-    let t = ((value - MACRO_FIELD_CONTOUR_NORMALIZED_MIN)
-        / (MACRO_FIELD_CONTOUR_NORMALIZED_MAX - MACRO_FIELD_CONTOUR_NORMALIZED_MIN))
-        .clamp(0.0, 1.0);
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS
-        + t * (MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS)
+    if value >= 0.0 {
+        let t = (value / MACRO_FIELD_CONTOUR_NORMALIZED_MAX.max(f32::EPSILON)).clamp(0.0, 1.0);
+        t * MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS
+    } else {
+        let t = (value / MACRO_FIELD_CONTOUR_NORMALIZED_MIN.min(-f32::EPSILON)).clamp(0.0, 1.0);
+        t * MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS
+    }
 }
 
 pub fn extract_macro_field_contours(
@@ -2016,6 +2018,19 @@ mod tests {
     }
 
     #[test]
+    fn contour_block_scale_keeps_signed_zero_at_sea_level() {
+        assert_eq!(combined_macro_height_to_blocks(0.0), 0.0);
+        assert_eq!(
+            combined_macro_height_to_blocks(MACRO_FIELD_CONTOUR_NORMALIZED_MIN),
+            MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS
+        );
+        assert_eq!(
+            combined_macro_height_to_blocks(MACRO_FIELD_CONTOUR_NORMALIZED_MAX),
+            MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS
+        );
+    }
+
+    #[test]
     fn simple_ramp_field_produces_contour_crossing() {
         let tile = test_contour_tile(&[0.0, 16.0, 0.0, 16.0], 2, 2);
 
@@ -2116,10 +2131,15 @@ mod tests {
     }
 
     fn blocks_to_combined_macro_height(height_blocks: f32) -> f32 {
-        let t = (height_blocks - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS)
-            / (MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS - MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS);
-        MACRO_FIELD_CONTOUR_NORMALIZED_MIN
-            + t * (MACRO_FIELD_CONTOUR_NORMALIZED_MAX - MACRO_FIELD_CONTOUR_NORMALIZED_MIN)
+        if height_blocks >= 0.0 {
+            let t = (height_blocks / MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS.max(f32::EPSILON))
+                .clamp(0.0, 1.0);
+            t * MACRO_FIELD_CONTOUR_NORMALIZED_MAX
+        } else {
+            let t = (height_blocks / MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS.min(-f32::EPSILON))
+                .clamp(0.0, 1.0);
+            t * MACRO_FIELD_CONTOUR_NORMALIZED_MIN
+        }
     }
 
     fn test_site(

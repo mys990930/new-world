@@ -25,6 +25,7 @@
 
 - a top-down PNG under `target/meso-preview/` by default
   - the image includes chunk grid lines plus a top/left coordinate frame with chunk `x/z` labels and center-chunk highlight
+  - the image includes the shared compass overlay: top=N, right=E, bottom=S, left=W
 - stdout diagnostics for:
   - center chunk region identity
   - original vs filtered meso guide sample
@@ -41,6 +42,7 @@
 5. Run `build_chunk_meso_applied_prototype_for_feature(...)` with an optional exclusive feature filter.
 6. Render the resulting `height - base_height` field as a meso-only top-down heatmap with hillshade, contours, chunk grid lines, and explicit chunk-coordinate reference labels.
 7. If `--overlay hill_peaks` is requested, draw the filtered hill-cluster local-peak candidates from the same guide map on top of that heatmap so candidate density can be inspected before owner-region sparsening and per-hill resolve.
+8. Draw the shared compass overlay so the PNG can be compared with macro-field previews.
 
 ## Why Flat-Base Preview Exists
 

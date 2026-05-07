@@ -25,6 +25,10 @@ use new_world::world::{
     sample_chunk_surface_lod, sample_meso_guides, sample_topdown_columns,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_offscreen;
+
 #[path = "shared/world_dump_common.rs"]
 mod world_dump_common;
 
@@ -291,7 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bounds = combined_render_bounds(&render_meshes)
         .ok_or_else(|| cli_error("failed to compute preview bounds"))?;
     let camera = build_preview_camera(bounds, width, height, quarter_turns % 4);
-    let image = render_offscreen(OffscreenRenderRequest {
+    let mut image = render_offscreen(OffscreenRenderRequest {
         width,
         height,
         camera,
@@ -300,6 +304,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         chunk_meshes: render_meshes.clone(),
         clear_color_override: None,
     })?;
+    draw_compass_offscreen(&mut image);
     write_offscreen_png(&output, &image)?;
 
     match &source {

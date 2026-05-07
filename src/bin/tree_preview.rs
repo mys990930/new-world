@@ -17,6 +17,10 @@ use new_world::world::{
     generate_tree_blueprint, world_to_chunk_local,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_offscreen;
+
 const DEFAULT_IMAGE_WIDTH: u32 = 1600;
 const DEFAULT_IMAGE_HEIGHT: u32 = 1000;
 const PREVIEW_TREE_COUNT: usize = 5;
@@ -75,7 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ))
     });
 
-    let image = render_offscreen(OffscreenRenderRequest {
+    let mut image = render_offscreen(OffscreenRenderRequest {
         width,
         height,
         camera,
@@ -84,6 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         chunk_meshes: render_meshes,
         clear_color_override: Some([0.72, 0.82, 0.92, 1.0]),
     })?;
+    draw_compass_offscreen(&mut image);
     write_offscreen_png(&output, &image)?;
 
     println!("tree kind: {} ({})", kind.key(), kind.display_name());

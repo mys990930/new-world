@@ -21,6 +21,10 @@ use new_world::world::generation::{
     generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_rgb;
+
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
@@ -446,6 +450,7 @@ impl PreviewHeader {
             format!("center_z={}", self.center_z),
             format!("width={}", self.width),
             format!("height={}", self.height),
+            "orientation_overlay=north_up_east_right".to_string(),
             format!("world_span_blocks={}", self.world_span_blocks),
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
@@ -702,6 +707,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             config.contour_step_blocks,
             config.contour_major_every,
         );
+        draw_compass_rgb(&mut image);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((channel, output, image.width(), image.height()));
     }

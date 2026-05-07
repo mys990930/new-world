@@ -108,7 +108,7 @@ of giving every tile its own artificial low and high.
    `combined_macro_height -0.75..1.25 -> -48..160 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
-   overlay, a scale bar, and a thin macro-field cache tile grid.
+   overlay, a scale bar, a compass overlay, and a thin macro-field cache tile grid.
 11. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
@@ -171,6 +171,8 @@ Each PNG contains:
   broad white-material hillshade, so graph edges there are only a barely visible registration aid.
 - The scale bar is drawn on every channel so the world footprint can be read without checking
   metadata.
+- The compass overlay is drawn on every channel. Its orientation is fixed to the common macro-field
+  frame: image top=N, right=E, bottom=S, left=W.
 - The `contour` channel is a diagnostic layer, not a terrain source of truth. It should be used to
   check whether the pre-heightfield combined macro height is continuous and readable before the
   heightfield/water solve consumes it. The contour channel keeps noisy Voronoi edge overlay off so

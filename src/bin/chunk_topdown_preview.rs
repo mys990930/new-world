@@ -19,6 +19,10 @@ use new_world::world::{
     resolve_chunk_surface_plan, resolve_material_policy_for_archetype, sample_region_classes,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_rgb;
+
 #[path = "shared/world_dump_common.rs"]
 mod world_dump_common;
 
@@ -331,101 +335,112 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output =
         output.unwrap_or_else(|| default_output_path(&source, center_x, center_z, radius, stage));
-    let (image, surface_range, debug_summary, mesh_debug, stage_debug, material_debug) = match stage
-    {
-        PreviewStage::Full => {
-            let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
+    let (mut image, surface_range, debug_summary, mesh_debug, stage_debug, material_debug) =
+        match stage {
+            PreviewStage::Full => {
+                let mut world = WorldCore::new(meta, Arc::clone(&block_registry));
 
-            match created_world_dir.as_deref() {
-                Some(world_dir) => {
-                    let manifest = created_world_manifest
-                        .as_ref()
-                        .expect("created-world preview metadata should exist");
-                    ensure_created_world_bounds_cover_request(
-                        manifest.min_chunk_coord(),
-                        manifest.max_chunk_coord(),
-                        center_x,
-                        center_z,
-                        radius,
-                        min_y_chunk,
-                        max_y_chunk,
-                    )?;
-                    load_preview_chunks(
+                match created_world_dir.as_deref() {
+                    Some(world_dir) => {
+                        let manifest = created_world_manifest
+                            .as_ref()
+                            .expect("created-world preview metadata should exist");
+                        ensure_created_world_bounds_cover_request(
+                            manifest.min_chunk_coord(),
+                            manifest.max_chunk_coord(),
+                            center_x,
+                            center_z,
+                            radius,
+                            min_y_chunk,
+                            max_y_chunk,
+                        )?;
+                        load_preview_chunks(
+                            &mut world,
+                            world_dir,
+                            manifest.min_chunk_coord(),
+                            manifest.max_chunk_coord(),
+                            center_x,
+                            center_z,
+                            radius,
+                            min_y_chunk,
+                            max_y_chunk,
+                        )?;
+                    }
+                    None => generate_preview_chunks(
                         &mut world,
-                        world_dir,
-                        manifest.min_chunk_coord(),
-                        manifest.max_chunk_coord(),
+                        block_registry.as_ref(),
                         center_x,
                         center_z,
                         radius,
                         min_y_chunk,
                         max_y_chunk,
-                    )?;
+                    ),
                 }
-                None => generate_preview_chunks(
-                    &mut world,
+
+                let (image, surface_range, debug_summary) = render_topdown_preview(
+                    &world,
                     block_registry.as_ref(),
                     center_x,
                     center_z,
                     radius,
                     min_y_chunk,
                     max_y_chunk,
-                ),
+                    pixels_per_block,
+                )?;
+                let mesh_debug = collect_mesh_debug_summary(
+                    &world,
+                    block_registry.as_ref(),
+                    center_x,
+                    center_z,
+                    radius,
+                    min_y_chunk,
+                    max_y_chunk,
+                );
+                (
+                    image,
+                    surface_range,
+                    Some(debug_summary),
+                    Some(mesh_debug),
+                    None,
+                    None,
+                )
             }
-
-            let (image, surface_range, debug_summary) = render_topdown_preview(
-                &world,
-                block_registry.as_ref(),
-                center_x,
-                center_z,
-                radius,
-                min_y_chunk,
-                max_y_chunk,
-                pixels_per_block,
-            )?;
-            let mesh_debug = collect_mesh_debug_summary(
-                &world,
-                block_registry.as_ref(),
-                center_x,
-                center_z,
-                radius,
-                min_y_chunk,
-                max_y_chunk,
-            );
-            (
-                image,
-                surface_range,
-                Some(debug_summary),
-                Some(mesh_debug),
-                None,
-                None,
-            )
-        }
-        PreviewStage::Prototype | PreviewStage::Hydrology => {
-            let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
-            let grid =
-                build_stage_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
-            let (image, surface_range, stage_debug) =
-                render_stage_topdown_preview(&grid, center_x, center_z, radius, pixels_per_block)?;
-            (image, surface_range, None, None, Some(stage_debug), None)
-        }
-        PreviewStage::HardMaterial | PreviewStage::SurfaceMaterial => {
-            let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
-            let grid =
-                build_material_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
-            let (image, surface_range, material_debug) = render_material_topdown_preview(
-                &grid,
-                center_x,
-                center_z,
-                radius,
-                pixels_per_block,
-            )?;
-            (image, surface_range, None, None, None, Some(material_debug))
-        }
-    };
+            PreviewStage::Prototype | PreviewStage::Hydrology => {
+                let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
+                let grid =
+                    build_stage_preview_grid(&meta, center_x, center_z, generation_radius, stage)?;
+                let (image, surface_range, stage_debug) = render_stage_topdown_preview(
+                    &grid,
+                    center_x,
+                    center_z,
+                    radius,
+                    pixels_per_block,
+                )?;
+                (image, surface_range, None, None, Some(stage_debug), None)
+            }
+            PreviewStage::HardMaterial | PreviewStage::SurfaceMaterial => {
+                let generation_radius = radius + DEFAULT_STAGE_GENERATION_PADDING;
+                let grid = build_material_preview_grid(
+                    &meta,
+                    center_x,
+                    center_z,
+                    generation_radius,
+                    stage,
+                )?;
+                let (image, surface_range, material_debug) = render_material_topdown_preview(
+                    &grid,
+                    center_x,
+                    center_z,
+                    radius,
+                    pixels_per_block,
+                )?;
+                (image, surface_range, None, None, None, Some(material_debug))
+            }
+        };
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    draw_compass_rgb(&mut image);
     image.save(&output)?;
 
     match &source {

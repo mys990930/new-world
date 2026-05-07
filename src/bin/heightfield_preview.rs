@@ -20,6 +20,10 @@ use new_world::world::generation::{
     graph_region_for_world_block, solve_hydrology,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_offscreen;
+
 const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
@@ -246,6 +250,7 @@ impl PreviewHeader {
             format!("generator_version={}", self.generator_version),
             format!("center={},{}", self.center_x, self.center_z),
             format!("image={}x{}", self.width, self.height),
+            "orientation_overlay=north_up_east_right".to_string(),
             format!("world_span_blocks={}", self.world_span_blocks),
             format!(
                 "world_footprint_blocks=x:{:.1}..{:.1},z:{:.1}..{:.1}",
@@ -330,7 +335,7 @@ impl PreviewHeader {
             ),
             "height_snap=round_to_integer_block".to_string(),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
-            "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
+            "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_-48_to_0_to_160_blocks".to_string(),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
                 self.build_ms,
@@ -453,6 +458,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     draw_boundary_overlays(&mut image, &heightfield, plan, window);
     draw_overlay(&mut image, &header);
+    draw_compass_offscreen(&mut image);
     write_rgba_png_with_metadata(&image, &output, &header)?;
 
     println!("heightfield preview: seed {}", config.seed);

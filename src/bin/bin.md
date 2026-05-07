@@ -5,6 +5,8 @@
 - Index the standalone binaries under `src/bin`.
 - Summarize what each binary does, which parameters it accepts, and which command shape is recommended right now.
 - Keep this index focused on active tools only. Removed legacy atlas / realization / terrain-search preview binaries are intentionally not listed here.
+- Active preview images include a small compass overlay. The shared orientation is macro-field/world
+  topdown orientation: image top is north (N), right is east (E), bottom is south (S), and left is west (W).
 
 ## Current Index
 
@@ -262,3 +264,4 @@ cargo run --bin world_create -- 42 --center-x 0 --center-z 0 --radius 16 --outpu
 - Use `heightfield_preview` to inspect contour-guided heightfield columns before final voxel fill.
 - Use `chunk_preview --stage prototype` or `--stage hydrology` when you need the older chunk-oriented diagnostic paths.
 - Use `chunk_topdown_preview --world-dir ...` when you already have a valid created-world dump and need exact realized block-column inspection.
+- Read the compass on preview PNGs as the common world orientation marker: up=N and right=E.

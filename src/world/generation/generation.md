@@ -69,7 +69,8 @@ macro terrain identity는 graph와 field가 소유한다.
 
 아래 순서가 현재 graph-first generator의 표준 순서다. 각 단계는 같은 seed, generator version,
 area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown preview binary로 검사할 수
-있어야 한다.
+있어야 한다. preview output은 공통적으로 방향 compass overlay를 포함하며, macro field 기준으로
+이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
 
 1. seed 기반 padded Voronoi/Delaunay dual graph를 생성한다.
 2. site/corner에 macro-friendly base field를 부여하고 이웃 graph를 참고해 smoothing한다.
@@ -170,8 +171,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      oriented `HeightfieldTile`로 변환한다.
    - heightfield는 `combined_macro_height`를 직접 continuous height로 쓰지 않고, stage 8 contour
      preview와 같은 block-height domain에서 contour lower band를 선택해 1-block integer terrace를
-     만든다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column output은 같은
-     contour level domain과 일관되어야 한다.
+     만든다. 이 block-height domain은 signed sea level과 정렬되어 `combined_macro_height = 0`이
+     `y = 0`이 되어야 한다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column
+     output은 같은 contour level domain과 일관되어야 한다.
    - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
      final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
      올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을

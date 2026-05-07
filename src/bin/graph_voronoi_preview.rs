@@ -16,6 +16,10 @@ use new_world::world::generation::{
     graph_region_for_world_block, graph_site_spacing_stats,
 };
 
+mod common;
+
+use common::preview_compass::draw_compass_rgb;
+
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
@@ -392,6 +396,7 @@ impl PreviewHeader {
             format!("center_z={}", self.center_z),
             format!("width={}", self.width),
             format!("height={}", self.height),
+            "orientation_overlay=north_up_east_right".to_string(),
             format!("world_span_blocks={}", self.world_span_blocks),
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
@@ -470,6 +475,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut image = render_preview(window, &graph, config.region_size_blocks, mode)?;
         draw_graph_topology_overlay(&mut image, window, &graph, mode);
         draw_legend_overlay(&mut image, mode);
+        draw_compass_rgb(&mut image);
         write_png_with_metadata(&image, &output, &header)?;
         generated.push((mode, output, image.width(), image.height()));
     }
@@ -1148,6 +1154,7 @@ fn draw_gradient_bar(
     }
 }
 
+#[allow(dead_code)]
 fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3], scale: u32) {
     let mut cursor_x = x;
     for ch in text.chars() {

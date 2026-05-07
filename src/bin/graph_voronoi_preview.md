@@ -50,6 +50,8 @@
 - each PNG includes a compact legend overlay in one corner:
   - identity mode shows a small map label/header only
   - field modes show a small gradient bar with low/high meaning labels
+- each PNG includes a compass overlay using the common preview orientation: image top=N, right=E,
+  bottom=S, left=W
 - stdout summary for seed, generator version, selected modes, world footprint, graph region area, site count, metadata, and generated file paths
 - stdout and metadata include nearest-site spacing min/avg/max/stddev/CV so cell size variability is visible without reading pixels by eye
 - a PNG iTXt chunk named `new-world-preview-header` containing the deterministic header fields plus `mode`, `map_name`, and site spacing stats
