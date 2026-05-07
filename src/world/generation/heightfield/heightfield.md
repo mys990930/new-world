@@ -61,6 +61,7 @@ heightfield_column_from_sample(&MacroFieldSample, HeightfieldConfig) -> Heightfi
 
 ```rust
 HeightfieldConfig {
+    horizontal_subdivisions,
     sea_level_blocks,
     min_height_blocks,
     max_height_blocks,
@@ -103,6 +104,13 @@ HeightfieldColumn {
     micro_relief_blocks,
 }
 ```
+
+`horizontal_subdivisions`는 X/Z 방향 sampling density 계약이다. 기본값 `1`은 입력
+`MacroFieldTile`의 sample grid를 그대로 column으로 변환한다. preview나 runtime cache가 같은
+world footprint를 더 촘촘히 보고 싶으면 macro field tile의 `width/height`를 각 축에서
+`horizontal_subdivisions`배로 만들고 `sample_spacing_blocks`를 같은 비율로 줄인 뒤 heightfield로
+넘긴다. 이 값은 vertical scale이 아니며, 같은 world-space sample과 같은 scalar는 subdivision 값과
+무관하게 같은 integer `surface_y`/`water_y`를 가져야 한다.
 
 ---
 
@@ -225,6 +233,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   계약이다.
 - `--vertical-scale`은 자동 산정값에 곱해지는 preview-only multiplier이며 기본은 `1.0`이다. 실제
   heightfield 값을 바꾸지 않는다.
+- `--xz-scale`은 같은 world footprint에서 X/Z column density만 늘리는 preview sampling multiplier다.
+  기본 preview는 `2`를 사용해 각 축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다.
+  이 값은 `y` height block, sea level, contour step, river water descent 값을 rescale하지 않는다.
 - column은 top diamond와 보이는 east/south side face만 그린다. 모든 column을 전역 base plane까지
   벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를 보여주는
   terraced relief를 우선한다.
@@ -270,3 +281,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     파인 지형처럼 보이면 회귀다.
 12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
+13. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
+    바꾸지 않는다. 같은 world-space `MacroFieldSample`은 subdivision 1과 2에서 같은 `surface_y`와
+    water hint를 가져야 한다.

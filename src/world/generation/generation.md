@@ -188,6 +188,9 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
      만들지 않아야 한다.
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
+   - heightfield는 vertical block height와 horizontal sampling density를 분리한다. 같은 world footprint를
+     더 촘촘히 검사하거나 cache하고 싶으면 X/Z sample 수만 늘리고 sample spacing을 줄이며, sea level,
+     contour step, river water height 같은 Y block 값은 그대로 유지한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.
 14. vegetation/feature placement plan을 만든다.

@@ -15,6 +15,7 @@ pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
+pub const DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldContourConfig {
@@ -33,6 +34,7 @@ impl Default for HeightfieldContourConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldConfig {
+    pub horizontal_subdivisions: u32,
     pub sea_level_blocks: f32,
     pub min_height_blocks: f32,
     pub max_height_blocks: f32,
@@ -49,6 +51,7 @@ pub struct HeightfieldConfig {
 impl Default for HeightfieldConfig {
     fn default() -> Self {
         Self {
+            horizontal_subdivisions: DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS,
             sea_level_blocks: DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
             min_height_blocks: DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
             max_height_blocks: DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
@@ -144,6 +147,7 @@ pub struct HeightfieldTile {
     pub width: u32,
     pub height: u32,
     pub sample_spacing_blocks: f32,
+    pub horizontal_subdivisions: u32,
     pub columns: Vec<HeightfieldColumn>,
     pub stats: HeightfieldTileStats,
     pub config: HeightfieldConfig,
@@ -187,6 +191,7 @@ pub fn generate_heightfield_tile(
         width: macro_tile.config.width,
         height: macro_tile.config.height,
         sample_spacing_blocks: macro_tile.config.sample_spacing_blocks,
+        horizontal_subdivisions: config.horizontal_subdivisions,
         columns,
         stats,
         config,
@@ -830,6 +835,7 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.normalized_min_height < config.normalized_max_height);
     assert!(config.ocean_bed_blocks <= 0.0);
     assert!(config.lake_bed_blocks <= 0.0);
+    assert!(config.horizontal_subdivisions > 0);
     assert!(config.shore_ramp_blocks.is_finite());
     assert!(config.shore_min_land_blocks.is_finite());
     assert!(config.shore_ramp_blocks >= 0.0);
@@ -899,6 +905,35 @@ mod tests {
 
         assert_eq!(contour.step_blocks, 1.0);
         assert_eq!(contour.band_smoothing, 0.0);
+    }
+
+    #[test]
+    fn horizontal_subdivision_does_not_rescale_vertical_height() {
+        let sample = sample(0.0, 0.0, 0.37, 0.0, 0.0, 0.0, 0.0);
+        let scale_one = heightfield_column_from_sample(
+            &sample,
+            HeightfieldConfig {
+                horizontal_subdivisions: 1,
+                ..HeightfieldConfig::default()
+            },
+        );
+        let scale_two = heightfield_column_from_sample(
+            &sample,
+            HeightfieldConfig {
+                horizontal_subdivisions: 2,
+                ..HeightfieldConfig::default()
+            },
+        );
+
+        assert_eq!(
+            scale_one.raw_surface_height_blocks,
+            scale_two.raw_surface_height_blocks
+        );
+        assert_eq!(scale_one.surface_y, scale_two.surface_y);
+        assert_eq!(
+            scale_one.water_level_blocks, scale_two.water_level_blocks,
+            "horizontal sampling density must not change vertical water policy"
+        );
     }
 
     #[test]

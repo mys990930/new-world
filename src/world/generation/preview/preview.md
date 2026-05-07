@@ -363,6 +363,9 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--columns-x <u32>`: heightfield sample column 수, 기본 `192`
   - `--columns-z <u32>`: 기본은 image aspect에서 계산. 단 `--chunk-radius` 모드에서는 square
     footprint에 맞춰 기본값이 `columns-x`가 된다.
+  - `--xz-scale <u32>`: 같은 world footprint에서 X/Z column density만 곱하는 multiplier, 기본 `2`.
+    `--horizontal-subdivisions` alias도 허용한다. `2`이면 effective columns가 각 축 두 배가 되고
+    effective sample spacing은 절반이 되지만, Y height block 값은 바뀌지 않는다.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -375,7 +378,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 
 - 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
-- metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
+- metadata/stdout은 base/effective column resolution, XZ scale, base/effective sample spacing,
+  block height min/avg/max, water/ocean/lake/
   river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, ocean
   visible `y=0` policy, river water descent stats, meso/perlin stub 상태, isometric view/projection,
   timing을 기록한다.
@@ -386,6 +390,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
   32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
+  column resolution은 effective column count를 뜻하며, legend에는 `XZ<n>`과 base/effective spacing도
+  함께 표시한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
 - 방향 compass는 이미지 위=N(`world -Z`), 오른쪽=E(`world +X`), 아래=S, 왼쪽=W라는 macro field

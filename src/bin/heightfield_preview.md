@@ -21,6 +21,9 @@
   - `--columns-x <u32>`: sampled heightfield columns across X, default `192`
   - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
     `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid
+  - `--xz-scale <u32>`: horizontal sampling multiplier, default `2`. The binary also accepts
+    `--horizontal-subdivisions`. Scale `2` keeps the same world footprint while producing twice as
+    many columns on X and Z, so total columns become four times larger.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -35,7 +38,8 @@
 3. Solve hydrology.
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
-6. Convert it to `HeightfieldTile` with pure contour-band terrace resolve.
+6. Convert it to `HeightfieldTile` with pure contour-band terrace resolve. `--xz-scale` only changes
+   X/Z sample spacing and column count; it never rescales Y block height.
 7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
    fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
@@ -60,6 +64,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   20-35% of the image height. This keeps top faces and relief visible at the same time.
 - `--vertical-scale` multiplies the automatic relief fit. It does not modify `HeightfieldTile`
   values or persisted generation data.
+- `--xz-scale` changes horizontal density only. For example, with the default base `192` columns and
+  `--xz-scale 2`, the effective X column count is `384`; Z is scaled the same way after aspect or
+  chunk-radius resolution. Sea level, contour step, surface `y`, and river water `y` stay in the same
+  block domain as scale `1`.
 - Columns are drawn as top diamonds plus only the visible east/south side faces where a neighbor is
   lower. The preview does not draw every column down to a global base plane, because that reads as a
   side-view wall chart instead of a macro terrain surface.
@@ -97,6 +105,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   contains the world-block center. The world footprint is the covered chunk square times
   `CHUNK_EDGE`.
 - The legend/header records `cx`, `cz`, world footprint, column count/spacing, chunk x/z range,
+  base/effective column count, XZ scale, base/effective spacing, chunk x/z range,
   chunk radius, height range, contour step/smoothing-disabled value, sea level, primary `macro tile 1024 blk`,
   secondary `major 256 blk`, faint `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
@@ -113,4 +122,11 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 72
 
 ```bash
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 32 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r32.png
+```
+
+Scale 1/2 comparison for the same footprint:
+
+```bash
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 1 --output target/heightfield-preview/s42_r8_xz1.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --output target/heightfield-preview/s42_r8_xz2.png
 ```
