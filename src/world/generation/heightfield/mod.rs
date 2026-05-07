@@ -14,12 +14,14 @@ pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldContourConfig {
     pub step_blocks: f32,
+    pub min_gap_blocks: f32,
     pub band_smoothing: f32,
 }
 
@@ -27,6 +29,7 @@ impl Default for HeightfieldContourConfig {
     fn default() -> Self {
         Self {
             step_blocks: DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+            min_gap_blocks: DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS,
             band_smoothing: DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING,
         }
     }
@@ -122,6 +125,7 @@ pub struct HeightfieldTileStats {
     pub max_surface_height_blocks: f32,
     pub average_surface_height_blocks: f32,
     pub contour_step_blocks: f32,
+    pub contour_min_gap_blocks: f32,
     pub contour_band_smoothing: f32,
     pub max_raw_neighbor_delta_blocks: f32,
     pub max_contour_guided_neighbor_delta_blocks: f32,
@@ -288,7 +292,16 @@ fn normalized_to_blocks(value: f32, config: HeightfieldConfig) -> f32 {
 }
 
 fn resolve_contour_band_height(value: f32, contour: HeightfieldContourConfig) -> f32 {
-    snap_to_contour_step(value, contour)
+    if contour.step_blocks <= 0.0 {
+        return value;
+    }
+    let step = contour.step_blocks;
+    let stride = step + contour.min_gap_blocks.max(0.0);
+    if value >= 0.0 {
+        (value / stride).floor() * step
+    } else {
+        -((-value / stride).floor() * step)
+    }
 }
 
 fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {
@@ -640,6 +653,7 @@ fn heightfield_stats(
         max_surface_height_blocks: max,
         average_surface_height_blocks: sum / columns.len() as f32,
         contour_step_blocks: config.contour.step_blocks,
+        contour_min_gap_blocks: config.contour.min_gap_blocks,
         contour_band_smoothing: config.contour.band_smoothing,
         max_raw_neighbor_delta_blocks: max_neighbor_delta(columns, |column| {
             column.raw_surface_height_blocks
@@ -841,8 +855,10 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.shore_ramp_blocks >= 0.0);
     assert!(config.shore_min_land_blocks >= 0.0);
     assert!(config.contour.step_blocks.is_finite());
+    assert!(config.contour.min_gap_blocks.is_finite());
     assert!(config.contour.band_smoothing.is_finite());
     assert!(config.contour.step_blocks > 0.0);
+    assert!(config.contour.min_gap_blocks >= 0.0);
     assert!(config.contour.band_smoothing >= 0.0);
 }
 
@@ -904,6 +920,7 @@ mod tests {
         let contour = HeightfieldContourConfig::default();
 
         assert_eq!(contour.step_blocks, 1.0);
+        assert_eq!(contour.min_gap_blocks, 1.0);
         assert_eq!(contour.band_smoothing, 0.0);
     }
 
@@ -943,9 +960,37 @@ mod tests {
         let column = heightfield_column_from_sample(&sample, config);
         let lower = (column.raw_surface_height_blocks / config.contour.step_blocks).floor()
             * config.contour.step_blocks;
+        let expected =
+            resolve_contour_band_height(column.raw_surface_height_blocks, config.contour);
 
-        assert_eq!(column.contour_guided_surface_height_blocks, lower);
+        assert!(
+            column.contour_guided_surface_height_blocks <= lower,
+            "gap policy should not raise the lower contour band"
+        );
+        assert_eq!(column.contour_guided_surface_height_blocks, expected);
         assert_eq!(column.surface_height_blocks.fract(), 0.0);
+    }
+
+    #[test]
+    fn contour_gap_requires_extra_raw_height_before_next_terrace() {
+        let config = HeightfieldConfig::default();
+        let just_below_next_stride =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.015, 0.0, 0.0, 0.0, 0.0), config);
+        let after_next_stride =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.016, 0.0, 0.0, 0.0, 0.0), config);
+
+        assert!(
+            just_below_next_stride.raw_surface_height_blocks > 1.0,
+            "raw height should already cross the old one-block terrace"
+        );
+        assert_eq!(
+            just_below_next_stride.surface_height_blocks, 0.0,
+            "default one-block gap keeps the next integer terrace unused until raw height crosses two blocks"
+        );
+        assert_eq!(
+            after_next_stride.surface_height_blocks, 1.0,
+            "after raw height crosses step+gap, the next integer terrace becomes available"
+        );
     }
 
     #[test]
@@ -992,6 +1037,7 @@ mod tests {
             HeightfieldConfig {
                 contour: HeightfieldContourConfig {
                     step_blocks: 4.0,
+                    min_gap_blocks: 0.0,
                     band_smoothing: 0.0,
                 },
                 ..HeightfieldConfig::default()
@@ -1022,11 +1068,12 @@ mod tests {
         let mut sample = sample(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0);
         sample.coast_mask = 1.0;
         let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
-        let lower = (column.raw_surface_height_blocks / DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS)
-            .floor()
-            * DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS;
+        let expected = resolve_contour_band_height(
+            column.raw_surface_height_blocks,
+            HeightfieldConfig::default().contour,
+        );
 
-        assert_eq!(column.surface_height_blocks, lower);
+        assert_eq!(column.surface_height_blocks, expected);
     }
 
     #[test]

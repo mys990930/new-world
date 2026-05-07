@@ -323,6 +323,7 @@ struct PreviewHeader {
     max_river_water_neighbor_delta: f32,
     river_uphill_flow_neighbors: usize,
     contour_step_blocks: f32,
+    contour_min_gap_blocks: f32,
     contour_band_smoothing: f32,
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
@@ -472,8 +473,8 @@ impl PreviewHeader {
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
             format!(
-                "contour_band_heightfield=step:{:.2}_blocks,smoothing_disabled:{:.2}",
-                self.contour_step_blocks, self.contour_band_smoothing
+                "contour_band_heightfield=step:{:.2}_blocks,min_gap:{:.2}_blocks,smoothing_disabled:{:.2}",
+                self.contour_step_blocks, self.contour_min_gap_blocks, self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
             format!("block_lines={}", self.block_lines),
@@ -600,6 +601,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_river_water_neighbor_delta: heightfield.stats.max_river_water_neighbor_delta_blocks,
         river_uphill_flow_neighbors: heightfield.stats.river_uphill_flow_neighbor_count,
         contour_step_blocks: heightfield.stats.contour_step_blocks,
+        contour_min_gap_blocks: heightfield.stats.contour_min_gap_blocks,
         contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
@@ -712,8 +714,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.river_uphill_flow_neighbors
     );
     println!(
-        "contour-band heightfield: step {:.1} blocks, smoothing disabled {:.2}",
-        heightfield.stats.contour_step_blocks, heightfield.stats.contour_band_smoothing
+        "contour-band heightfield: step {:.1} blocks, min gap {:.1} blocks, smoothing disabled {:.2}",
+        heightfield.stats.contour_step_blocks,
+        heightfield.stats.contour_min_gap_blocks,
+        heightfield.stats.contour_band_smoothing
     );
     println!(
         "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y height blocks are not rescaled, rendered vertical pixels are normalized by fixed xz density",
@@ -1608,8 +1612,10 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         text_x,
         text_y,
         &format!(
-            "BAND {:.0}B SM {:.1}",
-            header.contour_step_blocks, header.contour_band_smoothing
+            "BAND {:.0}B GAP {:.0}B SM {:.1}",
+            header.contour_step_blocks,
+            header.contour_min_gap_blocks,
+            header.contour_band_smoothing
         ),
         [204, 214, 203, 255],
         layout.scale,
@@ -2578,6 +2584,7 @@ mod tests {
                 max_surface_height_blocks: 72.0,
                 average_surface_height_blocks: 27.5,
                 contour_step_blocks: HeightfieldConfig::default().contour.step_blocks,
+                contour_min_gap_blocks: HeightfieldConfig::default().contour.min_gap_blocks,
                 contour_band_smoothing: HeightfieldConfig::default().contour.band_smoothing,
                 max_raw_neighbor_delta_blocks: 80.0,
                 max_contour_guided_neighbor_delta_blocks: 80.0,

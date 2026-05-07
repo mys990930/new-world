@@ -160,6 +160,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      flow, carve strength를 저장한다. 강을 별도 noise curve로 다시 만들지 않는다.
    - river valley field는 고정 폭으로 모든 강을 칠하지 않는다. selected/display flow가 작은 상류는
      좁고 얕은 carve guide를 만들고, flow가 큰 하류 trunk에서만 넓고 깊은 carve guide를 만든다.
+   - river valley profile은 V자 center carve 하나가 아니라 flat-bottom + shoulder falloff 구조다.
+     하류일수록 flat bed 폭이 커지고 side shoulder가 완만해지며, carve depth는 과도한 canyon을 피하도록
+     capped된다.
    - river valley carve는 이 단계에서 2D scalar guide로 보이는 것이 정상이다. 최종 water surface와
      voxel carve는 heightfield/water/voxel 단계에서 확정하지만, combined macro height와 lit preview는
      이 guide가 지형을 낮추는 효과를 보여야 한다.
@@ -184,6 +187,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      만든다. 이 block-height domain은 signed sea level과 정렬되어 `combined_macro_height = 0`이
      `y = 0`이 되어야 한다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column
      output은 같은 contour level domain과 일관되어야 한다.
+   - launch contour terrace는 smoothing 없이 integer step을 유지하되, 모든 raw 1-block band를 바로
+     쓰지 않는다. `step + min_gap` stride로 다음 terrace를 열어 전체 높이를 압축할 수 있으며, 이 정책은
+     등고선/계단이 서로 과밀하게 붙어 보이는 문제를 줄이기 위한 heightfield band 계약이다.
    - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
      final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
      올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을

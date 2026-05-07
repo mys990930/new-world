@@ -167,11 +167,13 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
-   - river valley width와 depth는 모두 selected/display flow에서 파생한다. launch 기본 정책은
-     `flow_hint = clamp(sqrt(flow_accumulation) / 32, 0, 1)`을 만들고,
-     `width = 20 + (144 - 20) * flow_hint^1.35` blocks 범위를 사용한다. 중심부 carve depth도
-     `0.18..1.0` 범위에서 `flow_hint^1.15`로 커진다. 따라서 상류는 좁고 얕게 빠르게 사라지고,
-     하류 trunk에서만 넓고 깊은 valley guide가 보여야 한다.
+   - river valley width, flat-bed radius, depth는 모두 selected/display flow에서 파생한다. launch
+     기본 정책은 `flow_hint = clamp(sqrt(flow_accumulation) / 32, 0, 1)`을 만들고, outer valley
+     radius는 대략 `28..176` blocks, flat-bed radius는 대략 `3.5..56` blocks 범위에서 flow에 따라
+     커진다. 중심부는 즉시 V자로 떨어지지 않고 일정 depth를 유지하는 flat-bottom profile이며,
+     flat-bed 밖 shoulder에서 smooth falloff로 완만하게 원래 지형으로 회복한다. carve depth는 과도한
+     canyon을 피하기 위해 `0.12..0.68` 계열로 capped된다. 따라서 상류는 좁고 얕되 칼같은 V가 아니고,
+     하류 trunk는 더 넓고 평평한 강바닥과 완만한 어깨를 가져야 한다.
 8. 아래 계열로 combined macro height를 계산한다. 이 단계의 river carve는 최종 물/복셀 carve가
    아니라 heightfield가 읽을 2D valley/carve guide이며, preview에서 보여야 한다.
 
@@ -252,7 +254,7 @@ launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신
 - ridge influence
 - river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
   carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
-  얕게, 하류는 넓고 깊게 보여야 한다.
+  얕지만 knife-cut V가 아니어야 하고, 하류는 넓은 flat bed와 완만한 shoulder를 가져야 한다.
 - combined macro height. river valley carve가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
   subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
@@ -314,8 +316,10 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    안 된다. ridge를 높이로 재도입할 때는 guide 위 한 점만 밝은 pinpoint로 남지 않고, selected ridge
    path를 따라 연결된 mountain belt shoulder가 보여야 한다.
 4. river valley는 hydrology selected segment만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
-5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다. river valley width와
-   carve depth는 selected/display flow에 비례해야 하며, 고정 폭 corridor를 모든 강에 적용하면 안 된다.
+5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다. river valley width,
+   flat-bed radius, carve depth는 selected/display flow에 비례해야 하며, 고정 폭 corridor를 모든 강에
+   적용하면 안 된다. valley profile은 center flat-bottom과 shoulder falloff를 분리해야 하며, 하류일수록
+   flat bed가 넓고 완만하게 보여야 한다.
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.

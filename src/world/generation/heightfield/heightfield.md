@@ -77,6 +77,7 @@ HeightfieldConfig {
 
 HeightfieldContourConfig {
     step_blocks,
+    min_gap_blocks,
     band_smoothing,
 }
 
@@ -162,13 +163,16 @@ launch 구현은 최종 surface/water output을 integer block height로 snap하�
 
 ```text
 contour.step_blocks = 1 block
+contour.min_gap_blocks = 1 block
 contour.band_smoothing = 0.0
 ```
 
-각 land column은 `raw_surface_height_blocks`가 속한 contour step의 lower level로 떨어진다. smoothing,
-smoothstep, band-local interpolation은 현재 사용하지 않는다. contour step을 4 blocks처럼 바꾸면 일반
-land output도 4-block terrace에 맞춰야 한다. raw continuous height는 `raw_surface_height_blocks`와
-`combined_macro_height`에 남지만 final terrain surface 결정에는 직접 쓰지 않는다.
+각 land column은 `raw_surface_height_blocks`가 속한 contour band의 lower level로 떨어진다. 기본
+launch 정책은 모든 1-block band를 바로 쓰지 않고, 다음 terrace로 올라가려면 raw block-height가
+`step_blocks + min_gap_blocks`만큼 더 진행되어야 한다. 출력 높이는 여전히 `0, 1, 2, ...` integer
+step이지만, 전체 height 사용량은 압축되어 등고선/계단이 과밀하게 붙어 보이는 현상을 줄인다. smoothing,
+smoothstep, band-local interpolation은 현재 사용하지 않는다. raw continuous height는
+`raw_surface_height_blocks`와 `combined_macro_height`에 남지만 final terrain surface 결정에는 직접 쓰지 않는다.
 
 ---
 
@@ -262,8 +266,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   방향이 화면에 놓이는 방향을 가리킨다.
 - `--block-lines`는 각 column top/visible side polygon에 매우 얇은 diagnostic outline을 더한다.
   기본 preview에서는 켜져 있으며, terrain 색을 압도하면 `--no-block-lines`로 끌 수 있다.
-- preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, smoothing disabled
-  값을 기록해야 한다.
+- preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, minimum gap,
+  smoothing disabled 값을 기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 
@@ -282,7 +286,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
    water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.
 9. heightfield contour band resolve는 raw macro scalar를 diagnostic으로 보존하되 final land terrain
    surface에는 직접 쓰지 않는다. water/shoreline constraint 전의 land column은 자신이 속한 contour
-   step의 lower band height가 되어야 하며, smoothing/interpolation을 적용하면 안 된다.
+   band의 lower height가 되어야 하며, smoothing/interpolation을 적용하면 안 된다.
 10. water-adjacent visible top은 bed가 아니라 water surface `y = 0`과 비교해야 한다. 순수
     contour-step mode에서 water와 맞닿은 land ring은 `y = 0`부터 시작하고, shoreline ramp 안쪽으로
     갈수록 contour step 단위로만 올라가야 한다.
@@ -290,7 +294,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     파인 지형처럼 보이면 회귀다.
 12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
-13. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
+13. contour gap 정책은 final height를 렌더링으로 속이는 값이 아니라 heightfield band resolve 계약이다.
+    `step_blocks = 1`, `min_gap_blocks = 1`이면 raw height가 2 block 진행될 때마다 visible terrain은
+    1 integer step 올라가며, sea level `y=0`, shoreline ceiling, river descent는 이 snap 결과 위에서
+    유지되어야 한다.
+14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
     바꾸지 않는다. 같은 world-space `MacroFieldSample`은 subdivision 1과 2에서 같은 `surface_y`와
     water hint를 가져야 한다. 단 preview 렌더링의 세로 픽셀 displacement는 subdivision에 반비례해
     보정되어, subdivision 2는 subdivision 1 대비 같은 Y 값을 절반 높이로 그려야 한다.

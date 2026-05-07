@@ -13,7 +13,7 @@ pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 160.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.0;
-pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.48;
+pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.34;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
@@ -26,9 +26,12 @@ pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
-const RIVER_MIN_WIDTH_BLOCKS: f32 = 20.0;
-const RIVER_MAX_WIDTH_BLOCKS: f32 = 144.0;
-const RIVER_HEADWATER_DEPTH_FACTOR: f32 = 0.18;
+const RIVER_MIN_WIDTH_BLOCKS: f32 = 28.0;
+const RIVER_MAX_WIDTH_BLOCKS: f32 = 176.0;
+const RIVER_MIN_FLAT_BED_BLOCKS: f32 = 3.5;
+const RIVER_MAX_FLAT_BED_BLOCKS: f32 = 56.0;
+const RIVER_HEADWATER_DEPTH_FACTOR: f32 = 0.12;
+const RIVER_TRUNK_DEPTH_FACTOR: f32 = 0.68;
 const DRY_BASIN_MIN_HEIGHT: f32 = 0.025;
 const DRY_BASIN_MAX_HEIGHT: f32 = 0.38;
 const DRY_BASIN_FLOOR_LOWERING: f32 = 0.035;
@@ -1280,7 +1283,7 @@ fn combine_macro_height(
     let ridge_raise = ridge_influence * config.ridge_height_scale;
     let river_carve = river_valley_strength
         * config.river_carve_scale
-        * (0.92 + river_flow_hint * 0.08)
+        * (0.86 + river_flow_hint * 0.10)
         * (1.0 - ocean_mask);
     let dry_basin = dry_basin_mask > 0.5;
     let coast_flatten = if dry_basin {
@@ -1413,7 +1416,15 @@ fn river_width_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
 
 fn river_depth_factor(flow_hint: f32) -> f32 {
     RIVER_HEADWATER_DEPTH_FACTOR
-        + (1.0 - RIVER_HEADWATER_DEPTH_FACTOR) * flow_hint.clamp(0.0, 1.0).powf(1.15)
+        + (RIVER_TRUNK_DEPTH_FACTOR - RIVER_HEADWATER_DEPTH_FACTOR)
+            * flow_hint.clamp(0.0, 1.0).powf(1.05)
+}
+
+fn river_flat_bed_radius_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
+    let t = flow_hint.clamp(0.0, 1.0).powf(1.05);
+    let flat =
+        RIVER_MIN_FLAT_BED_BLOCKS + (RIVER_MAX_FLAT_BED_BLOCKS - RIVER_MIN_FLAT_BED_BLOCKS) * t;
+    flat.min(river_width_blocks(flow_hint, configured_radius_blocks) * 0.42)
 }
 
 fn river_valley_strength_for_distance(
@@ -1422,7 +1433,18 @@ fn river_valley_strength_for_distance(
     configured_radius_blocks: f32,
 ) -> f32 {
     let width = river_width_blocks(flow_hint, configured_radius_blocks);
-    envelope(distance_blocks, width) * river_depth_factor(flow_hint)
+    let flat_bed = river_flat_bed_radius_blocks(flow_hint, configured_radius_blocks);
+    let depth = river_depth_factor(flow_hint);
+    if !distance_blocks.is_finite() || distance_blocks >= width {
+        return 0.0;
+    }
+    if distance_blocks <= flat_bed {
+        return depth;
+    }
+    let shoulder_t =
+        ((distance_blocks - flat_bed) / (width - flat_bed).max(f32::EPSILON)).clamp(0.0, 1.0);
+    let shoulder = 1.0 - smoothstep01(shoulder_t);
+    depth * shoulder.powf(1.35)
 }
 
 fn polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f32 {
@@ -1790,6 +1812,45 @@ mod tests {
         assert!(
             headwater <= 0.02,
             "headwater carve should fade quickly instead of using a fixed wide corridor: {headwater}"
+        );
+    }
+
+    #[test]
+    fn river_valley_has_flat_bed_before_shoulder_falloff() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let trunk = flow_hint(1024.0);
+        let flat = river_flat_bed_radius_blocks(trunk, radius);
+        let center = river_valley_strength_for_distance(0.0, trunk, radius);
+        let inside_flat = river_valley_strength_for_distance(flat * 0.85, trunk, radius);
+        let shoulder = river_valley_strength_for_distance(flat + 24.0, trunk, radius);
+
+        assert!(
+            flat > 24.0,
+            "downstream river should expose a wide flat bed"
+        );
+        assert!(
+            (center - inside_flat).abs() <= 0.001,
+            "river bottom should stay flat across the bed: center={center} inside={inside_flat}"
+        );
+        assert!(
+            shoulder < center && shoulder > 0.0,
+            "river shoulder should fall off after the flat bed without an immediate cliff: center={center} shoulder={shoulder}"
+        );
+    }
+
+    #[test]
+    fn downstream_flow_widens_flat_bed_and_stays_depth_capped() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let headwater = flow_hint(12.0);
+        let trunk = flow_hint(1024.0);
+
+        assert!(
+            river_flat_bed_radius_blocks(trunk, radius)
+                > river_flat_bed_radius_blocks(headwater, radius)
+        );
+        assert!(
+            river_depth_factor(trunk) <= RIVER_TRUNK_DEPTH_FACTOR + f32::EPSILON,
+            "downstream carve depth should be capped instead of becoming a deep V"
         );
     }
 

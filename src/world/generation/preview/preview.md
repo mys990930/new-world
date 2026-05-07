@@ -272,7 +272,9 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
 - `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
   carve strength. 이 channel은 selected curve를 source pixel로 rasterize한 tile influence pass를
-  사용해야 하며, raw polyline distance를 preview pixel마다 반복 계산하면 안 된다.
+  사용해야 하며, raw polyline distance를 preview pixel마다 반복 계산하면 안 된다. river valley는
+  flat-bottom + shoulder falloff profile이어야 해서, 하류 trunk는 더 넓고 평평한 강바닥을 보여야 하며
+  상류도 칼같은 V자로 파이면 회귀다.
 - `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과.
   이 단계의 river carve는 최종 water/voxel carve가 아니라 heightfield가 읽을 2D valley guide이며,
   combined/lit preview에서 보여야 한다. `combined`는 진단용 heat map이 아니라 macro base 위에 ridge와
@@ -380,7 +382,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 base/effective column resolution, XZ scale, base/effective sample spacing,
   block height min/avg/max, water/ocean/lake/
-  river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, ocean
+  river/dry/ridge column count, contour-band heightfield policy, contour minimum gap, integer height snap policy, ocean
   visible `y=0` policy, river water descent stats, meso/perlin stub 상태, isometric view/projection,
   timing을 기록한다.
 - metadata/stdout은 input center, input unit, center chunk, center world block, world footprint,
@@ -409,8 +411,10 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
-  1 block이며, `combined_macro_height`에서 얻은 raw block height를 직접 final surface로 쓰지 않고
-  해당 contour step의 lower band로 quantize한다. smoothing/interpolation은 현재 disabled/stub이다.
+  1 block이고 기본 minimum gap도 1 block이다. `combined_macro_height`에서 얻은 raw block height를
+  직접 final surface로 쓰지 않고 해당 contour band의 lower level로 quantize한다. 다음 integer
+  terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 전체 높이 사용량은
+  압축될 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
@@ -418,7 +422,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   contour ceiling으로 `0, 1, 2, ...` 계단을 따라 올라가야 한다. explicit cliff/meso feature가 없는
   launch slice에서 바다 옆 land가 즉시 높은 vertical cliff로 솟으면 회귀다.
 - river valley는 이미 `combined_macro_height`에 carve guide로 반영되어 있으므로 heightfield stage에서
-  중복 carve하지 않는다. 다만 river hint column에는 preliminary integer river water height를 만들고,
+  중복 carve하지 않는다. macro field 쪽 river guide는 flat-bottom + shoulder falloff profile이어야 한다.
+  다만 river hint column에는 preliminary integer river water height를 만들고,
   인접 river/standing-water surface와 한 block 이하의 step으로 천천히 내려오도록 clamping한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.

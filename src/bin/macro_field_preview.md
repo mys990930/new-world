@@ -50,8 +50,9 @@
 - `ridge`: connected distance-envelope influence around ridge noisy boundary curves. It should read
   as a mountain belt shoulder around the ridge maxima guide, not isolated bright pixels and not
   global low-level texture.
-- `river`: flow-scaled distance-envelope valley influence around selected hydrology river curves.
-  Upstream segments are narrow and shallow; downstream trunks are wider and deeper.
+- `river`: flow-scaled flat-bottom valley influence around selected hydrology river curves.
+  Upstream segments are narrow and shallow but should not read as knife-cut V shapes; downstream
+  trunks are wider with flatter beds and broader shoulders.
 - `combined`: macro elevation minus visible river valley carve guide, coast flatten, and water
   flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map. Ridge influence is
   diagnostic-only in the current launch slice and does not raise combined height until a broader
