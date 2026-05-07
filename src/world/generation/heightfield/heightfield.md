@@ -243,16 +243,16 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-- `vertical_px_per_block`은 preview 렌더링 전용 투영 값이다. 실제 `surface_y`, sea level, contour
-  step, river water height는 렌더링 때문에 다시 스케일하지 않는다.
-- preview의 세로 픽셀 스케일은 `horizontal_subdivisions`에서 고정 파생된다. 내부 heightfield 계약상
-  subdivision `1`도 유효하지만, `heightfield_preview` binary는 subdivision/XZ scale `2`를 고정으로
-  사용하며 같은 Y block 값을 기준 XZ density 대비 화면에서 절반 높이로 그린다.
-  즉 `height values are not rescaled; preview vertical pixels are normalized by xz sampling density`가
-  heightfield preview 계약이다.
+- `vertical_px_per_block`은 preview 렌더링 전용 투영 값이지만, XZ density에 맞춰 따로 눌러지는 보정
+  계수가 아니다. `heightfield_preview`는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
+  `vertical_px_per_block == tile_h_px`인 cubic scale로 그린다.
+- 고정 XZ scale `2`에 대응해 macro relief를 낮추는 정책은 preview 렌더링이 아니라
+  `macro_field`/`heightfield`가 공유하는 block-height 변환이 소유한다. 현재 launch scale은 이미
+  `-0.75..0.0..1.25 -> -24..0..80 blocks`로 50% 압축되어 있으므로 preview에서 같은 Y 값을 다시
+  절반으로 그리면 중복 압축이다.
 - heightfield preview의 XZ scale은 사용자 CLI 옵션이 아니다. 고정값 `2`는 같은 world footprint에서 각
-  축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다. 이 값은 `y` height block,
-  sea level, contour step, river water descent 값을 rescale하지 않는다.
+  축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다. preview는 이 산출 `y` height
+  block, sea level, contour step, river water descent 값을 cubic block scale로 렌더한다.
   X/Z 렌더링 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image size에서
   자동으로 파생된다.
 - column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
@@ -311,7 +311,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     raw height가 2 block 진행될 때마다 visible terrain은 1 integer step 올라간다. river corridor
     override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`, shoreline ceiling,
     river descent는 이 snap 결과 위에서 유지되어야 한다.
-14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
-    바꾸지 않는다. 같은 world-space `MacroFieldSample`은 subdivision 1과 2에서 같은 `surface_y`와
-    water hint를 가져야 한다. 단 preview 렌더링의 세로 픽셀 displacement는 subdivision에 반비례해
-    보정되어, subdivision 2는 subdivision 1 대비 같은 Y 값을 절반 높이로 그려야 한다.
+14. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, 그 자체가 per-sample
+    vertical rescale knob가 아니다. fixed XZ scale `2`에 맞춘 launch relief 완만화는 shared
+    block-height domain의 `-24..80` 기본 범위가 소유한다. preview 렌더러는 산출된 `surface_y`와
+    water hint를 cubic block scale로 그려야 하며, subdivision 값으로 같은 Y 값을 다시 낮춰 보이면
+    중복 압축이다.

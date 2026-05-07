@@ -30,9 +30,6 @@ const DEFAULT_COLUMNS_X: u32 = 192;
 const HEIGHTFIELD_PREVIEW_XZ_SCALE: u32 = 2;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
-const ISO_TARGET_RELIEF_FRACTION: f32 = 0.28;
-const ISO_MIN_RELIEF_FRACTION: f32 = 0.20;
-const ISO_MAX_RELIEF_FRACTION: f32 = 0.35;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
 const PREVIEW_MAJOR_CHUNK_GRID_BLOCKS: i32 = CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER;
@@ -305,7 +302,6 @@ struct PreviewHeader {
     requested_chunk_radius: Option<i32>,
     major_grid_edge_blocks: i32,
     macro_tile_edge_blocks: i32,
-    render_vertical_normalization: f32,
     graph_site_count: usize,
     macro_sample_count: usize,
     column_count: usize,
@@ -396,11 +392,8 @@ impl PreviewHeader {
                 "effective_sample_spacing_blocks={:.3}",
                 self.sample_spacing_blocks
             ),
-            "height_values=not_rescaled_by_preview".to_string(),
-            format!(
-                "render_scale_policy=xz_pixels_from_effective_columns_vertical_pixels_normalized_by_fixed_xz_scale_{}:{:.3}",
-                self.xz_scale, self.render_vertical_normalization
-            ),
+            "height_values=relief_compressed_before_preview".to_string(),
+            "render_scale_policy=cubic_block_pixels_no_vertical_normalization".to_string(),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
             format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
             format!(
@@ -609,7 +602,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         requested_chunk_radius: config.chunk_radius,
         major_grid_edge_blocks: PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
         macro_tile_edge_blocks: MACRO_FIELD_TILE_EDGE_BLOCKS,
-        render_vertical_normalization: plan.vertical_density_normalization(),
         graph_site_count: patch.sites.len(),
         macro_sample_count: macro_tile.samples.len(),
         column_count: heightfield.stats.column_count,
@@ -714,9 +706,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.chunk_radius_z
     );
     println!(
-        "view: cpu isometric columns, quarter turns {}, xz-derived vertical normalization {:.3}, vertical {:.3} px/block, relief span {:.1}px",
+        "view: cpu isometric columns, quarter turns {}, cubic block render scale, vertical {:.3} px/block, relief span {:.1}px",
         config.quarter_turns % 4,
-        plan.vertical_density_normalization(),
         iso_stats.vertical_px_per_block,
         iso_stats.projected_height_span_px
     );
@@ -763,7 +754,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
     println!(
-        "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y height blocks are not rescaled, rendered vertical pixels are normalized by fixed xz density",
+        "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y relief is compressed in heightfield block-domain before cubic preview rendering",
         HEIGHTFIELD_PREVIEW_XZ_SCALE
     );
     println!(
@@ -885,7 +876,6 @@ struct IsoRenderPlan {
     tile_w_px: f32,
     tile_h_px: f32,
     vertical_px_per_block: f32,
-    vertical_density_normalization: f32,
     offset_x_px: f32,
     offset_y_px: f32,
     min_surface_blocks: f32,
@@ -917,17 +907,15 @@ impl IsoRenderPlan {
         let min_surface = tile.stats.min_surface_height_blocks;
         let max_surface = tile.stats.max_surface_height_blocks;
         let height_range = (max_surface - min_surface).max(1.0);
-        let relief_fraction =
-            ISO_TARGET_RELIEF_FRACTION.clamp(ISO_MIN_RELIEF_FRACTION, ISO_MAX_RELIEF_FRACTION);
-        let vertical_density_normalization = vertical_density_normalization(tile);
-        let target_relief_px = height as f32 * relief_fraction * vertical_density_normalization;
         let footprint_axis_count = (tile.width + tile.height).max(2) as f32;
         let tile_w_by_width = width as f32 * 1.64 / footprint_axis_count;
-        let height_budget = (height as f32 * 0.86 - target_relief_px).max(height as f32 * 0.34);
-        let tile_w_by_height = height_budget * 4.0 / footprint_axis_count;
+        let height_budget = height as f32 * 0.86;
+        let height_denominator =
+            ISO_TILE_HEIGHT_RATIO * (footprint_axis_count * 0.5 + height_range);
+        let tile_w_by_height = height_budget / height_denominator.max(f32::EPSILON);
         let tile_w_px = tile_w_by_width.min(tile_w_by_height).clamp(2.0, 24.0);
         let tile_h_px = tile_w_px * ISO_TILE_HEIGHT_RATIO;
-        let vertical_px_per_block = (target_relief_px / height_range).max(0.05);
+        let vertical_px_per_block = tile_h_px;
         let mut plan = Self {
             width,
             height,
@@ -935,7 +923,6 @@ impl IsoRenderPlan {
             tile_w_px,
             tile_h_px,
             vertical_px_per_block,
-            vertical_density_normalization,
             offset_x_px: 0.0,
             offset_y_px: 0.0,
             min_surface_blocks: min_surface,
@@ -949,10 +936,6 @@ impl IsoRenderPlan {
 
     fn projected_height_span_px(self) -> f32 {
         (self.max_surface_blocks - self.min_surface_blocks).max(0.0) * self.vertical_px_per_block
-    }
-
-    fn vertical_density_normalization(self) -> f32 {
-        self.vertical_density_normalization
     }
 
     fn project_grid(self, x: f32, z: f32, y_blocks: f32, tile: &HeightfieldTile) -> Point2 {
@@ -1006,14 +989,6 @@ impl IsoRenderPlan {
         }
         (min_x, max_x, min_y, max_y)
     }
-}
-
-fn vertical_density_normalization(tile: &HeightfieldTile) -> f32 {
-    vertical_density_normalization_from_subdivisions(tile.horizontal_subdivisions)
-}
-
-fn vertical_density_normalization_from_subdivisions(horizontal_subdivisions: u32) -> f32 {
-    1.0 / horizontal_subdivisions.max(1) as f32
 }
 
 fn rotate_grid_delta(quarter_turns: u8, dx: f32, dz: f32) -> (f32, f32) {
@@ -1646,6 +1621,15 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
             "H {:.0}/{:.0}/{:.0}",
             header.min_surface, header.avg_surface, header.max_surface
         ),
+        [204, 214, 203, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        "CUBE 1:1:1 RELIEF50",
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -2515,12 +2499,16 @@ mod tests {
         let span = plan.projected_height_span_px();
 
         assert!(span > 720.0 * 0.19);
-        assert!(span < 720.0 * 0.36);
+        assert!(span < 720.0 * 0.86);
         assert!(plan.tile_w_px > 2.0);
+        assert_eq!(
+            plan.vertical_px_per_block, plan.tile_h_px,
+            "isometric preview should render blocks with cubic x/y/z visual scale; height relief must be compressed before rendering"
+        );
     }
 
     #[test]
-    fn xz_scale_two_halves_rendered_vertical_delta() {
+    fn xz_scale_two_keeps_cubic_render_scale() {
         let scale_one = two_by_two_heightfield_tile();
         let mut scale_two = two_by_two_heightfield_tile();
         scale_two.horizontal_subdivisions = 2;
@@ -2530,11 +2518,11 @@ mod tests {
         let plan_one = IsoRenderPlan::new(&scale_one, 1280, 720, 0).expect("scale one plan");
         let plan_two = IsoRenderPlan::new(&scale_two, 1280, 720, 0).expect("scale two plan");
 
-        assert!(
-            (plan_two.vertical_px_per_block - plan_one.vertical_px_per_block * 0.5).abs() < 0.001,
-            "xz scale 2 should render the same height values at half vertical pixel scale: {} vs {}",
-            plan_two.vertical_px_per_block,
-            plan_one.vertical_px_per_block
+        assert_eq!(plan_one.vertical_px_per_block, plan_one.tile_h_px);
+        assert_eq!(plan_two.vertical_px_per_block, plan_two.tile_h_px);
+        assert_eq!(
+            plan_one.vertical_px_per_block, plan_two.vertical_px_per_block,
+            "horizontal subdivisions alone must not add artificial vertical preview normalization"
         );
         assert_eq!(
             scale_one.columns[1].surface_y,

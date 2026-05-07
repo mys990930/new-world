@@ -438,11 +438,11 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-  `vertical_px_per_block`은 preview 렌더링 전용 값이며 heightfield의 `surface_y`, sea level,
-  contour step, river water height를 바꾸지 않는다. 대신 세로 픽셀 displacement는
-  fixed XZ scale `2` / `horizontal_subdivisions = 2`에 맞춰 고정 보정한다. 따라서 같은 Y block 값을
-  기준 XZ density 대비 절반 높이로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라 effective column
-  count, footprint, image size에서 파생된다.
+  `vertical_px_per_block`은 preview 렌더링 전용 값이지만, fixed XZ scale `2` 때문에 별도 세로
+  normalization을 적용하지 않는다. XZ scale `2`에 대응하는 완만한 높이는 macro/heightfield
+  block-domain의 relief compression에서 이미 산출되며, preview는 그 `surface_y`를 cubic block
+  scale로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image
+  size에서 파생된다.
 - The preview draws top diamonds and only visible neighbor-difference side faces. The visible side
   set and painter order are derived from the current `--quarter-turns` projection, not from fixed
   east/south faces. It must show top surfaces and macro relief together; a side-wall chart, a flat

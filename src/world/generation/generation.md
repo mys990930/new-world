@@ -203,13 +203,13 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      만들지 않아야 한다.
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
-   - heightfield는 vertical block height와 horizontal sampling density를 분리한다. 같은 world footprint를
-     더 촘촘히 검사하거나 cache하고 싶으면 X/Z sample 수만 늘리고 sample spacing을 줄이며, sea level,
-     contour step, river water height 같은 Y block 값은 그대로 유지한다.
-   - heightfield preview는 데이터 높이를 다시 스케일하지 않는다. 다만 같은 world footprint에서 X/Z
-     sampling density가 증가하면 렌더링상의 세로 픽셀 displacement를 그 density에 반비례해 보정한다.
-     `heightfield_preview`는 preview 정책상 XZ scale `2`를 고정으로 사용하며, 같은 `surface_y` 값을
-     보존하지만 화면에서는 기준 XZ density 대비 절반 높이로 보여야 한다. 이 값은 CLI 인자로 조절하지 않는다.
+   - `heightfield_preview`는 preview 정책상 XZ scale `2`를 고정으로 사용한다. 같은 world footprint에서
+     각 축 column 수를 두 배로 늘리고 sample spacing을 줄이지만, preview 렌더러가 Y 픽셀 스케일을 따로
+     눌러서는 안 된다.
+   - fixed XZ scale `2`에 대응하는 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와
+     `heightfield` band resolve가 공유하는 block-height domain에서 이미 적용한다. 현재 launch 기본
+     signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -24..0..80 blocks`다. preview는 이
+     산출 `surface_y`를 정육면체에 가까운 block primitive로 그대로 렌더한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.
 14. vegetation/feature placement plan을 만든다.

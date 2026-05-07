@@ -132,8 +132,8 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
   - The compass follows the current quarter-view projection, and thin block lines are on by default
     to make column scale readable.
   - Horizontal density is fixed at XZ scale `2` for this preview and is not a CLI option.
-    Heightfield Y values are not rescaled, but rendered vertical pixels are normalized by that fixed
-    XZ density so the same block heights display at half the baseline screen height.
+    Heightfield Y relief is already compressed in the macro/heightfield block-domain, and preview
+    rendering keeps block primitives visually cubic instead of applying an extra vertical scale.
   - Heightfield terrace resolve uses integer contour steps with a one-block raw minimum gap for
     both general land and river corridors; the river override structure remains available for later
     tuning.
