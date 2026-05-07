@@ -68,8 +68,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   - pale gray high/ridge
   - muted gray/mauve dry basin
 - Water boxes come from heightfield water hints, not final fluid simulation.
-- Sea level is fixed at `y = 0`. Coast-adjacent land is shoreline-ramped before integer snapping so
-  ordinary ocean/land contact does not render as an immediate vertical wall.
+- Sea level is fixed at `y = 0`. Coast-adjacent land uses a shoreline contour ceiling before
+  integer snapping so ordinary ocean/land contact does not render as an immediate vertical wall.
+  In pure contour-step mode, the first land ring next to water starts at `y = 0`, then rises inward
+  by contour steps.
 - Heightfield columns are resolved to contour bands before water/shore constraints. The raw block
   height from `combined_macro_height` remains stored for diagnostics, but final land surface does
   not directly use the continuous scalar. Default contour step is `1` block and smoothing is

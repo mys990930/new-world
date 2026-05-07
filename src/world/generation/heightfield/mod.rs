@@ -104,6 +104,12 @@ impl HeightfieldColumn {
         self.water_level_blocks
             .is_some_and(|water| water > self.surface_height_blocks)
     }
+
+    pub fn visible_surface_height_blocks(&self) -> f32 {
+        self.water_level_blocks
+            .filter(|water| *water > self.surface_height_blocks)
+            .unwrap_or(self.surface_height_blocks)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -118,6 +124,8 @@ pub struct HeightfieldTileStats {
     pub max_contour_guided_neighbor_delta_blocks: f32,
     pub max_constrained_neighbor_delta_blocks: f32,
     pub max_snapped_neighbor_delta_blocks: f32,
+    pub max_visible_neighbor_delta_blocks: f32,
+    pub max_shore_visible_neighbor_delta_blocks: f32,
     pub water_column_count: usize,
     pub ocean_column_count: usize,
     pub lake_column_count: usize,
@@ -291,9 +299,25 @@ fn apply_shoreline_ramp(
         return surface_height_blocks;
     }
     let inland_t = (1.0 - coast_t).clamp(0.0, 1.0);
-    let max_land_height = config.sea_level_blocks
-        + config.shore_min_land_blocks
-        + config.shore_ramp_blocks * inland_t.powf(1.65);
+    let max_land_height = config.sea_level_blocks + config.shore_ramp_blocks * inland_t.powf(1.65);
+    surface_height_blocks
+        .max(config.sea_level_blocks)
+        .min(max_land_height)
+}
+
+fn apply_shoreline_contour_ceiling(
+    surface_height_blocks: f32,
+    water_distance_blocks: f32,
+    sample_spacing_blocks: f32,
+    config: HeightfieldConfig,
+) -> f32 {
+    if !water_distance_blocks.is_finite() || sample_spacing_blocks <= 0.0 {
+        return surface_height_blocks;
+    }
+    let edge_distance = (water_distance_blocks - sample_spacing_blocks * 0.5).max(0.0);
+    let step = config.contour.step_blocks.max(1.0);
+    let allowed_steps_from_water = (edge_distance / sample_spacing_blocks).floor();
+    let max_land_height = config.sea_level_blocks + allowed_steps_from_water * step;
     surface_height_blocks
         .max(config.sea_level_blocks)
         .min(max_land_height)
@@ -315,10 +339,12 @@ fn apply_neighbor_shoreline_continuity(
         if column.water_level_blocks.is_some() || water_distance[index] > config.shore_ramp_blocks {
             continue;
         }
-        let edge_distance = (water_distance[index] - sample_spacing_blocks * 0.5).max(0.0);
-        let coast_t = 1.0 - (edge_distance / config.shore_ramp_blocks).clamp(0.0, 1.0);
-        let clamped =
-            apply_shoreline_ramp(column.constrained_surface_height_blocks, coast_t, config);
+        let clamped = apply_shoreline_contour_ceiling(
+            column.constrained_surface_height_blocks,
+            water_distance[index],
+            sample_spacing_blocks,
+            config,
+        );
         if clamped < column.constrained_surface_height_blocks {
             column.constrained_surface_height_blocks = clamped;
             let final_surface_height_blocks = snap_to_contour_step(clamped, config.contour);
@@ -534,6 +560,10 @@ fn heightfield_stats(
         max_snapped_neighbor_delta_blocks: max_neighbor_delta(columns, |column| {
             column.surface_height_blocks
         }),
+        max_visible_neighbor_delta_blocks: max_neighbor_delta(columns, |column| {
+            column.visible_surface_height_blocks()
+        }),
+        max_shore_visible_neighbor_delta_blocks: max_shore_neighbor_delta(columns),
         water_column_count: water,
         ocean_column_count: ocean,
         lake_column_count: lake,
@@ -541,6 +571,37 @@ fn heightfield_stats(
         dry_basin_column_count: dry,
         ridge_column_count: ridge,
     }
+}
+
+fn max_shore_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
+    if columns.len() < 2 {
+        return 0.0;
+    }
+    let width = infer_row_width(columns);
+    let mut max_delta = 0.0f32;
+    for (index, column) in columns.iter().enumerate() {
+        if index + 1 < columns.len() && (index + 1) % width != 0 {
+            let neighbor = &columns[index + 1];
+            if column.water_level_blocks.is_some() || neighbor.water_level_blocks.is_some() {
+                max_delta = max_delta.max(
+                    (column.visible_surface_height_blocks()
+                        - neighbor.visible_surface_height_blocks())
+                    .abs(),
+                );
+            }
+        }
+        if index + width < columns.len() {
+            let neighbor = &columns[index + width];
+            if column.water_level_blocks.is_some() || neighbor.water_level_blocks.is_some() {
+                max_delta = max_delta.max(
+                    (column.visible_surface_height_blocks()
+                        - neighbor.visible_surface_height_blocks())
+                    .abs(),
+                );
+            }
+        }
+    }
+    max_delta
 }
 
 fn max_neighbor_delta(
@@ -755,16 +816,42 @@ mod tests {
         let inland = tile.column(2, 0).expect("inland column");
 
         assert!(coast.raw_surface_height_blocks > 100.0);
-        assert!(
-            coast.surface_height_blocks <= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS + 6.0,
-            "land sample next to water should start near sea level, got {}",
-            coast.surface_height_blocks
+        assert_eq!(
+            coast.surface_height_blocks, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "first land sample next to water should start at sea level in contour-step mode"
+        );
+        assert_eq!(
+            inland.surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS + DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+            "second land sample should rise by one contour step"
         );
         assert!(inland.surface_height_blocks >= coast.surface_height_blocks);
+        assert!(
+            tile.stats.max_shore_visible_neighbor_delta_blocks
+                <= DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+            "water/shore visible top should not jump more than one contour step, got {}",
+            tile.stats.max_shore_visible_neighbor_delta_blocks
+        );
         assert!(
             tile.stats.max_constrained_neighbor_delta_blocks
                 < tile.stats.max_raw_neighbor_delta_blocks,
             "shoreline continuity should reduce the raw neighbor jump"
+        );
+    }
+
+    #[test]
+    fn water_visible_top_uses_water_surface_not_bed() {
+        let sample = sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0);
+        let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
+
+        assert!(column.surface_height_blocks <= DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS);
+        assert_eq!(
+            column.water_level_blocks,
+            Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+        );
+        assert_eq!(
+            column.visible_surface_height_blocks(),
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
         );
     }
 

@@ -214,6 +214,7 @@ struct PreviewHeader {
     max_constrained_neighbor_delta: f32,
     max_snapped_neighbor_delta: f32,
     max_visible_neighbor_delta: f32,
+    max_shore_visible_neighbor_delta: f32,
     contour_step_blocks: f32,
     contour_band_smoothing: f32,
     vertical_px_per_block: f32,
@@ -288,12 +289,13 @@ impl PreviewHeader {
                 self.min_surface, self.avg_surface, self.max_surface
             ),
             format!(
-                "neighbor_delta_raw_contour_constrained_snapped_visible_blocks={:.3},{:.3},{:.3},{:.3},{:.3}",
+                "neighbor_delta_raw_contour_constrained_snapped_visible_shore_visible_blocks={:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
                 self.max_raw_neighbor_delta,
                 self.max_contour_guided_neighbor_delta,
                 self.max_constrained_neighbor_delta,
                 self.max_snapped_neighbor_delta,
-                self.max_visible_neighbor_delta
+                self.max_visible_neighbor_delta,
+                self.max_shore_visible_neighbor_delta
             ),
             format!(
                 "water_ocean_lake_river_dry_ridge_columns={},{},{},{},{},{}",
@@ -311,7 +313,7 @@ impl PreviewHeader {
                 self.contour_step_blocks, self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
-            "shoreline_policy=land_coast_mask_ramps_from_y0_without_vertical_sea_cliff".to_string(),
+            "shoreline_policy=water_visible_top_y0_land_contour_ceiling_from_y0_without_vertical_sea_cliff".to_string(),
             "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
@@ -409,7 +411,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .max_contour_guided_neighbor_delta_blocks,
         max_constrained_neighbor_delta: heightfield.stats.max_constrained_neighbor_delta_blocks,
         max_snapped_neighbor_delta: heightfield.stats.max_snapped_neighbor_delta_blocks,
-        max_visible_neighbor_delta: max_visible_neighbor_delta(&heightfield),
+        max_visible_neighbor_delta: heightfield.stats.max_visible_neighbor_delta_blocks,
+        max_shore_visible_neighbor_delta: heightfield.stats.max_shore_visible_neighbor_delta_blocks,
         contour_step_blocks: heightfield.stats.contour_step_blocks,
         contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
@@ -482,12 +485,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.max_surface_height_blocks
     );
     println!(
-        "neighbor delta raw/contour/constrained/snapped/visible max {:.2}/{:.2}/{:.2}/{:.2}/{:.2} blocks",
+        "neighbor delta raw/contour/constrained/snapped/visible/shore-visible max {:.2}/{:.2}/{:.2}/{:.2}/{:.2}/{:.2} blocks",
         heightfield.stats.max_raw_neighbor_delta_blocks,
         heightfield.stats.max_contour_guided_neighbor_delta_blocks,
         heightfield.stats.max_constrained_neighbor_delta_blocks,
         heightfield.stats.max_snapped_neighbor_delta_blocks,
-        header.max_visible_neighbor_delta
+        header.max_visible_neighbor_delta,
+        header.max_shore_visible_neighbor_delta
     );
     println!(
         "contour-band heightfield: step {:.1} blocks, smoothing disabled {:.2}",
@@ -825,31 +829,7 @@ fn draw_column_iso(
 }
 
 fn visible_surface_height(column: HeightfieldColumn) -> f32 {
-    column
-        .water_level_blocks
-        .filter(|water| *water > column.surface_height_blocks)
-        .unwrap_or(column.surface_height_blocks)
-}
-
-fn max_visible_neighbor_delta(tile: &HeightfieldTile) -> f32 {
-    let width = tile.width as usize;
-    let height = tile.height as usize;
-    let mut max_delta = 0.0f32;
-    for z in 0..height {
-        for x in 0..width {
-            let index = z * width + x;
-            let here = visible_surface_height(tile.columns[index]);
-            if x + 1 < width {
-                max_delta =
-                    max_delta.max((here - visible_surface_height(tile.columns[index + 1])).abs());
-            }
-            if z + 1 < height {
-                max_delta = max_delta
-                    .max((here - visible_surface_height(tile.columns[index + width])).abs());
-            }
-        }
-    }
-    max_delta
+    column.visible_surface_height_blocks()
 }
 
 fn draw_top_face(
@@ -1863,6 +1843,8 @@ mod tests {
                 max_contour_guided_neighbor_delta_blocks: 80.0,
                 max_constrained_neighbor_delta_blocks: 80.0,
                 max_snapped_neighbor_delta_blocks: 80.0,
+                max_visible_neighbor_delta_blocks: 80.0,
+                max_shore_visible_neighbor_delta_blocks: 0.0,
                 water_column_count: 0,
                 ocean_column_count: 0,
                 lake_column_count: 0,

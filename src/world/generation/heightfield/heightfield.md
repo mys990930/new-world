@@ -129,7 +129,7 @@ raw_surface_height_blocks
 contour_guided_surface_height_blocks
   = raw height가 속한 contour step의 lower band 높이
 constrained_surface_height_blocks
-  = water bed / shoreline ramp / clamp를 적용한 snap 전 높이
+  = water bed / shoreline contour ceiling / clamp를 적용한 snap 전 높이
 surface_height_blocks
   = voxel fill이 바로 읽을 수 있게 contour step / integer block에 snap한 최종 높이
 ```
@@ -165,9 +165,12 @@ land output도 4-block terrace에 맞춰야 한다. raw continuous height는 `ra
   없음"의 예외인 water/shore safety constraint이며, final land output은 constraint 뒤에도 contour step에
   다시 snap된다.
 - `coast_mask`가 coarse preview sample에서 충분히 잡히지 않는 경우를 보완하기 위해, tile 생성 후
-  water column으로부터의 grid distance를 계산하고 `shore_ramp_blocks` 안의 land column에 같은
-  shoreline constraint를 한 번 더 적용한다. 이 neighbor-aware pass는 raw macro height를 바꾸지 않고
-  `constrained_surface_height_blocks`와 snapped final output만 조정한다.
+  water column으로부터의 grid distance를 계산하고 `shore_ramp_blocks` 안의 land column에 shoreline
+  contour ceiling을 한 번 더 적용한다. 이 pass는 raw macro height를 바꾸지 않고
+  `constrained_surface_height_blocks`와 snapped final output만 조정한다. 순수 contour-step mode에서
+  water와 맞닿은 첫 land ring은 water surface `y = 0`에서 시작하고, 다음 ring은 contour step만큼
+  올라간다. 즉 해안 안전 제약은 continuous scalar smoothing이 아니라 `0, 1, 2, ...` 계단을 물가에서
+  강제하는 quantized ceiling이다.
 - 지형 surface가 water level보다 낮으면 water column이 생긴다.
 - ocean/lake column의 `surface_height_blocks`는 수면이 아니라 bed 높이다. preview나 후속 voxel
   fill이 visible top continuity를 판단할 때는 `max(surface_height_blocks, water_level_blocks)`를
@@ -252,3 +255,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 9. heightfield contour band resolve는 raw macro scalar를 diagnostic으로 보존하되 final land terrain
    surface에는 직접 쓰지 않는다. water/shoreline constraint 전의 land column은 자신이 속한 contour
    step의 lower band height가 되어야 하며, smoothing/interpolation을 적용하면 안 된다.
+10. water-adjacent visible top은 bed가 아니라 water surface `y = 0`과 비교해야 한다. 순수
+    contour-step mode에서 water와 맞닿은 land ring은 `y = 0`부터 시작하고, shoreline ramp 안쪽으로
+    갈수록 contour step 단위로만 올라가야 한다.
