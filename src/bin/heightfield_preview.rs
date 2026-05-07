@@ -307,7 +307,7 @@ impl PreviewHeader {
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
             format!(
-                "contour_guided_heightfield=step:{:.2}_blocks,band_smoothing:{:.2}",
+                "contour_band_heightfield=step:{:.2}_blocks,smoothing_disabled:{:.2}",
                 self.contour_step_blocks, self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
@@ -490,7 +490,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.max_visible_neighbor_delta
     );
     println!(
-        "contour-guided heightfield: step {:.1} blocks, band smoothing {:.2}",
+        "contour-band heightfield: step {:.1} blocks, smoothing disabled {:.2}",
         heightfield.stats.contour_step_blocks, heightfield.stats.contour_band_smoothing
     );
     println!(
@@ -1213,7 +1213,7 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         text_x,
         text_y,
         &format!(
-            "CT {:.0}B SM {:.1}",
+            "BAND {:.0}B SM {:.1}",
             header.contour_step_blocks, header.contour_band_smoothing
         ),
         [204, 214, 203, 255],

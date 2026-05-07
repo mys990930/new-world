@@ -13,8 +13,8 @@ pub const DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS: f32 = -12.0;
 pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
-pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 8.0;
-pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 1.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldContourConfig {
@@ -182,7 +182,7 @@ pub fn heightfield_column_from_sample(
     validate_heightfield_config(config);
     let raw_surface_height_blocks = normalized_to_blocks(sample.combined_macro_height, config);
     let contour_guided_surface_height_blocks =
-        apply_contour_band_interpolation(raw_surface_height_blocks, config.contour);
+        resolve_contour_band_height(raw_surface_height_blocks, config.contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
     let water_bed_ceiling = if is_ocean {
@@ -204,7 +204,12 @@ pub fn heightfield_column_from_sample(
     }
     let constrained_surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
-    let surface_y = snap_height_to_block(constrained_surface_height_blocks);
+    let final_surface_height_blocks = if water_bed_ceiling.is_some() {
+        constrained_surface_height_blocks
+    } else {
+        snap_to_contour_step(constrained_surface_height_blocks, config.contour)
+    };
+    let surface_y = snap_height_to_block(final_surface_height_blocks);
     let surface_height_blocks = surface_y as f32;
     let is_river_hint = sample.river_valley_strength >= config.river_water_threshold
         && sample.river_flow_hint > 0.0
@@ -264,17 +269,16 @@ fn normalized_to_blocks(value: f32, config: HeightfieldConfig) -> f32 {
     config.min_height_blocks + (config.max_height_blocks - config.min_height_blocks) * t
 }
 
-fn apply_contour_band_interpolation(value: f32, contour: HeightfieldContourConfig) -> f32 {
-    if contour.step_blocks <= 0.0 || contour.band_smoothing <= 0.0 {
+fn resolve_contour_band_height(value: f32, contour: HeightfieldContourConfig) -> f32 {
+    snap_to_contour_step(value, contour)
+}
+
+fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {
+    if contour.step_blocks <= 0.0 {
         return value;
     }
     let step = contour.step_blocks;
-    let lower = (value / step).floor() * step;
-    let t = ((value - lower) / step).clamp(0.0, 1.0);
-    let smooth_t = t * t * (3.0 - 2.0 * t);
-    let amount = contour.band_smoothing.clamp(0.0, 1.0);
-    let band_t = t + (smooth_t - t) * amount;
-    lower + band_t * step
+    (value / step).floor() * step
 }
 
 fn apply_shoreline_ramp(
@@ -317,7 +321,8 @@ fn apply_neighbor_shoreline_continuity(
             apply_shoreline_ramp(column.constrained_surface_height_blocks, coast_t, config);
         if clamped < column.constrained_surface_height_blocks {
             column.constrained_surface_height_blocks = clamped;
-            column.surface_y = snap_height_to_block(clamped);
+            let final_surface_height_blocks = snap_to_contour_step(clamped, config.contour);
+            column.surface_y = snap_height_to_block(final_surface_height_blocks);
             column.surface_height_blocks = column.surface_y as f32;
             if matches!(column.terrain_kind, HeightfieldTerrainKind::Land) {
                 column.terrain_kind = HeightfieldTerrainKind::Coast;
@@ -647,46 +652,55 @@ mod tests {
     }
 
     #[test]
-    fn contour_guided_height_stays_inside_source_band_and_snaps() {
+    fn default_contour_step_is_one_block_without_smoothing() {
+        let contour = HeightfieldContourConfig::default();
+
+        assert_eq!(contour.step_blocks, 1.0);
+        assert_eq!(contour.band_smoothing, 0.0);
+    }
+
+    #[test]
+    fn contour_guided_height_is_pure_lower_band_and_snaps() {
         let config = HeightfieldConfig::default();
         let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
         let column = heightfield_column_from_sample(&sample, config);
         let lower = (column.raw_surface_height_blocks / config.contour.step_blocks).floor()
             * config.contour.step_blocks;
-        let upper = lower + config.contour.step_blocks;
 
-        assert!(column.contour_guided_surface_height_blocks >= lower);
-        assert!(column.contour_guided_surface_height_blocks <= upper);
+        assert_eq!(column.contour_guided_surface_height_blocks, lower);
         assert_eq!(column.surface_height_blocks.fract(), 0.0);
     }
 
     #[test]
-    fn changing_contour_step_changes_band_interpolation() {
-        let sample = sample(0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0);
-        let fine = heightfield_column_from_sample(
+    fn changing_contour_step_snaps_land_surface_to_step_multiples() {
+        let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
+        let column = heightfield_column_from_sample(
             &sample,
             HeightfieldConfig {
                 contour: HeightfieldContourConfig {
                     step_blocks: 4.0,
-                    band_smoothing: 1.0,
-                },
-                ..HeightfieldConfig::default()
-            },
-        );
-        let coarse = heightfield_column_from_sample(
-            &sample,
-            HeightfieldConfig {
-                contour: HeightfieldContourConfig {
-                    step_blocks: 16.0,
-                    band_smoothing: 1.0,
+                    band_smoothing: 0.0,
                 },
                 ..HeightfieldConfig::default()
             },
         );
 
+        assert_eq!(column.contour_guided_surface_height_blocks % 4.0, 0.0);
+        assert_eq!(column.surface_height_blocks % 4.0, 0.0);
+    }
+
+    #[test]
+    fn raw_continuous_height_is_recorded_but_final_uses_band_value() {
+        let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
+        let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
+
         assert_ne!(
-            fine.contour_guided_surface_height_blocks,
-            coarse.contour_guided_surface_height_blocks
+            column.raw_surface_height_blocks,
+            column.contour_guided_surface_height_blocks
+        );
+        assert_eq!(
+            column.surface_height_blocks,
+            column.contour_guided_surface_height_blocks
         );
     }
 
@@ -763,10 +777,6 @@ mod tests {
         assert_ne!(
             column.raw_surface_height_blocks,
             column.surface_height_blocks
-        );
-        assert_ne!(
-            column.raw_surface_height_blocks,
-            column.contour_guided_surface_height_blocks
         );
         assert_ne!(
             column.constrained_surface_height_blocks,

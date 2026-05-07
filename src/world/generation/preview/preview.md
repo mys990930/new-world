@@ -370,7 +370,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
-  river/dry/ridge column count, contour-guided heightfield policy, integer height snap policy, shoreline ramp policy,
+  river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, shoreline ramp policy,
   meso/perlin stub 상태, isometric view/projection, timing을 기록한다.
 - metadata/stdout은 `center-x/center-z`, world footprint, chunk x/z range, chunk radius,
   chunk edge blocks, macro-field tile edge blocks, column step/resolution, sea level과 height range를
@@ -390,9 +390,11 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
-  8 blocks이며, `combined_macro_height`에서 얻은 raw block height를 같은 contour band 안에서
-  interpolation/smoothing한 뒤 water/shoreline constraint와 integer snap을 적용한다. contour line
-  segment 자체는 debug surface이며 heightfield source of truth가 아니다.
+  1 block이며, `combined_macro_height`에서 얻은 raw block height를 직접 final surface로 쓰지 않고
+  해당 contour step의 lower band로 quantize한다. smoothing/interpolation은 현재 disabled/stub이다.
+  water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
+  contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
+  아니다.
 - ocean water surface는 `y = 0`이지만, coast-adjacent land는 `coast_mask` 기반 shoreline ramp를 통해
   해수면 근처에서 시작해야 한다. explicit cliff/meso feature가 없는 launch slice에서 바다 옆 land가
   즉시 높은 vertical cliff로 솟으면 회귀다.
