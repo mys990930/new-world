@@ -110,7 +110,7 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
   - positional: `<seed> <center-x> <center-z>` where center coordinates are chunk coordinates by default
   - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--chunk-radius <i32>`, `--columns-x <u32>`,
     `--columns-z <u32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`,
-    `--land-bias <f32>`, `--quarter-turns <u8>`, `--vertical-scale <f32>`, `--block-lines`,
+    `--land-bias <f32>`, `--quarter-turns <u8>`, `--block-lines`,
     `--no-block-lines`, `--world-center`, `--stage heightfield`, `--output <path>`
 - Defaults:
   - `--width 1280`
@@ -131,6 +131,9 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-sc
     only a compatibility path for old world-block invocations.
   - The compass follows the current quarter-view projection, and thin block lines are on by default
     to make column scale readable.
+  - `--xz-scale` changes sampling density. Heightfield Y values are not rescaled, but rendered
+    vertical pixels are normalized by the same XZ sampling density so `xz-scale 2` displays the same
+    block heights at half the screen height.
   - Meso feature and Perlin micro relief are currently stubbed to zero.
   - See [heightfield_preview.md](./heightfield_preview.md).
 

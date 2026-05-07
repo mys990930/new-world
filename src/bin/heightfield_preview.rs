@@ -27,7 +27,6 @@ const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_COLUMNS_X: u32 = 192;
 const DEFAULT_XZ_SCALE: u32 = 2;
-const DEFAULT_VERTICAL_SCALE: f32 = 1.0;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const ISO_TARGET_RELIEF_FRACTION: f32 = 0.28;
@@ -55,7 +54,6 @@ struct PreviewConfig {
     xz_scale: u32,
     chunk_radius: Option<i32>,
     quarter_turns: u8,
-    vertical_scale: f32,
     block_lines: bool,
     output: Option<PathBuf>,
 }
@@ -86,9 +84,6 @@ impl PreviewConfig {
             .ok_or_else(|| cli_error("columns-z * xz-scale is too large"))?;
         if self.chunk_radius.is_some_and(|radius| radius < 0) {
             return Err(cli_error("chunk-radius must be zero or positive"));
-        }
-        if !self.vertical_scale.is_finite() || self.vertical_scale <= 0.0 {
-            return Err(cli_error("vertical-scale must be a positive finite number"));
         }
         Ok(self)
     }
@@ -287,7 +282,7 @@ struct PreviewHeader {
     requested_chunk_radius: Option<i32>,
     major_grid_edge_blocks: i32,
     macro_tile_edge_blocks: i32,
-    vertical_scale: f32,
+    render_vertical_normalization: f32,
     graph_site_count: usize,
     macro_sample_count: usize,
     column_count: usize,
@@ -375,7 +370,11 @@ impl PreviewHeader {
                 "effective_sample_spacing_blocks={:.3}",
                 self.sample_spacing_blocks
             ),
-            "vertical_height_scale=unchanged_by_xz_scale".to_string(),
+            "height_values=not_rescaled_by_preview".to_string(),
+            format!(
+                "render_scale_policy=xz_pixels_from_effective_columns_vertical_pixels_normalized_by_xz_scale_{:.3}",
+                self.render_vertical_normalization
+            ),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
             format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
             format!(
@@ -401,7 +400,6 @@ impl PreviewHeader {
                 self.major_grid_edge_blocks,
                 self.chunk_edge_blocks
             ),
-            format!("vertical_scale={:.3}", self.vertical_scale),
             "view=cpu_isometric_columns".to_string(),
             format!(
                 "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px_quarter_turns_{}",
@@ -506,7 +504,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.width,
         config.height,
         config.quarter_turns % 4,
-        config.vertical_scale,
     )?;
     let mesh_ms = mesh_start.elapsed().as_millis();
 
@@ -559,7 +556,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         requested_chunk_radius: config.chunk_radius,
         major_grid_edge_blocks: PREVIEW_MAJOR_CHUNK_GRID_BLOCKS,
         macro_tile_edge_blocks: MACRO_FIELD_TILE_EDGE_BLOCKS,
-        vertical_scale: config.vertical_scale,
+        render_vertical_normalization: plan.vertical_density_normalization(),
         graph_site_count: patch.sites.len(),
         macro_sample_count: macro_tile.samples.len(),
         column_count: heightfield.stats.column_count,
@@ -662,9 +659,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.chunk_radius_z
     );
     println!(
-        "view: cpu isometric columns, quarter turns {}, vertical scale multiplier {:.2}, vertical {:.3} px/block, relief span {:.1}px",
+        "view: cpu isometric columns, quarter turns {}, xz-derived vertical normalization {:.3}, vertical {:.3} px/block, relief span {:.1}px",
         config.quarter_turns % 4,
-        config.vertical_scale,
+        plan.vertical_density_normalization(),
         iso_stats.vertical_px_per_block,
         iso_stats.projected_height_span_px
     );
@@ -696,7 +693,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.contour_step_blocks, heightfield.stats.contour_band_smoothing
     );
     println!(
-        "xz scale: {}x horizontal columns only; y height blocks are not rescaled",
+        "xz scale: {}x horizontal columns; y height blocks are not rescaled, rendered vertical pixels are normalized by xz density",
         config.xz_scale
     );
     println!(
@@ -818,6 +815,7 @@ struct IsoRenderPlan {
     tile_w_px: f32,
     tile_h_px: f32,
     vertical_px_per_block: f32,
+    vertical_density_normalization: f32,
     offset_x_px: f32,
     offset_y_px: f32,
     min_surface_blocks: f32,
@@ -842,7 +840,6 @@ impl IsoRenderPlan {
         width: u32,
         height: u32,
         quarter_turns: u8,
-        vertical_scale: f32,
     ) -> Result<Self, Box<dyn Error>> {
         if tile.columns.is_empty() {
             return Err(cli_error("heightfield preview cannot render an empty tile"));
@@ -850,9 +847,10 @@ impl IsoRenderPlan {
         let min_surface = tile.stats.min_surface_height_blocks;
         let max_surface = tile.stats.max_surface_height_blocks;
         let height_range = (max_surface - min_surface).max(1.0);
-        let relief_fraction = (ISO_TARGET_RELIEF_FRACTION * vertical_scale)
-            .clamp(ISO_MIN_RELIEF_FRACTION, ISO_MAX_RELIEF_FRACTION);
-        let target_relief_px = height as f32 * relief_fraction;
+        let relief_fraction =
+            ISO_TARGET_RELIEF_FRACTION.clamp(ISO_MIN_RELIEF_FRACTION, ISO_MAX_RELIEF_FRACTION);
+        let vertical_density_normalization = vertical_density_normalization(tile);
+        let target_relief_px = height as f32 * relief_fraction * vertical_density_normalization;
         let footprint_axis_count = (tile.width + tile.height).max(2) as f32;
         let tile_w_by_width = width as f32 * 1.64 / footprint_axis_count;
         let height_budget = (height as f32 * 0.86 - target_relief_px).max(height as f32 * 0.34);
@@ -867,6 +865,7 @@ impl IsoRenderPlan {
             tile_w_px,
             tile_h_px,
             vertical_px_per_block,
+            vertical_density_normalization,
             offset_x_px: 0.0,
             offset_y_px: 0.0,
             min_surface_blocks: min_surface,
@@ -880,6 +879,10 @@ impl IsoRenderPlan {
 
     fn projected_height_span_px(self) -> f32 {
         (self.max_surface_blocks - self.min_surface_blocks).max(0.0) * self.vertical_px_per_block
+    }
+
+    fn vertical_density_normalization(self) -> f32 {
+        self.vertical_density_normalization
     }
 
     fn project_grid(self, x: f32, z: f32, y_blocks: f32, tile: &HeightfieldTile) -> Point2 {
@@ -933,6 +936,14 @@ impl IsoRenderPlan {
         }
         (min_x, max_x, min_y, max_y)
     }
+}
+
+fn vertical_density_normalization(tile: &HeightfieldTile) -> f32 {
+    vertical_density_normalization_from_subdivisions(tile.horizontal_subdivisions)
+}
+
+fn vertical_density_normalization_from_subdivisions(horizontal_subdivisions: u32) -> f32 {
+    1.0 / horizontal_subdivisions.max(1) as f32
 }
 
 fn rotate_grid_delta(quarter_turns: u8, dx: f32, dz: f32) -> (f32, f32) {
@@ -2022,7 +2033,6 @@ where
         xz_scale: DEFAULT_XZ_SCALE,
         chunk_radius: None,
         quarter_turns: 0,
-        vertical_scale: DEFAULT_VERTICAL_SCALE,
         block_lines: DEFAULT_BLOCK_LINES,
         output: None,
     };
@@ -2055,9 +2065,6 @@ where
             }
             "--quarter-turns" => {
                 config.quarter_turns = parse_required::<u8>(&mut args, "quarter-turns")?
-            }
-            "--vertical-scale" => {
-                config.vertical_scale = parse_required::<f32>(&mut args, "vertical-scale")?
             }
             "--world-center" | "--world-coordinates" => {
                 config.center_is_world_blocks = true;
@@ -2109,7 +2116,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--xz-scale <u32>] [--quarter-turns <u8>] [--vertical-scale <f32>] [--block-lines|--no-block-lines] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--xz-scale <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2149,7 +2156,6 @@ mod tests {
             xz_scale: DEFAULT_XZ_SCALE,
             chunk_radius: None,
             quarter_turns: 0,
-            vertical_scale: DEFAULT_VERTICAL_SCALE,
             block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
@@ -2171,11 +2177,6 @@ mod tests {
     }
 
     #[test]
-    fn default_vertical_scale_is_auto_fit_multiplier() {
-        assert!((DEFAULT_VERTICAL_SCALE - 1.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
     fn preview_window_reports_chunk_range_and_radius_context() {
         let config = PreviewConfig {
             seed: 42,
@@ -2193,7 +2194,6 @@ mod tests {
             xz_scale: DEFAULT_XZ_SCALE,
             chunk_radius: None,
             quarter_turns: 0,
-            vertical_scale: DEFAULT_VERTICAL_SCALE,
             block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
@@ -2324,7 +2324,6 @@ mod tests {
             xz_scale: 1,
             chunk_radius: None,
             quarter_turns: 0,
-            vertical_scale: DEFAULT_VERTICAL_SCALE,
             block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         }
@@ -2345,7 +2344,6 @@ mod tests {
             xz_scale: 2,
             chunk_radius: None,
             quarter_turns: 0,
-            vertical_scale: DEFAULT_VERTICAL_SCALE,
             block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         }
@@ -2376,7 +2374,6 @@ mod tests {
             xz_scale: DEFAULT_XZ_SCALE,
             chunk_radius: Some(2),
             quarter_turns: 0,
-            vertical_scale: DEFAULT_VERTICAL_SCALE,
             block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
@@ -2410,8 +2407,7 @@ mod tests {
     #[test]
     fn iso_plan_default_relief_uses_measurable_image_span() {
         let tile = two_by_two_heightfield_tile();
-        let plan = IsoRenderPlan::new(&tile, 1280, 720, 0, DEFAULT_VERTICAL_SCALE)
-            .expect("iso render plan");
+        let plan = IsoRenderPlan::new(&tile, 1280, 720, 0).expect("iso render plan");
         let span = plan.projected_height_span_px();
 
         assert!(span > 720.0 * 0.19);
@@ -2420,10 +2416,32 @@ mod tests {
     }
 
     #[test]
+    fn xz_scale_two_halves_rendered_vertical_delta() {
+        let scale_one = two_by_two_heightfield_tile();
+        let mut scale_two = two_by_two_heightfield_tile();
+        scale_two.horizontal_subdivisions = 2;
+        scale_two.sample_spacing_blocks *= 0.5;
+        scale_two.config.horizontal_subdivisions = 2;
+
+        let plan_one = IsoRenderPlan::new(&scale_one, 1280, 720, 0).expect("scale one plan");
+        let plan_two = IsoRenderPlan::new(&scale_two, 1280, 720, 0).expect("scale two plan");
+
+        assert!(
+            (plan_two.vertical_px_per_block - plan_one.vertical_px_per_block * 0.5).abs() < 0.001,
+            "xz scale 2 should render the same height values at half vertical pixel scale: {} vs {}",
+            plan_two.vertical_px_per_block,
+            plan_one.vertical_px_per_block
+        );
+        assert_eq!(
+            scale_one.columns[1].surface_y,
+            scale_two.columns[1].surface_y
+        );
+    }
+
+    #[test]
     fn cpu_iso_preview_is_nonblank() {
         let tile = two_by_two_heightfield_tile();
-        let plan = IsoRenderPlan::new(&tile, 320, 180, 0, DEFAULT_VERTICAL_SCALE)
-            .expect("iso render plan");
+        let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
         let (image, stats) =
             render_heightfield_isometric(&tile, plan, DEFAULT_BLOCK_LINES).expect("render");
         let first = image.rgba.chunks_exact(4).next().expect("pixel");
@@ -2485,8 +2503,7 @@ mod tests {
     fn all_quarter_turns_render_nonblank_with_block_lines() {
         let tile = two_by_two_heightfield_tile();
         for quarter in 0..4 {
-            let plan = IsoRenderPlan::new(&tile, 320, 180, quarter, DEFAULT_VERTICAL_SCALE)
-                .expect("iso render plan");
+            let plan = IsoRenderPlan::new(&tile, 320, 180, quarter).expect("iso render plan");
             let (image, _) =
                 render_heightfield_isometric(&tile, plan, true).expect("render quarter");
             let first = image.rgba.chunks_exact(4).next().expect("pixel");

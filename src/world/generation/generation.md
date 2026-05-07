@@ -193,6 +193,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - heightfield는 vertical block height와 horizontal sampling density를 분리한다. 같은 world footprint를
      더 촘촘히 검사하거나 cache하고 싶으면 X/Z sample 수만 늘리고 sample spacing을 줄이며, sea level,
      contour step, river water height 같은 Y block 값은 그대로 유지한다.
+   - heightfield preview는 데이터 높이를 다시 스케일하지 않는다. 다만 같은 world footprint에서 X/Z
+     sampling density가 증가하면 렌더링상의 세로 픽셀 displacement를 그 density에 반비례해 보정한다.
+     예를 들어 `xz-scale 2`는 같은 `surface_y` 값을 보존하지만 화면에서는 절반 높이로 보여야 한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.
 14. vegetation/feature placement plan을 만든다.

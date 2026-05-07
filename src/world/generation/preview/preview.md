@@ -371,7 +371,6 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
-  - `--vertical-scale <f32>`: automatic vertical relief fit multiplier, 기본 `1.0`
   - `--block-lines` / `--no-block-lines`: 각 diagnostic block/column face의 매우 얇은 outline 표시.
     기본은 `--block-lines` on이다.
   - `--stage heightfield`
@@ -433,9 +432,11 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-  `vertical_px_per_block` is fitted so the visible height range occupies about 20-35% of the output
-  height. `--vertical-scale` multiplies that automatic fit, and `--quarter-turns` rotates the
-  horizontal grid without changing height data.
+  `vertical_px_per_block`은 preview 렌더링 전용 값이며 heightfield의 `surface_y`, sea level,
+  contour step, river water height를 바꾸지 않는다. 대신 세로 픽셀 displacement는
+  `--xz-scale`/`horizontal_subdivisions`에 반비례하도록 고정 보정한다. 따라서 scale `2`는 같은 Y block
+  값을 scale `1` 대비 절반 높이로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라 effective column count,
+  footprint, image size에서 파생된다.
 - The preview draws top diamonds and only visible neighbor-difference side faces. The visible side
   set and painter order are derived from the current `--quarter-turns` projection, not from fixed
   east/south faces. It must show top surfaces and macro relief together; a side-wall chart, a flat

@@ -30,7 +30,6 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
-  - `--vertical-scale <f32>`: preview-only multiplier for automatic vertical relief fit, default `1.0`
   - `--block-lines` / `--no-block-lines`: enable or disable very thin diagnostic outlines around
     each rendered column top/visible side. The default is on.
   - `--output <path>`
@@ -64,14 +63,17 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-- `vertical_px_per_block` is computed per preview so the visible height range occupies roughly
-  20-35% of the image height. This keeps top faces and relief visible at the same time.
-- `--vertical-scale` multiplies the automatic relief fit. It does not modify `HeightfieldTile`
-  values or persisted generation data.
+- `vertical_px_per_block`은 preview 렌더링 전용 값이다. heightfield의 `surface_y`, sea level,
+  contour step, river water height는 절대 다시 스케일하지 않는다.
+- 렌더링 세로 픽셀 스케일은 `--xz-scale`/`horizontal_subdivisions`에서 고정 파생된다. scale `1`은
+  기준 relief fit을 그대로 쓰고, scale `2`는 같은 Y block 값을 화면에서 절반 높이로 그린다. 즉
+  `height values are not rescaled; preview vertical pixels are normalized by xz sampling density`가
+  이 binary의 계약이다.
 - `--xz-scale` changes horizontal density only. For example, with the default base `192` columns and
   `--xz-scale 2`, the effective X column count is `384`; Z is scaled the same way after aspect or
   chunk-radius resolution. Sea level, contour step, surface `y`, and river water `y` stay in the same
-  block domain as scale `1`.
+  block domain as scale `1`. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective column count,
+  footprint, image size에서 자동으로 파생된다.
 - Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
   visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
   sees the +X/+Z faces, quarter `1` sees -X/+Z, quarter `2` sees -X/-Z, and quarter `3` sees +X/-Z.

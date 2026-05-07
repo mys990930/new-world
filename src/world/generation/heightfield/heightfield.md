@@ -109,8 +109,8 @@ HeightfieldColumn {
 `MacroFieldTile`의 sample grid를 그대로 column으로 변환한다. preview나 runtime cache가 같은
 world footprint를 더 촘촘히 보고 싶으면 macro field tile의 `width/height`를 각 축에서
 `horizontal_subdivisions`배로 만들고 `sample_spacing_blocks`를 같은 비율로 줄인 뒤 heightfield로
-넘긴다. 이 값은 vertical scale이 아니며, 같은 world-space sample과 같은 scalar는 subdivision 값과
-무관하게 같은 integer `surface_y`/`water_y`를 가져야 한다.
+넘긴다. 이 값은 heightfield 데이터의 vertical scale이 아니며, 같은 world-space sample과 같은 scalar는
+subdivision 값과 무관하게 같은 integer `surface_y`/`water_y`를 가져야 한다.
 
 ---
 
@@ -227,15 +227,17 @@ screen_x = (x - z) * tile_w / 2
 screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
-- `vertical_px_per_block`은 현재 heightfield의 min/max surface range와 이미지 높이를 읽어 자동
-  산정한다. 기본 목표는 projected height span이 이미지 높이의 약 20-35%를 차지하는 것이다. 이 범위는
-  top surface가 평면처럼 죽지 않고, 동시에 side wall이 preview를 지배하지 않도록 하기 위한 진단용
-  계약이다.
-- `--vertical-scale`은 자동 산정값에 곱해지는 preview-only multiplier이며 기본은 `1.0`이다. 실제
-  heightfield 값을 바꾸지 않는다.
+- `vertical_px_per_block`은 preview 렌더링 전용 투영 값이다. 실제 `surface_y`, sea level, contour
+  step, river water height는 렌더링 때문에 다시 스케일하지 않는다.
+- preview의 세로 픽셀 스케일은 `horizontal_subdivisions`에서 고정 파생된다. subdivision `1`은 기준
+  relief fit을 그대로 사용하고, subdivision `2`는 같은 Y block 값을 화면에서 절반 높이로 그린다.
+  즉 `height values are not rescaled; preview vertical pixels are normalized by xz sampling density`가
+  heightfield preview 계약이다.
 - `--xz-scale`은 같은 world footprint에서 X/Z column density만 늘리는 preview sampling multiplier다.
   기본 preview는 `2`를 사용해 각 축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다.
   이 값은 `y` height block, sea level, contour step, river water descent 값을 rescale하지 않는다.
+  X/Z 렌더링 픽셀 스케일도 별도 옵션이 아니라 effective column count, footprint, image size에서
+  자동으로 파생된다.
 - column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
   전역 base plane까지 벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를
   보여주는 terraced relief를 우선한다. quarter view가 바뀌면 painter order와 visible side도 함께 바뀌어야 한다.
@@ -289,4 +291,5 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
 13. horizontal subdivision은 X/Z column density와 sample spacing만 바꾸며, vertical block height를
     바꾸지 않는다. 같은 world-space `MacroFieldSample`은 subdivision 1과 2에서 같은 `surface_y`와
-    water hint를 가져야 한다.
+    water hint를 가져야 한다. 단 preview 렌더링의 세로 픽셀 displacement는 subdivision에 반비례해
+    보정되어, subdivision 2는 subdivision 1 대비 같은 Y 값을 절반 높이로 그려야 한다.
