@@ -35,7 +35,7 @@
 3. Solve hydrology.
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
-6. Convert it to `HeightfieldTile`.
+6. Convert it to `HeightfieldTile` with contour-guided band interpolation.
 7. Snap heightfield surface/water output to integer block heights.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
    their visible top for neighbor-delta side faces; the underwater bed remains stored separately.
@@ -70,6 +70,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Water boxes come from heightfield water hints, not final fluid simulation.
 - Sea level is fixed at `y = 0`. Coast-adjacent land is shoreline-ramped before integer snapping so
   ordinary ocean/land contact does not render as an immediate vertical wall.
+- Heightfield columns are contour-guided before water/shore constraints. The raw block height from
+  `combined_macro_height` remains stored, but the surface path passes through the same 8-block
+  contour band domain used by `macro_field_preview --channel contour`. This is not contour-line
+  reconstruction; it is band-local interpolation so columns and contour diagnostics describe the
+  same pre-heightfield height context.
 - Ocean/lake terrain `surface_height_blocks` is bed height. The preview compares adjacent columns by
   visible top height, `max(surface_height_blocks, water_level_blocks)`, so a water bed does not look
   like a shoreline cliff.
@@ -84,8 +89,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   contains the world-block center. The world footprint is the covered chunk square times
   `CHUNK_EDGE`.
 - The legend/header records `cx`, `cz`, world footprint, column count/spacing, chunk x/z range,
-  chunk radius, height range, sea level, primary `macro tile 1024 blk`, secondary `major 256 blk`,
-  faint `chunk 32 blk`, and a block scale bar.
+  chunk radius, height range, contour step/smoothing, sea level, primary `macro tile 1024 blk`,
+  secondary `major 256 blk`, faint `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
 

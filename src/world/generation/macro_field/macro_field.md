@@ -107,8 +107,9 @@ MacroFieldContourSet {
 
 `MacroFieldContourSet`은 terrain source of truth가 아니다. 이 구조는 `MacroFieldTile.samples[].combined_macro_height`
 를 heightfield 직전 block-height scale로 변환한 뒤 Marching Squares로 추출한 진단 layer다. contour는
-macro field가 heightfield로 넘어가기 직전에 연속적으로 읽히는지 확인하는 preview surface이며, 이후
-heightfield/water/voxel fill이 contour segment를 직접 소비해서는 안 된다.
+macro field가 heightfield로 넘어가기 직전에 연속적으로 읽히는지 확인하는 preview surface다. 이후
+heightfield는 같은 block-height contour level domain을 사용해 column band interpolation을 할 수 있지만,
+Marching Squares segment 자체를 terrain source로 직접 소비해서는 안 된다.
 
 Contour block-height scale은 heightfield launch slice와 맞춘다.
 
@@ -307,8 +308,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    mask는 connected ocean basin과 non-ocean terrain 사이의 explicit coast context만 읽는다.
 10. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
    normalized scale을 사용해야 한다.
-11. contour는 preview/debug layer이며, source graph/macro/hydrology/boundary나 heightfield output을
-    대체하지 않는다.
+11. contour segment는 preview/debug layer이며, source graph/macro/hydrology/boundary나 heightfield
+    scalar source를 대체하지 않는다. heightfield가 contour-guided mode를 사용할 때도 같은 level/step
+    domain을 공유할 뿐, contour polyline을 새 terrain source로 삼지 않는다.
 
 ---
 

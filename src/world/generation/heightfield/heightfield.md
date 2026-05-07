@@ -18,6 +18,12 @@ MacroFieldTile
 이 단계는 아직 final surface material이나 `ChunkData` voxel fill을 결정하지 않는다. 다만 이후 voxel
 fill이 읽을 수 있는 surface height, water level, terrain kind hint, macro mask를 column 단위로 제공한다.
 
+heightfield는 contour segment를 새로운 terrain source로 재구성하지 않는다. source of truth는 여전히
+`MacroFieldTile.samples[].combined_macro_height`다. 다만 macro field contour preview와 같은
+block-height domain을 사용해 raw height를 contour band 안에서 보간한 뒤 column height로 넘긴다.
+즉 "등고선을 따라 생성"한다는 의미는 Marching Squares 선분을 다시 raster source로 쓰는 것이 아니라,
+heightfield column이 heightfield 직전 등고선 level과 같은 band/step 계약을 통과한다는 뜻이다.
+
 ---
 
 ## 책임
@@ -64,11 +70,18 @@ HeightfieldConfig {
     lake_bed_blocks,
     shore_ramp_blocks,
     shore_min_land_blocks,
+    contour,
+}
+
+HeightfieldContourConfig {
+    step_blocks,
+    band_smoothing,
 }
 
 HeightfieldColumn {
     position,
     raw_surface_height_blocks,
+    contour_guided_surface_height_blocks,
     constrained_surface_height_blocks,
     surface_height_blocks,
     surface_y,
@@ -112,6 +125,8 @@ heightfield column은 값을 세 단계로 보존한다.
 ```text
 raw_surface_height_blocks
   = combined_macro_height를 block-space로 변환한 연속 높이
+contour_guided_surface_height_blocks
+  = raw height를 contour step band 안에서 smoothing/interpolation한 높이
 constrained_surface_height_blocks
   = water bed / shoreline ramp / clamp를 적용한 snap 전 높이
 surface_height_blocks
@@ -121,6 +136,18 @@ surface_height_blocks
 launch 구현은 최종 surface/water output을 integer block height로 snap하고,
 `surface_height_blocks == surface_y as f32` 관계를 유지한다. raw macro 값은
 `macro_elevation`과 `combined_macro_height` diagnostic field에도 남는다.
+
+기본 contour-guided 설정은 macro field preview contour 기본값과 맞춘다.
+
+```text
+contour.step_blocks = 8 blocks
+contour.band_smoothing = 1.0
+```
+
+각 column은 `raw_surface_height_blocks`가 속한 두 contour level 사이의 band를 찾고, band 내부
+위치를 smoothstep 계열로 보간한다. 결과는 항상 같은 band 안에 남아야 하며, 이후 water/shoreline
+constraint와 integer snap만 적용된다. contour step을 바꾸면 band 해석과 column output도 예측 가능하게
+바뀌어야 한다.
 
 ---
 
@@ -202,6 +229,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `width/height`는 이미지 해상도만 정하고, world footprint는 chunk square가 정한다.
 - preview legend는 고정 픽셀 크기가 아니라 출력 이미지 크기에 비례해야 한다. 기본 metadata panel은
   화면 높이의 약 1/5을 목표로 하며, 글꼴, swatch, scale bar도 같은 비율로 커져야 한다.
+- preview metadata/stdout과 legend는 contour-guided heightfield mode, contour step, band smoothing을
+  기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 
@@ -218,3 +247,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 7. final column surface/water height는 integer block height로 snap되어야 한다.
 8. coast-adjacent land는 explicit cliff feature가 없는 한 sea level에서 완만히 올라가야 하며, ocean
    water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.
+9. heightfield contour guidance는 raw macro scalar를 버리지 않고, 같은 contour band 안의 interpolation
+   layer로만 작동해야 한다. water/shoreline constraint 전의 land column은 자신이 속한 contour band를
+   벗어나면 안 된다.

@@ -168,6 +168,10 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 현재 vertical slice에서는 meso feature와 Perlin micro relief를 stub으로 두고 각각 `0` delta를 적용한다.
    - `heightfield`는 stage 8 `MacroFieldTile`의 `combined_macro_height`와 mask/value channel을 column
      oriented `HeightfieldTile`로 변환한다.
+   - heightfield는 `combined_macro_height`를 직접 integer height로만 snap하지 않고, stage 8 contour
+     preview와 같은 block-height step을 읽어 contour band 안에서 보간한 뒤 column height를 만든다.
+     contour segment 자체는 debug layer이며 source of truth가 아니지만, column output은 같은 contour
+     level domain과 일관되어야 한다.
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
@@ -221,7 +225,8 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
   독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
   직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
 - stage 11 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
-  meso/perlin delta는 아직 `0`인 stub이며, ocean/lake mask는 water level hint로, river/ridge/dry basin
+  meso/perlin delta는 아직 `0`인 stub이며, macro field contour step과 일관된 band interpolation을
+  거친 뒤 integer block height로 snap한다. ocean/lake mask는 water level hint로, river/ridge/dry basin
   channel은 terrain kind hint로 보존한다.
 
 런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
@@ -296,6 +301,9 @@ column/window만 sample해 `ChunkData`를 채운다.
 - macro field tile overlap은 인접 tile에서 같은 world-space sample에 대해 같은 값을 내야 한다.
 - macro elevation, coast/lake/ocean/dry basin mask, ridge influence, river valley, combined macro
   height는 각각 finite 값과 문서화된 range를 유지해야 한다.
+- heightfield는 macro field contour preview와 같은 block-height domain을 사용해 column height를
+  contour-guided band 안에서 resolve해야 하며, raw macro scalar를 버리고 contour line만 terrain
+  source로 재구성하면 안 된다.
 - river valley width와 depth는 selected/display flow에 단조 증가해야 한다. 상류와 하류가 같은 폭으로
   보이면 회귀다.
 - ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 진단할 수 있어야 하지만,

@@ -210,9 +210,12 @@ struct PreviewHeader {
     avg_surface: f32,
     max_surface: f32,
     max_raw_neighbor_delta: f32,
+    max_contour_guided_neighbor_delta: f32,
     max_constrained_neighbor_delta: f32,
     max_snapped_neighbor_delta: f32,
     max_visible_neighbor_delta: f32,
+    contour_step_blocks: f32,
+    contour_band_smoothing: f32,
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
     water_columns: usize,
@@ -285,8 +288,9 @@ impl PreviewHeader {
                 self.min_surface, self.avg_surface, self.max_surface
             ),
             format!(
-                "neighbor_delta_raw_constrained_snapped_visible_blocks={:.3},{:.3},{:.3},{:.3}",
+                "neighbor_delta_raw_contour_constrained_snapped_visible_blocks={:.3},{:.3},{:.3},{:.3},{:.3}",
                 self.max_raw_neighbor_delta,
+                self.max_contour_guided_neighbor_delta,
                 self.max_constrained_neighbor_delta,
                 self.max_snapped_neighbor_delta,
                 self.max_visible_neighbor_delta
@@ -302,6 +306,10 @@ impl PreviewHeader {
             ),
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
+            format!(
+                "contour_guided_heightfield=step:{:.2}_blocks,band_smoothing:{:.2}",
+                self.contour_step_blocks, self.contour_band_smoothing
+            ),
             "height_snap=round_to_integer_block".to_string(),
             "shoreline_policy=land_coast_mask_ramps_from_y0_without_vertical_sea_cliff".to_string(),
             "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
@@ -396,9 +404,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         avg_surface: heightfield.stats.average_surface_height_blocks,
         max_surface: heightfield.stats.max_surface_height_blocks,
         max_raw_neighbor_delta: heightfield.stats.max_raw_neighbor_delta_blocks,
+        max_contour_guided_neighbor_delta: heightfield
+            .stats
+            .max_contour_guided_neighbor_delta_blocks,
         max_constrained_neighbor_delta: heightfield.stats.max_constrained_neighbor_delta_blocks,
         max_snapped_neighbor_delta: heightfield.stats.max_snapped_neighbor_delta_blocks,
         max_visible_neighbor_delta: max_visible_neighbor_delta(&heightfield),
+        contour_step_blocks: heightfield.stats.contour_step_blocks,
+        contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
         water_columns: heightfield.stats.water_column_count,
@@ -469,11 +482,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.max_surface_height_blocks
     );
     println!(
-        "neighbor delta raw/constrained/snapped/visible max {:.2}/{:.2}/{:.2}/{:.2} blocks",
+        "neighbor delta raw/contour/constrained/snapped/visible max {:.2}/{:.2}/{:.2}/{:.2}/{:.2} blocks",
         heightfield.stats.max_raw_neighbor_delta_blocks,
+        heightfield.stats.max_contour_guided_neighbor_delta_blocks,
         heightfield.stats.max_constrained_neighbor_delta_blocks,
         heightfield.stats.max_snapped_neighbor_delta_blocks,
         header.max_visible_neighbor_delta
+    );
+    println!(
+        "contour-guided heightfield: step {:.1} blocks, band smoothing {:.2}",
+        heightfield.stats.contour_step_blocks, heightfield.stats.contour_band_smoothing
     );
     println!(
         "columns: total {}, water {}, ocean {}, lake {}, river {}, dry {}, ridge {}",
@@ -1195,6 +1213,18 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         text_x,
         text_y,
         &format!(
+            "CT {:.0}B SM {:.1}",
+            header.contour_step_blocks, header.contour_band_smoothing
+        ),
+        [204, 214, 203, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        &format!(
             "CH {}..{} {}..{}",
             header.chunk_min_x, header.chunk_max_x, header.chunk_min_z, header.chunk_max_z
         ),
@@ -1827,7 +1857,10 @@ mod tests {
                 min_surface_height_blocks: -8.0,
                 max_surface_height_blocks: 72.0,
                 average_surface_height_blocks: 27.5,
+                contour_step_blocks: HeightfieldConfig::default().contour.step_blocks,
+                contour_band_smoothing: HeightfieldConfig::default().contour.band_smoothing,
                 max_raw_neighbor_delta_blocks: 80.0,
+                max_contour_guided_neighbor_delta_blocks: 80.0,
                 max_constrained_neighbor_delta_blocks: 80.0,
                 max_snapped_neighbor_delta_blocks: 80.0,
                 water_column_count: 0,
@@ -1850,6 +1883,7 @@ mod tests {
         HeightfieldColumn {
             position: new_world::world::WorldPlanePoint::new(x, z),
             raw_surface_height_blocks: surface_height_blocks,
+            contour_guided_surface_height_blocks: surface_height_blocks,
             constrained_surface_height_blocks: surface_height_blocks,
             surface_height_blocks,
             surface_y: surface_height_blocks.floor() as i32,
