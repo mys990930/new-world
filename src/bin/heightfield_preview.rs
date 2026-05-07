@@ -34,6 +34,9 @@ const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
 const PREVIEW_MAJOR_CHUNK_GRID_BLOCKS: i32 = CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER;
 const DEFAULT_BLOCK_LINES: bool = true;
+const TOP_FACE_OUTLINE: [u8; 4] = [5, 9, 12, 96];
+const SIDE_FACE_OUTLINE: [u8; 4] = [2, 5, 7, 88];
+const SIDE_FACE_STEP_LINE: [u8; 4] = [8, 13, 15, 64];
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -475,6 +478,7 @@ impl PreviewHeader {
             ),
             "height_snap=round_to_integer_block".to_string(),
             format!("block_lines={}", self.block_lines),
+            "block_line_style=thin_face_edges_with_integer_side_steps".to_string(),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
             format!(
                 "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_{:.0}_to_0_to_{:.0}_blocks",
@@ -1048,7 +1052,7 @@ fn render_heightfield_isometric(
             width: plan.width,
             height: plan.height,
             rgba: image.into_raw(),
-            draw_call_count: (tile.columns.len() * if block_lines { 5 } else { 3 }) as u32,
+            draw_call_count: (tile.columns.len() * if block_lines { 7 } else { 3 }) as u32,
         },
         IsoRenderStats {
             vertical_px_per_block: plan.vertical_px_per_block,
@@ -1208,7 +1212,7 @@ fn draw_top_face(
     ];
     fill_convex_polygon(image, &polygon, color);
     if block_lines {
-        draw_polygon_outline(image, &polygon, [4, 8, 10, 42], 1);
+        draw_polygon_outline(image, &polygon, TOP_FACE_OUTLINE, 1);
     }
 }
 
@@ -1231,8 +1235,30 @@ fn draw_side_face(
     ];
     fill_convex_polygon(image, &polygon, color);
     if block_lines {
-        draw_polygon_outline(image, &polygon, [2, 5, 7, 34], 1);
+        draw_side_face_step_lines(image, tile, plan, edge, lower_y, upper_y);
+        draw_polygon_outline(image, &polygon, SIDE_FACE_OUTLINE, 1);
     }
+}
+
+fn draw_side_face_step_lines(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    edge: [f32; 4],
+    lower_y: f32,
+    upper_y: f32,
+) {
+    for y in side_face_step_levels(lower_y, upper_y) {
+        let start = plan.project_grid(edge[0], edge[1], y, tile);
+        let end = plan.project_grid(edge[2], edge[3], y, tile);
+        draw_projected_line_thick(image, start, end, SIDE_FACE_STEP_LINE, 1, 1);
+    }
+}
+
+fn side_face_step_levels(lower_y: f32, upper_y: f32) -> impl Iterator<Item = f32> {
+    let first = lower_y.ceil() as i32;
+    let last = upper_y.floor() as i32;
+    (first..=last).map(|y| y as f32)
 }
 
 fn draw_boundary_overlays(
@@ -1680,6 +1706,19 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
             header.chunk_radius_x.max(header.chunk_radius_z),
             header.world_span_blocks
         ),
+        [204, 214, 203, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        if header.block_lines {
+            "EDGE ON 1B SIDE STEPS"
+        } else {
+            "EDGE OFF"
+        },
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -2545,6 +2584,33 @@ mod tests {
 
         assert!(varied);
         assert!(stats.projected_height_span_px > 0.0);
+    }
+
+    #[test]
+    fn block_lines_add_face_edge_pixels() {
+        let tile = two_by_two_heightfield_tile();
+        let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
+        let (without_lines, _) =
+            render_heightfield_isometric(&tile, plan, false).expect("render without lines");
+        let (with_lines, _) =
+            render_heightfield_isometric(&tile, plan, true).expect("render with lines");
+        let without_draws = without_lines.draw_call_count;
+        let with_draws = with_lines.draw_call_count;
+
+        assert_ne!(with_lines.rgba, without_lines.rgba);
+        assert!(
+            with_draws > without_draws,
+            "block outline mode should be represented in render diagnostics"
+        );
+    }
+
+    #[test]
+    fn side_face_step_levels_follow_integer_blocks() {
+        let levels = side_face_step_levels(2.2, 5.0).collect::<Vec<_>>();
+        assert_eq!(levels, vec![3.0, 4.0, 5.0]);
+
+        let empty = side_face_step_levels(4.1, 4.8).collect::<Vec<_>>();
+        assert!(empty.is_empty());
     }
 
     #[test]

@@ -210,6 +210,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      `heightfield` band resolve가 공유하는 block-height domain에서 적용한다. 현재 launch 기본
      signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`다. preview는 이
      산출 `surface_y`를 정육면체에 가까운 block primitive로 그대로 렌더한다.
+   - heightfield preview의 block outline은 기본 on이다. top/visible side face 외곽선과 side face의
+     정수 `y` step guide를 얇게 그려 작은 chunk-radius preview에서 block scale을 읽게 하되, final
+     mesh/material 계약으로 해석하지 않는다. 필요하면 preview 전용 `--no-block-lines`로 끌 수 있다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
 13. biome/material/water/coast surface plan을 만든다.
 14. vegetation/feature placement plan을 만든다.

@@ -371,7 +371,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
   - `--block-lines` / `--no-block-lines`: 각 diagnostic block/column face의 매우 얇은 outline 표시.
-    기본은 `--block-lines` on이다.
+    기본은 `--block-lines` on이다. side face에는 정수 `y` step마다 얇은 guide line도 함께 그려
+    `--chunk-radius 1` 같은 작은 preview에서 개별 block scale을 읽을 수 있게 한다.
   - `--stage heightfield`
   - `--output <path>`
 
@@ -393,7 +394,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
   column resolution은 effective column count를 뜻하며, legend에는 fixed `XZ4`와 base/effective spacing도
-  함께 표시한다.
+  함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
+  line이 표시된다는 것을 기록해야 한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
 - 방향 compass는 `heightfield_preview`에 한해 isometric projection과 `--quarter-turns`가 적용된 뒤의

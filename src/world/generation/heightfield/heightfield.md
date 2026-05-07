@@ -278,6 +278,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   방향이 화면에 놓이는 방향을 가리킨다.
 - `--block-lines`는 각 column top/visible side polygon에 매우 얇은 diagnostic outline을 더한다.
   기본 preview에서는 켜져 있으며, terrain 색을 압도하면 `--no-block-lines`로 끌 수 있다.
+  outline은 top face 외곽선과 visible side face 외곽선뿐 아니라 side face의 정수 `y` step마다
+  아주 얇은 horizontal guide를 그려, 작은 `--chunk-radius 1` preview에서도 개별 block 층을 읽을 수
+  있어야 한다. 이 선은 final mesh edge가 아니라 preview 전용 scale guide이며 terrain/water 색보다
+  약하게 보여야 한다.
 - preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, minimum gap,
   smoothing disabled 값을 기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저

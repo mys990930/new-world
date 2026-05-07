@@ -130,7 +130,8 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
   - Positional center is chunk-based so it is consistent with `--chunk-radius`; `--world-center` is
     only a compatibility path for old world-block invocations.
   - The compass follows the current quarter-view projection, and thin block lines are on by default
-    to make column scale readable.
+    to make column scale readable. They draw subtle top/side face edges plus integer side-step
+    guides; `--no-block-lines` disables only this diagnostic overlay.
   - Horizontal density is fixed at XZ scale `4` for this preview and is not a CLI option.
     Heightfield Y relief is resolved in the doubled macro/heightfield block-domain, and preview
     rendering keeps block primitives visually cubic instead of applying an extra vertical scale.

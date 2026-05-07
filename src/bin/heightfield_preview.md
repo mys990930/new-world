@@ -28,7 +28,9 @@
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
   - `--block-lines` / `--no-block-lines`: enable or disable very thin diagnostic outlines around
-    each rendered column top/visible side. The default is on.
+    each rendered column top/visible side. The default is on. Visible side faces also receive
+    one-pixel integer `y` step guides so individual block layers remain readable in
+    `--chunk-radius 1` previews.
   - `--output <path>`
 
 ## Flow
@@ -81,7 +83,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
   `x+z` painter order is a regression because it only works for one quarter view.
 - Very thin block lines are drawn on top/visible side polygons by default to make the block scale
-  readable with fixed XZ scale `4`. They are diagnostic overlay lines, not final mesh edges.
+  readable with fixed XZ scale `4`. Top faces get a subtle face-edge outline, visible side faces
+  get a subtle face-edge outline plus one-pixel horizontal guides at integer `y` block steps. They
+  are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land
@@ -122,8 +126,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - The legend/header records input center, input unit, center chunk, center world block, world
   footprint, column count/spacing, chunk x/z range, base/effective column count, fixed XZ scale,
   base/effective spacing, chunk radius, height range, contour step/smoothing-disabled value, sea
-  level, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint `chunk 32 blk`, and a block
-  scale bar.
+  level, block outline state, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint
+  `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
 - The compass overlay follows the isometric projection after `--quarter-turns`. It does not stay
