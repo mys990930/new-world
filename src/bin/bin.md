@@ -121,7 +121,7 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 - Example:
 
 ```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 0 --output target/heightfield-preview/heightfield.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quarter-turns 0 --output target/heightfield-preview/heightfield.png
 ```
 
 - Notes:
@@ -131,9 +131,11 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-sc
     only a compatibility path for old world-block invocations.
   - The compass follows the current quarter-view projection, and thin block lines are on by default
     to make column scale readable.
-  - `--xz-scale` changes sampling density. Heightfield Y values are not rescaled, but rendered
-    vertical pixels are normalized by the same XZ sampling density so `xz-scale 2` displays the same
-    block heights at half the screen height.
+  - Horizontal density is fixed at XZ scale `2` for this preview and is not a CLI option.
+    Heightfield Y values are not rescaled, but rendered vertical pixels are normalized by that fixed
+    XZ density so the same block heights display at half the baseline screen height.
+  - Auto output names include quarter and chunk radius suffixes such as `s42_cx0_cz0_q0_r4.png`.
+    Explicit `--output` paths are respected exactly.
   - Meso feature and Perlin micro relief are currently stubbed to zero.
   - See [heightfield_preview.md](./heightfield_preview.md).
 

@@ -23,9 +23,6 @@
   - `--columns-x <u32>`: sampled heightfield columns across X, default `192`
   - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
     `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid
-  - `--xz-scale <u32>`: horizontal sampling multiplier, default `2`. The binary also accepts
-    `--horizontal-subdivisions`. Scale `2` keeps the same world footprint while producing twice as
-    many columns on X and Z, so total columns become four times larger.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -41,8 +38,9 @@
 3. Solve hydrology.
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
-6. Convert it to `HeightfieldTile` with pure contour-band terrace resolve. `--xz-scale` only changes
-   X/Z sample spacing and column count; it never rescales Y block height.
+6. Convert it to `HeightfieldTile` with pure contour-band terrace resolve. The preview always uses
+   fixed XZ scale `2`, so X/Z sample spacing and column count are doubled internally while Y block
+   height is never rescaled.
 7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
    fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
@@ -65,15 +63,15 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 
 - `vertical_px_per_block`은 preview 렌더링 전용 값이다. heightfield의 `surface_y`, sea level,
   contour step, river water height는 절대 다시 스케일하지 않는다.
-- 렌더링 세로 픽셀 스케일은 `--xz-scale`/`horizontal_subdivisions`에서 고정 파생된다. scale `1`은
-  기준 relief fit을 그대로 쓰고, scale `2`는 같은 Y block 값을 화면에서 절반 높이로 그린다. 즉
+- 렌더링 세로 픽셀 스케일은 고정 XZ scale `2` / `horizontal_subdivisions = 2`에서 파생된다. 같은
+  Y block 값을 기준 XZ density 대비 화면에서 절반 높이로 그린다. 즉
   `height values are not rescaled; preview vertical pixels are normalized by xz sampling density`가
   이 binary의 계약이다.
-- `--xz-scale` changes horizontal density only. For example, with the default base `192` columns and
-  `--xz-scale 2`, the effective X column count is `384`; Z is scaled the same way after aspect or
-  chunk-radius resolution. Sea level, contour step, surface `y`, and river water `y` stay in the same
-  block domain as scale `1`. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective column count,
-  footprint, image size에서 자동으로 파생된다.
+- XZ scale is not a CLI knob. With the default base `192` columns and fixed XZ scale `2`, the
+  effective X column count is `384`; Z is scaled the same way after aspect or chunk-radius
+  resolution. Sea level, contour step, surface `y`, and river water `y` stay in the same block
+  domain. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 effective column count, footprint, image
+  size에서 자동으로 파생된다.
 - Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
   visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
   sees the +X/+Z faces, quarter `1` sees -X/+Z, quarter `2` sees -X/-Z, and quarter `3` sees +X/-Z.
@@ -82,7 +80,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
   `x+z` painter order is a regression because it only works for one quarter view.
 - Very thin block lines are drawn on top/visible side polygons by default to make the block scale
-  readable even with `--xz-scale 2`. They are diagnostic overlay lines, not final mesh edges.
+  readable with fixed XZ scale `2`. They are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land
@@ -115,8 +113,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - With `--chunk-radius r`, the preview range is inclusive in chunk coordinates:
   `center_chunk-r .. center_chunk+r` on both X and Z. A radius of `0` shows exactly the positional
   center chunk. The world footprint is the covered chunk square times `CHUNK_EDGE`.
+- When `--output` is omitted, the auto filename includes the projected quarter and chunk radius
+  suffix, for example `s42_cx0_cz0_q0_r4.png`. Explicit `--output` paths are respected exactly.
 - The legend/header records input center, input unit, center chunk, center world block, world
-  footprint, column count/spacing, chunk x/z range, base/effective column count, XZ scale,
+  footprint, column count/spacing, chunk x/z range, base/effective column count, fixed XZ scale,
   base/effective spacing, chunk radius, height range, contour step/smoothing-disabled value, sea
   level, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint `chunk 32 blk`, and a block
   scale bar.
@@ -136,18 +136,11 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 72
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r8.png
 ```
 
-Scale 1/2 comparison for the same footprint:
-
-```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 1 --output target/heightfield-preview/s42_r8_xz1.png
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --output target/heightfield-preview/s42_r8_xz2.png
-```
-
 Quarter-view smoke set:
 
 ```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 0 --output target/heightfield-preview/s42_c0_0_r8_q0.png
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 1 --output target/heightfield-preview/s42_c0_0_r8_q1.png
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 2 --output target/heightfield-preview/s42_c0_0_r8_q2.png
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 3 --output target/heightfield-preview/s42_c0_0_r8_q3.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quarter-turns 0 --output target/heightfield-preview/s42_c0_0_r8_q0.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quarter-turns 1 --output target/heightfield-preview/s42_c0_0_r8_q1.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quarter-turns 2 --output target/heightfield-preview/s42_c0_0_r8_q2.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quarter-turns 3 --output target/heightfield-preview/s42_c0_0_r8_q3.png
 ```
