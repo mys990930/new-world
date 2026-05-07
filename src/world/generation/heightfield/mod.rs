@@ -85,6 +85,7 @@ pub struct HeightfieldColumn {
     pub surface_y: i32,
     pub water_level_blocks: Option<f32>,
     pub water_y: Option<i32>,
+    pub river_water_height_blocks: Option<f32>,
     pub terrain_kind: HeightfieldTerrainKind,
     pub macro_elevation: f32,
     pub combined_macro_height: f32,
@@ -101,13 +102,12 @@ pub struct HeightfieldColumn {
 
 impl HeightfieldColumn {
     pub fn has_water_column(&self) -> bool {
-        self.water_level_blocks
-            .is_some_and(|water| water > self.surface_height_blocks)
+        self.water_level_blocks.is_some()
     }
 
     pub fn visible_surface_height_blocks(&self) -> f32 {
         self.water_level_blocks
-            .filter(|water| *water > self.surface_height_blocks)
+            .map(|water| water.max(self.surface_height_blocks))
             .unwrap_or(self.surface_height_blocks)
     }
 }
@@ -126,6 +126,11 @@ pub struct HeightfieldTileStats {
     pub max_snapped_neighbor_delta_blocks: f32,
     pub max_visible_neighbor_delta_blocks: f32,
     pub max_shore_visible_neighbor_delta_blocks: f32,
+    pub min_ocean_visible_surface_blocks: f32,
+    pub max_ocean_visible_surface_blocks: f32,
+    pub min_land_near_water_surface_blocks: f32,
+    pub max_river_water_neighbor_delta_blocks: f32,
+    pub river_uphill_flow_neighbor_count: usize,
     pub water_column_count: usize,
     pub ocean_column_count: usize,
     pub lake_column_count: usize,
@@ -171,6 +176,11 @@ pub fn generate_heightfield_tile(
         macro_tile.config.sample_spacing_blocks,
         config,
     );
+    apply_river_water_descent(
+        &mut columns,
+        macro_tile.config.width as usize,
+        macro_tile.config.height as usize,
+    );
     let stats = heightfield_stats(&columns, config);
 
     HeightfieldTile {
@@ -193,30 +203,19 @@ pub fn heightfield_column_from_sample(
         resolve_contour_band_height(raw_surface_height_blocks, config.contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
-    let water_bed_ceiling = if is_ocean {
-        Some(config.sea_level_blocks + config.ocean_bed_blocks)
-    } else if is_lake {
-        Some(config.sea_level_blocks + config.lake_bed_blocks)
-    } else {
-        None
-    };
     let meso_delta_blocks = 0.0;
     let micro_relief_blocks = 0.0;
-    let mut surface_height_blocks =
+    let surface_height_blocks =
         contour_guided_surface_height_blocks + meso_delta_blocks + micro_relief_blocks;
-    if let Some(bed_ceiling) = water_bed_ceiling {
-        surface_height_blocks = surface_height_blocks.min(bed_ceiling);
-    } else if sample.coast_mask > 0.0 {
-        surface_height_blocks =
-            apply_shoreline_ramp(surface_height_blocks, sample.coast_mask, config);
-    }
+    let surface_height_blocks = if is_ocean || is_lake {
+        config.sea_level_blocks
+    } else {
+        surface_height_blocks.max(config.sea_level_blocks)
+    };
     let constrained_surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
-    let final_surface_height_blocks = if water_bed_ceiling.is_some() {
-        constrained_surface_height_blocks
-    } else {
-        snap_to_contour_step(constrained_surface_height_blocks, config.contour)
-    };
+    let final_surface_height_blocks =
+        snap_to_contour_step(constrained_surface_height_blocks, config.contour);
     let surface_y = snap_height_to_block(final_surface_height_blocks);
     let surface_height_blocks = surface_y as f32;
     let is_river_hint = sample.river_valley_strength >= config.river_water_threshold
@@ -231,6 +230,7 @@ pub fn heightfield_column_from_sample(
         None
     };
     let water_y = water_level_blocks.map(snap_height_to_block);
+    let river_water_height_blocks = is_river_hint.then_some(surface_height_blocks + 1.0);
     let terrain_kind = if is_ocean {
         HeightfieldTerrainKind::Ocean
     } else if is_lake {
@@ -256,6 +256,7 @@ pub fn heightfield_column_from_sample(
         surface_y,
         water_level_blocks,
         water_y,
+        river_water_height_blocks,
         terrain_kind,
         macro_elevation: sample.macro_elevation,
         combined_macro_height: sample.combined_macro_height,
@@ -289,22 +290,6 @@ fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {
     (value / step).floor() * step
 }
 
-fn apply_shoreline_ramp(
-    surface_height_blocks: f32,
-    coast_mask: f32,
-    config: HeightfieldConfig,
-) -> f32 {
-    let coast_t = coast_mask.clamp(0.0, 1.0);
-    if coast_t <= 0.0 {
-        return surface_height_blocks;
-    }
-    let inland_t = (1.0 - coast_t).clamp(0.0, 1.0);
-    let max_land_height = config.sea_level_blocks + config.shore_ramp_blocks * inland_t.powf(1.65);
-    surface_height_blocks
-        .max(config.sea_level_blocks)
-        .min(max_land_height)
-}
-
 fn apply_shoreline_contour_ceiling(
     surface_height_blocks: f32,
     water_distance_blocks: f32,
@@ -334,9 +319,9 @@ fn apply_neighbor_shoreline_continuity(
         return;
     }
     let water_distance =
-        water_distance_field(columns, width, height, sample_spacing_blocks, config);
+        standing_water_distance_field(columns, width, height, sample_spacing_blocks, config);
     for (index, column) in columns.iter_mut().enumerate() {
-        if column.water_level_blocks.is_some() || water_distance[index] > config.shore_ramp_blocks {
+        if is_standing_water(*column) || water_distance[index] > config.shore_ramp_blocks {
             continue;
         }
         let clamped = apply_shoreline_contour_ceiling(
@@ -357,7 +342,7 @@ fn apply_neighbor_shoreline_continuity(
     }
 }
 
-fn water_distance_field(
+fn standing_water_distance_field(
     columns: &[HeightfieldColumn],
     width: usize,
     height: usize,
@@ -367,7 +352,7 @@ fn water_distance_field(
     let mut distance = columns
         .iter()
         .map(|column| {
-            if column.water_level_blocks.is_some() {
+            if is_standing_water(*column) {
                 0.0
             } else {
                 f32::INFINITY
@@ -477,6 +462,96 @@ fn water_distance_field(
     distance
 }
 
+fn apply_river_water_descent(columns: &mut [HeightfieldColumn], width: usize, height: usize) {
+    if columns.is_empty() || width == 0 || height == 0 {
+        return;
+    }
+
+    let mut water_y = columns
+        .iter()
+        .map(|column| column.water_y)
+        .collect::<Vec<_>>();
+    for _ in 0..(width + height).max(1) {
+        let mut changed = false;
+        for index in 0..columns.len() {
+            if !matches!(columns[index].terrain_kind, HeightfieldTerrainKind::River) {
+                continue;
+            }
+            let Some(current) = water_y[index] else {
+                continue;
+            };
+            let mut allowed = current;
+            for neighbor in neighbor_indices(index, width, height) {
+                let Some(neighbor_water) = water_y[neighbor] else {
+                    continue;
+                };
+                if matches!(
+                    columns[neighbor].terrain_kind,
+                    HeightfieldTerrainKind::River
+                ) && columns[index].river_flow_hint > columns[neighbor].river_flow_hint + 0.01
+                {
+                    allowed = allowed.min(neighbor_water);
+                } else {
+                    allowed = allowed.min(neighbor_water.saturating_add(1));
+                }
+            }
+            if allowed < current {
+                water_y[index] = Some(allowed);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    for (index, column) in columns.iter_mut().enumerate() {
+        if !matches!(column.terrain_kind, HeightfieldTerrainKind::River) {
+            continue;
+        }
+        let Some(water) = water_y[index] else {
+            continue;
+        };
+        column.water_y = Some(water);
+        column.water_level_blocks = Some(water as f32);
+        column.river_water_height_blocks = Some(water as f32);
+        if column.surface_y >= water {
+            column.surface_y = water.saturating_sub(1);
+            column.surface_height_blocks = column.surface_y as f32;
+            column.constrained_surface_height_blocks = column.surface_height_blocks;
+        }
+    }
+}
+
+fn neighbor_indices(index: usize, width: usize, height: usize) -> impl Iterator<Item = usize> {
+    let x = index % width;
+    let z = index / width;
+    let mut neighbors = [None; 4];
+    if x > 0 {
+        neighbors[0] = Some(index - 1);
+    }
+    if x + 1 < width {
+        neighbors[1] = Some(index + 1);
+    }
+    if z > 0 {
+        neighbors[2] = Some(index - width);
+    }
+    if z + 1 < height {
+        neighbors[3] = Some(index + width);
+    }
+    neighbors
+        .into_iter()
+        .flatten()
+        .filter(move |neighbor| *neighbor < width * height)
+}
+
+fn is_standing_water(column: HeightfieldColumn) -> bool {
+    matches!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::Ocean | HeightfieldTerrainKind::Lake
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_distance_from_neighbor(
     distance: &mut [f32],
@@ -523,6 +598,9 @@ fn heightfield_stats(
     let mut river = 0usize;
     let mut dry = 0usize;
     let mut ridge = 0usize;
+    let mut min_ocean_visible = f32::INFINITY;
+    let mut max_ocean_visible = f32::NEG_INFINITY;
+    let mut found_ocean = false;
 
     for column in columns {
         min = min.min(column.surface_height_blocks);
@@ -532,7 +610,13 @@ fn heightfield_stats(
             water += 1;
         }
         match column.terrain_kind {
-            HeightfieldTerrainKind::Ocean => ocean += 1,
+            HeightfieldTerrainKind::Ocean => {
+                ocean += 1;
+                found_ocean = true;
+                let visible = column.visible_surface_height_blocks();
+                min_ocean_visible = min_ocean_visible.min(visible);
+                max_ocean_visible = max_ocean_visible.max(visible);
+            }
             HeightfieldTerrainKind::Lake => lake += 1,
             HeightfieldTerrainKind::River => river += 1,
             HeightfieldTerrainKind::DryBasin => dry += 1,
@@ -564,6 +648,11 @@ fn heightfield_stats(
             column.visible_surface_height_blocks()
         }),
         max_shore_visible_neighbor_delta_blocks: max_shore_neighbor_delta(columns),
+        min_ocean_visible_surface_blocks: found_ocean.then_some(min_ocean_visible).unwrap_or(0.0),
+        max_ocean_visible_surface_blocks: found_ocean.then_some(max_ocean_visible).unwrap_or(0.0),
+        min_land_near_water_surface_blocks: min_land_near_standing_water(columns),
+        max_river_water_neighbor_delta_blocks: max_river_water_neighbor_delta(columns),
+        river_uphill_flow_neighbor_count: river_uphill_flow_neighbor_count(columns),
         water_column_count: water,
         ocean_column_count: ocean,
         lake_column_count: lake,
@@ -571,6 +660,94 @@ fn heightfield_stats(
         dry_basin_column_count: dry,
         ridge_column_count: ridge,
     }
+}
+
+fn min_land_near_standing_water(columns: &[HeightfieldColumn]) -> f32 {
+    if columns.len() < 2 {
+        return 0.0;
+    }
+    let width = infer_row_width(columns);
+    let height = columns.len().div_ceil(width);
+    let mut min_land = f32::INFINITY;
+    for (index, column) in columns.iter().enumerate() {
+        if is_standing_water(*column) {
+            continue;
+        }
+        if neighbor_indices(index, width, height)
+            .any(|neighbor| is_standing_water(columns[neighbor]))
+        {
+            min_land = min_land.min(column.surface_height_blocks);
+        }
+    }
+    min_land.is_finite().then_some(min_land).unwrap_or(0.0)
+}
+
+fn max_river_water_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
+    if columns.len() < 2 {
+        return 0.0;
+    }
+    let width = infer_row_width(columns);
+    let height = columns.len().div_ceil(width);
+    let mut max_delta = 0.0f32;
+    for (index, column) in columns.iter().enumerate() {
+        if !matches!(column.terrain_kind, HeightfieldTerrainKind::River) {
+            continue;
+        }
+        let Some(water) = column.river_water_height_blocks else {
+            continue;
+        };
+        for neighbor in neighbor_indices(index, width, height) {
+            let neighbor_column = columns[neighbor];
+            if matches!(
+                neighbor_column.terrain_kind,
+                HeightfieldTerrainKind::River
+                    | HeightfieldTerrainKind::Ocean
+                    | HeightfieldTerrainKind::Lake
+            ) {
+                if let Some(neighbor_water) = neighbor_column.water_level_blocks {
+                    max_delta = max_delta.max((water - neighbor_water).abs());
+                }
+            }
+        }
+    }
+    max_delta
+}
+
+fn river_uphill_flow_neighbor_count(columns: &[HeightfieldColumn]) -> usize {
+    if columns.len() < 2 {
+        return 0;
+    }
+    let width = infer_row_width(columns);
+    let height = columns.len().div_ceil(width);
+    let mut count = 0usize;
+    for (index, column) in columns.iter().enumerate() {
+        if !matches!(column.terrain_kind, HeightfieldTerrainKind::River) {
+            continue;
+        }
+        let Some(water) = column.river_water_height_blocks else {
+            continue;
+        };
+        for neighbor in neighbor_indices(index, width, height).filter(|neighbor| *neighbor > index)
+        {
+            let neighbor_column = columns[neighbor];
+            if !matches!(neighbor_column.terrain_kind, HeightfieldTerrainKind::River) {
+                continue;
+            }
+            let Some(neighbor_water) = neighbor_column.river_water_height_blocks else {
+                continue;
+            };
+            if neighbor_column.river_flow_hint > column.river_flow_hint + 0.01
+                && neighbor_water > water
+            {
+                count += 1;
+            } else if column.river_flow_hint > neighbor_column.river_flow_hint + 0.01
+                && water > neighbor_water
+            {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 fn max_shore_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
@@ -582,7 +759,7 @@ fn max_shore_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
     for (index, column) in columns.iter().enumerate() {
         if index + 1 < columns.len() && (index + 1) % width != 0 {
             let neighbor = &columns[index + 1];
-            if column.water_level_blocks.is_some() || neighbor.water_level_blocks.is_some() {
+            if is_standing_water(*column) || is_standing_water(*neighbor) {
                 max_delta = max_delta.max(
                     (column.visible_surface_height_blocks()
                         - neighbor.visible_surface_height_blocks())
@@ -592,7 +769,7 @@ fn max_shore_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
         }
         if index + width < columns.len() {
             let neighbor = &columns[index + width];
-            if column.water_level_blocks.is_some() || neighbor.water_level_blocks.is_some() {
+            if is_standing_water(*column) || is_standing_water(*neighbor) {
                 max_delta = max_delta.max(
                     (column.visible_surface_height_blocks()
                         - neighbor.visible_surface_height_blocks())
@@ -766,18 +943,15 @@ mod tests {
     }
 
     #[test]
-    fn coast_adjacent_land_ramps_from_sea_level() {
+    fn coast_mask_alone_does_not_smooth_contour_terrace() {
         let mut sample = sample(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0);
         sample.coast_mask = 1.0;
         let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
+        let lower = (column.raw_surface_height_blocks / DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS)
+            .floor()
+            * DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS;
 
-        assert!(column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS);
-        assert!(
-            column.surface_height_blocks
-                <= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
-                    + DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS
-                    + 1.0
-        );
+        assert_eq!(column.surface_height_blocks, lower);
     }
 
     #[test]
@@ -795,6 +969,32 @@ mod tests {
                     HeightfieldTerrainKind::Ocean | HeightfieldTerrainKind::Lake
                 ))
                 .all(|column| column.water_level_blocks.is_some())
+        );
+    }
+
+    #[test]
+    fn ocean_visible_surface_is_always_sea_level() {
+        let tile = generate_heightfield_tile(&test_macro_tile(), HeightfieldConfig::default());
+
+        assert!(tile.stats.ocean_column_count > 0);
+        assert_eq!(
+            tile.stats.min_ocean_visible_surface_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+        );
+        assert_eq!(
+            tile.stats.max_ocean_visible_surface_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+        );
+        assert!(
+            tile.columns
+                .iter()
+                .filter(|column| matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean))
+                .all(|column| {
+                    column.surface_height_blocks == DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                        && column.water_level_blocks == Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+                        && column.visible_surface_height_blocks()
+                            == DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                })
         );
     }
 
@@ -844,7 +1044,10 @@ mod tests {
         let sample = sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0);
         let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
 
-        assert!(column.surface_height_blocks <= DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS);
+        assert_eq!(
+            column.surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+        );
         assert_eq!(
             column.water_level_blocks,
             Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
@@ -856,7 +1059,69 @@ mod tests {
     }
 
     #[test]
-    fn raw_and_constrained_heights_are_recorded_before_snap() {
+    fn final_visible_heights_are_integer_blocks() {
+        let tile = generate_heightfield_tile(&test_macro_tile(), HeightfieldConfig::default());
+
+        assert!(tile.columns.iter().all(|column| {
+            column.visible_surface_height_blocks().fract() == 0.0
+                && column
+                    .water_level_blocks
+                    .is_none_or(|water| water.fract() == 0.0)
+                && column
+                    .river_water_height_blocks
+                    .is_none_or(|water| water.fract() == 0.0)
+        }));
+    }
+
+    #[test]
+    fn river_water_steps_down_to_standing_water_without_large_jumps() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 32.0);
+        let samples = vec![
+            sample_with_river(0.0, 0.0, 1.0, 0.22),
+            sample_with_river(32.0, 0.0, 0.85, 0.42),
+            sample_with_river(64.0, 0.0, 0.70, 0.62),
+            sample_with_river(96.0, 0.0, 0.55, 0.82),
+            sample(128.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0),
+        ];
+        let macro_tile = MacroFieldTile {
+            config,
+            samples,
+            stats: MacroFieldTileStats::default(),
+        };
+        let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+        let river_water = (0..4)
+            .map(|x| {
+                tile.column(x, 0)
+                    .expect("river column")
+                    .river_water_height_blocks
+                    .expect("river water")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tile.column(4, 0).expect("ocean").water_level_blocks,
+            Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+        );
+        assert!(
+            river_water.windows(2).all(|pair| pair[0] >= pair[1]),
+            "river water should not climb as display flow increases: {river_water:?}"
+        );
+        assert!(
+            river_water
+                .windows(2)
+                .all(|pair| (pair[0] - pair[1]).abs() <= 1.0),
+            "river water should descend by at most one block per neighboring sample: {river_water:?}"
+        );
+        assert!(
+            tile.stats.max_river_water_neighbor_delta_blocks <= 1.0,
+            "river water neighbor delta should be constrained: {}",
+            tile.stats.max_river_water_neighbor_delta_blocks
+        );
+        assert_eq!(tile.stats.river_uphill_flow_neighbor_count, 0);
+    }
+
+    #[test]
+    fn raw_and_contour_heights_are_recorded_before_snap() {
         let mut sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
         sample.coast_mask = 0.65;
         let column = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
@@ -865,9 +1130,9 @@ mod tests {
             column.raw_surface_height_blocks,
             column.surface_height_blocks
         );
-        assert_ne!(
+        assert_eq!(
             column.constrained_surface_height_blocks,
-            column.surface_height_blocks
+            column.contour_guided_surface_height_blocks
         );
         assert_eq!(column.surface_height_blocks, column.surface_y as f32);
     }
@@ -914,5 +1179,12 @@ mod tests {
             river_flow_hint: 0.0,
             combined_macro_height: height,
         }
+    }
+
+    fn sample_with_river(x: f32, z: f32, height: f32, flow_hint: f32) -> MacroFieldSample {
+        let mut sample = sample(x, z, height, 0.0, 0.0, 0.0, 0.0);
+        sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
+        sample.river_flow_hint = flow_hint;
+        sample
     }
 }

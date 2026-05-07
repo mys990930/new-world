@@ -168,10 +168,14 @@ area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown pr
    - 현재 vertical slice에서는 meso feature와 Perlin micro relief를 stub으로 두고 각각 `0` delta를 적용한다.
    - `heightfield`는 stage 8 `MacroFieldTile`의 `combined_macro_height`와 mask/value channel을 column
      oriented `HeightfieldTile`로 변환한다.
-   - heightfield는 `combined_macro_height`를 직접 integer height로만 snap하지 않고, stage 8 contour
-     preview와 같은 block-height step을 읽어 contour band 안에서 보간한 뒤 column height를 만든다.
-     contour segment 자체는 debug layer이며 source of truth가 아니지만, column output은 같은 contour
-     level domain과 일관되어야 한다.
+   - heightfield는 `combined_macro_height`를 직접 continuous height로 쓰지 않고, stage 8 contour
+     preview와 같은 block-height domain에서 contour lower band를 선택해 1-block integer terrace를
+     만든다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column output은 같은
+     contour level domain과 일관되어야 한다.
+   - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
+     final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
+     올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을
+     만들지 않아야 한다.
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
 12. elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature/hydration/biome influence를 resolve한다.
@@ -302,8 +306,9 @@ column/window만 sample해 `ChunkData`를 채운다.
 - macro elevation, coast/lake/ocean/dry basin mask, ridge influence, river valley, combined macro
   height는 각각 finite 값과 문서화된 range를 유지해야 한다.
 - heightfield는 macro field contour preview와 같은 block-height domain을 사용해 column height를
-  contour-guided band 안에서 resolve해야 하며, raw macro scalar를 버리고 contour line만 terrain
-  source로 재구성하면 안 된다.
+  contour lower band로 resolve해야 하며, raw macro scalar를 버리고 contour line만 terrain source로
+  재구성하면 안 된다. launch slice의 final land surface는 smoothing 없이 integer contour step을
+  따른다.
 - river valley width와 depth는 selected/display flow에 단조 증가해야 한다. 상류와 하류가 같은 폭으로
   보이면 회귀다.
 - ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 진단할 수 있어야 하지만,

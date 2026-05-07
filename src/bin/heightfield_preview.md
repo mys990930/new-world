@@ -36,9 +36,10 @@
 4. Generate canonical noisy boundaries.
 5. Rasterize `MacroFieldTile` at the requested column resolution.
 6. Convert it to `HeightfieldTile` with pure contour-band terrace resolve.
-7. Snap heightfield surface/water output to integer block heights.
+7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
+   fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
 8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
-   their visible top for neighbor-delta side faces; the underwater bed remains stored separately.
+   their visible top for neighbor-delta side faces.
 9. Draw visible side faces, top faces, water tops, the primary 1024-block macro-field tile grid,
    secondary/faint 256-block chunk-group references, very faint 32-block chunk boundaries, scale
    bar, and metadata legend in painter order.
@@ -68,18 +69,23 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   - pale gray high/ridge
   - muted gray/mauve dry basin
 - Water boxes come from heightfield water hints, not final fluid simulation.
-- Sea level is fixed at `y = 0`. Coast-adjacent land uses a shoreline contour ceiling before
-  integer snapping so ordinary ocean/land contact does not render as an immediate vertical wall.
-  In pure contour-step mode, the first land ring next to water starts at `y = 0`, then rises inward
-  by contour steps.
+- Sea level is fixed at `y = 0`. Ocean/lake columns render their visible surface at `y = 0`; the
+  current vertical slice hides bathymetry so the sea side does not read as carved terrain.
+- Coast-adjacent land uses a shoreline contour ceiling before integer snapping so ordinary
+  ocean/lake contact does not render as an immediate vertical wall. In pure contour-step mode, the
+  first land ring next to standing water starts at `y = 0`, then rises inward by one-block contour
+  steps.
 - Heightfield columns are resolved to contour bands before water/shore constraints. The raw block
   height from `combined_macro_height` remains stored for diagnostics, but final land surface does
   not directly use the continuous scalar. Default contour step is `1` block and smoothing is
   disabled, so the preview shows every one-block terrace. This is not contour-line reconstruction;
   it is scalar-to-band quantization in the same block-height domain as the contour preview.
-- Ocean/lake terrain `surface_height_blocks` is bed height. The preview compares adjacent columns by
-  visible top height, `max(surface_height_blocks, water_level_blocks)`, so a water bed does not look
-  like a shoreline cliff.
+- River columns receive an integer preliminary water height. Before preview, neighboring river or
+  standing-water surfaces clamp river water so adjacent river-water steps descend by at most one
+  block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.
+- Ocean/lake terrain `surface_height_blocks` is the visible waterline surface in this slice, not
+  bed height. The preview still compares adjacent columns by visible top height,
+  `max(surface_height_blocks, water_level_blocks)`.
 - Grid overlay has three diagnostic layers, but the primary readable scale is the same
   `1024`-block macro-field tile grid used by `macro_field_preview`. The runtime chunk edge is
   currently `32` blocks and remains as a very faint reference. The `256`-block grid is a secondary

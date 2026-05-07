@@ -215,6 +215,11 @@ struct PreviewHeader {
     max_snapped_neighbor_delta: f32,
     max_visible_neighbor_delta: f32,
     max_shore_visible_neighbor_delta: f32,
+    min_ocean_visible_surface: f32,
+    max_ocean_visible_surface: f32,
+    min_land_near_water_surface: f32,
+    max_river_water_neighbor_delta: f32,
+    river_uphill_flow_neighbors: usize,
     contour_step_blocks: f32,
     contour_band_smoothing: f32,
     vertical_px_per_block: f32,
@@ -298,6 +303,17 @@ impl PreviewHeader {
                 self.max_shore_visible_neighbor_delta
             ),
             format!(
+                "waterline_ocean_visible_min_max_land_near_water_min={:.3},{:.3},{:.3}",
+                self.min_ocean_visible_surface,
+                self.max_ocean_visible_surface,
+                self.min_land_near_water_surface
+            ),
+            format!(
+                "river_water_delta_max_uphill_flow_neighbors={:.3},{}",
+                self.max_river_water_neighbor_delta,
+                self.river_uphill_flow_neighbors
+            ),
+            format!(
                 "water_ocean_lake_river_dry_ridge_columns={},{},{},{},{},{}",
                 self.water_columns,
                 self.ocean_columns,
@@ -313,7 +329,7 @@ impl PreviewHeader {
                 self.contour_step_blocks, self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
-            "shoreline_policy=water_visible_top_y0_land_contour_ceiling_from_y0_without_vertical_sea_cliff".to_string(),
+            "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
             "height_mapping=combined_macro_height_-0.75_to_1.25_maps_-48_to_160_blocks".to_string(),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
@@ -413,6 +429,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_snapped_neighbor_delta: heightfield.stats.max_snapped_neighbor_delta_blocks,
         max_visible_neighbor_delta: heightfield.stats.max_visible_neighbor_delta_blocks,
         max_shore_visible_neighbor_delta: heightfield.stats.max_shore_visible_neighbor_delta_blocks,
+        min_ocean_visible_surface: heightfield.stats.min_ocean_visible_surface_blocks,
+        max_ocean_visible_surface: heightfield.stats.max_ocean_visible_surface_blocks,
+        min_land_near_water_surface: heightfield.stats.min_land_near_water_surface_blocks,
+        max_river_water_neighbor_delta: heightfield.stats.max_river_water_neighbor_delta_blocks,
+        river_uphill_flow_neighbors: heightfield.stats.river_uphill_flow_neighbor_count,
         contour_step_blocks: heightfield.stats.contour_step_blocks,
         contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
@@ -492,6 +513,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.max_snapped_neighbor_delta_blocks,
         header.max_visible_neighbor_delta,
         header.max_shore_visible_neighbor_delta
+    );
+    println!(
+        "waterline: ocean visible min/max {:.2}/{:.2}, land near water min {:.2}, river water neighbor delta max {:.2}, uphill-flow neighbors {}",
+        header.min_ocean_visible_surface,
+        header.max_ocean_visible_surface,
+        header.min_land_near_water_surface,
+        header.max_river_water_neighbor_delta,
+        header.river_uphill_flow_neighbors
     );
     println!(
         "contour-band heightfield: step {:.1} blocks, smoothing disabled {:.2}",
@@ -811,10 +840,26 @@ fn draw_column_iso(
             shade_rgba(color, 0.56),
         );
     }
-    draw_top_face(image, tile, plan, x, z, surface, shade_rgba(color, 1.05));
+    let top_surface = if matches!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::Ocean | HeightfieldTerrainKind::Lake
+    ) {
+        visible_surface
+    } else {
+        surface
+    };
+    draw_top_face(
+        image,
+        tile,
+        plan,
+        x,
+        z,
+        top_surface,
+        shade_rgba(color, 1.05),
+    );
 
     if let Some(water) = column.water_level_blocks {
-        if water > surface {
+        if water >= surface {
             draw_top_face(
                 image,
                 tile,
@@ -1845,6 +1890,11 @@ mod tests {
                 max_snapped_neighbor_delta_blocks: 80.0,
                 max_visible_neighbor_delta_blocks: 80.0,
                 max_shore_visible_neighbor_delta_blocks: 0.0,
+                min_ocean_visible_surface_blocks: 0.0,
+                max_ocean_visible_surface_blocks: 0.0,
+                min_land_near_water_surface_blocks: 0.0,
+                max_river_water_neighbor_delta_blocks: 0.0,
+                river_uphill_flow_neighbor_count: 0,
                 water_column_count: 0,
                 ocean_column_count: 0,
                 lake_column_count: 0,
@@ -1871,6 +1921,7 @@ mod tests {
             surface_y: surface_height_blocks.floor() as i32,
             water_level_blocks: None,
             water_y: None,
+            river_water_height_blocks: None,
             terrain_kind,
             macro_elevation: 0.0,
             combined_macro_height: surface_height_blocks / 160.0,

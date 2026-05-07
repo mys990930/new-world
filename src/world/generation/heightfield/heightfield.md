@@ -88,6 +88,7 @@ HeightfieldColumn {
     surface_y,
     water_level_blocks,
     water_y,
+    river_water_height_blocks,
     terrain_kind,
     macro_elevation,
     combined_macro_height,
@@ -129,7 +130,7 @@ raw_surface_height_blocks
 contour_guided_surface_height_blocks
   = raw height가 속한 contour step의 lower band 높이
 constrained_surface_height_blocks
-  = water bed / shoreline contour ceiling / clamp를 적용한 snap 전 높이
+  = sea-level water surface / shoreline contour ceiling / clamp를 적용한 snap 전 높이
 surface_height_blocks
   = voxel fill이 바로 읽을 수 있게 contour step / integer block에 snap한 최종 높이
 ```
@@ -155,29 +156,22 @@ land output도 4-block terrace에 맞춰야 한다. raw continuous height는 `ra
 ## Water Policy
 
 - `ocean_mask > 0.5` 또는 `lake_mask > 0.5`이면 water level은 `sea_level_blocks`다.
-- ocean/lake column의 terrain surface는 water bed로 취급하며, preview vertical slice에서는 기본적으로
-  ocean bed를 `sea_level - 12 blocks`, lake bed를 `sea_level - 2 blocks` 이하로 낮춘다. 이는 final
-  bathymetry가 아니라 수면과 지형 bed를 분리해 preview/voxel fill이 물을 볼 수 있게 하는 launch
-  정책이다.
-- 바다 수면은 `y = 0`이지만, 바다와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다.
-  explicit cliff/ridge/meso feature가 생기기 전까지 coast-adjacent land는 `coast_mask`를 읽어
-  해수면에서 올라가는 shoreline constraint로 clamp한다. 이 pass는 사용자가 요청한 "terrain smoothing
-  없음"의 예외인 water/shore safety constraint이며, final land output은 constraint 뒤에도 contour step에
-  다시 snap된다.
-- `coast_mask`가 coarse preview sample에서 충분히 잡히지 않는 경우를 보완하기 위해, tile 생성 후
-  water column으로부터의 grid distance를 계산하고 `shore_ramp_blocks` 안의 land column에 shoreline
-  contour ceiling을 한 번 더 적용한다. 이 pass는 raw macro height를 바꾸지 않고
-  `constrained_surface_height_blocks`와 snapped final output만 조정한다. 순수 contour-step mode에서
-  water와 맞닿은 첫 land ring은 water surface `y = 0`에서 시작하고, 다음 ring은 contour step만큼
-  올라간다. 즉 해안 안전 제약은 continuous scalar smoothing이 아니라 `0, 1, 2, ...` 계단을 물가에서
-  강제하는 quantized ceiling이다.
-- 지형 surface가 water level보다 낮으면 water column이 생긴다.
-- ocean/lake column의 `surface_height_blocks`는 수면이 아니라 bed 높이다. preview나 후속 voxel
-  fill이 visible top continuity를 판단할 때는 `max(surface_height_blocks, water_level_blocks)`를
-  별도 visible surface로 읽어야 한다. ocean bed와 land surface를 직접 비교해 해안 절벽으로
-  렌더하면 회귀다.
-- `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있지만, 현재 vertical
-  slice에서는 height를 추가로 깎지 않는다.
+- ocean/lake column의 final visible surface는 water surface와 같은 `y = 0`이다. 이 vertical slice는
+  ocean bathymetry를 만들지 않으며, `ocean_bed_blocks`와 `lake_bed_blocks`는 후속/debug bathymetry용
+  설정으로만 남는다. preview나 heightfield visible top에 bed depression을 섞으면 회귀다.
+- 일반 land column은 raw block height를 contour lower band로 양자화한 뒤 sea level 아래로 내려가지
+  않는다. 즉 water가 아닌 terrain의 기본 floor는 `y = 0`이다.
+- 바다/호수와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다. tile 생성 후
+  standing water(ocean/lake) column으로부터 grid distance를 계산하고, 주변 land에 shoreline contour
+  ceiling을 적용한다. 이 pass는 continuous smoothing이 아니라 `0, 1, 2, ...` 계단 ceiling이다.
+  water와 맞닿은 첫 land ring은 `y = 0`, 다음 ring은 `y = 1`, 그 다음은 `y = 2`처럼 contour step
+  단위로만 올라간다.
+- water-adjacent safety pass는 ocean/lake 같은 standing water만 기준으로 삼는다. river water hint를
+  shoreline ocean/lake ramp 기준으로 사용하지 않는다.
+- `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있다. river column은
+  integer river water height를 갖고, 인접 river/standing-water surface와 비교해 한 column 이웃 사이에서
+  한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full hydrology
+  water surface solve가 아니라 stage 11 vertical slice용 안전 장치다.
 - dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
 
 ---
@@ -258,3 +252,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 10. water-adjacent visible top은 bed가 아니라 water surface `y = 0`과 비교해야 한다. 순수
     contour-step mode에서 water와 맞닿은 land ring은 `y = 0`부터 시작하고, shoreline ramp 안쪽으로
     갈수록 contour step 단위로만 올라가야 한다.
+11. ocean/lake visible surface는 항상 `y = 0`이며, preview vertical slice에서 ocean side가 깊게
+    파인 지형처럼 보이면 회귀다.
+12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
+    않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.

@@ -370,8 +370,9 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 column resolution, sample spacing, block height min/avg/max, water/ocean/lake/
-  river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, shoreline ramp policy,
-  meso/perlin stub 상태, isometric view/projection, timing을 기록한다.
+  river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, ocean
+  visible `y=0` policy, river water descent stats, meso/perlin stub 상태, isometric view/projection,
+  timing을 기록한다.
 - metadata/stdout은 `center-x/center-z`, world footprint, chunk x/z range, chunk radius,
   chunk edge blocks, macro-field tile edge blocks, column step/resolution, sea level과 height range를
   함께 기록한다.
@@ -386,7 +387,9 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
 - `combined_macro_height -0.75..1.25`를 `-48..160 block` preview scale로 매핑한다.
-- ocean/lake mask는 sea-level `y = 0` water hint가 된다.
+- ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
+  ocean/lake visible surface도 `y = 0`이며, bathymetry/bed depression을 preview terrain으로 렌더하지
+  않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
@@ -395,11 +398,12 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
-- ocean water surface는 `y = 0`이지만, coast-adjacent land는 `coast_mask` 기반 shoreline ramp를 통해
-  해수면 근처에서 시작해야 한다. explicit cliff/meso feature가 없는 launch slice에서 바다 옆 land가
-  즉시 높은 vertical cliff로 솟으면 회귀다.
+- ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 grid-distance 기반
+  contour ceiling으로 `0, 1, 2, ...` 계단을 따라 올라가야 한다. explicit cliff/meso feature가 없는
+  launch slice에서 바다 옆 land가 즉시 높은 vertical cliff로 솟으면 회귀다.
 - river valley는 이미 `combined_macro_height`에 carve guide로 반영되어 있으므로 heightfield stage에서
-  중복 carve하지 않고 terrain kind/water hint로 보존한다.
+  중복 carve하지 않는다. 다만 river hint column에는 preliminary integer river water height를 만들고,
+  인접 river/standing-water surface와 한 block 이하의 step으로 천천히 내려오도록 clamping한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
 - default renderer is a CPU 2D isometric column renderer, not a tunable 3D orthographic camera. It
