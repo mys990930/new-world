@@ -27,7 +27,7 @@ const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_WINDOW_COLUMNS_X: u32 = 768;
-const DEFAULT_COLUMNS_PER_CHUNK: u32 = CHUNK_EDGE_I32 as u32 * 4;
+const DEFAULT_COLUMNS_PER_CHUNK: u32 = 64;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
@@ -2483,6 +2483,44 @@ mod tests {
         assert_eq!(window.max_x(), 160.0);
         assert_eq!(window.min_z(), -128.0);
         assert_eq!(window.max_z(), 32.0);
+    }
+
+    #[test]
+    fn chunk_radius_default_density_uses_sixty_four_columns_per_chunk() {
+        assert_eq!(DEFAULT_COLUMNS_PER_CHUNK, 64);
+        assert_eq!(columns_for_chunk_radius(1), 192);
+        assert_eq!(columns_for_chunk_radius(4), 576);
+    }
+
+    #[test]
+    fn explicit_columns_override_chunk_radius_default_density() {
+        let config = PreviewConfig {
+            seed: 42,
+            center_x: 0,
+            center_z: 0,
+            center_is_world_blocks: false,
+            width: DEFAULT_IMAGE_WIDTH,
+            height: DEFAULT_IMAGE_HEIGHT,
+            world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+            region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+            land_bias: 0.14,
+            columns_x: Some(320),
+            columns_z: Some(160),
+            chunk_radius: Some(1),
+            quarter_turns: 0,
+            block_lines: DEFAULT_BLOCK_LINES,
+            output: None,
+        };
+        let window = config.window();
+
+        assert_eq!(window.columns_x, 320);
+        assert_eq!(window.columns_z, 160);
+        assert_eq!(
+            config.chunk_radius.map(|_| DEFAULT_COLUMNS_PER_CHUNK),
+            Some(64),
+            "metadata should still report the chunk-derived default while explicit columns own final resolution"
+        );
     }
 
     #[test]

@@ -205,7 +205,7 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      voxel fill은 이후 stage에서 별도로 수행한다.
    - `heightfield_preview`는 별도 수평 scale 계층을 쓰지 않는다. 같은 world footprint를 더 촘촘히
      보려면 해당 footprint를 더 많은 column으로 직접 샘플링한다. chunk-radius preview의 기본값은
-     chunk 하나당 128개 column이며, free window preview는 기본 768개 X column을 사용한다.
+     chunk 하나당 64개 column이며, free window preview는 기본 768개 X column을 사용한다.
      `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
    - 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와 `heightfield` band resolve가
      공유하는 block-height domain에서 적용한다. 현재 launch 기본

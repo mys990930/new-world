@@ -363,9 +363,11 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--chunk-radius <i32>`: positional center chunk를 중심으로 하는 square chunk radius. 지정되면
     `--world-span-blocks` 기반 footprint 대신 `center_chunk-r .. center_chunk+r` inclusive chunk range를
     사용한다.
-  - `--columns-x <u32>`: heightfield sample column 수, 기본 `192`
+  - `--columns-x <u32>`: heightfield sample column 수. free-window 기본은 `768`이고,
+    `--chunk-radius` 모드 기본은 `(2r+1) * 64`다.
   - `--columns-z <u32>`: 기본은 image aspect에서 계산. 단 `--chunk-radius` 모드에서는 square
-    footprint에 맞춰 기본값이 `columns-x`가 된다.
+    footprint에 맞춰 기본값이 `columns-x`가 된다. 명시한 `--columns-x`/`--columns-z`는
+    chunk당 기본 column 수보다 우선한다.
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`

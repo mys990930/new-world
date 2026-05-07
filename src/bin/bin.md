@@ -116,7 +116,8 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
   - `--width 1280`
   - `--height 720`
   - `--world-span-blocks 8192`
-  - `--columns-x 192`
+  - `--columns-x 768` in free-window mode
+  - `--chunk-radius` mode uses `64` columns per covered chunk by default
   - `--columns-z` derived from image aspect
 - Example:
 
@@ -133,7 +134,7 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
     to make column scale readable. They draw subtle top/side face edges plus integer side-step
     guides; `--no-block-lines` disables only this diagnostic overlay.
   - Horizontal density is expressed as direct column count. Free-window mode defaults to `768` X
-    columns; chunk-radius mode defaults to `128` columns per chunk on each axis. Heightfield Y
+    columns; chunk-radius mode defaults to `64` columns per chunk on each axis. Heightfield Y
     relief is resolved in the doubled macro/heightfield block-domain, and preview rendering keeps
     block primitives visually cubic instead of applying an extra vertical scale.
   - Heightfield terrace resolve uses integer contour steps with a one-block raw minimum gap for
