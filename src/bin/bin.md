@@ -134,9 +134,9 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
   - Horizontal density is fixed at XZ scale `2` for this preview and is not a CLI option.
     Heightfield Y values are not rescaled, but rendered vertical pixels are normalized by that fixed
     XZ density so the same block heights display at half the baseline screen height.
-  - Heightfield terrace resolve uses integer contour steps with a default four-block raw minimum
-    gap for general land, while river corridors keep a one-block gap so water descent remains
-    readable.
+  - Heightfield terrace resolve uses integer contour steps with a one-block raw minimum gap for
+    both general land and river corridors; the river override structure remains available for later
+    tuning.
   - Auto output names include quarter and chunk radius suffixes such as `s42_cx0_cz0_q0_r4.png`.
     Explicit `--output` paths are respected exactly.
   - Meso feature and Perlin micro relief are currently stubbed to zero.

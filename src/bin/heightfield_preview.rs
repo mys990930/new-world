@@ -474,12 +474,11 @@ impl PreviewHeader {
             ),
             "meso_delta_blocks=0".to_string(),
             "micro_relief_blocks=0".to_string(),
-            format!(
-                "contour_band_heightfield=step:{:.2}_blocks,land_min_gap:{:.2}_blocks,river_min_gap:{:.2}_blocks,smoothing_disabled:{:.2}",
+            contour_gap_metadata(
                 self.contour_step_blocks,
                 self.contour_min_gap_blocks,
                 self.contour_river_min_gap_blocks,
-                self.contour_band_smoothing
+                self.contour_band_smoothing,
             ),
             "height_snap=round_to_integer_block".to_string(),
             format!("block_lines={}", self.block_lines),
@@ -501,6 +500,27 @@ impl PreviewHeader {
             "meaning=diagnostic_voxelized_heightfield_columns_not_final_chunkdata".to_string(),
         ]
         .join("\n")
+    }
+}
+
+fn contour_gaps_are_unified(land_gap_blocks: f32, river_gap_blocks: f32) -> bool {
+    (land_gap_blocks - river_gap_blocks).abs() <= 0.001
+}
+
+fn contour_gap_metadata(
+    step_blocks: f32,
+    land_gap_blocks: f32,
+    river_gap_blocks: f32,
+    band_smoothing: f32,
+) -> String {
+    if contour_gaps_are_unified(land_gap_blocks, river_gap_blocks) {
+        format!(
+            "contour_band_heightfield=step:{step_blocks:.2}_blocks,unified_land_river_min_gap:{land_gap_blocks:.2}_blocks,smoothing_disabled:{band_smoothing:.2}"
+        )
+    } else {
+        format!(
+            "contour_band_heightfield=step:{step_blocks:.2}_blocks,land_min_gap:{land_gap_blocks:.2}_blocks,river_min_gap:{river_gap_blocks:.2}_blocks,smoothing_disabled:{band_smoothing:.2}"
+        )
     }
 }
 
@@ -723,13 +743,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         header.max_river_water_neighbor_delta,
         header.river_uphill_flow_neighbors
     );
-    println!(
-        "contour-band heightfield: step {:.1} blocks, land gap {:.1} blocks, river gap {:.1} blocks, smoothing disabled {:.2}",
-        heightfield.stats.contour_step_blocks,
+    if contour_gaps_are_unified(
         heightfield.stats.contour_min_gap_blocks,
         heightfield.stats.contour_river_min_gap_blocks,
-        heightfield.stats.contour_band_smoothing
-    );
+    ) {
+        println!(
+            "contour-band heightfield: step {:.1} blocks, unified land/river gap {:.1} blocks, smoothing disabled {:.2}",
+            heightfield.stats.contour_step_blocks,
+            heightfield.stats.contour_min_gap_blocks,
+            heightfield.stats.contour_band_smoothing
+        );
+    } else {
+        println!(
+            "contour-band heightfield: step {:.1} blocks, land gap {:.1} blocks, river gap {:.1} blocks, smoothing disabled {:.2}",
+            heightfield.stats.contour_step_blocks,
+            heightfield.stats.contour_min_gap_blocks,
+            heightfield.stats.contour_river_min_gap_blocks,
+            heightfield.stats.contour_band_smoothing
+        );
+    }
     println!(
         "xz scale: {}x fixed horizontal columns; horizontal subdivisions are not user-configurable; y height blocks are not rescaled, rendered vertical pixels are normalized by fixed xz density",
         HEIGHTFIELD_PREVIEW_XZ_SCALE
@@ -1618,16 +1650,27 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         layout.scale,
     );
     text_y += layout.line_step;
-    draw_text(
-        &mut rgba,
-        text_x,
-        text_y,
-        &format!(
+    let band_label = if contour_gaps_are_unified(
+        header.contour_min_gap_blocks,
+        header.contour_river_min_gap_blocks,
+    ) {
+        format!(
+            "BAND {:.0}B GAP {:.0}B",
+            header.contour_step_blocks, header.contour_min_gap_blocks
+        )
+    } else {
+        format!(
             "BAND {:.0}B LAND GAP {:.0}B RIV {:.0}B",
             header.contour_step_blocks,
             header.contour_min_gap_blocks,
             header.contour_river_min_gap_blocks
-        ),
+        )
+    };
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        &band_label,
         [204, 214, 203, 255],
         layout.scale,
     );

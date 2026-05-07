@@ -14,7 +14,7 @@ pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
-pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 4.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_HORIZONTAL_SUBDIVISIONS: u32 = 1;
@@ -943,7 +943,7 @@ mod tests {
         let contour = HeightfieldContourConfig::default();
 
         assert_eq!(contour.step_blocks, 1.0);
-        assert_eq!(contour.min_gap_blocks, 4.0);
+        assert_eq!(contour.min_gap_blocks, 1.0);
         assert_eq!(contour.river_min_gap_blocks, 1.0);
         assert_eq!(contour.band_smoothing, 0.0);
     }
@@ -996,20 +996,20 @@ mod tests {
     }
 
     #[test]
-    fn general_land_contour_gap_requires_four_raw_blocks_before_next_terrace() {
+    fn general_land_contour_gap_uses_one_raw_block_before_next_terrace() {
         let config = HeightfieldConfig::default();
         let just_below_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.077, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.031, 0.0, 0.0, 0.0, 0.0), config);
         let after_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.079, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
 
         assert!(
-            just_below_next_stride.raw_surface_height_blocks > 4.0,
-            "raw height should already cross several one-block terraces"
+            just_below_next_stride.raw_surface_height_blocks > 1.0,
+            "raw height should already cross the first one-block terrace"
         );
         assert_eq!(
             just_below_next_stride.surface_height_blocks, 0.0,
-            "default four-block land gap keeps the next integer terrace unused until raw height crosses five raw blocks"
+            "default one-block land gap keeps the next integer terrace unused until raw height crosses two raw blocks"
         );
         assert_eq!(
             after_next_stride.surface_height_blocks, 1.0,
@@ -1018,21 +1018,41 @@ mod tests {
     }
 
     #[test]
-    fn river_corridor_uses_smaller_contour_gap_than_general_land() {
+    fn default_river_corridor_gap_matches_land_gap() {
         let config = HeightfieldConfig::default();
         let land =
             heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
         let river =
             heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.032, 0.75), config);
 
-        assert!(
-            land.raw_surface_height_blocks
-                > config.contour.step_blocks + config.contour.river_min_gap_blocks,
-            "the sample should be high enough for the river corridor's finer stride"
+        assert_eq!(
+            config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
+            "default launch slice uses the same one-block gap for land and river corridors"
         );
         assert_eq!(
+            land.surface_height_blocks, river.surface_height_blocks,
+            "river corridors should not differ from land while default gaps are unified"
+        );
+    }
+
+    #[test]
+    fn river_corridor_gap_can_still_override_general_land_gap() {
+        let config = HeightfieldConfig {
+            contour: HeightfieldContourConfig {
+                min_gap_blocks: 4.0,
+                river_min_gap_blocks: 1.0,
+                ..HeightfieldContourConfig::default()
+            },
+            ..HeightfieldConfig::default()
+        };
+        let land =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.032, 0.0, 0.0, 0.0, 0.0), config);
+        let river =
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.032, 0.75), config);
+
+        assert_eq!(
             land.surface_height_blocks, 0.0,
-            "general terrain should still wait for the wider macro terrace gap"
+            "wider configured land gap should still hold ordinary terrain back"
         );
         assert_eq!(
             river.surface_height_blocks, 1.0,

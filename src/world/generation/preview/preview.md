@@ -413,11 +413,11 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
-  1 block이고 일반 land terrain의 기본 minimum gap은 4 block이다. `combined_macro_height`에서 얻은
+  1 block이고 일반 land terrain의 기본 minimum gap도 1 block이다. `combined_macro_height`에서 얻은
   raw block height를 직접 final surface로 쓰지 않고 해당 contour band의 lower level로 quantize한다.
-  다음 integer terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 전체 높이
-  사용량은 압축될 수 있다. river corridor는 water descent를 보존하기 위해 별도 minimum gap 1 block을
-  사용한다. smoothing/interpolation은 현재 disabled/stub이다.
+  다음 integer terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 현재 기본값에서는
+  raw height가 2 block 진행될 때 visible terrain이 1 block 올라간다. river corridor 기본 minimum gap도
+  1 block이며, 이후 필요하면 별도 override로 다시 분리할 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
