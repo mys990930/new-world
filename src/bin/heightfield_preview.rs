@@ -22,8 +22,6 @@ use new_world::world::generation::{
 
 mod common;
 
-use common::preview_compass::draw_compass_offscreen;
-
 const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
@@ -38,12 +36,14 @@ const ISO_MAX_RELIEF_FRACTION: f32 = 0.35;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
 const PREVIEW_MAJOR_CHUNK_GRID_BLOCKS: i32 = CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER;
+const DEFAULT_BLOCK_LINES: bool = true;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
     seed: u64,
     center_x: i32,
     center_z: i32,
+    center_is_world_blocks: bool,
     width: u32,
     height: u32,
     world_span_blocks: i32,
@@ -56,6 +56,7 @@ struct PreviewConfig {
     chunk_radius: Option<i32>,
     quarter_turns: u8,
     vertical_scale: f32,
+    block_lines: bool,
     output: Option<PathBuf>,
 }
 
@@ -116,9 +117,9 @@ impl PreviewConfig {
     }
 
     fn window(&self) -> PreviewWindow {
+        let center_chunk_x = self.center_chunk_x();
+        let center_chunk_z = self.center_chunk_z();
         let (center_x, center_z, span_x, span_z) = if let Some(radius) = self.chunk_radius {
-            let center_chunk_x = self.center_x.div_euclid(CHUNK_EDGE_I32);
-            let center_chunk_z = self.center_z.div_euclid(CHUNK_EDGE_I32);
             let min_chunk_x = center_chunk_x - radius;
             let max_chunk_x = center_chunk_x + radius;
             let min_chunk_z = center_chunk_z - radius;
@@ -136,7 +137,12 @@ impl PreviewConfig {
         } else {
             let span_x = self.world_span_blocks as f32;
             let span_z = span_x * self.columns_z() as f32 / self.columns_x as f32;
-            (self.center_x as f32, self.center_z as f32, span_x, span_z)
+            (
+                self.center_world_x() as f32,
+                self.center_world_z() as f32,
+                span_x,
+                span_z,
+            )
         };
         PreviewWindow {
             center_x,
@@ -154,10 +160,42 @@ impl PreviewConfig {
     fn output_path(&self) -> PathBuf {
         self.output.clone().unwrap_or_else(|| {
             PathBuf::from(format!(
-                "target/heightfield-preview/s{}_x{}_z{}.png",
+                "target/heightfield-preview/s{}_cx{}_cz{}.png",
                 self.seed, self.center_x, self.center_z
             ))
         })
+    }
+
+    fn center_chunk_x(&self) -> i32 {
+        if self.center_is_world_blocks {
+            self.center_x.div_euclid(CHUNK_EDGE_I32)
+        } else {
+            self.center_x
+        }
+    }
+
+    fn center_chunk_z(&self) -> i32 {
+        if self.center_is_world_blocks {
+            self.center_z.div_euclid(CHUNK_EDGE_I32)
+        } else {
+            self.center_z
+        }
+    }
+
+    fn center_world_x(&self) -> i32 {
+        if self.center_is_world_blocks {
+            self.center_x
+        } else {
+            self.center_x * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2
+        }
+    }
+
+    fn center_world_z(&self) -> i32 {
+        if self.center_is_world_blocks {
+            self.center_z
+        } else {
+            self.center_z * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2
+        }
     }
 }
 
@@ -218,8 +256,13 @@ impl PreviewWindow {
 struct PreviewHeader {
     seed: u64,
     generator_version: u32,
-    center_x: i32,
-    center_z: i32,
+    input_center_x: i32,
+    input_center_z: i32,
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    center_world_x: i32,
+    center_world_z: i32,
+    center_is_world_blocks: bool,
     width: u32,
     height: u32,
     world_span_blocks: i32,
@@ -266,6 +309,8 @@ struct PreviewHeader {
     contour_band_smoothing: f32,
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
+    quarter_turns: u8,
+    block_lines: bool,
     water_columns: usize,
     ocean_columns: usize,
     lake_columns: usize,
@@ -286,9 +331,31 @@ impl PreviewHeader {
             "stage=heightfield".to_string(),
             format!("seed={}", self.seed),
             format!("generator_version={}", self.generator_version),
-            format!("center={},{}", self.center_x, self.center_z),
+            format!(
+                "input_center={},{}",
+                self.input_center_x, self.input_center_z
+            ),
+            format!(
+                "input_center_units={}",
+                if self.center_is_world_blocks {
+                    "world_blocks_compat"
+                } else {
+                    "chunk_coordinates"
+                }
+            ),
+            format!(
+                "center_chunk={},{}",
+                self.center_chunk_x, self.center_chunk_z
+            ),
+            format!(
+                "center_world_blocks={},{}",
+                self.center_world_x, self.center_world_z
+            ),
             format!("image={}x{}", self.width, self.height),
-            "orientation_overlay=north_up_east_right".to_string(),
+            format!(
+                "orientation_overlay=heightfield_projected_compass_quarter_turns_{}",
+                self.quarter_turns
+            ),
             format!("world_span_blocks={}", self.world_span_blocks),
             format!(
                 "world_footprint_blocks=x:{:.1}..{:.1},z:{:.1}..{:.1}",
@@ -336,7 +403,10 @@ impl PreviewHeader {
             ),
             format!("vertical_scale={:.3}", self.vertical_scale),
             "view=cpu_isometric_columns".to_string(),
-            "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px".to_string(),
+            format!(
+                "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px_quarter_turns_{}",
+                self.quarter_turns
+            ),
             format!("vertical_px_per_block={:.4}", self.vertical_px_per_block),
             format!(
                 "projected_height_span_px={:.3}",
@@ -385,6 +455,7 @@ impl PreviewHeader {
                 self.contour_step_blocks, self.contour_band_smoothing
             ),
             "height_snap=round_to_integer_block".to_string(),
+            format!("block_lines={}", self.block_lines),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
             "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_-48_to_0_to_160_blocks".to_string(),
             format!(
@@ -440,18 +511,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mesh_ms = mesh_start.elapsed().as_millis();
 
     let render_start = Instant::now();
-    let (mut image, iso_stats) = render_heightfield_isometric(&heightfield, plan)?;
+    let (mut image, iso_stats) =
+        render_heightfield_isometric(&heightfield, plan, config.block_lines)?;
     let render_ms = render_start.elapsed().as_millis();
 
     let total_ms = total_start.elapsed().as_millis();
     let chunk_range = chunk_range_for_window(window);
-    let center_chunk_x = config.center_x.div_euclid(CHUNK_EDGE_I32);
-    let center_chunk_z = config.center_z.div_euclid(CHUNK_EDGE_I32);
+    let center_chunk_x = config.center_chunk_x();
+    let center_chunk_z = config.center_chunk_z();
+    let center_world_x = config.center_world_x();
+    let center_world_z = config.center_world_z();
     let header = PreviewHeader {
         seed: config.seed,
         generator_version: meta.generator_version,
-        center_x: config.center_x,
-        center_z: config.center_z,
+        input_center_x: config.center_x,
+        input_center_z: config.center_z,
+        center_chunk_x,
+        center_chunk_z,
+        center_world_x,
+        center_world_z,
+        center_is_world_blocks: config.center_is_world_blocks,
         width: config.width,
         height: config.height,
         world_span_blocks: window.world_span_x.round() as i32,
@@ -504,6 +583,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         contour_band_smoothing: heightfield.stats.contour_band_smoothing,
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
+        quarter_turns: config.quarter_turns % 4,
+        block_lines: config.block_lines,
         water_columns: heightfield.stats.water_column_count,
         ocean_columns: heightfield.stats.ocean_column_count,
         lake_columns: heightfield.stats.lake_column_count,
@@ -519,14 +600,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     draw_boundary_overlays(&mut image, &heightfield, plan, window);
     draw_overlay(&mut image, &header);
-    draw_compass_offscreen(&mut image);
+    draw_iso_compass_offscreen(&mut image, plan);
     write_rgba_png_with_metadata(&image, &output, &header)?;
 
     println!("heightfield preview: seed {}", config.seed);
     println!(
-        "window: center=({}, {}), span={:.0}x{:.0} blocks, base columns={}x{}, xz scale={}x, effective columns={}x{}, spacing {:.2}->{:.2} blocks",
-        config.center_x,
-        config.center_z,
+        "window: center chunk=({}, {}), center world=({}, {}), span={:.0}x{:.0} blocks, base columns={}x{}, xz scale={}x, effective columns={}x{}, spacing {:.2}->{:.2} blocks",
+        center_chunk_x,
+        center_chunk_z,
+        center_world_x,
+        center_world_z,
         window.world_span_x,
         window.world_span_z,
         window.base_columns_x,
@@ -536,6 +619,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.columns_z,
         window.base_sample_spacing(),
         window.sample_spacing()
+    );
+    if config.center_is_world_blocks {
+        println!(
+            "compat input: positional center was read as world blocks ({}, {})",
+            config.center_x, config.center_z
+        );
+    } else {
+        println!(
+            "input: positional center is chunk coordinates ({}, {})",
+            config.center_x, config.center_z
+        );
+    }
+    println!(
+        "block lines: {}",
+        if config.block_lines { "on" } else { "off" }
     );
     if let Some(radius) = config.chunk_radius {
         println!(
@@ -789,18 +887,19 @@ impl IsoRenderPlan {
         let center_z = tile.height as f32 * 0.5;
         let dx = x - center_x;
         let dz = z - center_z;
-        let (rx, rz) = match self.quarter_turns {
-            0 => (dx, dz),
-            1 => (dz, -dx),
-            2 => (-dx, -dz),
-            3 => (-dz, dx),
-            _ => unreachable!(),
-        };
+        let (rx, rz) = rotate_grid_delta(self.quarter_turns, dx, dz);
         Point2 {
             x: (rx - rz) * self.tile_w_px * 0.5 + self.offset_x_px,
             y: (rx + rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
                 + self.offset_y_px,
         }
+    }
+
+    fn horizontal_depth_key(self, x: f32, z: f32, tile: &HeightfieldTile) -> f32 {
+        let center_x = tile.width as f32 * 0.5;
+        let center_z = tile.height as f32 * 0.5;
+        let (rx, rz) = rotate_grid_delta(self.quarter_turns, x - center_x, z - center_z);
+        (rx + rz) * self.tile_h_px * 0.5
     }
 
     fn untranslated_project_grid(
@@ -836,32 +935,64 @@ impl IsoRenderPlan {
     }
 }
 
+fn rotate_grid_delta(quarter_turns: u8, dx: f32, dz: f32) -> (f32, f32) {
+    match quarter_turns % 4 {
+        0 => (dx, dz),
+        1 => (dz, -dx),
+        2 => (-dx, -dz),
+        3 => (-dz, dx),
+        _ => unreachable!(),
+    }
+}
+
+fn iso_cardinal_screen_delta(quarter_turns: u8, dx: f32, dz: f32) -> Point2 {
+    let (rx, rz) = rotate_grid_delta(quarter_turns, dx, dz);
+    Point2 {
+        x: (rx - rz) * 0.5,
+        y: (rx + rz) * 0.5,
+    }
+}
+
 fn render_heightfield_isometric(
     tile: &HeightfieldTile,
     plan: IsoRenderPlan,
+    block_lines: bool,
 ) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
     let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
     let width = tile.width as usize;
     let height = tile.height as usize;
-    for diagonal in 0..(width + height - 1) {
-        for z in 0..height {
-            if diagonal < z {
-                continue;
-            }
-            let x = diagonal - z;
-            if x >= width {
-                continue;
-            }
-            let index = z * width + x;
-            draw_column_iso(&mut image, tile, plan, x, z, tile.columns[index]);
-        }
+    let mut draw_order = (0..height)
+        .flat_map(|z| {
+            (0..width).map(move |x| {
+                let depth = plan.horizontal_depth_key(x as f32 + 0.5, z as f32 + 0.5, tile);
+                (depth, x, z)
+            })
+        })
+        .collect::<Vec<_>>();
+    draw_order.sort_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+
+    for (_, x, z) in draw_order {
+        let index = z * width + x;
+        draw_column_iso(
+            &mut image,
+            tile,
+            plan,
+            x,
+            z,
+            tile.columns[index],
+            block_lines,
+        );
     }
     Ok((
         OffscreenRenderOutput {
             width: plan.width,
             height: plan.height,
             rgba: image.into_raw(),
-            draw_call_count: (tile.columns.len() * 3) as u32,
+            draw_call_count: (tile.columns.len() * if block_lines { 5 } else { 3 }) as u32,
         },
         IsoRenderStats {
             vertical_px_per_block: plan.vertical_px_per_block,
@@ -877,43 +1008,26 @@ fn draw_column_iso(
     x: usize,
     z: usize,
     column: HeightfieldColumn,
+    block_lines: bool,
 ) {
     let surface = column.surface_height_blocks;
     let visible_surface = visible_surface_height(column);
-    let width = tile.width as usize;
-    let height = tile.height as usize;
-    let east = if x + 1 < width {
-        visible_surface_height(tile.columns[z * width + x + 1])
-    } else {
-        visible_surface - 12.0
-    };
-    let south = if z + 1 < height {
-        visible_surface_height(tile.columns[(z + 1) * width + x])
-    } else {
-        visible_surface - 12.0
-    };
     let color = terrain_color_rgba(column);
-    if visible_surface > east + 0.75 {
-        draw_side_face(
-            image,
-            tile,
-            plan,
-            [(x + 1) as f32, z as f32, (x + 1) as f32, (z + 1) as f32],
-            east,
-            visible_surface,
-            shade_rgba(color, 0.68),
-        );
-    }
-    if visible_surface > south + 0.75 {
-        draw_side_face(
-            image,
-            tile,
-            plan,
-            [x as f32, (z + 1) as f32, (x + 1) as f32, (z + 1) as f32],
-            south,
-            visible_surface,
-            shade_rgba(color, 0.56),
-        );
+    for side in visible_side_directions(plan.quarter_turns) {
+        let neighbor_height = neighbor_visible_surface(tile, x, z, side.dx, side.dz)
+            .unwrap_or(visible_surface - 12.0);
+        if visible_surface > neighbor_height + 0.75 {
+            draw_side_face(
+                image,
+                tile,
+                plan,
+                side_edge(x, z, side.dx, side.dz),
+                neighbor_height,
+                visible_surface,
+                shade_rgba(color, side.shade),
+                block_lines,
+            );
+        }
     }
     let top_surface = if matches!(
         column.terrain_kind,
@@ -931,6 +1045,7 @@ fn draw_column_iso(
         z,
         top_surface,
         shade_rgba(color, 1.05),
+        block_lines,
     );
 
     if let Some(water) = column.water_level_blocks {
@@ -943,8 +1058,75 @@ fn draw_column_iso(
                 z,
                 water + 0.10,
                 water_color_rgba(column),
+                block_lines,
             );
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct VisibleSide {
+    dx: isize,
+    dz: isize,
+    shade: f32,
+}
+
+fn visible_side_directions(quarter_turns: u8) -> [VisibleSide; 2] {
+    let mut sides = [
+        VisibleSide {
+            dx: 1,
+            dz: 0,
+            shade: 0.68,
+        },
+        VisibleSide {
+            dx: -1,
+            dz: 0,
+            shade: 0.62,
+        },
+        VisibleSide {
+            dx: 0,
+            dz: 1,
+            shade: 0.56,
+        },
+        VisibleSide {
+            dx: 0,
+            dz: -1,
+            shade: 0.60,
+        },
+    ];
+    sides.sort_by(|a, b| {
+        iso_cardinal_screen_delta(quarter_turns, a.dx as f32, a.dz as f32)
+            .y
+            .total_cmp(&iso_cardinal_screen_delta(quarter_turns, b.dx as f32, b.dz as f32).y)
+            .reverse()
+    });
+    [sides[0], sides[1]]
+}
+
+fn neighbor_visible_surface(
+    tile: &HeightfieldTile,
+    x: usize,
+    z: usize,
+    dx: isize,
+    dz: isize,
+) -> Option<f32> {
+    let nx = x.checked_add_signed(dx)?;
+    let nz = z.checked_add_signed(dz)?;
+    if nx >= tile.width as usize || nz >= tile.height as usize {
+        return None;
+    }
+    Some(visible_surface_height(
+        tile.columns[nz * tile.width as usize + nx],
+    ))
+}
+
+fn side_edge(x: usize, z: usize, dx: isize, dz: isize) -> [f32; 4] {
+    match (dx, dz) {
+        (1, 0) => [(x + 1) as f32, z as f32, (x + 1) as f32, (z + 1) as f32],
+        (-1, 0) => [x as f32, z as f32, x as f32, (z + 1) as f32],
+        (0, 1) => [x as f32, (z + 1) as f32, (x + 1) as f32, (z + 1) as f32],
+        (0, -1) => [x as f32, z as f32, (x + 1) as f32, z as f32],
+        _ => unreachable!("side directions are cardinal"),
     }
 }
 
@@ -960,6 +1142,7 @@ fn draw_top_face(
     z: usize,
     y: f32,
     color: [u8; 4],
+    block_lines: bool,
 ) {
     let polygon = [
         plan.project_grid(x as f32, z as f32, y, tile),
@@ -968,6 +1151,9 @@ fn draw_top_face(
         plan.project_grid(x as f32, (z + 1) as f32, y, tile),
     ];
     fill_convex_polygon(image, &polygon, color);
+    if block_lines {
+        draw_polygon_outline(image, &polygon, [4, 8, 10, 42], 1);
+    }
 }
 
 fn draw_side_face(
@@ -978,6 +1164,7 @@ fn draw_side_face(
     lower_y: f32,
     upper_y: f32,
     color: [u8; 4],
+    block_lines: bool,
 ) {
     let lower_y = lower_y.max(upper_y - 96.0);
     let polygon = [
@@ -987,6 +1174,9 @@ fn draw_side_face(
         plan.project_grid(edge[0], edge[1], lower_y, tile),
     ];
     fill_convex_polygon(image, &polygon, color);
+    if block_lines {
+        draw_polygon_outline(image, &polygon, [2, 5, 7, 34], 1);
+    }
 }
 
 fn draw_boundary_overlays(
@@ -1105,6 +1295,56 @@ fn draw_projected_line(
             continue;
         }
         blend_rgba(image, x as u32, y as u32, color, color[3] as f32 / 255.0);
+    }
+}
+
+fn draw_polygon_outline(image: &mut RgbaImage, points: &[Point2], color: [u8; 4], thickness: i32) {
+    if points.len() < 2 {
+        return;
+    }
+    for i in 0..points.len() {
+        let start = points[i];
+        let end = points[(i + 1) % points.len()];
+        draw_projected_line_thick(image, start, end, color, 1, thickness);
+    }
+}
+
+fn draw_projected_line_thick(
+    image: &mut RgbaImage,
+    start: Point2,
+    end: Point2,
+    color: [u8; 4],
+    dash_period: i32,
+    thickness: i32,
+) {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let steps = dx.abs().max(dy.abs()).ceil().max(1.0) as i32;
+    for step in 0..=steps {
+        if dash_period > 1 && (step / dash_period) % 2 != 0 {
+            continue;
+        }
+        let t = step as f32 / steps as f32;
+        let x = (start.x + dx * t).round() as i32;
+        let y = (start.y + dy * t).round() as i32;
+        for oy in -thickness / 2..=thickness / 2 {
+            for ox in -thickness / 2..=thickness / 2 {
+                if x + ox < 0
+                    || y + oy < 0
+                    || x + ox >= image.width() as i32
+                    || y + oy >= image.height() as i32
+                {
+                    continue;
+                }
+                blend_rgba(
+                    image,
+                    (x + ox) as u32,
+                    (y + oy) as u32,
+                    color,
+                    color[3] as f32 / 255.0,
+                );
+            }
+        }
     }
 }
 
@@ -1279,7 +1519,16 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         &mut rgba,
         text_x,
         text_y,
-        &format!("CX {} CZ {}", header.center_x, header.center_z),
+        &format!("CCH {} {}", header.center_chunk_x, header.center_chunk_z),
+        [204, 214, 203, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        &format!("W {} {}", header.center_world_x, header.center_world_z),
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -1362,6 +1611,102 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
     draw_grid_legend_keys(&mut rgba, header, text_x, text_y, layout.scale);
     draw_scale_bar(&mut rgba, header, layout.scale);
     image.rgba = rgba.into_raw();
+}
+
+fn draw_iso_compass_offscreen(image: &mut OffscreenRenderOutput, plan: IsoRenderPlan) {
+    let Some(mut rgba) =
+        RgbaImage::from_raw(image.width, image.height, std::mem::take(&mut image.rgba))
+    else {
+        return;
+    };
+    draw_iso_compass_rgba(&mut rgba, plan.quarter_turns);
+    image.rgba = rgba.into_raw();
+}
+
+fn draw_iso_compass_rgba(image: &mut RgbaImage, quarter_turns: u8) {
+    let layout = OverlayLayout::new(image.width(), image.height());
+    let panel = (layout.panel_height.min(layout.panel_width) / 2).max(26 * layout.scale);
+    let margin = layout.margin;
+    let x = image.width().saturating_sub(panel + margin);
+    let y = margin;
+    let center = Point2 {
+        x: x as f32 + panel as f32 * 0.5,
+        y: y as f32 + panel as f32 * 0.5,
+    };
+    let arm = (panel as f32 * 0.34).max(12.0);
+    draw_panel(image, x, y, panel, panel);
+
+    for (label, dx, dz, color) in [
+        ("N", 0.0, -1.0, [232, 238, 226, 255]),
+        ("E", 1.0, 0.0, [122, 196, 238, 255]),
+        ("S", 0.0, 1.0, [182, 193, 184, 255]),
+        ("W", -1.0, 0.0, [182, 193, 184, 255]),
+    ] {
+        let dir = normalized_point(iso_cardinal_screen_delta(quarter_turns, dx, dz));
+        let tip = Point2 {
+            x: center.x + dir.x * arm,
+            y: center.y + dir.y * arm,
+        };
+        draw_projected_line_thick(image, center, tip, color, 1, 2);
+        draw_compass_arrow_head(image, tip, dir, color);
+        let label_pos = Point2 {
+            x: center.x + dir.x * (arm + 8.0 * layout.scale as f32),
+            y: center.y + dir.y * (arm + 8.0 * layout.scale as f32),
+        };
+        draw_text(
+            image,
+            label_pos.x.round().max(0.0) as u32,
+            label_pos.y.round().max(0.0) as u32,
+            label,
+            color,
+            layout.scale,
+        );
+    }
+}
+
+fn normalized_point(point: Point2) -> Point2 {
+    let length = (point.x * point.x + point.y * point.y)
+        .sqrt()
+        .max(f32::EPSILON);
+    Point2 {
+        x: point.x / length,
+        y: point.y / length,
+    }
+}
+
+fn draw_compass_arrow_head(image: &mut RgbaImage, tip: Point2, dir: Point2, color: [u8; 4]) {
+    let len = (image.width().min(image.height()) as f32 / 70.0).clamp(6.0, 18.0);
+    let wing = (len * 0.52).max(3.0);
+    let base = Point2 {
+        x: tip.x - dir.x * len,
+        y: tip.y - dir.y * len,
+    };
+    let perp = Point2 {
+        x: -dir.y,
+        y: dir.x,
+    };
+    draw_projected_line_thick(
+        image,
+        tip,
+        Point2 {
+            x: base.x + perp.x * wing,
+            y: base.y + perp.y * wing,
+        },
+        color,
+        1,
+        2,
+    );
+    draw_projected_line_thick(
+        image,
+        tip,
+        Point2 {
+            x: base.x - perp.x * wing,
+            y: base.y - perp.y * wing,
+        },
+        color,
+        1,
+        2,
+    );
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1665,6 +2010,7 @@ where
         seed,
         center_x,
         center_z,
+        center_is_world_blocks: false,
         width: DEFAULT_IMAGE_WIDTH,
         height: DEFAULT_IMAGE_HEIGHT,
         world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1677,6 +2023,7 @@ where
         chunk_radius: None,
         quarter_turns: 0,
         vertical_scale: DEFAULT_VERTICAL_SCALE,
+        block_lines: DEFAULT_BLOCK_LINES,
         output: None,
     };
 
@@ -1711,6 +2058,15 @@ where
             }
             "--vertical-scale" => {
                 config.vertical_scale = parse_required::<f32>(&mut args, "vertical-scale")?
+            }
+            "--world-center" | "--world-coordinates" => {
+                config.center_is_world_blocks = true;
+            }
+            "--block-lines" => {
+                config.block_lines = true;
+            }
+            "--no-block-lines" => {
+                config.block_lines = false;
             }
             "--output" => {
                 config.output = Some(PathBuf::from(parse_required::<String>(
@@ -1753,7 +2109,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--xz-scale <u32>] [--quarter-turns <u8>] [--vertical-scale <f32>] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--xz-scale <u32>] [--quarter-turns <u8>] [--vertical-scale <f32>] [--block-lines|--no-block-lines] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -1781,6 +2137,7 @@ mod tests {
             seed: 42,
             center_x: 0,
             center_z: 0,
+            center_is_world_blocks: false,
             width: DEFAULT_IMAGE_WIDTH,
             height: DEFAULT_IMAGE_HEIGHT,
             world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1793,12 +2150,13 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
+            block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
 
         assert_eq!(
             config.output_path(),
-            PathBuf::from("target/heightfield-preview/s42_x0_z0.png")
+            PathBuf::from("target/heightfield-preview/s42_cx0_cz0.png")
         );
     }
 
@@ -1823,6 +2181,7 @@ mod tests {
             seed: 42,
             center_x: 0,
             center_z: 0,
+            center_is_world_blocks: false,
             width: DEFAULT_IMAGE_WIDTH,
             height: DEFAULT_IMAGE_HEIGHT,
             world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1835,6 +2194,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
+            block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
         let window = config.window();
@@ -1849,7 +2209,7 @@ mod tests {
             window.sample_spacing(),
             window.base_sample_spacing() / DEFAULT_XZ_SCALE as f32
         );
-        assert_eq!(range, (-128, 127, -72, 71));
+        assert_eq!(range, (-128, 128, -72, 72));
         assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
     }
 
@@ -1876,8 +2236,8 @@ mod tests {
     fn parse_chunk_radius_option() {
         let config = parse_args_from([
             "42",
-            "64",
-            "-33",
+            "2",
+            "-3",
             "--chunk-radius",
             "32",
             "--width",
@@ -1888,9 +2248,42 @@ mod tests {
         .expect("parse args");
 
         assert_eq!(config.chunk_radius, Some(32));
-        assert_eq!(config.center_x, 64);
-        assert_eq!(config.center_z, -33);
+        assert_eq!(config.center_x, 2);
+        assert_eq!(config.center_z, -3);
+        assert_eq!(config.center_chunk_x(), 2);
+        assert_eq!(config.center_chunk_z(), -3);
+        assert_eq!(config.center_world_x(), 80);
+        assert_eq!(config.center_world_z(), -80);
         assert_eq!(config.xz_scale, DEFAULT_XZ_SCALE);
+    }
+
+    #[test]
+    fn positional_center_defaults_to_chunk_coordinates() {
+        let config = parse_args_from(["42", "2", "-3", "--chunk-radius", "1"]).expect("parse args");
+        let window = config.window();
+
+        assert!(!config.center_is_world_blocks);
+        assert_eq!(config.center_chunk_x(), 2);
+        assert_eq!(config.center_chunk_z(), -3);
+        assert_eq!(chunk_range_for_window(window), (1, 3, -4, -2));
+        assert_eq!(window.min_x(), 32.0);
+        assert_eq!(window.max_x(), 128.0);
+        assert_eq!(window.min_z(), -128.0);
+        assert_eq!(window.max_z(), -32.0);
+    }
+
+    #[test]
+    fn world_center_compat_option_derives_chunk_context() {
+        let config = parse_args_from(["42", "64", "-33", "--world-center", "--chunk-radius", "2"])
+            .expect("parse args");
+        let window = config.window();
+
+        assert!(config.center_is_world_blocks);
+        assert_eq!(config.center_chunk_x(), 2);
+        assert_eq!(config.center_chunk_z(), -2);
+        assert_eq!(config.center_world_x(), 64);
+        assert_eq!(config.center_world_z(), -33);
+        assert_eq!(chunk_range_for_window(window), (0, 4, -4, 0));
     }
 
     #[test]
@@ -1902,11 +2295,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_line_toggles() {
+        let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
+        let disabled = parse_args_from(["42", "0", "0", "--no-block-lines"]).expect("parse args");
+        let enabled = parse_args_from(["42", "0", "0", "--no-block-lines", "--block-lines"])
+            .expect("parse args");
+
+        assert!(default_config.block_lines);
+        assert!(!disabled.block_lines);
+        assert!(enabled.block_lines);
+    }
+
+    #[test]
     fn xz_scale_doubles_effective_columns_without_changing_footprint() {
         let scale_one = PreviewConfig {
             seed: 42,
             center_x: 0,
             center_z: 0,
+            center_is_world_blocks: false,
             width: DEFAULT_IMAGE_WIDTH,
             height: DEFAULT_IMAGE_HEIGHT,
             world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1919,6 +2325,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
+            block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         }
         .window();
@@ -1926,6 +2333,7 @@ mod tests {
             seed: 42,
             center_x: 0,
             center_z: 0,
+            center_is_world_blocks: false,
             width: DEFAULT_IMAGE_WIDTH,
             height: DEFAULT_IMAGE_HEIGHT,
             world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1938,6 +2346,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
+            block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         }
         .window();
@@ -1953,8 +2362,9 @@ mod tests {
     fn chunk_radius_maps_to_square_chunk_footprint() {
         let config = PreviewConfig {
             seed: 42,
-            center_x: 64,
-            center_z: -33,
+            center_x: 2,
+            center_z: -2,
+            center_is_world_blocks: false,
             width: DEFAULT_IMAGE_WIDTH,
             height: DEFAULT_IMAGE_HEIGHT,
             world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
@@ -1967,6 +2377,7 @@ mod tests {
             chunk_radius: Some(2),
             quarter_turns: 0,
             vertical_scale: DEFAULT_VERTICAL_SCALE,
+            block_lines: DEFAULT_BLOCK_LINES,
             output: None,
         };
         let window = config.window();
@@ -2013,7 +2424,8 @@ mod tests {
         let tile = two_by_two_heightfield_tile();
         let plan = IsoRenderPlan::new(&tile, 320, 180, 0, DEFAULT_VERTICAL_SCALE)
             .expect("iso render plan");
-        let (image, stats) = render_heightfield_isometric(&tile, plan).expect("render");
+        let (image, stats) =
+            render_heightfield_isometric(&tile, plan, DEFAULT_BLOCK_LINES).expect("render");
         let first = image.rgba.chunks_exact(4).next().expect("pixel");
         let varied = image
             .rgba
@@ -2022,6 +2434,68 @@ mod tests {
 
         assert!(varied);
         assert!(stats.projected_height_span_px > 0.0);
+    }
+
+    #[test]
+    fn quarter_turns_change_visible_side_directions() {
+        assert_eq!(
+            visible_side_directions(0)
+                .iter()
+                .map(|side| (side.dx, side.dz))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (0, 1)]
+        );
+        assert_eq!(
+            visible_side_directions(1)
+                .iter()
+                .map(|side| (side.dx, side.dz))
+                .collect::<Vec<_>>(),
+            vec![(-1, 0), (0, 1)]
+        );
+        assert_eq!(
+            visible_side_directions(2)
+                .iter()
+                .map(|side| (side.dx, side.dz))
+                .collect::<Vec<_>>(),
+            vec![(-1, 0), (0, -1)]
+        );
+        assert_eq!(
+            visible_side_directions(3)
+                .iter()
+                .map(|side| (side.dx, side.dz))
+                .collect::<Vec<_>>(),
+            vec![(1, 0), (0, -1)]
+        );
+    }
+
+    #[test]
+    fn projected_compass_follows_quarter_turns() {
+        let n0 = iso_cardinal_screen_delta(0, 0.0, -1.0);
+        let e0 = iso_cardinal_screen_delta(0, 1.0, 0.0);
+        assert!(n0.x > 0.0 && n0.y < 0.0);
+        assert!(e0.x > 0.0 && e0.y > 0.0);
+
+        let n1 = iso_cardinal_screen_delta(1, 0.0, -1.0);
+        let e1 = iso_cardinal_screen_delta(1, 1.0, 0.0);
+        assert!(n1.x < 0.0 && n1.y < 0.0);
+        assert!(e1.x > 0.0 && e1.y < 0.0);
+    }
+
+    #[test]
+    fn all_quarter_turns_render_nonblank_with_block_lines() {
+        let tile = two_by_two_heightfield_tile();
+        for quarter in 0..4 {
+            let plan = IsoRenderPlan::new(&tile, 320, 180, quarter, DEFAULT_VERTICAL_SCALE)
+                .expect("iso render plan");
+            let (image, _) =
+                render_heightfield_isometric(&tile, plan, true).expect("render quarter");
+            let first = image.rgba.chunks_exact(4).next().expect("pixel");
+            let varied = image
+                .rgba
+                .chunks_exact(4)
+                .any(|pixel| pixel[0] != first[0] || pixel[1] != first[1] || pixel[2] != first[2]);
+            assert!(varied, "quarter {quarter} should produce visible geometry");
+        }
     }
 
     fn two_by_two_heightfield_tile() -> HeightfieldTile {

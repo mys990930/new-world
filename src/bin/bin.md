@@ -5,8 +5,10 @@
 - Index the standalone binaries under `src/bin`.
 - Summarize what each binary does, which parameters it accepts, and which command shape is recommended right now.
 - Keep this index focused on active tools only. Removed legacy atlas / realization / terrain-search preview binaries are intentionally not listed here.
-- Active preview images include a small compass overlay. The shared orientation is macro-field/world
-  topdown orientation: image top is north (N), right is east (E), bottom is south (S), and left is west (W).
+- Active preview images include a small compass overlay. Topdown previews use macro-field/world
+  orientation: image top is north (N), right is east (E), bottom is south (S), and left is west (W).
+  Quarter-view previews may project the compass through their current camera/quarter transform; see
+  the binary-specific docs.
 
 ## Current Index
 
@@ -105,11 +107,11 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 
 - Purpose: render a quarter-view diagnostic preview for graph-first heightfield columns.
 - Parameters:
-  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are chunk coordinates by default
   - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--chunk-radius <i32>`, `--columns-x <u32>`,
     `--columns-z <u32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`,
-    `--land-bias <f32>`, `--quarter-turns <u8>`, `--vertical-scale <f32>`, `--stage heightfield`,
-    `--output <path>`
+    `--land-bias <f32>`, `--quarter-turns <u8>`, `--vertical-scale <f32>`, `--block-lines`,
+    `--no-block-lines`, `--world-center`, `--stage heightfield`, `--output <path>`
 - Defaults:
   - `--width 1280`
   - `--height 720`
@@ -119,12 +121,16 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 - Example:
 
 ```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 32 --width 1280 --height 720 --output target/heightfield-preview/heightfield.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 0 --output target/heightfield-preview/heightfield.png
 ```
 
 - Notes:
   - This is not final `ChunkData` voxel fill. It converts `MacroFieldTile` to `HeightfieldTile`,
     then renders diagnostic voxelized columns.
+  - Positional center is chunk-based so it is consistent with `--chunk-radius`; `--world-center` is
+    only a compatibility path for old world-block invocations.
+  - The compass follows the current quarter-view projection, and thin block lines are on by default
+    to make column scale readable.
   - Meso feature and Perlin micro relief are currently stubbed to zero.
   - See [heightfield_preview.md](./heightfield_preview.md).
 
@@ -264,4 +270,5 @@ cargo run --bin world_create -- 42 --center-x 0 --center-z 0 --radius 16 --outpu
 - Use `heightfield_preview` to inspect contour-guided heightfield columns before final voxel fill.
 - Use `chunk_preview --stage prototype` or `--stage hydrology` when you need the older chunk-oriented diagnostic paths.
 - Use `chunk_topdown_preview --world-dir ...` when you already have a valid created-world dump and need exact realized block-column inspection.
-- Read the compass on preview PNGs as the common world orientation marker: up=N and right=E.
+- Read topdown preview compasses as common world orientation markers: up=N and right=E. For
+  quarter-view tools, read the binary docs because the compass may be projected through the view.

@@ -236,23 +236,29 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `--xz-scale`은 같은 world footprint에서 X/Z column density만 늘리는 preview sampling multiplier다.
   기본 preview는 `2`를 사용해 각 축 column 수를 두 배로 만들며, effective sample spacing은 절반이 된다.
   이 값은 `y` height block, sea level, contour step, river water descent 값을 rescale하지 않는다.
-- column은 top diamond와 보이는 east/south side face만 그린다. 모든 column을 전역 base plane까지
-  벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를 보여주는
-  terraced relief를 우선한다.
-- preview overlay는 실제 world-block 맥락을 함께 표시한다. legend/header는 `center-x/center-z`,
-  column resolution, sample spacing, chunk range/radius, world footprint, sea level, height range를
-  기록해야 한다. `heightfield_preview`의 주 grid는 `macro_field_preview`와 같은 1024-block
+- column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
+  전역 base plane까지 벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를
+  보여주는 terraced relief를 우선한다. quarter view가 바뀌면 painter order와 visible side도 함께 바뀌어야 한다.
+- preview overlay는 실제 chunk/world-block 맥락을 함께 표시한다. legend/header는 positional
+  `center-x/center-z`가 chunk coordinate임을 기본 계약으로 기록하고, 내부에서 변환한 center chunk,
+  center world block, column resolution, sample spacing, chunk range/radius, world footprint, sea level,
+  height range를 기록해야 한다. `heightfield_preview`의 주 grid는 `macro_field_preview`와 같은 1024-block
   macro field tile/cache boundary다. chunk boundary는 `CHUNK_EDGE` block 간격의 very faint minor
   line으로 유지하고, `CHUNK_EDGE * 8`인 256-block major grid는 보조 chunk-group reference로 더
   약하게 표시한다. 1024-block macro tile line이 terrain scale을 읽는 primary overlay여야 한다.
-- `heightfield_preview`가 `--chunk-radius r`을 받으면 `center-x/center-z` world block이 속한 chunk를
-  중심으로 `center_chunk-r .. center_chunk+r` inclusive square range를 샘플링한다. 이 모드에서
-  `width/height`는 이미지 해상도만 정하고, world footprint는 chunk square가 정한다.
+- `heightfield_preview`의 positional `center-x/center-z`는 기본적으로 chunk coordinate다.
+  `--chunk-radius r`을 받으면 해당 center chunk를 중심으로 `center_chunk-r .. center_chunk+r`
+  inclusive square range를 샘플링한다. 이 모드에서 `width/height`는 이미지 해상도만 정하고,
+  world footprint는 chunk square가 정한다. 예전 world-block 입력이 필요하면 preview-only
+  `--world-center`/`--world-coordinates` 호환 옵션을 사용한다.
 - preview legend는 고정 픽셀 크기가 아니라 출력 이미지 크기에 비례해야 한다. 기본 metadata panel은
   화면 높이의 약 1/5을 목표로 하며, 글꼴, swatch, scale bar도 같은 비율로 커져야 한다.
-- preview는 방향 compass overlay를 포함한다. 방향 기준은 macro field와 같은 화면/world topdown
-  등록 기준으로, 이미지 위=N, 오른쪽=E, 아래=S, 왼쪽=W다. isometric projection과 `--quarter-turns`는
-  column 표시 방식이고, compass는 preview가 덮는 world footprint를 읽기 위한 고정 방향 표식이다.
+- preview는 방향 compass overlay를 포함한다. topdown preview는 이미지 위=N, 오른쪽=E 기준을
+  유지하지만, `heightfield_preview`의 compass는 isometric `--quarter-turns` projection 이후의
+  screen-space 방향을 따른다. 따라서 N/E/S/W label은 현재 quarter view에서 실제 world cardinal
+  방향이 화면에 놓이는 방향을 가리킨다.
+- `--block-lines`는 각 column top/visible side polygon에 매우 얇은 diagnostic outline을 더한다.
+  기본 preview에서는 켜져 있으며, terrain 색을 압도하면 `--no-block-lines`로 끌 수 있다.
 - preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, smoothing disabled
   값을 기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저

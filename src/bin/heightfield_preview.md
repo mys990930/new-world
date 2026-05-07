@@ -10,14 +10,16 @@
 ## Inputs
 
 - positional: `<seed> <center-x> <center-z>`
-  - `center-x` and `center-z` are world-block coordinates.
+  - `center-x` and `center-z` are chunk coordinates by default.
+  - Use `--world-center` or `--world-coordinates` only when you intentionally want the old
+    world-block center interpretation.
 - optional:
   - `--width <u32>`: output image width, default `1280`
   - `--height <u32>`: output image height, default `720`
   - `--world-span-blocks <i32>`: horizontal world footprint, default `8192`
-  - `--chunk-radius <i32>`: square chunk radius around the chunk containing `center-x/center-z`.
-    When set, this overrides the preview footprint derived from `--world-span-blocks`; width/height
-    only control image resolution.
+  - `--chunk-radius <i32>`: square chunk radius around the positional center chunk. When set, this
+    overrides the preview footprint derived from `--world-span-blocks`; width/height only control
+    image resolution.
   - `--columns-x <u32>`: sampled heightfield columns across X, default `192`
   - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
     `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid
@@ -29,6 +31,8 @@
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
   - `--vertical-scale <f32>`: preview-only multiplier for automatic vertical relief fit, default `1.0`
+  - `--block-lines` / `--no-block-lines`: enable or disable very thin diagnostic outlines around
+    each rendered column top/visible side. The default is on.
   - `--output <path>`
 
 ## Flow
@@ -68,9 +72,15 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `--xz-scale 2`, the effective X column count is `384`; Z is scaled the same way after aspect or
   chunk-radius resolution. Sea level, contour step, surface `y`, and river water `y` stay in the same
   block domain as scale `1`.
-- Columns are drawn as top diamonds plus only the visible east/south side faces where a neighbor is
-  lower. The preview does not draw every column down to a global base plane, because that reads as a
+- Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
+  visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
+  sees the +X/+Z faces, quarter `1` sees -X/+Z, quarter `2` sees -X/-Z, and quarter `3` sees +X/-Z.
+  The preview does not draw every column down to a global base plane, because that reads as a
   side-view wall chart instead of a macro terrain surface.
+- Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
+  `x+z` painter order is a regression because it only works for one quarter view.
+- Very thin block lines are drawn on top/visible side polygons by default to make the block scale
+  readable even with `--xz-scale 2`. They are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land
@@ -101,18 +111,18 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   These are distinct overlays: macro tile lines show generation cache scale, secondary major lines
   show chunk groups, and minor chunk lines show future `ChunkData` output windows.
 - With `--chunk-radius r`, the preview range is inclusive in chunk coordinates:
-  `center_chunk-r .. center_chunk+r` on both X and Z. A radius of `0` shows exactly the chunk that
-  contains the world-block center. The world footprint is the covered chunk square times
-  `CHUNK_EDGE`.
-- The legend/header records `cx`, `cz`, world footprint, column count/spacing, chunk x/z range,
-  base/effective column count, XZ scale, base/effective spacing, chunk x/z range,
-  chunk radius, height range, contour step/smoothing-disabled value, sea level, primary `macro tile 1024 blk`,
-  secondary `major 256 blk`, faint `chunk 32 blk`, and a block scale bar.
+  `center_chunk-r .. center_chunk+r` on both X and Z. A radius of `0` shows exactly the positional
+  center chunk. The world footprint is the covered chunk square times `CHUNK_EDGE`.
+- The legend/header records input center, input unit, center chunk, center world block, world
+  footprint, column count/spacing, chunk x/z range, base/effective column count, XZ scale,
+  base/effective spacing, chunk radius, height range, contour step/smoothing-disabled value, sea
+  level, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint `chunk 32 blk`, and a block
+  scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
-- The compass overlay uses the same orientation as macro field topdown previews: image top=N,
-  right=E, bottom=S, left=W. It is a world-footprint registration marker and does not modify
-  heightfield data.
+- The compass overlay follows the isometric projection after `--quarter-turns`. It does not stay
+  topdown north-up; each N/E/S/W label is placed in the screen-space direction that the corresponding
+  world cardinal axis projects to for the current quarter view.
 
 ## Example
 
@@ -121,7 +131,7 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 72
 ```
 
 ```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 32 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r32.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r8.png
 ```
 
 Scale 1/2 comparison for the same footprint:
@@ -129,4 +139,13 @@ Scale 1/2 comparison for the same footprint:
 ```bash
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 1 --output target/heightfield-preview/s42_r8_xz1.png
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --output target/heightfield-preview/s42_r8_xz2.png
+```
+
+Quarter-view smoke set:
+
+```bash
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 0 --output target/heightfield-preview/s42_c0_0_r8_q0.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 1 --output target/heightfield-preview/s42_c0_0_r8_q1.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 2 --output target/heightfield-preview/s42_c0_0_r8_q2.png
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --xz-scale 2 --quarter-turns 3 --output target/heightfield-preview/s42_c0_0_r8_q3.png
 ```

@@ -352,14 +352,15 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 ### 입력
 
 - 필수 positional 인자: `<seed> <center-x> <center-z>`
-  - `center-x`, `center-z`는 world-block 좌표다.
+  - `center-x`, `center-z`는 기본적으로 chunk coordinate다.
+  - 예전 world-block center 입력이 필요하면 `--world-center` 또는 `--world-coordinates`를 사용한다.
 - 선택 인자:
   - `--width <u32>`: 기본 `1280`
   - `--height <u32>`: 기본 `720`
   - `--world-span-blocks <i32>`: 가로 footprint, 기본 `8192`
-  - `--chunk-radius <i32>`: `center-x/center-z` world block이 속한 chunk를 중심으로 하는 square
-    chunk radius. 지정되면 `--world-span-blocks` 기반 footprint 대신
-    `center_chunk-r .. center_chunk+r` inclusive chunk range를 사용한다.
+  - `--chunk-radius <i32>`: positional center chunk를 중심으로 하는 square chunk radius. 지정되면
+    `--world-span-blocks` 기반 footprint 대신 `center_chunk-r .. center_chunk+r` inclusive chunk range를
+    사용한다.
   - `--columns-x <u32>`: heightfield sample column 수, 기본 `192`
   - `--columns-z <u32>`: 기본은 image aspect에서 계산. 단 `--chunk-radius` 모드에서는 square
     footprint에 맞춰 기본값이 `columns-x`가 된다.
@@ -371,21 +372,23 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
   - `--vertical-scale <f32>`: automatic vertical relief fit multiplier, 기본 `1.0`
+  - `--block-lines` / `--no-block-lines`: 각 diagnostic block/column face의 매우 얇은 outline 표시.
+    기본은 `--block-lines` on이다.
   - `--stage heightfield`
   - `--output <path>`
 
 ### 출력
 
-- 기본 출력은 `target/heightfield-preview/s<seed>_x<center-x>_z<center-z>.png`다.
+- 기본 출력은 `target/heightfield-preview/s<seed>_cx<center-x>_cz<center-z>.png`다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
 - metadata/stdout은 base/effective column resolution, XZ scale, base/effective sample spacing,
   block height min/avg/max, water/ocean/lake/
   river/dry/ridge column count, contour-band heightfield policy, integer height snap policy, ocean
   visible `y=0` policy, river water descent stats, meso/perlin stub 상태, isometric view/projection,
   timing을 기록한다.
-- metadata/stdout은 `center-x/center-z`, world footprint, chunk x/z range, chunk radius,
-  chunk edge blocks, macro-field tile edge blocks, column step/resolution, sea level과 height range를
-  함께 기록한다.
+- metadata/stdout은 input center, input unit, center chunk, center world block, world footprint,
+  chunk x/z range, chunk radius, chunk edge blocks, macro-field tile edge blocks, column step/resolution,
+  sea level과 height range를 함께 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
   32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
@@ -394,9 +397,10 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   함께 표시한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
-- 방향 compass는 이미지 위=N(`world -Z`), 오른쪽=E(`world +X`), 아래=S, 왼쪽=W라는 macro field
-  기준을 유지한다. isometric preview에서도 이 표기는 화면/월드 topdown 기준의 등록 보조 overlay이며,
-  height 값을 바꾸지 않는다.
+- 방향 compass는 `heightfield_preview`에 한해 isometric projection과 `--quarter-turns`가 적용된 뒤의
+  screen-space 방향을 표시한다. 즉 N/E/S/W는 현재 quarter view에서 world cardinal 방향이 실제 화면으로
+  투영된 위치에 놓인다. `macro_field_preview` 같은 topdown preview는 기존처럼 이미지 위=N,
+  오른쪽=E 기준을 유지한다.
 
 ### 현재 구현 상태
 
@@ -432,8 +436,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `vertical_px_per_block` is fitted so the visible height range occupies about 20-35% of the output
   height. `--vertical-scale` multiplies that automatic fit, and `--quarter-turns` rotates the
   horizontal grid without changing height data.
-- The preview draws top diamonds and only visible neighbor-difference side faces. It must show top
-  surfaces and macro relief together; a side-wall chart and a flat topdown plane are both regressions.
+- The preview draws top diamonds and only visible neighbor-difference side faces. The visible side
+  set and painter order are derived from the current `--quarter-turns` projection, not from fixed
+  east/south faces. It must show top surfaces and macro relief together; a side-wall chart, a flat
+  topdown plane, and quarter-specific missing back/side faces are regressions.
 - Macro-field tile boundary overlay is drawn at the generation cache tile scale, currently 1024
   blocks, and is the primary readable grid so the scale matches `macro_field_preview`. Chunk
   boundary overlay is still drawn at the runtime chunk size (`CHUNK_EDGE`, currently 32 blocks) as a
