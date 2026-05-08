@@ -122,6 +122,10 @@ selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source 
 `GraphMacroMap.biomes`는 site id별 final cell biome context와 classification을 가진다. 이
 classification은 macro_map 끝에서 생성되어 macro_field가 nearest site의 biome 의미를 함께 전달할 수
 있게 한다. Oceanic은 단일 biome으로 남기지 않고 `ShallowOcean`과 `DeepOcean`으로 분리한다.
+`MacroSurfaceKind::LakeCandidate`는 biome lake 판정의 source of truth다. 따라서 site가
+`LakeCandidate`이면 같은 site의 `GraphBiomeCell.context.water_role`은 반드시 `Lake`이고,
+`GraphBiomeCell.biome`은 반드시 `GraphBiomeKind::Lake`여야 한다. 반대로 `LakeCandidate`가 아닌
+site가 biome lake로 승격되면 macro/biome preview가 서로 다른 호수 mask를 보게 되므로 회귀다.
 land biome classification은 graph temperature/hydration, signed macro elevation, continentality,
 coastness, mountainness, ridgeness-derived ruggedness를 읽되 water/coast/lake/wetland/dry-basin role이 climate-only class보다
 우선한다. Temperate grassland와 hot dry/wet tropical classes가 사라지지 않도록 bounded seed

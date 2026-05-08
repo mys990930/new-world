@@ -36,7 +36,10 @@ stable biome class that later field, surface, and voxel stages can consume.
 3. Classification depends only on explicit context values and is deterministic.
 4. `GraphBiomeContext` does not carry `basinness`; closed basin semantics are represented by
    `GraphBiomeWaterRole::DryBasin` before biome classification.
-5. Legacy `RegionClassCell` or atlas archetype types are not part of this contract.
+5. `GraphBiomeWaterRole::Lake` is not inferred from climate, elevation, or hydration. Macro map
+   `MacroSurfaceKind::LakeCandidate` is the source of truth for lake cells, and biome
+   classification preserves it as `GraphBiomeKind::Lake` one-for-one.
+6. Legacy `RegionClassCell` or atlas archetype types are not part of this contract.
 
 ## Current Classification Policy
 
@@ -59,7 +62,8 @@ Water-role priority:
 
 - `DeepOcean` -> `DeepOcean`.
 - `ShallowOcean` -> `ShallowOcean`.
-- `Lake` -> `Lake`.
+- `Lake` -> `Lake`. This role is assigned by macro map `LakeCandidate` cells and must not be
+  expanded or narrowed by biome climate thresholds.
 - `Coast`, `Wetland`, and `DryBasin` use their own detailed policies before climate-only land
   classification.
 

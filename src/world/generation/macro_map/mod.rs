@@ -1875,6 +1875,51 @@ mod tests {
     }
 
     #[test]
+    fn biome_lake_cells_match_macro_lake_candidates() {
+        let mut saw_lake_candidate = false;
+
+        for seed in 1..=128 {
+            let patch = generate_voronoi_graph_patch(test_request(seed, 0, 0));
+            let map = generate_macro_map(&patch, test_macro_config(seed));
+            let biomes_by_site = map
+                .biomes
+                .iter()
+                .map(|biome| (biome.site, biome))
+                .collect::<HashMap<_, _>>();
+
+            assert_eq!(map.biomes.len(), map.sites.len());
+
+            for site in &map.sites {
+                let biome = biomes_by_site
+                    .get(&site.id)
+                    .copied()
+                    .expect("each macro site must have a matching biome cell");
+                let macro_lake = site.surface_kind == MacroSurfaceKind::LakeCandidate;
+                let biome_lake_role = biome.context.water_role == GraphBiomeWaterRole::Lake;
+                let biome_lake_kind = biome.biome == GraphBiomeKind::Lake;
+
+                saw_lake_candidate |= macro_lake;
+
+                assert_eq!(
+                    macro_lake, biome_lake_role,
+                    "GraphBiomeWaterRole::Lake must mirror MacroSurfaceKind::LakeCandidate for site {:?}",
+                    site.id
+                );
+                assert_eq!(
+                    macro_lake, biome_lake_kind,
+                    "GraphBiomeKind::Lake must mirror MacroSurfaceKind::LakeCandidate for site {:?}",
+                    site.id
+                );
+            }
+        }
+
+        assert!(
+            saw_lake_candidate,
+            "bounded deterministic seed scan should include at least one lake candidate"
+        );
+    }
+
+    #[test]
     fn bounded_seed_scan_exposes_expected_land_biome_distribution() {
         let mut counts = HashMap::<GraphBiomeKind, usize>::new();
 
