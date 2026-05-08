@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeKind};
 use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
+use super::hydrology::GraphHydrologyGraph;
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
-use super::river_plan::{RiverPlan, RiverReachType, RiverSegmentPlan};
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
 
@@ -27,6 +27,12 @@ pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
+const RIVER_MIN_WIDTH_BLOCKS: f32 = 28.0;
+const RIVER_MAX_WIDTH_BLOCKS: f32 = 176.0;
+const RIVER_MIN_FLAT_BED_BLOCKS: f32 = 3.5;
+const RIVER_MAX_FLAT_BED_BLOCKS: f32 = 56.0;
+const RIVER_HEADWATER_DEPTH_FACTOR: f32 = 0.12;
+const RIVER_TRUNK_DEPTH_FACTOR: f32 = 0.68;
 const DRY_BASIN_MIN_HEIGHT: f32 = 0.018;
 const DRY_BASIN_FLOOR_LOWERING: f32 = 0.055;
 const DRY_BASIN_RIM_RAISE: f32 = 0.18;
@@ -101,10 +107,6 @@ pub struct MacroFieldSample {
     pub river_valley_strength: f32,
     pub river_distance_blocks: f32,
     pub river_flow_hint: f32,
-    pub river_broad_valley_width_blocks: f32,
-    pub river_bed_width_hint_blocks: f32,
-    pub river_bed_depth_hint: f32,
-    pub river_reach_type: Option<RiverReachType>,
     pub combined_macro_height: f32,
 }
 
@@ -129,13 +131,6 @@ pub struct MacroFieldTileStats {
     pub ridge_source_pixel_count: usize,
     pub river_source_pixel_count: usize,
     pub coast_source_pixel_count: usize,
-    pub river_reach_type_counts: [usize; 7],
-    pub min_river_broad_valley_width_blocks: f32,
-    pub max_river_broad_valley_width_blocks: f32,
-    pub min_river_bed_width_hint_blocks: f32,
-    pub max_river_bed_width_hint_blocks: f32,
-    pub min_river_bed_depth_hint: f32,
-    pub max_river_bed_depth_hint: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -278,7 +273,7 @@ pub fn extract_macro_field_contours(
 pub fn generate_macro_field_tile(
     patch: &VoronoiGraphPatch,
     macro_map: &GraphMacroMap,
-    river_plan: &RiverPlan,
+    hydrology: &GraphHydrologyGraph,
     boundary: &BoundaryCache,
     config: MacroFieldTileConfig,
 ) -> MacroFieldTile {
@@ -288,7 +283,7 @@ pub fn generate_macro_field_tile(
         "macro field requires complete canonical boundary coverage"
     );
 
-    let context = MacroFieldRasterContext::new(patch, macro_map, river_plan, boundary);
+    let context = MacroFieldRasterContext::new(patch, macro_map, hydrology, boundary);
     let influence_fields = rasterize_influence_fields(&context, config);
     let samples = (0..config.sample_count())
         .into_par_iter()
@@ -429,7 +424,6 @@ pub fn sample_macro_field_point(
         .fold(0.0, f32::max);
     let (river_distance_blocks, river_flow_hint, river_valley_strength) =
         context.river_valley(position, config);
-    let river_hint = context.river_hint(position, config);
     let combined_macro_height = combine_macro_height(
         macro_elevation,
         ocean_mask,
@@ -439,6 +433,7 @@ pub fn sample_macro_field_point(
         owner_sample.dry_basin_rim_blend,
         ridge_influence,
         river_valley_strength,
+        river_flow_hint,
         config,
     );
 
@@ -457,10 +452,6 @@ pub fn sample_macro_field_point(
         river_valley_strength,
         river_distance_blocks,
         river_flow_hint,
-        river_broad_valley_width_blocks: river_hint.broad_valley_width_blocks,
-        river_bed_width_hint_blocks: river_hint.bed_width_blocks,
-        river_bed_depth_hint: river_hint.bed_depth,
-        river_reach_type: river_hint.reach_type,
         combined_macro_height,
     }
 }
@@ -498,10 +489,6 @@ fn sample_macro_field_point_with_influence(
     let river_distance_blocks = influence.river_distance_blocks;
     let river_flow_hint = influence.river_flow_hint;
     let river_valley_strength = influence.river_valley_strength;
-    let river_broad_valley_width_blocks = influence.river_broad_valley_width_blocks;
-    let river_bed_width_hint_blocks = influence.river_bed_width_hint_blocks;
-    let river_bed_depth_hint = influence.river_bed_depth_hint;
-    let river_reach_type = influence.river_reach_type;
     let combined_macro_height = combine_macro_height(
         macro_elevation,
         ocean_mask,
@@ -511,6 +498,7 @@ fn sample_macro_field_point_with_influence(
         owner_sample.dry_basin_rim_blend,
         ridge_influence,
         river_valley_strength,
+        river_flow_hint,
         config,
     );
 
@@ -529,10 +517,6 @@ fn sample_macro_field_point_with_influence(
         river_valley_strength,
         river_distance_blocks,
         river_flow_hint,
-        river_broad_valley_width_blocks,
-        river_bed_width_hint_blocks,
-        river_bed_depth_hint,
-        river_reach_type,
         combined_macro_height,
     }
 }
@@ -554,10 +538,6 @@ struct MacroFieldInfluenceSample {
     river_valley_strength: f32,
     river_distance_blocks: f32,
     river_flow_hint: f32,
-    river_broad_valley_width_blocks: f32,
-    river_bed_width_hint_blocks: f32,
-    river_bed_depth_hint: f32,
-    river_reach_type: Option<RiverReachType>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -567,10 +547,6 @@ struct MacroFieldInfluenceFields {
     river_distance_blocks: Vec<f32>,
     river_valley_strength: Vec<f32>,
     river_flow_hint: Vec<f32>,
-    river_broad_valley_width_blocks: Vec<f32>,
-    river_bed_width_hint_blocks: Vec<f32>,
-    river_bed_depth_hint: Vec<f32>,
-    river_reach_type: Vec<Option<RiverReachType>>,
     stats: MacroFieldInfluenceStats,
 }
 
@@ -588,10 +564,6 @@ impl MacroFieldInfluenceFields {
             river_valley_strength: river_valley_strength.clamp(0.0, 1.0),
             river_distance_blocks: river_distance,
             river_flow_hint,
-            river_broad_valley_width_blocks: self.river_broad_valley_width_blocks[index],
-            river_bed_width_hint_blocks: self.river_bed_width_hint_blocks[index],
-            river_bed_depth_hint: self.river_bed_depth_hint[index],
-            river_reach_type: self.river_reach_type[index],
         }
     }
 }
@@ -613,7 +585,7 @@ fn rasterize_influence_fields(
     let river_sources = context
         .river_curves
         .iter()
-        .map(RiverRasterSource::from_ref)
+        .map(|river| (river.curve, flow_hint(river.flow_accumulation)))
         .collect::<Vec<_>>();
 
     let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
@@ -638,10 +610,6 @@ fn rasterize_influence_fields(
         river_distance_blocks: river.distance_blocks,
         river_valley_strength: river.river_valley_strength,
         river_flow_hint: river.flow_hint,
-        river_broad_valley_width_blocks: river.broad_valley_width_blocks,
-        river_bed_width_hint_blocks: river.bed_width_hint_blocks,
-        river_bed_depth_hint: river.bed_depth_hint,
-        river_reach_type: river.reach_type,
         stats,
     }
 }
@@ -651,10 +619,6 @@ struct RasterDistanceField {
     distance_blocks: Vec<f32>,
     river_valley_strength: Vec<f32>,
     flow_hint: Vec<f32>,
-    broad_valley_width_blocks: Vec<f32>,
-    bed_width_hint_blocks: Vec<f32>,
-    bed_depth_hint: Vec<f32>,
-    reach_type: Vec<Option<RiverReachType>>,
     source_pixel_count: usize,
 }
 
@@ -669,10 +633,6 @@ fn rasterize_curve_distance_field(
             distance_blocks: vec![f32::INFINITY; sample_count],
             river_valley_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
-            broad_valley_width_blocks: vec![0.0; sample_count],
-            bed_width_hint_blocks: vec![0.0; sample_count],
-            bed_depth_hint: vec![0.0; sample_count],
-            reach_type: vec![None; sample_count],
             source_pixel_count: 0,
         };
     }
@@ -728,16 +688,12 @@ fn rasterize_curve_distance_field(
         distance_blocks: cropped_distance,
         river_valley_strength: vec![0.0; sample_count],
         flow_hint: cropped_flow,
-        broad_valley_width_blocks: vec![0.0; sample_count],
-        bed_width_hint_blocks: vec![0.0; sample_count],
-        bed_depth_hint: vec![0.0; sample_count],
-        reach_type: vec![None; sample_count],
         source_pixel_count,
     }
 }
 
 fn rasterize_curve_anti_aliased_polyline_field(
-    sources: &[RiverRasterSource<'_>],
+    sources: &[(&NoisyBoundaryCurve, f32)],
     config: MacroFieldTileConfig,
     radius_blocks: f32,
 ) -> RasterDistanceField {
@@ -747,10 +703,6 @@ fn rasterize_curve_anti_aliased_polyline_field(
             distance_blocks: vec![f32::INFINITY; sample_count],
             river_valley_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
-            broad_valley_width_blocks: vec![0.0; sample_count],
-            bed_width_hint_blocks: vec![0.0; sample_count],
-            bed_depth_hint: vec![0.0; sample_count],
-            reach_type: vec![None; sample_count],
             source_pixel_count: 0,
         };
     }
@@ -761,30 +713,21 @@ fn rasterize_curve_anti_aliased_polyline_field(
     let mut river_valley_strength = vec![0.0; sample_count];
     let mut flow_weighted_sum = vec![0.0; sample_count];
     let mut flow_weight_sum = vec![0.0; sample_count];
-    let mut broad_valley_width_blocks = vec![0.0; sample_count];
-    let mut bed_width_hint_blocks = vec![0.0; sample_count];
-    let mut bed_depth_hint = vec![0.0; sample_count];
-    let mut reach_type = vec![None; sample_count];
 
-    for source in sources {
-        let radius = source.broad_valley_width_blocks.min(radius_blocks).max(1.0);
-        for segment in source.curve.points.windows(2) {
+    for (curve, strength) in sources {
+        for segment in curve.points.windows(2) {
             rasterize_segment_anti_aliased_stroke(
                 &mut distance_blocks,
                 &mut river_valley_strength,
                 &mut flow_weighted_sum,
                 &mut flow_weight_sum,
-                &mut broad_valley_width_blocks,
-                &mut bed_width_hint_blocks,
-                &mut bed_depth_hint,
-                &mut reach_type,
                 width,
                 height,
                 config,
                 segment[0],
                 segment[1],
-                radius,
-                *source,
+                radius_blocks,
+                *strength,
             );
         }
     }
@@ -809,10 +752,6 @@ fn rasterize_curve_anti_aliased_polyline_field(
         distance_blocks,
         river_valley_strength,
         flow_hint,
-        broad_valley_width_blocks,
-        bed_width_hint_blocks,
-        bed_depth_hint,
-        reach_type,
         source_pixel_count,
     }
 }
@@ -823,17 +762,13 @@ fn rasterize_segment_anti_aliased_stroke(
     river_valley_strength: &mut [f32],
     flow_weighted_sum: &mut [f32],
     flow_weight_sum: &mut [f32],
-    broad_valley_width_blocks: &mut [f32],
-    bed_width_hint_blocks: &mut [f32],
-    bed_depth_hint: &mut [f32],
-    reach_type: &mut [Option<RiverReachType>],
     width: usize,
     height: usize,
     config: MacroFieldTileConfig,
     start: WorldPlanePoint,
     end: WorldPlanePoint,
     radius_blocks: f32,
-    source: RiverRasterSource<'_>,
+    strength: f32,
 ) {
     let spacing = config.sample_spacing_blocks;
     let aa_margin = spacing * 0.75;
@@ -879,7 +814,7 @@ fn rasterize_segment_anti_aliased_stroke(
                 let subpixel_distance = point_segment_distance(subpixel, start, end);
                 closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
                 profile_sum +=
-                    river_valley_strength_for_distance(subpixel_distance, source.valley_profile());
+                    river_valley_strength_for_distance(subpixel_distance, strength, radius_blocks);
             }
             let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
             if anti_aliased_strength <= 0.0 {
@@ -888,18 +823,8 @@ fn rasterize_segment_anti_aliased_stroke(
 
             distance_blocks[index] = distance_blocks[index].min(closest_subpixel_distance);
             river_valley_strength[index] = river_valley_strength[index].max(anti_aliased_strength);
-            flow_weighted_sum[index] += source.flow_hint * anti_aliased_strength;
+            flow_weighted_sum[index] += strength * anti_aliased_strength;
             flow_weight_sum[index] += anti_aliased_strength;
-            if anti_aliased_strength >= river_valley_strength[index] - 0.001
-                || source.bed_width_blocks > bed_width_hint_blocks[index]
-            {
-                broad_valley_width_blocks[index] =
-                    broad_valley_width_blocks[index].max(source.broad_valley_width_blocks);
-                bed_width_hint_blocks[index] =
-                    bed_width_hint_blocks[index].max(source.bed_width_blocks);
-                bed_depth_hint[index] = bed_depth_hint[index].max(source.bed_depth);
-                reach_type[index] = Some(source.reach_type);
-            }
         }
     }
 }
@@ -1061,7 +986,7 @@ impl<'a> MacroFieldRasterContext<'a> {
     pub fn new(
         _patch: &'a VoronoiGraphPatch,
         macro_map: &'a GraphMacroMap,
-        river_plan: &'a RiverPlan,
+        hydrology: &'a GraphHydrologyGraph,
         boundary: &'a BoundaryCache,
     ) -> Self {
         let macro_edges = macro_map
@@ -1085,6 +1010,14 @@ impl<'a> MacroFieldRasterContext<'a> {
             .map(|biome| (biome.site, *biome))
             .collect::<HashMap<_, _>>();
         let site_grid = SiteIndexGrid::from_sites(&macro_map.sites);
+        let mut river_flow_by_edge = HashMap::<VoronoiEdgeId, f32>::new();
+        for segment in &hydrology.segments {
+            river_flow_by_edge
+                .entry(segment.edge)
+                .and_modify(|flow| *flow = flow.max(segment.flow_accumulation))
+                .or_insert(segment.flow_accumulation);
+        }
+
         let coast_curves = macro_map
             .edges
             .iter()
@@ -1110,17 +1043,16 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        let mut river_curves = river_plan
-            .segment_plans
-            .iter()
-            .filter_map(|plan| {
+        let mut river_curves = river_flow_by_edge
+            .into_iter()
+            .filter_map(|(edge, flow_accumulation)| {
                 boundary_curves
-                    .get(&plan.edge)
+                    .get(&edge)
                     .copied()
                     .map(|curve| RiverCurveRef {
-                        edge: plan.edge,
+                        edge,
                         curve,
-                        plan: *plan,
+                        flow_accumulation,
                     })
             })
             .collect::<Vec<_>>();
@@ -1245,7 +1177,7 @@ impl<'a> MacroFieldRasterContext<'a> {
         position: WorldPlanePoint,
         config: MacroFieldTileConfig,
     ) -> (f32, f32, f32) {
-        let Some((distance, source)) = self
+        let Some((distance, flow)) = self
             .river_grid
             .candidate_indices(position, config.river_radius_blocks)
             .into_iter()
@@ -1253,41 +1185,18 @@ impl<'a> MacroFieldRasterContext<'a> {
             .map(|river| {
                 (
                     polyline_distance(position, &river.curve.points),
-                    RiverRasterSource::from_ref(river),
+                    river.flow_accumulation.max(0.0),
                 )
             })
             .min_by(|left, right| left.0.total_cmp(&right.0))
         else {
             return (f32::INFINITY, 0.0, 0.0);
         };
-        let flow_hint = source.flow_hint;
-        let valley = if distance <= config.river_radius_blocks {
-            river_valley_strength_for_distance(distance, source.valley_profile())
-        } else {
-            0.0
-        };
+        let flow_hint = flow_hint(flow);
+        let valley =
+            river_valley_strength_for_distance(distance, flow_hint, config.river_radius_blocks);
 
         (distance, flow_hint, valley.clamp(0.0, 1.0))
-    }
-
-    fn river_hint(
-        &self,
-        position: WorldPlanePoint,
-        config: MacroFieldTileConfig,
-    ) -> RiverHintSample {
-        self.river_grid
-            .candidate_indices(position, config.river_radius_blocks)
-            .into_iter()
-            .filter_map(|index| self.river_curves.get(index))
-            .map(|river| {
-                (
-                    polyline_distance(position, &river.curve.points),
-                    RiverHintSample::from_plan(river.plan),
-                )
-            })
-            .min_by(|left, right| left.0.total_cmp(&right.0))
-            .map(|(_, hint)| hint)
-            .unwrap_or_default()
     }
 }
 
@@ -1295,59 +1204,7 @@ impl<'a> MacroFieldRasterContext<'a> {
 struct RiverCurveRef<'a> {
     edge: VoronoiEdgeId,
     curve: &'a NoisyBoundaryCurve,
-    plan: RiverSegmentPlan,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RiverRasterSource<'a> {
-    curve: &'a NoisyBoundaryCurve,
-    flow_hint: f32,
-    reach_type: RiverReachType,
-    broad_valley_width_blocks: f32,
-    broad_valley_depth: f32,
-    bed_width_blocks: f32,
-    bed_depth: f32,
-}
-
-impl<'a> RiverRasterSource<'a> {
-    fn from_ref(river: &RiverCurveRef<'a>) -> Self {
-        Self {
-            curve: river.curve,
-            flow_hint: flow_hint(river.plan.display_flow),
-            reach_type: river.plan.reach_type,
-            broad_valley_width_blocks: river.plan.broad_valley_width_blocks,
-            broad_valley_depth: river.plan.broad_valley_depth,
-            bed_width_blocks: river.plan.bed_width_blocks,
-            bed_depth: river.plan.bed_depth,
-        }
-    }
-
-    fn valley_profile(self) -> RiverValleyProfile {
-        RiverValleyProfile {
-            broad_valley_width_blocks: self.broad_valley_width_blocks,
-            broad_valley_depth: self.broad_valley_depth,
-            bed_width_blocks: self.bed_width_blocks,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct RiverHintSample {
-    broad_valley_width_blocks: f32,
-    bed_width_blocks: f32,
-    bed_depth: f32,
-    reach_type: Option<RiverReachType>,
-}
-
-impl RiverHintSample {
-    fn from_plan(plan: RiverSegmentPlan) -> Self {
-        Self {
-            broad_valley_width_blocks: plan.broad_valley_width_blocks,
-            bed_width_blocks: plan.bed_width_blocks,
-            bed_depth: plan.bed_depth,
-            reach_type: Some(plan.reach_type),
-        }
-    }
+    flow_accumulation: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1590,10 +1447,14 @@ fn combine_macro_height(
     dry_basin_rim_blend: f32,
     ridge_influence: f32,
     river_valley_strength: f32,
+    river_flow_hint: f32,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let ridge_raise = ridge_influence * config.ridge_height_scale;
-    let river_carve = river_valley_strength * config.river_carve_scale * (1.0 - ocean_mask);
+    let river_carve = river_valley_strength
+        * config.river_carve_scale
+        * (0.86 + river_flow_hint * 0.10)
+        * (1.0 - ocean_mask);
     let dry_basin = dry_basin_mask > 0.5;
     let coast_flatten = if dry_basin {
         0.0
@@ -1637,12 +1498,6 @@ fn macro_field_stats(
         max_combined_macro_height: f32::NEG_INFINITY,
         min_dry_basin_height: f32::INFINITY,
         max_dry_basin_height: f32::NEG_INFINITY,
-        min_river_broad_valley_width_blocks: f32::INFINITY,
-        max_river_broad_valley_width_blocks: f32::NEG_INFINITY,
-        min_river_bed_width_hint_blocks: f32::INFINITY,
-        max_river_bed_width_hint_blocks: f32::NEG_INFINITY,
-        min_river_bed_depth_hint: f32::INFINITY,
-        max_river_bed_depth_hint: f32::NEG_INFINITY,
         ridge_source_curve_count: influence_stats.ridge_source_curve_count,
         river_source_curve_count: influence_stats.river_source_curve_count,
         coast_source_curve_count: influence_stats.coast_source_curve_count,
@@ -1669,29 +1524,6 @@ fn macro_field_stats(
         stats.max_river_valley_strength = stats
             .max_river_valley_strength
             .max(sample.river_valley_strength);
-        if sample.river_valley_strength > 0.0 {
-            stats.min_river_broad_valley_width_blocks = stats
-                .min_river_broad_valley_width_blocks
-                .min(sample.river_broad_valley_width_blocks);
-            stats.max_river_broad_valley_width_blocks = stats
-                .max_river_broad_valley_width_blocks
-                .max(sample.river_broad_valley_width_blocks);
-            stats.min_river_bed_width_hint_blocks = stats
-                .min_river_bed_width_hint_blocks
-                .min(sample.river_bed_width_hint_blocks);
-            stats.max_river_bed_width_hint_blocks = stats
-                .max_river_bed_width_hint_blocks
-                .max(sample.river_bed_width_hint_blocks);
-            stats.min_river_bed_depth_hint = stats
-                .min_river_bed_depth_hint
-                .min(sample.river_bed_depth_hint);
-            stats.max_river_bed_depth_hint = stats
-                .max_river_bed_depth_hint
-                .max(sample.river_bed_depth_hint);
-        }
-        if let Some(reach_type) = sample.river_reach_type {
-            stats.river_reach_type_counts[reach_type.as_index()] += 1;
-        }
         if sample.ocean_mask > 0.5 {
             stats.ocean_sample_count += 1;
         }
@@ -1713,14 +1545,6 @@ fn macro_field_stats(
     } else {
         stats.min_dry_basin_height = 0.0;
         stats.max_dry_basin_height = 0.0;
-    }
-    if stats.max_river_valley_strength <= 0.0 {
-        stats.min_river_broad_valley_width_blocks = 0.0;
-        stats.max_river_broad_valley_width_blocks = 0.0;
-        stats.min_river_bed_width_hint_blocks = 0.0;
-        stats.max_river_bed_width_hint_blocks = 0.0;
-        stats.min_river_bed_depth_hint = 0.0;
-        stats.max_river_bed_depth_hint = 0.0;
     }
 
     stats
@@ -1761,34 +1585,43 @@ fn flow_hint(flow_accumulation: f32) -> f32 {
     (flow_accumulation.max(0.0).sqrt() / 32.0).clamp(0.0, 1.0)
 }
 
-fn river_valley_strength_for_distance(distance_blocks: f32, profile: RiverValleyProfile) -> f32 {
-    let width = profile.broad_valley_width_blocks.max(1.0);
-    let core = (profile.bed_width_blocks + profile.bank_transition_width_blocks_hint())
-        .min(width * 0.42)
-        .max(1.0);
-    let depth = profile.broad_valley_depth.clamp(0.0, 1.0);
+fn river_width_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
+    let t = flow_hint.clamp(0.0, 1.0).powf(1.35);
+    let width = RIVER_MIN_WIDTH_BLOCKS + (RIVER_MAX_WIDTH_BLOCKS - RIVER_MIN_WIDTH_BLOCKS) * t;
+    width.min(configured_radius_blocks.max(RIVER_MIN_WIDTH_BLOCKS))
+}
+
+fn river_depth_factor(flow_hint: f32) -> f32 {
+    RIVER_HEADWATER_DEPTH_FACTOR
+        + (RIVER_TRUNK_DEPTH_FACTOR - RIVER_HEADWATER_DEPTH_FACTOR)
+            * flow_hint.clamp(0.0, 1.0).powf(1.05)
+}
+
+fn river_flat_bed_radius_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
+    let t = flow_hint.clamp(0.0, 1.0).powf(1.05);
+    let flat =
+        RIVER_MIN_FLAT_BED_BLOCKS + (RIVER_MAX_FLAT_BED_BLOCKS - RIVER_MIN_FLAT_BED_BLOCKS) * t;
+    flat.min(river_width_blocks(flow_hint, configured_radius_blocks) * 0.42)
+}
+
+fn river_valley_strength_for_distance(
+    distance_blocks: f32,
+    flow_hint: f32,
+    configured_radius_blocks: f32,
+) -> f32 {
+    let width = river_width_blocks(flow_hint, configured_radius_blocks);
+    let flat_bed = river_flat_bed_radius_blocks(flow_hint, configured_radius_blocks);
+    let depth = river_depth_factor(flow_hint);
     if !distance_blocks.is_finite() || distance_blocks >= width {
         return 0.0;
     }
-    if distance_blocks <= core {
+    if distance_blocks <= flat_bed {
         return depth;
     }
-    let shoulder_t = ((distance_blocks - core) / (width - core).max(f32::EPSILON)).clamp(0.0, 1.0);
+    let shoulder_t =
+        ((distance_blocks - flat_bed) / (width - flat_bed).max(f32::EPSILON)).clamp(0.0, 1.0);
     let shoulder = 1.0 - smoothstep01(shoulder_t);
-    depth * shoulder.powf(1.55)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct RiverValleyProfile {
-    broad_valley_width_blocks: f32,
-    broad_valley_depth: f32,
-    bed_width_blocks: f32,
-}
-
-impl RiverValleyProfile {
-    fn bank_transition_width_blocks_hint(self) -> f32 {
-        (self.broad_valley_width_blocks * 0.10).max(8.0)
-    }
+    depth * shoulder.powf(1.35)
 }
 
 fn polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f32 {
@@ -1872,11 +1705,8 @@ mod tests {
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
         VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
-    use crate::world::generation::hydrology::{
-        GraphHydrologyGraph, HydrologyConfig, solve_hydrology,
-    };
+    use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
     use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
-    use crate::world::generation::river_plan::{RiverPlan, generate_river_plan};
 
     #[test]
     fn macro_field_tile_generation_is_deterministic() {
@@ -1886,14 +1716,14 @@ mod tests {
         let first = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             config,
         );
         let second = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             config,
         );
@@ -1909,7 +1739,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             config,
         );
@@ -1926,7 +1756,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             test_tile_config(),
         );
@@ -1942,8 +1772,9 @@ mod tests {
     #[test]
     fn dry_basin_height_is_shallow_land_floor_not_water_flatten() {
         let config = test_tile_config();
-        let dry_height = combine_macro_height(0.18, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, config);
-        let water_height = combine_macro_height(0.18, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, config);
+        let dry_height = combine_macro_height(0.18, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, config);
+        let water_height =
+            combine_macro_height(0.18, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
 
         assert!(
             dry_height >= DRY_BASIN_MIN_HEIGHT,
@@ -1985,7 +1816,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
         );
         let config = test_tile_config();
@@ -2020,7 +1851,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             centered_test_tile_config(near),
         );
@@ -2080,7 +1911,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
         );
         let config = test_tile_config();
@@ -2118,7 +1949,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
             centered_test_tile_config(near),
         );
@@ -2171,11 +2002,7 @@ mod tests {
             },
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 3, 16.0);
-        let field = rasterize_curve_anti_aliased_polyline_field(
-            &[test_river_source(&curve, 0.5, 32.0, 0.24, 8.0, 0.12)],
-            config,
-            32.0,
-        );
+        let field = rasterize_curve_anti_aliased_polyline_field(&[(&curve, 0.5)], config, 32.0);
 
         for x in 0..7 {
             let index = 7 + x;
@@ -2248,10 +2075,7 @@ mod tests {
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 3, 16.0);
         let field = rasterize_curve_anti_aliased_polyline_field(
-            &[
-                test_river_source(&left, 0.25, 32.0, 0.18, 8.0, 0.10),
-                test_river_source(&right, 0.75, 48.0, 0.34, 18.0, 0.26),
-            ],
+            &[(&left, 0.25), (&right, 0.75)],
             config,
             32.0,
         );
@@ -2299,11 +2123,7 @@ mod tests {
             },
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 7, 16.0);
-        let field = rasterize_curve_anti_aliased_polyline_field(
-            &[test_river_source(&curve, 0.75, 48.0, 0.34, 18.0, 0.26)],
-            config,
-            32.0,
-        );
+        let field = rasterize_curve_anti_aliased_polyline_field(&[(&curve, 0.75)], config, 32.0);
         let joint = 1 * 7 + 3;
         let before_joint = 1 * 7 + 2;
         let after_joint = 2 * 7 + 3;
@@ -2348,27 +2168,10 @@ mod tests {
             },
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 7, 16.0);
-        let headwater = rasterize_curve_anti_aliased_polyline_field(
-            &[test_river_source(
-                &curve,
-                flow_hint(12.0),
-                36.0,
-                0.12,
-                6.0,
-                0.10,
-            )],
-            config,
-            96.0,
-        );
+        let headwater =
+            rasterize_curve_anti_aliased_polyline_field(&[(&curve, flow_hint(12.0))], config, 96.0);
         let trunk = rasterize_curve_anti_aliased_polyline_field(
-            &[test_river_source(
-                &curve,
-                flow_hint(1024.0),
-                128.0,
-                0.48,
-                42.0,
-                0.44,
-            )],
+            &[(&curve, flow_hint(1024.0))],
             config,
             96.0,
         );
@@ -2381,12 +2184,31 @@ mod tests {
     }
 
     #[test]
-    fn river_valley_uses_river_plan_scaled_width() {
-        let distance = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS * 0.45;
-        let headwater =
-            river_valley_strength_for_distance(distance, test_river_profile(36.0, 0.12, 6.0));
-        let trunk =
-            river_valley_strength_for_distance(distance, test_river_profile(160.0, 0.48, 42.0));
+    fn river_width_and_depth_increase_with_flow() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let headwater_flow = flow_hint(12.0);
+        let trunk_flow = flow_hint(1024.0);
+
+        assert!(
+            river_width_blocks(headwater_flow, radius) < river_width_blocks(trunk_flow, radius),
+            "river corridor width should grow with selected/display flow"
+        );
+        assert!(
+            river_depth_factor(headwater_flow) < river_depth_factor(trunk_flow),
+            "river carve depth should grow with selected/display flow"
+        );
+        assert!(
+            river_width_blocks(headwater_flow, radius) < radius * 0.35,
+            "headwater rivers should be much narrower than the maximum downstream radius"
+        );
+    }
+
+    #[test]
+    fn river_valley_uses_flow_scaled_width() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let distance = radius * 0.45;
+        let headwater = river_valley_strength_for_distance(distance, flow_hint(12.0), radius);
+        let trunk = river_valley_strength_for_distance(distance, flow_hint(1024.0), radius);
 
         assert!(
             trunk > headwater,
@@ -2400,11 +2222,12 @@ mod tests {
 
     #[test]
     fn river_valley_has_flat_bed_before_shoulder_falloff() {
-        let trunk = test_river_profile(160.0, 0.48, 42.0);
-        let flat = trunk.bed_width_blocks + trunk.bank_transition_width_blocks_hint();
-        let center = river_valley_strength_for_distance(0.0, trunk);
-        let inside_flat = river_valley_strength_for_distance(flat * 0.85, trunk);
-        let shoulder = river_valley_strength_for_distance(flat + 24.0, trunk);
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let trunk = flow_hint(1024.0);
+        let flat = river_flat_bed_radius_blocks(trunk, radius);
+        let center = river_valley_strength_for_distance(0.0, trunk, radius);
+        let inside_flat = river_valley_strength_for_distance(flat * 0.85, trunk, radius);
+        let shoulder = river_valley_strength_for_distance(flat + 24.0, trunk, radius);
 
         assert!(
             flat > 24.0,
@@ -2421,11 +2244,28 @@ mod tests {
     }
 
     #[test]
+    fn downstream_flow_widens_flat_bed_and_stays_depth_capped() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let headwater = flow_hint(12.0);
+        let trunk = flow_hint(1024.0);
+
+        assert!(
+            river_flat_bed_radius_blocks(trunk, radius)
+                > river_flat_bed_radius_blocks(headwater, radius)
+        );
+        assert!(
+            river_depth_factor(trunk) <= RIVER_TRUNK_DEPTH_FACTOR + f32::EPSILON,
+            "downstream carve depth should be capped instead of becoming a deep V"
+        );
+    }
+
+    #[test]
     fn default_combined_height_does_not_apply_ridge_raise() {
         let config = MacroFieldTileConfig::new(0.0, 0.0, 1, 1, 32.0);
-        let without_ridge = combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
+        let without_ridge =
+            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
         let with_ridge_influence =
-            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, config);
+            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, config);
 
         assert_eq!(
             config.ridge_height_scale, 0.0,
@@ -2443,6 +2283,7 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2511,8 +2352,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2533,6 +2374,7 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2601,8 +2443,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2636,6 +2478,7 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2704,8 +2547,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
+        let hydrology = GraphHydrologyGraph::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2724,7 +2567,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
         );
         let site = inputs
@@ -2757,7 +2600,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.river_plan,
+            &inputs.hydrology,
             &inputs.boundary,
         );
         let config = test_tile_config();
@@ -2869,7 +2712,6 @@ mod tests {
         patch: super::super::graph::VoronoiGraphPatch,
         macro_map: GraphMacroMap,
         hydrology: GraphHydrologyGraph,
-        river_plan: RiverPlan,
         boundary: BoundaryCache,
     }
 
@@ -2887,14 +2729,12 @@ mod tests {
         ));
         let macro_map = generate_macro_map(&patch, MacroMapConfig::new(seed, 11));
         let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
-        let river_plan = generate_river_plan(&patch, &macro_map, &hydrology);
         let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(seed, 11));
 
         TestInputs {
             patch,
             macro_map,
             hydrology,
-            river_plan,
             boundary,
         }
     }
@@ -2905,37 +2745,6 @@ mod tests {
 
     fn centered_test_tile_config(center: WorldPlanePoint) -> MacroFieldTileConfig {
         MacroFieldTileConfig::new(center.x - 512.0, center.z - 512.0, 24, 24, 64.0)
-    }
-
-    fn test_river_source<'a>(
-        curve: &'a NoisyBoundaryCurve,
-        flow_hint: f32,
-        broad_valley_width_blocks: f32,
-        broad_valley_depth: f32,
-        bed_width_blocks: f32,
-        bed_depth: f32,
-    ) -> RiverRasterSource<'a> {
-        RiverRasterSource {
-            curve,
-            flow_hint,
-            reach_type: RiverReachType::Middle,
-            broad_valley_width_blocks,
-            broad_valley_depth,
-            bed_width_blocks,
-            bed_depth,
-        }
-    }
-
-    fn test_river_profile(
-        broad_valley_width_blocks: f32,
-        broad_valley_depth: f32,
-        bed_width_blocks: f32,
-    ) -> RiverValleyProfile {
-        RiverValleyProfile {
-            broad_valley_width_blocks,
-            broad_valley_depth,
-            bed_width_blocks,
-        }
     }
 
     fn test_contour_tile(heights_blocks: &[f32], width: u32, height: u32) -> MacroFieldTile {
@@ -2960,10 +2769,6 @@ mod tests {
                     river_valley_strength: 0.0,
                     river_distance_blocks: f32::INFINITY,
                     river_flow_hint: 0.0,
-                    river_broad_valley_width_blocks: 0.0,
-                    river_bed_width_hint_blocks: 0.0,
-                    river_bed_depth_hint: 0.0,
-                    river_reach_type: None,
                     combined_macro_height,
                 }
             })

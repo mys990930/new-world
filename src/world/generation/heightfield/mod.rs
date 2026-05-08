@@ -1430,10 +1430,6 @@ mod tests {
             river_valley_strength: 0.0,
             river_distance_blocks: f32::INFINITY,
             river_flow_hint: 0.0,
-            river_broad_valley_width_blocks: 0.0,
-            river_bed_width_hint_blocks: 0.0,
-            river_bed_depth_hint: 0.0,
-            river_reach_type: None,
             combined_macro_height: height,
         }
     }
