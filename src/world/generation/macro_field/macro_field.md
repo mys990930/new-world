@@ -139,14 +139,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
 2. ridge, coast, selected river curve를 tile-local influence field로 rasterize한다.
    - ridge/coast는 launch 성능을 위해 source pixel과 chamfer distance propagation을 계속 사용할 수 있다.
-   - selected river는 hydrology segment를 downstream chain 단위로 묶고, 각 segment가 가리키는
-     canonical noisy polyline을 방향에 맞게 이어 chain-level centerline을 만든다. confluence/branch/lake
-     contact처럼 의미가 갈라지는 node에서는 chain을 억지로 이어 붙이지 않는다.
-   - river chain은 conservative centerline smoothing과 chain 방향 1D display-flow smoothing을 거친 뒤
-     anti-aliased thick stroke/corridor로 굽는다. 각 sample cell은 중심점 하나만 보지 않고 subpixel
-     coverage를 읽어 flat-bottom + shoulder profile strength를 누적하며, 가까운 segment까지의 실제 거리와
-     segment 내 보간된 display flow를 함께 보존한다. round된 source point나 segment endpoint cap이 만드는
-     원형 blob/scallop, edge 단위 width/depth jump, segment join 사이 뾰족함이 보이면 회귀다.
+   - selected river는 source pixel 점열이 아니라 canonical noisy polyline을 anti-aliased thick
+     stroke/corridor로 굽는다. 각 sample cell은 중심점 하나만 보지 않고 subpixel coverage를 읽어
+     flat-bottom + shoulder profile strength를 누적하며, 가까운 segment까지의 실제 거리와 주변 segment의
+     display flow를 함께 보존한다. round된 source point나 segment endpoint cap이 만드는 원형
+     blob/scallop과 segment join 사이 뾰족함이 보이면 회귀다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -178,14 +175,9 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      guide/source 진단용으로 유지하지만, ridge raise는 broad mountain elevation model이 들어올 때까지
      disabled/stub 상태다. 기존 narrow ridge envelope가 1블록 등고선 기준에서 pinpoint maxima를 만들어
      contour가 층마다 불연속적으로 튀어 보였기 때문이다.
-7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve를 downstream chain으로 묶고, chain-level smoothed centerline의 anti-aliased thick polyline coverage, distance, selected/display flow로 river valley field를 만든다.
+7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve의 anti-aliased thick polyline coverage, distance, selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
-   - confluence와 branch는 chain split point다. rendering source가 두 독립 upstream branch를 한 polyline처럼
-     꿰어 보이게 만들면 안 되며, downstream segment는 별도 chain으로 시작할 수 있다.
-   - flow hint는 edge별 max 값을 그대로 sample에 노출하지 않고, chain 방향으로 local smoothing한 값을 segment
-     내부에서 보간한다. 이 값은 river width, flat-bed radius, depth에 함께 쓰이므로 edge마다 갑자기 부풀어
-     원형 blob처럼 보이면 회귀다.
    - river valley width, flat-bed radius, depth는 모두 selected/display flow에서 파생한다. launch
      기본 정책은 `flow_hint = clamp(sqrt(flow_accumulation) / 32, 0, 1)`을 만들고, outer valley
      radius는 대략 `28..176` blocks, flat-bed radius는 대략 `3.5..56` blocks 범위에서 flow에 따라
@@ -272,9 +264,8 @@ chunk fill은 매 column마다 가장 가까운 ridge curve, river curve, coast 
 sample한다.
 
 launch 구현은 ridge/coast/river influence를 per-sample full curve scan 대신 tile-local raster pass로
-굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 selected segment를
-chain-level smoothed centerline으로 정리한 뒤 canonical noisy polyline 기반 anti-aliased thick stroke로 직접
-굽는다. ownership과 macro elevation의 noisy-boundary
+굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 canonical
+noisy polyline을 anti-aliased thick stroke로 직접 굽는다. ownership과 macro elevation의 noisy-boundary
 side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visible mask boundary 정확도를
 지키기 위한 보수적 선택이다. 4K preview의 남은 주된
 비용은 이 ownership side query와 nearest site lookup이며, 후속 최적화는 owner classification field를
@@ -292,8 +283,8 @@ side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visi
 - ocean/coast/lake/dry basin mask. coast/lake/ocean 경계는 noisy boundary를 따라 보여야 한다.
   dry basin은 별도 mask/color로 표시되며 coast 노란색과 구분되어야 한다.
 - ridge influence
-- river valley strength/distance/flow hint. selected hydrology chain path의 smoothed canonical noisy
-  centerline 주변 carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
+- river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
+  carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
   얕지만 knife-cut V가 아니어야 하고, 하류는 넓은 flat bed와 완만한 shoulder를 가져야 한다.
 - combined macro height. river valley carve가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
