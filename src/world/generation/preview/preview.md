@@ -253,9 +253,12 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   - `--width <u32>`: 기본 `3840`
   - `--height <u32>`: 기본 `2160`
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
+  - `--chunk-radius <i32>`: world-block center를 유지한 채 가로 footprint를 `radius * 2 * CHUNK_EDGE`
+    block으로 정한다. 기본 footprint `32768`은 현재 `CHUNK_EDGE = 32` 기준 `chunk_radius = 512`와 같다.
+    더 작은 값을 넣으면 같은 이미지 해상도에서 더 작은 world footprint를 보므로 확대된다.
   - `--stage macro_field`
   - `--channel <all|macro|mask|ridge|river|combined|lit|contour>`: 기본 `lit`
-  - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `4`
+  - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `32`
   - `--contour-major-every <n>`: major contour 간격 multiplier, 기본 `5`
   - `--contours`: `combined`/`lit` channel 위에 contour overlay를 추가
   - `--output <path>`
@@ -271,8 +274,9 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   land 사이의 경계가 노란 coast처럼 보이면 회귀다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
 - `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
-  carve strength. 이 channel은 selected curve를 source pixel로 rasterize한 tile influence pass를
-  사용해야 하며, raw polyline distance를 preview pixel마다 반복 계산하면 안 된다. river valley는
+  carve strength. 이 channel은 selected curve segment의 capsule distance를 tile-local field로 굽는
+  influence pass를 사용해야 하며, source pixel 점열/chamfer만으로 원형 blob이 이어져 보이면 회귀다.
+  river valley는
   flat-bottom + shoulder falloff profile이어야 해서, 하류 trunk는 더 넓고 평평한 강바닥을 보여야 하며
   상류도 칼같은 V자로 파이면 회귀다.
 - `combined`: Perlin 합성 전 macro elevation + ridge raise - river carve - coast/lake flatten 결과.
@@ -282,7 +286,7 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
 - `lit`: combined macro height 또는 heightfield stage output을 흰색 texture와 단순 lighting으로
   보여주는 top-down rendering
 - `contour`: heightfield 직전 `combined_macro_height`를 block-height scale으로 변환한 뒤 Marching
-  Squares로 추출한 contour line preview. 기본 level step은 4 blocks이며, 5 level마다 major contour를
+  Squares로 추출한 contour line preview. 기본 level step은 32 blocks이며, 5 level마다 major contour를
   그린다. sea level `y=0` contour는 별도 blue 계열로 표시한다.
 
 중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
@@ -364,7 +368,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
     `--world-span-blocks` 기반 footprint 대신 `center_chunk-r .. center_chunk+r` inclusive chunk range를
     사용한다.
   - `--columns-x <u32>`: heightfield sample column 수. free-window 기본은 `768`이고,
-    `--chunk-radius` 모드 기본은 `(2r+1) * 64`다.
+    `--chunk-radius` 모드 기본은 `(2r+1) * 32`다.
   - `--columns-z <u32>`: 기본은 image aspect에서 계산. 단 `--chunk-radius` 모드에서는 square
     footprint에 맞춰 기본값이 `columns-x`가 된다. 명시한 `--columns-x`/`--columns-z`는
     chunk당 기본 column 수보다 우선한다.

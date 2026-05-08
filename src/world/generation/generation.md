@@ -172,7 +172,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      1블록 contour 기준에서 pinpoint maxima와 불연속적인 등고선 밀도 변화를 만들 수 있어
      `combined_macro_height`의 ridge raise는 broad mountain elevation model 재도입 전까지 disabled/stub으로 둔다.
    - dry basin은 lake/ocean water flatten 대상이 아니다. macro field에서는 폐쇄분지 surface mask와
-     얕은 above-sea-level floor로 표현하고, 큰 물웅덩이나 수면처럼 낮추지 않는다.
+     얕은 above-sea-level bowl profile로 표현한다. 내부 macro elevation variation과 dry/non-dry
+     noisy boundary rim blend를 보존해 분지 내부에도 contour가 생겨야 하며, 큰 물웅덩이나 수면처럼
+     낮추지 않는다.
    - 아직 micro Perlin이 없으므로 ordinary cell interior에 촘촘한 grain이 보이면 ridge/coast/river
      influence의 낮은 꼬리값이나 lit preview contrast가 과장된 것이다. ridge influence는 ridge guide
      주변에서만 active해야 하며 전역 low-level texture처럼 깔리면 안 된다.
@@ -204,8 +206,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - 이 stage는 final block material이 아니라 surface height, water level, terrain kind hint를 제공하며,
      voxel fill은 이후 stage에서 별도로 수행한다.
    - `heightfield_preview`는 별도 수평 scale 계층을 쓰지 않는다. 같은 world footprint를 더 촘촘히
-     보려면 해당 footprint를 더 많은 column으로 직접 샘플링한다. chunk-radius preview의 기본값은
-     chunk 하나당 64개 column이며, free window preview는 기본 768개 X column을 사용한다.
+     보려면 해당 footprint를 더 많은 column으로 직접 샘플링한다. 현재 큰 block-height domain과
+     cubic preview를 맞추기 위해 chunk-radius preview의 기본값은 chunk 하나당 32개 column, 즉
+     기본적으로 1 world block당 1 column이며, free window preview는 기본 768개 X column을 사용한다.
      `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
    - macro relief scale은 렌더링 트릭이 아니라 `macro_field` contour와 `heightfield` band resolve가
      공유하는 block-height domain에서 적용한다. 현재 실험 기본 signed scale은 effective

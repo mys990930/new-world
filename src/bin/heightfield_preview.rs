@@ -28,7 +28,7 @@ const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
 const DEFAULT_WINDOW_COLUMNS_X: u32 = 768;
-const DEFAULT_COLUMNS_PER_CHUNK: u32 = 64;
+const DEFAULT_COLUMNS_PER_CHUNK: u32 = 32;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
@@ -2490,10 +2490,10 @@ mod tests {
     }
 
     #[test]
-    fn chunk_radius_default_density_uses_sixty_four_columns_per_chunk() {
-        assert_eq!(DEFAULT_COLUMNS_PER_CHUNK, 64);
-        assert_eq!(columns_for_chunk_radius(1), 192);
-        assert_eq!(columns_for_chunk_radius(4), 576);
+    fn chunk_radius_default_density_uses_one_column_per_world_block() {
+        assert_eq!(DEFAULT_COLUMNS_PER_CHUNK, 32);
+        assert_eq!(columns_for_chunk_radius(1), 96);
+        assert_eq!(columns_for_chunk_radius(4), 288);
     }
 
     #[test]
@@ -2522,7 +2522,7 @@ mod tests {
         assert_eq!(window.columns_z, 160);
         assert_eq!(
             config.chunk_radius.map(|_| DEFAULT_COLUMNS_PER_CHUNK),
-            Some(64),
+            Some(32),
             "metadata should still report the chunk-derived default while explicit columns own final resolution"
         );
     }

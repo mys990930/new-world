@@ -21,7 +21,7 @@
     overrides the preview footprint derived from `--world-span-blocks`; width/height only control
     image resolution.
   - `--columns-x <u32>`: sampled heightfield columns across X. Free-window mode defaults to `768`;
-    `--chunk-radius` mode defaults to `(2r+1) * 64`.
+    `--chunk-radius` mode defaults to `(2r+1) * 32`.
   - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
     `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid.
     Explicit `--columns-x`/`--columns-z` values always own the final resolution.
@@ -76,11 +76,13 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   압축이다.
 - Horizontal density is a direct column-count contract. In free-window mode the default X column
   count is `768`; Z is derived from the image aspect unless `--columns-z` is provided. In
-  `--chunk-radius` mode, the default grid uses `64` columns per chunk on each axis, so a radius
-  `r` covers `(2r+1) * 64` columns per axis unless `--columns-x`/`--columns-z` explicitly override
+  `--chunk-radius` mode, the default grid uses `32` columns per chunk on each axis, so a radius
+  `r` covers `(2r+1) * 32` columns per axis unless `--columns-x`/`--columns-z` explicitly override
   the final count. Sea level, contour step, surface `y`, and river water `y` are resolved in the
-  block domain before rendering. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 column count, footprint,
-  image size에서 자동으로 파생된다.
+  block domain before rendering. This is the default natural density for the current large Y block
+  scale because one runtime chunk is `32` blocks wide, so chunk-radius mode starts at one column per
+  world block. X/Z 화면 픽셀 스케일도 별도 조절값을 갖지 않고 column count, footprint, image size에서
+  자동으로 파생된다.
 - Columns are drawn as top diamonds plus only the visible side faces where a neighbor is lower. The
   visible sides are derived from the current `--quarter-turns` projection. For example, quarter `0`
   sees the +X/+Z faces, quarter `1` sees -X/+Z, quarter `2` sees -X/-Z, and quarter `3` sees +X/-Z.

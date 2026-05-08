@@ -8,7 +8,6 @@ use std::time::Instant;
 use image::RgbImage;
 use rayon::prelude::*;
 
-use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
@@ -21,6 +20,7 @@ use new_world::world::generation::{
     generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
     generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
+use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 mod common;
 
@@ -29,6 +29,8 @@ use common::preview_compass::draw_compass_rgb;
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
+const DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS: i32 =
+    DEFAULT_WORLD_SPAN_BLOCKS / (CHUNK_EDGE_I32 * 2);
 const DEFAULT_STAGE: &str = "macro_field";
 const OUTPUT_DIR: &str = "target/macro-field-preview";
 const MACRO_PREVIEW_MIN_HEIGHT: f32 = -1.0;
@@ -76,6 +78,7 @@ struct PreviewConfig {
     width: u32,
     height: u32,
     world_span_blocks: i32,
+    chunk_radius: Option<i32>,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
@@ -94,6 +97,9 @@ impl PreviewConfig {
         }
         if self.world_span_blocks <= 0 {
             return Err(cli_error("world-span-blocks must be positive"));
+        }
+        if self.chunk_radius.is_some_and(|radius| radius <= 0) {
+            return Err(cli_error("chunk-radius must be positive"));
         }
         if self.region_size_blocks <= 0 {
             return Err(cli_error("region-size-blocks must be positive"));
@@ -125,9 +131,16 @@ impl PreviewConfig {
             center_z: self.center_z as f32,
             width: self.width,
             height: self.height,
-            world_span_x: self.world_span_blocks as f32,
-            world_span_z: self.world_span_blocks as f32 * self.height as f32 / self.width as f32,
+            world_span_x: self.effective_world_span_blocks() as f32,
+            world_span_z: self.effective_world_span_blocks() as f32 * self.height as f32
+                / self.width as f32,
         }
+    }
+
+    fn effective_world_span_blocks(&self) -> i32 {
+        self.chunk_radius
+            .map(|radius| radius.saturating_mul(CHUNK_EDGE_I32).saturating_mul(2))
+            .unwrap_or(self.world_span_blocks)
     }
 
     fn default_single_path(&self, channel: PreviewChannel) -> PathBuf {
@@ -293,6 +306,10 @@ impl PreviewWindow {
         self.center_z + self.world_span_z * 0.5
     }
 
+    fn sample_spacing_blocks(self) -> f32 {
+        self.world_span_x / self.width as f32
+    }
+
     fn graph_area(self, region_size_blocks: i32) -> Result<GraphRegionArea, Box<dyn Error>> {
         let min = graph_region_for_world_block(
             self.min_x().floor() as i32,
@@ -392,6 +409,10 @@ struct PreviewHeader {
     width: u32,
     height: u32,
     world_span_blocks: i32,
+    effective_world_span_blocks: i32,
+    chunk_radius: Option<i32>,
+    default_chunk_radius: i32,
+    sample_spacing_blocks: f32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
@@ -453,6 +474,18 @@ impl PreviewHeader {
             format!("height={}", self.height),
             "orientation_overlay=north_up_east_right".to_string(),
             format!("world_span_blocks={}", self.world_span_blocks),
+            format!(
+                "effective_world_span_blocks={}",
+                self.effective_world_span_blocks
+            ),
+            format!(
+                "chunk_radius={}",
+                self.chunk_radius
+                    .map_or_else(|| "default_footprint".to_string(), |radius| radius.to_string())
+            ),
+            format!("default_chunk_radius={}", self.default_chunk_radius),
+            format!("chunk_edge_blocks={}", CHUNK_EDGE_I32),
+            format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
             format!("land_bias={}", self.land_bias),
@@ -636,6 +669,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             width: config.width,
             height: config.height,
             world_span_blocks: config.world_span_blocks,
+            effective_world_span_blocks: config.effective_world_span_blocks(),
+            chunk_radius: config.chunk_radius,
+            default_chunk_radius: DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS,
+            sample_spacing_blocks: window.sample_spacing_blocks(),
             region_size_blocks: config.region_size_blocks,
             site_spacing_blocks: config.site_spacing_blocks,
             land_bias: config.land_bias,
@@ -705,6 +742,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         draw_legend_overlay(
             &mut image,
             channel,
+            window,
+            &config,
             config.contour_step_blocks,
             config.contour_major_every,
         );
@@ -738,6 +777,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.max_x(),
         window.min_z(),
         window.max_z()
+    );
+    println!(
+        "preview footprint: span {:.0} blocks, sample grid {}x{}, spacing {:.3} blocks/sample, chunk-radius {} (default equivalent {})",
+        window.world_span_x,
+        config.width,
+        config.height,
+        window.sample_spacing_blocks(),
+        config
+            .chunk_radius
+            .map_or_else(|| "default".to_string(), |radius| radius.to_string()),
+        DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS
     );
     println!(
         "graph regions: x={}..{}, z={}..{}",
@@ -898,6 +948,7 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
     let mut width = DEFAULT_WIDTH;
     let mut height = DEFAULT_HEIGHT;
     let mut world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
+    let mut chunk_radius = None;
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
     let mut land_bias = MacroMapConfig::new(seed, WorldMeta::new(seed).generator_version).land_bias;
@@ -915,6 +966,9 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
             "--height" => height = parse_required::<u32>(&mut args, "height")?,
             "--world-span-blocks" => {
                 world_span_blocks = parse_required::<i32>(&mut args, "world-span-blocks")?
+            }
+            "--chunk-radius" => {
+                chunk_radius = Some(parse_required::<i32>(&mut args, "chunk-radius")?)
             }
             "--region-size-blocks" => {
                 region_size_blocks = parse_required::<i32>(&mut args, "region-size-blocks")?
@@ -953,6 +1007,7 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         width,
         height,
         world_span_blocks,
+        chunk_radius,
         region_size_blocks,
         site_spacing_blocks,
         land_bias,
@@ -1075,7 +1130,7 @@ fn rasterize_macro_field(
     preview: &PreviewWorld,
     config: &PreviewConfig,
 ) -> Result<MacroFieldTile, Box<dyn Error>> {
-    let sample_spacing = window.world_span_x / window.width as f32;
+    let sample_spacing = window.sample_spacing_blocks();
     let core_config = CoreMacroFieldTileConfig::new(
         window.min_x() + sample_spacing * 0.5,
         window.min_z() + sample_spacing * 0.5,
@@ -1920,6 +1975,8 @@ fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
 fn draw_legend_overlay(
     image: &mut RgbImage,
     channel: PreviewChannel,
+    window: PreviewWindow,
+    config: &PreviewConfig,
     contour_step_blocks: f32,
     contour_major_every: u32,
 ) {
@@ -1935,11 +1992,11 @@ fn draw_legend_overlay(
     let margin = 8 * scale;
     let panel_width = (164 * scale).min(image.width());
     let panel_height_units = if channel == PreviewChannel::Mask {
-        66
+        76
     } else if channel == PreviewChannel::Contour {
-        62
+        72
     } else {
-        50
+        60
     };
     let panel_height = (panel_height_units * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
@@ -1991,6 +2048,20 @@ fn draw_legend_overlay(
             contour_major_every,
         );
     }
+    draw_text(
+        image,
+        bar_x,
+        y + panel_height.saturating_sub(12 * scale),
+        &format!(
+            "R {} / SPC {:.2}",
+            config
+                .chunk_radius
+                .map_or(DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS, |radius| radius),
+            window.sample_spacing_blocks()
+        ),
+        [196, 205, 194],
+        scale,
+    );
 }
 
 fn draw_contour_legend_keys(
@@ -2304,7 +2375,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_field_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit|contour>] [--contour-step <blocks>] [--contour-major-every <n>] [--contours] [--output <path>]"
+    "usage: cargo run --bin macro_field_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit|contour>] [--contour-step <blocks>] [--contour-major-every <n>] [--contours] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2328,6 +2399,7 @@ mod tests {
             width: 64,
             height: 32,
             world_span_blocks: 1024,
+            chunk_radius: None,
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
@@ -2385,6 +2457,15 @@ mod tests {
         draw_legend_overlay(
             &mut image,
             PreviewChannel::CombinedMacroHeight,
+            PreviewWindow {
+                center_x: 0.0,
+                center_z: 0.0,
+                width: 180,
+                height: 90,
+                world_span_x: 1024.0,
+                world_span_z: 512.0,
+            },
+            &test_config(),
             DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
             DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
         );
@@ -2463,6 +2544,28 @@ mod tests {
             GRAPH_EDGE_OVERLAY_AMOUNT <= 0.10,
             "macro field graph edge overlay should be a faint reference layer, not a dominant line layer"
         );
+    }
+
+    #[test]
+    fn chunk_radius_zooms_macro_field_world_footprint() {
+        let default_config = test_config();
+        let zoomed_config = PreviewConfig {
+            chunk_radius: Some(4),
+            ..test_config()
+        }
+        .validate()
+        .unwrap();
+
+        assert_eq!(DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS, 512);
+        assert_eq!(
+            default_config.effective_world_span_blocks(),
+            default_config.world_span_blocks
+        );
+        assert_eq!(
+            zoomed_config.effective_world_span_blocks(),
+            CHUNK_EDGE_I32 * 8
+        );
+        assert!(zoomed_config.window().world_span_x < default_config.window().world_span_x);
     }
 
     #[test]

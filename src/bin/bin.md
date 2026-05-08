@@ -117,7 +117,7 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
   - `--height 720`
   - `--world-span-blocks 8192`
   - `--columns-x 768` in free-window mode
-  - `--chunk-radius` mode uses `64` columns per covered chunk by default
+  - `--chunk-radius` mode uses `32` columns per covered chunk by default
   - `--columns-z` derived from image aspect
 - Example:
 
@@ -134,9 +134,10 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
     to make column scale readable. They draw subtle top/side face edges plus integer side-step
     guides; `--no-block-lines` disables only this diagnostic overlay.
   - Horizontal density is expressed as direct column count. Free-window mode defaults to `768` X
-    columns; chunk-radius mode defaults to `64` columns per chunk on each axis. Heightfield Y
-    relief is resolved in the doubled macro/heightfield block-domain, and preview rendering keeps
-    block primitives visually cubic instead of applying an extra vertical scale.
+    columns; chunk-radius mode defaults to `32` columns per chunk on each axis, matching one
+    column per world block for the current `32` block chunk edge. Heightfield Y relief is resolved
+    in the macro/heightfield block-domain, and preview rendering keeps block primitives visually
+    cubic instead of applying an extra vertical scale.
   - Heightfield terrace resolve uses integer contour steps with a one-block raw minimum gap for
     both general land and river corridors; the river override structure remains available for later
     tuning.
@@ -158,6 +159,7 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
   - `--width 3840`
   - `--height 2160`
   - `--world-span-blocks 32768`
+  - default footprint is equivalent to `--chunk-radius 512` with `CHUNK_EDGE = 32`
   - `--channel lit`
 - Example:
 

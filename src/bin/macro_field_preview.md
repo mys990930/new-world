@@ -17,6 +17,7 @@
   - `--width <u32>`
   - `--height <u32>`
   - `--world-span-blocks <i32>`
+  - `--chunk-radius <i32>`
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -32,12 +33,14 @@
 - `--width 3840`
 - `--height 2160`
 - `--world-span-blocks 32768`
+- default footprint equals `--chunk-radius 512` with the current `CHUNK_EDGE = 32`, but the default
+  remains expressed as `--world-span-blocks 32768` for compatibility
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--land-bias MacroMapConfig::new(...).land_bias`
 - `--stage macro_field`
 - `--channel lit`
-- `--contour-step 4`
+- `--contour-step 32`
 - `--contour-major-every 5`
 - single-channel output: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>_<channel>.png`
 - all-channel output directory: `target/macro-field-preview/s<seed>_x<center-x>_z<center-z>/`
@@ -102,9 +105,9 @@ of giving every tile its own artificial low and high.
 6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
 7. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
   - noisy-boundary owner/blend for macro elevation and masks,
-   - ridge candidate noisy curves through a tile-local influence raster pass,
-   - coast noisy curves through a tile-local influence raster pass,
-   - selected hydrology river noisy curves through a tile-local influence raster pass.
+  - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
+  - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
+  - selected hydrology river noisy curves through a tile-local segment capsule distance bake.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
@@ -173,6 +176,10 @@ Each PNG contains:
   broad white-material hillshade, so graph edges there are only a barely visible registration aid.
 - The scale bar is drawn on every channel so the world footprint can be read without checking
   metadata.
+- `--chunk-radius` keeps the positional center in world-block coordinates. It only changes the
+  preview footprint to `radius * 2 * CHUNK_EDGE` blocks on the X axis, with Z derived from image
+  aspect. Smaller radii therefore zoom in at the same image size. The current default footprint
+  `32768` blocks is equivalent to radius `512`.
 - The compass overlay is drawn on every channel. Its orientation is fixed to the common macro-field
   frame: image top=N, right=E, bottom=S, left=W.
 - The `contour` channel is a diagnostic layer, not a terrain source of truth. It should be used to

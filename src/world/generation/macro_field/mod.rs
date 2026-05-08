@@ -21,7 +21,7 @@ pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.5;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.0;
 pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -1024.0;
 pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 2048.0;
-pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 4.0;
+pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 32.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
@@ -32,9 +32,9 @@ const RIVER_MIN_FLAT_BED_BLOCKS: f32 = 3.5;
 const RIVER_MAX_FLAT_BED_BLOCKS: f32 = 56.0;
 const RIVER_HEADWATER_DEPTH_FACTOR: f32 = 0.12;
 const RIVER_TRUNK_DEPTH_FACTOR: f32 = 0.68;
-const DRY_BASIN_MIN_HEIGHT: f32 = 0.025;
-const DRY_BASIN_MAX_HEIGHT: f32 = 0.38;
-const DRY_BASIN_FLOOR_LOWERING: f32 = 0.035;
+const DRY_BASIN_MIN_HEIGHT: f32 = 0.018;
+const DRY_BASIN_FLOOR_LOWERING: f32 = 0.055;
+const DRY_BASIN_RIM_RAISE: f32 = 0.18;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -426,6 +426,7 @@ pub fn sample_macro_field_point(
         coast_mask,
         lake_mask,
         dry_basin_mask,
+        owner_sample.dry_basin_rim_blend,
         ridge_influence,
         river_valley_strength,
         river_flow_hint,
@@ -487,6 +488,7 @@ fn sample_macro_field_point_with_influence(
         coast_mask,
         lake_mask,
         dry_basin_mask,
+        owner_sample.dry_basin_rim_blend,
         ridge_influence,
         river_valley_strength,
         river_flow_hint,
@@ -582,7 +584,8 @@ fn rasterize_influence_fields(
 
     let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
     let coast = rasterize_curve_distance_field(&coast_sources, config, config.coast_radius_blocks);
-    let river = rasterize_curve_distance_field(&river_sources, config, config.river_radius_blocks);
+    let river =
+        rasterize_curve_capsule_distance_field(&river_sources, config, config.river_radius_blocks);
     let stats = MacroFieldInfluenceStats {
         ridge_source_curve_count: ridge_sources.len(),
         river_source_curve_count: river_sources.len(),
@@ -673,6 +676,114 @@ fn rasterize_curve_distance_field(
         distance_blocks: cropped_distance,
         flow_hint: cropped_flow,
         source_pixel_count,
+    }
+}
+
+fn rasterize_curve_capsule_distance_field(
+    sources: &[(&NoisyBoundaryCurve, f32)],
+    config: MacroFieldTileConfig,
+    radius_blocks: f32,
+) -> RasterDistanceField {
+    let sample_count = config.sample_count();
+    if sources.is_empty() {
+        return RasterDistanceField {
+            distance_blocks: vec![f32::INFINITY; sample_count],
+            flow_hint: vec![0.0; sample_count],
+            source_pixel_count: 0,
+        };
+    }
+
+    let width = config.width as usize;
+    let height = config.height as usize;
+    let spacing = config.sample_spacing_blocks;
+    let mut distance_blocks = vec![f32::INFINITY; sample_count];
+    let mut flow_weighted_sum = vec![0.0; sample_count];
+    let mut flow_weight_sum = vec![0.0; sample_count];
+
+    for (curve, strength) in sources {
+        for segment in curve.points.windows(2) {
+            rasterize_segment_capsule(
+                &mut distance_blocks,
+                &mut flow_weighted_sum,
+                &mut flow_weight_sum,
+                width,
+                height,
+                config,
+                segment[0],
+                segment[1],
+                radius_blocks,
+                *strength,
+            );
+        }
+    }
+
+    let source_pixel_count = distance_blocks
+        .iter()
+        .filter(|distance| distance.is_finite() && **distance <= spacing * 0.5)
+        .count();
+    let flow_hint = flow_weighted_sum
+        .into_iter()
+        .zip(flow_weight_sum)
+        .map(|(sum, weight)| {
+            if weight > f32::EPSILON {
+                (sum / weight).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        })
+        .collect();
+
+    RasterDistanceField {
+        distance_blocks,
+        flow_hint,
+        source_pixel_count,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rasterize_segment_capsule(
+    distance_blocks: &mut [f32],
+    flow_weighted_sum: &mut [f32],
+    flow_weight_sum: &mut [f32],
+    width: usize,
+    height: usize,
+    config: MacroFieldTileConfig,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    radius_blocks: f32,
+    strength: f32,
+) {
+    let spacing = config.sample_spacing_blocks;
+    let min_x = ((start.x.min(end.x) - radius_blocks - config.origin.x) / spacing)
+        .floor()
+        .max(0.0) as usize;
+    let max_x = ((start.x.max(end.x) + radius_blocks - config.origin.x) / spacing)
+        .ceil()
+        .min((width.saturating_sub(1)) as f32) as usize;
+    let min_z = ((start.z.min(end.z) - radius_blocks - config.origin.z) / spacing)
+        .floor()
+        .max(0.0) as usize;
+    let max_z = ((start.z.max(end.z) + radius_blocks - config.origin.z) / spacing)
+        .ceil()
+        .min((height.saturating_sub(1)) as f32) as usize;
+    if min_x > max_x || min_z > max_z {
+        return;
+    }
+
+    for z in min_z..=max_z {
+        for x in min_x..=max_x {
+            let index = z * width + x;
+            let position = config.sample_position(index);
+            let distance = point_segment_distance(position, start, end);
+            if distance > radius_blocks {
+                continue;
+            }
+            distance_blocks[index] = distance_blocks[index].min(distance);
+            let t = (1.0 - distance / radius_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
+            let weight = (t * t).max(0.0001);
+            flow_weighted_sum[index] += strength * weight;
+            flow_weight_sum[index] += weight;
+        }
     }
 }
 
@@ -961,6 +1072,8 @@ impl<'a> MacroFieldRasterContext<'a> {
         let primary = boundary.primary_site();
         let secondary = boundary.secondary_site();
         let is_coast_pair = is_explicit_coast_pair(primary, secondary);
+        let is_dry_basin_pair = primary.surface_kind == MacroSurfaceKind::DryBasin
+            && secondary.surface_kind != MacroSurfaceKind::DryBasin;
         let blend = envelope(boundary.distance, config.boundary_blend_radius_blocks);
         let mixed_elevation = if is_coast_pair {
             coast_boundary_elevation_profile(
@@ -981,6 +1094,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .or(nearest.copied()),
             macro_elevation: mixed_elevation,
             coast_boundary_blend: if is_coast_pair { blend } else { 0.0 },
+            dry_basin_rim_blend: if is_dry_basin_pair { blend } else { 0.0 },
         }
     }
 
@@ -1107,6 +1221,7 @@ struct OwnerSample {
     primary: Option<MacroSite>,
     macro_elevation: f32,
     coast_boundary_blend: f32,
+    dry_basin_rim_blend: f32,
 }
 
 impl OwnerSample {
@@ -1117,6 +1232,7 @@ impl OwnerSample {
                 .map(|site| site.signed_macro_elevation)
                 .unwrap_or_default(),
             coast_boundary_blend: 0.0,
+            dry_basin_rim_blend: 0.0,
         }
     }
 }
@@ -1275,6 +1391,7 @@ fn combine_macro_height(
     coast_mask: f32,
     lake_mask: f32,
     dry_basin_mask: f32,
+    dry_basin_rim_blend: f32,
     ridge_influence: f32,
     river_valley_strength: f32,
     river_flow_hint: f32,
@@ -1301,10 +1418,17 @@ fn combine_macro_height(
     let mut height = macro_elevation + ridge_raise - river_carve;
     height = height + (flatten_target - height) * flatten;
     if dry_basin {
-        height =
-            (height - DRY_BASIN_FLOOR_LOWERING).clamp(DRY_BASIN_MIN_HEIGHT, DRY_BASIN_MAX_HEIGHT);
+        height = dry_basin_height_profile(height, dry_basin_rim_blend);
     }
     height.clamp(-2.0, 2.0)
+}
+
+fn dry_basin_height_profile(height: f32, rim_blend: f32) -> f32 {
+    let lowered_floor = (height - DRY_BASIN_FLOOR_LOWERING).max(DRY_BASIN_MIN_HEIGHT);
+    let preserved_variation = height.max(0.0) * 0.42;
+    let interior = lowered_floor.max(DRY_BASIN_MIN_HEIGHT + preserved_variation);
+    let rim = smoothstep01(rim_blend) * DRY_BASIN_RIM_RAISE;
+    interior + rim
 }
 
 fn macro_field_stats(
@@ -1595,8 +1719,9 @@ mod tests {
     #[test]
     fn dry_basin_height_is_shallow_land_floor_not_water_flatten() {
         let config = test_tile_config();
-        let dry_height = combine_macro_height(0.18, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, config);
-        let water_height = combine_macro_height(0.18, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, config);
+        let dry_height = combine_macro_height(0.18, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, config);
+        let water_height =
+            combine_macro_height(0.18, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
 
         assert!(
             dry_height >= DRY_BASIN_MIN_HEIGHT,
@@ -1605,6 +1730,22 @@ mod tests {
         assert!(
             dry_height > water_height,
             "dry basin should not use lake/ocean water flatten: dry={dry_height} water={water_height}"
+        );
+    }
+
+    #[test]
+    fn dry_basin_profile_preserves_variation_and_rim_rise() {
+        let low_floor = dry_basin_height_profile(0.08, 0.0);
+        let high_floor = dry_basin_height_profile(0.28, 0.0);
+        let rim = dry_basin_height_profile(0.08, 1.0);
+
+        assert!(
+            high_floor > low_floor + 0.05,
+            "dry basin profile should not collapse interior macro variation into one plateau: low={low_floor} high={high_floor}"
+        );
+        assert!(
+            rim > low_floor + 0.12,
+            "dry basin boundary should rise toward a rim rather than stay flat: rim={rim} floor={low_floor}"
         );
     }
 
@@ -1774,7 +1915,120 @@ mod tests {
         assert!(tile.stats.river_source_pixel_count > 0);
         assert!(
             max > min,
-            "splat river field should preserve a near/far gradient: max={max} min={min}"
+            "capsule river field should preserve a near/far gradient: max={max} min={min}"
+        );
+    }
+
+    #[test]
+    fn river_capsule_distance_bake_keeps_segment_continuous() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+
+        let curve = NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(1),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [VoronoiSiteId(1), VoronoiSiteId(2)],
+                start: WorldPlanePoint::new(0.0, 16.0),
+                end: WorldPlanePoint::new(96.0, 16.0),
+            },
+            points: vec![
+                WorldPlanePoint::new(0.0, 16.0),
+                WorldPlanePoint::new(96.0, 16.0),
+            ],
+            amplitude: 0.0,
+            seed: 7,
+            guard: BoundaryGuard {
+                min_x: -16.0,
+                max_x: 112.0,
+                min_z: 0.0,
+                max_z: 32.0,
+            },
+        };
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 3, 16.0);
+        let field = rasterize_curve_capsule_distance_field(&[(&curve, 0.5)], config, 32.0);
+
+        for x in 0..7 {
+            let index = 7 + x;
+            assert!(
+                field.distance_blocks[index] <= f32::EPSILON,
+                "sample on continuous segment should be source distance without point-splat gaps: x={x} distance={}",
+                field.distance_blocks[index]
+            );
+            assert!(
+                field.flow_hint[index] > 0.49 && field.flow_hint[index] < 0.51,
+                "flow hint should remain stable along a single baked capsule"
+            );
+        }
+    }
+
+    #[test]
+    fn river_capsule_flow_blends_at_connected_segments() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+
+        let left = NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(1),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [VoronoiSiteId(1), VoronoiSiteId(2)],
+                start: WorldPlanePoint::new(0.0, 16.0),
+                end: WorldPlanePoint::new(64.0, 16.0),
+            },
+            points: vec![
+                WorldPlanePoint::new(0.0, 16.0),
+                WorldPlanePoint::new(64.0, 16.0),
+            ],
+            amplitude: 0.0,
+            seed: 7,
+            guard: BoundaryGuard {
+                min_x: -16.0,
+                max_x: 80.0,
+                min_z: 0.0,
+                max_z: 32.0,
+            },
+        };
+        let right = NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(2),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(2), VoronoiCornerId(3)],
+                sites: [VoronoiSiteId(2), VoronoiSiteId(3)],
+                start: WorldPlanePoint::new(64.0, 16.0),
+                end: WorldPlanePoint::new(128.0, 16.0),
+            },
+            points: vec![
+                WorldPlanePoint::new(64.0, 16.0),
+                WorldPlanePoint::new(128.0, 16.0),
+            ],
+            amplitude: 0.0,
+            seed: 8,
+            guard: BoundaryGuard {
+                min_x: 48.0,
+                max_x: 144.0,
+                min_z: 0.0,
+                max_z: 32.0,
+            },
+        };
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 3, 16.0);
+        let field =
+            rasterize_curve_capsule_distance_field(&[(&left, 0.25), (&right, 0.75)], config, 32.0);
+        let joint = 9 + 4;
+
+        assert!(
+            field.flow_hint[joint] > 0.35 && field.flow_hint[joint] < 0.65,
+            "connected segment joint should blend nearby display flow instead of jumping by edge: {}",
+            field.flow_hint[joint]
+        );
+        assert!(
+            (field.flow_hint[joint - 1] - field.flow_hint[joint + 1]).abs() < 0.5,
+            "flow hint should not spike abruptly around a segment joint"
         );
     }
 
@@ -1857,9 +2111,10 @@ mod tests {
     #[test]
     fn default_combined_height_does_not_apply_ridge_raise() {
         let config = MacroFieldTileConfig::new(0.0, 0.0, 1, 1, 32.0);
-        let without_ridge = combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
+        let without_ridge =
+            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
         let with_ridge_influence =
-            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, config);
+            combine_macro_height(0.20, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, config);
 
         assert_eq!(
             config.ridge_height_scale, 0.0,
@@ -2235,13 +2490,13 @@ mod tests {
     }
 
     #[test]
-    fn default_contour_preview_step_is_twice_as_dense() {
-        assert_eq!(DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, 4.0);
+    fn default_contour_preview_step_is_practical_for_large_block_domain() {
+        assert_eq!(DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, 32.0);
     }
 
     #[test]
     fn simple_ramp_field_produces_contour_crossing() {
-        let tile = test_contour_tile(&[0.0, 16.0, 0.0, 16.0], 2, 2);
+        let tile = test_contour_tile(&[0.0, 128.0, 0.0, 128.0], 2, 2);
 
         let contours =
             extract_macro_field_contours(&tile, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, 5);
@@ -2258,7 +2513,7 @@ mod tests {
         assert!(
             (level.segments[0].start.x - 16.0).abs() <= 0.01
                 || (level.segments[0].end.x - 16.0).abs() <= 0.01,
-            "default 4-block contour should cross one quarter across a 64-block sample cell: {:?}",
+            "default 32-block contour should cross one quarter across a 64-block sample cell: {:?}",
             level.segments[0]
         );
     }

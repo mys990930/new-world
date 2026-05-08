@@ -133,11 +133,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 병렬로 채운다.
 
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
-2. ridge, coast, selected river curve를 tile-local source pixel로 rasterize한다.
-   - 이 pass는 curve별 source pixel을 먼저 찍고, chamfer distance propagation으로 `distance to
-     nearest ridge/coast/river curve`를 tile channel로 만든다.
-   - selected river는 display `flow_accumulation`을 source pixel에 함께 기록하고, distance propagation
-     중 가장 가까운 source의 flow hint를 전파한다.
+2. ridge, coast, selected river curve를 tile-local influence field로 rasterize한다.
+   - ridge/coast는 launch 성능을 위해 source pixel과 chamfer distance propagation을 계속 사용할 수 있다.
+   - selected river는 source pixel 점열이 아니라 canonical noisy polyline segment에 대한 capsule
+     distance field로 굽는다. 각 sample은 가까운 segment까지의 실제 거리와 주변 segment의 display
+     flow를 함께 읽어, round된 source point가 만드는 원형 blob/scallop과 segment 사이 뾰족함을 피한다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -199,9 +199,11 @@ elevation model을 설계한 뒤 재도입한다.
 heightfield/water surface composition이 이 값을 읽는다.
 
 Dry basin은 lake/ocean처럼 water flatten 대상이 아니다. `DryBasin` mask는 폐쇄 저지대라는
-surface/context를 드러내지만, combined height에서는 얕은 above-sea-level land floor로 clamp한다.
-주변 rim이나 사면은 이후 heightfield/water solve에서 더 정교하게 만들 수 있지만, macro field
-단계에서 dry basin 주변을 물처럼 낮추거나 분지 바깥이 분지 floor보다 낮아 보이게 만드는 것은 회귀다.
+surface/context를 드러내지만, combined height에서는 단일 상한으로 clamp된 plateau가 아니라 얕은
+above-sea-level bowl profile을 만든다. 중앙부는 낮되 macro elevation variation을 일부 보존하고,
+dry/non-dry noisy boundary에 가까운 sample은 rim blend로 완만히 올라가야 한다. macro field 단계에서
+dry basin 주변을 물처럼 낮추거나, 반대로 분지 내부가 contour를 전혀 만들지 않는 flat field로
+눌리면 회귀다.
 
 Coast flatten은 일반 후처리 압축만으로 높은 coastal land를 억지로 낮추는 장치가 아니다.
 `macro_map`의 coastal elevation ramp와 `macro_field`의 coast-specific boundary profile이 먼저
@@ -211,10 +213,11 @@ sea-level aligned shoreline scalar를 제공해야 한다. coast flatten은 그 
 9. 필요한 경우 `combined_macro_height`에서 contour 진단 layer를 추출한다.
    - contour 추출은 Marching Squares 기반이다.
    - level은 normalized scalar가 아니라 heightfield 직전 block-height 기준이다.
-   - 기본 preview step은 4 blocks, major contour는 5 level마다 20 blocks 간격이다. contour가 읽는
+   - 기본 preview step은 32 blocks, major contour는 5 level마다 160 blocks 간격이다. contour가 읽는
      block-height relief는 effective `-1024..0..2048` block scale을 사용한다. 이는 현재
      `combined_macro_height` 분포를 크게 확대해 contour와 heightfield 계단을 실험적으로 진단하기
-     위한 값이다.
+     위한 값이다. 4-block step은 수백 level과 수백만 segment를 쉽게 만들기 때문에, 기본값은 성능과
+     판독성을 우선해 더 성긴 32-block contour로 둔다.
    - preview contour 색은 height에 따라 달라져야 한다. 낮은/oceanward contour는 푸른 계열,
      높은 contour는 붉은/주황 계열을 사용하고, sea level `y = 0` contour는 별도 preview 색상으로
      구분할 수 있어야 한다.
@@ -241,10 +244,11 @@ chunk fill은 매 column마다 가장 가까운 ridge curve, river curve, coast 
 한다. worker/cache miss에서 `MacroFieldTile`을 준비하고, chunk generation은 필요한 column/window만
 sample한다.
 
-launch 구현은 ridge/coast/river influence를 per-sample polyline query 대신 tile-local raster pass로
-굽는다. 이 pass는 canonical noisy curve를 source pixel로 찍고 distance propagation으로 envelope를
-만든다. ownership과 macro elevation의 noisy-boundary side/blend 판정은 아직 per-sample query로 남아
-있는데, 이것은 visible mask boundary 정확도를 지키기 위한 보수적 선택이다. 4K preview의 남은 주된
+launch 구현은 ridge/coast/river influence를 per-sample full curve scan 대신 tile-local raster pass로
+굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 canonical
+noisy segment capsule distance field를 직접 굽는다. ownership과 macro elevation의 noisy-boundary
+side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visible mask boundary 정확도를
+지키기 위한 보수적 선택이다. 4K preview의 남은 주된
 비용은 이 ownership side query와 nearest site lookup이며, 후속 최적화는 owner classification field를
 같은 tile cache에 굽는 것이다.
 
@@ -351,8 +355,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - sample fill은 rayon parallel iterator를 사용하고, index 기반 위치 계산으로 deterministic order를 유지한다.
 - launch rasterizer는 nearest macro site를 기본 lookup으로 사용하되, boundary blend radius 안에서는
   canonical noisy boundary curve의 side test로 owner/mask/elevation boundary를 고른다.
-- ridge/coast/river influence는 selected edge id가 참조하는 canonical noisy curve를 tile source pixel로
-  rasterize한 뒤 chamfer distance field로 만든다. 이로써 sample마다 curve 후보와 polyline segment를
-  반복 탐색하던 비용을 줄인다.
+- ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
+  뒤 chamfer distance field로 만든다. river influence는 selected edge id가 참조하는 canonical noisy
+  curve의 segment capsule distance field로 굽는다. 이로써 강줄기가 점 splat의 원형 흔적으로 보이는
+  문제를 줄이면서도 sample마다 전체 curve 후보를 반복 탐색하지 않는다.
 - signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
   visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.
