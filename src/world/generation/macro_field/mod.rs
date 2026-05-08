@@ -536,6 +536,7 @@ struct MacroFieldInfluenceFields {
     ridge_distance_blocks: Vec<f32>,
     coast_distance_blocks: Vec<f32>,
     river_distance_blocks: Vec<f32>,
+    river_valley_strength: Vec<f32>,
     river_flow_hint: Vec<f32>,
     stats: MacroFieldInfluenceStats,
 }
@@ -546,11 +547,7 @@ impl MacroFieldInfluenceFields {
         let coast_distance = self.coast_distance_blocks[index];
         let river_distance = self.river_distance_blocks[index];
         let river_flow_hint = self.river_flow_hint[index];
-        let river_valley_strength = river_valley_strength_for_distance(
-            river_distance,
-            river_flow_hint,
-            config.river_radius_blocks,
-        );
+        let river_valley_strength = self.river_valley_strength[index];
 
         MacroFieldInfluenceSample {
             ridge_influence: ridge_envelope(ridge_distance, config.ridge_radius_blocks),
@@ -584,8 +581,11 @@ fn rasterize_influence_fields(
 
     let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
     let coast = rasterize_curve_distance_field(&coast_sources, config, config.coast_radius_blocks);
-    let river =
-        rasterize_curve_capsule_distance_field(&river_sources, config, config.river_radius_blocks);
+    let river = rasterize_curve_anti_aliased_polyline_field(
+        &river_sources,
+        config,
+        config.river_radius_blocks,
+    );
     let stats = MacroFieldInfluenceStats {
         ridge_source_curve_count: ridge_sources.len(),
         river_source_curve_count: river_sources.len(),
@@ -599,6 +599,7 @@ fn rasterize_influence_fields(
         ridge_distance_blocks: ridge.distance_blocks,
         coast_distance_blocks: coast.distance_blocks,
         river_distance_blocks: river.distance_blocks,
+        river_valley_strength: river.river_valley_strength,
         river_flow_hint: river.flow_hint,
         stats,
     }
@@ -607,6 +608,7 @@ fn rasterize_influence_fields(
 #[derive(Debug, Clone, PartialEq)]
 struct RasterDistanceField {
     distance_blocks: Vec<f32>,
+    river_valley_strength: Vec<f32>,
     flow_hint: Vec<f32>,
     source_pixel_count: usize,
 }
@@ -620,6 +622,7 @@ fn rasterize_curve_distance_field(
     if sources.is_empty() {
         return RasterDistanceField {
             distance_blocks: vec![f32::INFINITY; sample_count],
+            river_valley_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             source_pixel_count: 0,
         };
@@ -674,12 +677,13 @@ fn rasterize_curve_distance_field(
 
     RasterDistanceField {
         distance_blocks: cropped_distance,
+        river_valley_strength: vec![0.0; sample_count],
         flow_hint: cropped_flow,
         source_pixel_count,
     }
 }
 
-fn rasterize_curve_capsule_distance_field(
+fn rasterize_curve_anti_aliased_polyline_field(
     sources: &[(&NoisyBoundaryCurve, f32)],
     config: MacroFieldTileConfig,
     radius_blocks: f32,
@@ -688,6 +692,7 @@ fn rasterize_curve_capsule_distance_field(
     if sources.is_empty() {
         return RasterDistanceField {
             distance_blocks: vec![f32::INFINITY; sample_count],
+            river_valley_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             source_pixel_count: 0,
         };
@@ -695,15 +700,16 @@ fn rasterize_curve_capsule_distance_field(
 
     let width = config.width as usize;
     let height = config.height as usize;
-    let spacing = config.sample_spacing_blocks;
     let mut distance_blocks = vec![f32::INFINITY; sample_count];
+    let mut river_valley_strength = vec![0.0; sample_count];
     let mut flow_weighted_sum = vec![0.0; sample_count];
     let mut flow_weight_sum = vec![0.0; sample_count];
 
     for (curve, strength) in sources {
         for segment in curve.points.windows(2) {
-            rasterize_segment_capsule(
+            rasterize_segment_anti_aliased_stroke(
                 &mut distance_blocks,
+                &mut river_valley_strength,
                 &mut flow_weighted_sum,
                 &mut flow_weight_sum,
                 width,
@@ -717,9 +723,9 @@ fn rasterize_curve_capsule_distance_field(
         }
     }
 
-    let source_pixel_count = distance_blocks
+    let source_pixel_count = river_valley_strength
         .iter()
-        .filter(|distance| distance.is_finite() && **distance <= spacing * 0.5)
+        .filter(|strength| **strength > 0.001)
         .count();
     let flow_hint = flow_weighted_sum
         .into_iter()
@@ -735,14 +741,16 @@ fn rasterize_curve_capsule_distance_field(
 
     RasterDistanceField {
         distance_blocks,
+        river_valley_strength,
         flow_hint,
         source_pixel_count,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn rasterize_segment_capsule(
+fn rasterize_segment_anti_aliased_stroke(
     distance_blocks: &mut [f32],
+    river_valley_strength: &mut [f32],
     flow_weighted_sum: &mut [f32],
     flow_weight_sum: &mut [f32],
     width: usize,
@@ -754,35 +762,60 @@ fn rasterize_segment_capsule(
     strength: f32,
 ) {
     let spacing = config.sample_spacing_blocks;
-    let min_x = ((start.x.min(end.x) - radius_blocks - config.origin.x) / spacing)
+    let aa_margin = spacing * 0.75;
+    let min_x = ((start.x.min(end.x) - radius_blocks - aa_margin - config.origin.x) / spacing)
         .floor()
         .max(0.0) as usize;
-    let max_x = ((start.x.max(end.x) + radius_blocks - config.origin.x) / spacing)
+    let max_x = ((start.x.max(end.x) + radius_blocks + aa_margin - config.origin.x) / spacing)
         .ceil()
         .min((width.saturating_sub(1)) as f32) as usize;
-    let min_z = ((start.z.min(end.z) - radius_blocks - config.origin.z) / spacing)
+    let min_z = ((start.z.min(end.z) - radius_blocks - aa_margin - config.origin.z) / spacing)
         .floor()
         .max(0.0) as usize;
-    let max_z = ((start.z.max(end.z) + radius_blocks - config.origin.z) / spacing)
+    let max_z = ((start.z.max(end.z) + radius_blocks + aa_margin - config.origin.z) / spacing)
         .ceil()
         .min((height.saturating_sub(1)) as f32) as usize;
     if min_x > max_x || min_z > max_z {
         return;
     }
 
+    let subpixel_offsets = [
+        (0.0, 0.0),
+        (-0.35, -0.35),
+        (0.35, -0.35),
+        (-0.35, 0.35),
+        (0.35, 0.35),
+    ];
+    let subpixel_count = subpixel_offsets.len() as f32;
     for z in min_z..=max_z {
         for x in min_x..=max_x {
             let index = z * width + x;
             let position = config.sample_position(index);
             let distance = point_segment_distance(position, start, end);
-            if distance > radius_blocks {
+            if distance > radius_blocks + aa_margin {
                 continue;
             }
-            distance_blocks[index] = distance_blocks[index].min(distance);
-            let t = (1.0 - distance / radius_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
-            let weight = (t * t).max(0.0001);
-            flow_weighted_sum[index] += strength * weight;
-            flow_weight_sum[index] += weight;
+            let mut profile_sum = 0.0;
+            let mut closest_subpixel_distance = distance;
+            for (offset_x, offset_z) in subpixel_offsets {
+                let subpixel = WorldPlanePoint::new(
+                    position.x + offset_x * spacing,
+                    position.z + offset_z * spacing,
+                );
+                let subpixel_distance = point_segment_distance(subpixel, start, end);
+                closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
+                profile_sum +=
+                    river_valley_strength_for_distance(subpixel_distance, strength, radius_blocks);
+            }
+            let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
+            if anti_aliased_strength <= 0.0 {
+                continue;
+            }
+
+            distance_blocks[index] = distance_blocks[index].min(closest_subpixel_distance);
+            river_valley_strength[index] = river_valley_strength[index].max(anti_aliased_strength);
+            flow_weighted_sum[index] += strength * anti_aliased_strength;
+            flow_weight_sum[index] += anti_aliased_strength;
         }
     }
 }
@@ -1915,12 +1948,12 @@ mod tests {
         assert!(tile.stats.river_source_pixel_count > 0);
         assert!(
             max > min,
-            "capsule river field should preserve a near/far gradient: max={max} min={min}"
+            "anti-aliased river field should preserve a near/far gradient: max={max} min={min}"
         );
     }
 
     #[test]
-    fn river_capsule_distance_bake_keeps_segment_continuous() {
+    fn river_anti_aliased_polyline_bake_keeps_segment_continuous() {
         use crate::world::generation::boundary::{
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
@@ -1949,7 +1982,7 @@ mod tests {
             },
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 3, 16.0);
-        let field = rasterize_curve_capsule_distance_field(&[(&curve, 0.5)], config, 32.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(&[(&curve, 0.5)], config, 32.0);
 
         for x in 0..7 {
             let index = 7 + x;
@@ -1960,13 +1993,17 @@ mod tests {
             );
             assert!(
                 field.flow_hint[index] > 0.49 && field.flow_hint[index] < 0.51,
-                "flow hint should remain stable along a single baked capsule"
+                "flow hint should remain stable along a single baked thick polyline"
+            );
+            assert!(
+                field.river_valley_strength[index] > 0.0,
+                "anti-aliased stroke should bake positive valley strength along the whole line"
             );
         }
     }
 
     #[test]
-    fn river_capsule_flow_blends_at_connected_segments() {
+    fn river_anti_aliased_polyline_flow_blends_at_connected_segments() {
         use crate::world::generation::boundary::{
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
@@ -2017,8 +2054,11 @@ mod tests {
             },
         };
         let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 3, 16.0);
-        let field =
-            rasterize_curve_capsule_distance_field(&[(&left, 0.25), (&right, 0.75)], config, 32.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(
+            &[(&left, 0.25), (&right, 0.75)],
+            config,
+            32.0,
+        );
         let joint = 9 + 4;
 
         assert!(
@@ -2029,6 +2069,97 @@ mod tests {
         assert!(
             (field.flow_hint[joint - 1] - field.flow_hint[joint + 1]).abs() < 0.5,
             "flow hint should not spike abruptly around a segment joint"
+        );
+    }
+
+    #[test]
+    fn river_anti_aliased_polyline_join_has_no_valley_strength_gap() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+
+        let curve = NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(11),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(3)],
+                sites: [VoronoiSiteId(1), VoronoiSiteId(2)],
+                start: WorldPlanePoint::new(16.0, 16.0),
+                end: WorldPlanePoint::new(80.0, 80.0),
+            },
+            points: vec![
+                WorldPlanePoint::new(16.0, 16.0),
+                WorldPlanePoint::new(48.0, 16.0),
+                WorldPlanePoint::new(48.0, 80.0),
+            ],
+            amplitude: 0.0,
+            seed: 11,
+            guard: BoundaryGuard {
+                min_x: 0.0,
+                max_x: 96.0,
+                min_z: 0.0,
+                max_z: 96.0,
+            },
+        };
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 7, 16.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(&[(&curve, 0.75)], config, 32.0);
+        let joint = 1 * 7 + 3;
+        let before_joint = 1 * 7 + 2;
+        let after_joint = 2 * 7 + 3;
+
+        assert!(
+            field.river_valley_strength[joint] >= field.river_valley_strength[before_joint] * 0.85,
+            "thick polyline join should not create a pointed valley gap at the bend"
+        );
+        assert!(
+            field.river_valley_strength[joint] >= field.river_valley_strength[after_joint] * 0.85,
+            "thick polyline join should stay continuous onto the next segment"
+        );
+    }
+
+    #[test]
+    fn river_anti_aliased_polyline_preserves_flow_scaled_flat_bed_width() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+
+        let curve = NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(21),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                sites: [VoronoiSiteId(1), VoronoiSiteId(2)],
+                start: WorldPlanePoint::new(0.0, 48.0),
+                end: WorldPlanePoint::new(128.0, 48.0),
+            },
+            points: vec![
+                WorldPlanePoint::new(0.0, 48.0),
+                WorldPlanePoint::new(128.0, 48.0),
+            ],
+            amplitude: 0.0,
+            seed: 21,
+            guard: BoundaryGuard {
+                min_x: -16.0,
+                max_x: 144.0,
+                min_z: 0.0,
+                max_z: 96.0,
+            },
+        };
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 7, 16.0);
+        let headwater =
+            rasterize_curve_anti_aliased_polyline_field(&[(&curve, flow_hint(12.0))], config, 96.0);
+        let trunk = rasterize_curve_anti_aliased_polyline_field(
+            &[(&curve, flow_hint(1024.0))],
+            config,
+            96.0,
+        );
+        let shoulder = 2 * 9 + 4;
+
+        assert!(
+            trunk.river_valley_strength[shoulder] > headwater.river_valley_strength[shoulder],
+            "downstream thick polyline should keep a wider flat/shoulder bed than headwater"
         );
     }
 

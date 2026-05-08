@@ -14,7 +14,10 @@ pub const DEFAULT_MACRO_LAND_BIAS: f32 = 0.14;
 const LAND_COMPONENT_NAMESPACE: u64 = 0x4f1d_77a9_b384_d13e;
 const OCEAN_COMPONENT_NAMESPACE: u64 = 0x9a72_c80d_31ef_624b;
 const SMALL_STREAM_POCKET_LAKE_NAMESPACE: u64 = 0x3c2d_8f19_641a_b057;
+const TINY_LOCAL_MINIMA_LAKE_NAMESPACE: u64 = 0x85e5_3c3f_51ef_9c2a;
 const DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS: f32 = 192.0;
+pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K: u32 = 1_200;
+pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CELLS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroMapConfig {
@@ -264,6 +267,7 @@ struct SiteContext {
     feature_hash: u64,
     is_land_owned: bool,
     is_island_owned: bool,
+    is_tiny_local_minima_lake: bool,
     is_inland_water: bool,
     inland_water_surface: Option<MacroSurfaceKind>,
     component_id: u64,
@@ -313,6 +317,13 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
         })
         .collect::<Vec<_>>();
     let coast_distances = graph_distances_to_ocean_coast(&adjacency, &ocean_mask);
+    let tiny_local_minima_lakes = tiny_local_minima_lake_mask(
+        &patch.sites,
+        &adjacency,
+        &land_mask,
+        &coast_distances,
+        config,
+    );
     let largest_land_component = components
         .iter()
         .enumerate()
@@ -344,6 +355,7 @@ fn resolve_site_context(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> Ve
                 is_island_owned: land_mask[index]
                     && Some(component) != largest_land_component
                     && component_size <= island_size_limit,
+                is_tiny_local_minima_lake: tiny_local_minima_lakes[index],
                 is_inland_water,
                 inland_water_surface,
                 component_id: component,
@@ -373,6 +385,130 @@ fn inland_water_surface_kind(
     } else {
         MacroSurfaceKind::DryBasin
     }
+}
+
+fn tiny_local_minima_lake_mask(
+    sites: &[super::graph::VoronoiSite],
+    adjacency: &[Vec<usize>],
+    land_mask: &[bool],
+    coast_distances: &[u32],
+    config: MacroMapConfig,
+) -> Vec<bool> {
+    let local_heights = sites
+        .iter()
+        .map(|site| tiny_local_minima_height(site.base_fields))
+        .collect::<Vec<_>>();
+    let candidates = sites
+        .iter()
+        .enumerate()
+        .map(|(index, site)| {
+            if !land_mask[index] || coast_distances[index] <= 1 {
+                return false;
+            }
+
+            let height = local_heights[index];
+            let has_lower_land_neighbor = adjacency[index]
+                .iter()
+                .any(|&neighbor| land_mask[neighbor] && local_heights[neighbor] < height - 0.006);
+
+            !has_lower_land_neighbor && tiny_local_minima_site_score(site.base_fields) >= 0.58
+        })
+        .collect::<Vec<_>>();
+    let mut promoted = vec![false; sites.len()];
+    let mut visited = vec![false; sites.len()];
+
+    for start in 0..sites.len() {
+        if visited[start] || !candidates[start] {
+            continue;
+        }
+
+        let mut stack = vec![start];
+        let mut members = Vec::new();
+        visited[start] = true;
+
+        while let Some(index) = stack.pop() {
+            members.push(index);
+            for &neighbor in &adjacency[index] {
+                if visited[neighbor] || !candidates[neighbor] {
+                    continue;
+                }
+                visited[neighbor] = true;
+                stack.push(neighbor);
+            }
+        }
+
+        if members.len() > DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CELLS {
+            continue;
+        }
+
+        let rim_height = members
+            .iter()
+            .flat_map(|&member| adjacency[member].iter().copied())
+            .filter(|neighbor| land_mask[*neighbor] && !members.contains(neighbor))
+            .map(|neighbor| local_heights[neighbor])
+            .min_by(|a, b| a.total_cmp(b))
+            .unwrap_or(f32::INFINITY);
+        let floor_height = members
+            .iter()
+            .map(|&member| local_heights[member])
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap_or(f32::INFINITY);
+        let rim_relief = (rim_height - floor_height).max(0.0);
+        if !rim_relief.is_finite() || rim_relief < 0.006 {
+            continue;
+        }
+
+        let score = members
+            .iter()
+            .map(|&member| tiny_local_minima_site_score(sites[member].base_fields))
+            .sum::<f32>()
+            / members.len().max(1) as f32;
+        let min_site_id = members
+            .iter()
+            .map(|&member| sites[member].id.0)
+            .min()
+            .unwrap_or(0);
+        let component_hash = splitmix64(
+            min_site_id
+                ^ config.seed
+                ^ ((config.generator_version as u64) << 32)
+                ^ TINY_LOCAL_MINIMA_LAKE_NAMESPACE,
+        );
+
+        if tiny_local_minima_lake_roll(members.len(), score, component_hash) {
+            for member in members {
+                promoted[member] = true;
+            }
+        }
+    }
+
+    promoted
+}
+
+fn tiny_local_minima_height(fields: GraphBaseFields) -> f32 {
+    fields.elevation_seed * 0.72 + fields.continentality.max(0.0) * 0.18 - fields.hydration * 0.10
+}
+
+fn tiny_local_minima_site_score(fields: GraphBaseFields) -> f32 {
+    let low_elevation = (1.0 - ((fields.elevation_seed + 1.0) * 0.5)).clamp(0.0, 1.0);
+    (low_elevation * 0.62 + fields.hydration * 0.38).clamp(0.0, 1.0)
+}
+
+fn tiny_local_minima_lake_roll(component_size: usize, score: f32, component_hash: u64) -> bool {
+    if !(1..=DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CELLS).contains(&component_size) || score < 0.58 {
+        return false;
+    }
+
+    let score_bonus = if score >= 0.82 {
+        300
+    } else if score >= 0.74 {
+        150
+    } else {
+        0
+    };
+    let chance_per_10k = DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K + score_bonus;
+
+    ((component_hash % 10_000) as u32) < chance_per_10k
 }
 
 fn component_sizes(components: &[u64]) -> HashMap<u64, usize> {
@@ -651,6 +787,7 @@ fn macro_field_sample_from_context(
             fields,
             context.is_land_owned,
             context.is_island_owned,
+            context.is_tiny_local_minima_lake,
             context.is_inland_water,
             context.inland_water_surface,
             coastness,
@@ -779,6 +916,7 @@ fn macro_corner(
         feature_hash: splitmix64(corner.id.0 ^ SMALL_STREAM_POCKET_LAKE_NAMESPACE),
         is_land_owned: base_is_land_owned,
         is_island_owned,
+        is_tiny_local_minima_lake: false,
         is_inland_water,
         inland_water_surface,
         component_id: component_site
@@ -816,6 +954,7 @@ fn surface_kind(
     fields: GraphBaseFields,
     is_land_owned: bool,
     is_island_owned: bool,
+    is_tiny_local_minima_lake: bool,
     is_inland_water: bool,
     inland_water_surface: Option<MacroSurfaceKind>,
     coastness: f32,
@@ -836,6 +975,8 @@ fn surface_kind(
             }
         } else if is_island_owned {
             MacroSurfaceKind::Island
+        } else if is_tiny_local_minima_lake {
+            MacroSurfaceKind::LakeCandidate
         } else if small_stream_pocket_lake(
             fields,
             coastness,
@@ -1317,6 +1458,7 @@ mod tests {
             feature_hash: 1,
             is_land_owned: true,
             is_island_owned: false,
+            is_tiny_local_minima_lake: false,
             is_inland_water: false,
             inland_water_surface: None,
             component_id: 10,
@@ -1361,6 +1503,105 @@ mod tests {
         assert!(
             !small_stream_pocket_lake(fields, 0.10, 0.92, 0.08, 9_999),
             "promotion must remain a low-probability deterministic roll"
+        );
+    }
+
+    #[test]
+    fn tiny_local_minima_lake_roll_is_low_probability_and_size_limited() {
+        assert_eq!(DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K, 1_200);
+        assert!(tiny_local_minima_lake_roll(1, 0.70, 0));
+        assert!(tiny_local_minima_lake_roll(3, 0.86, 1_499));
+        assert!(
+            !tiny_local_minima_lake_roll(4, 0.90, 0),
+            "4+ cell basins should stay under the existing lake/wetland/dry basin policy"
+        );
+        assert!(
+            !tiny_local_minima_lake_roll(1, 0.57, 0),
+            "weak minima-like pockets should stay dry even with a favorable roll"
+        );
+        assert!(
+            !tiny_local_minima_lake_roll(1, 0.86, 9_999),
+            "promotion must be deterministic and low probability"
+        );
+    }
+
+    #[test]
+    fn tiny_local_minima_lake_mask_is_deterministic_land_owned_and_component_limited() {
+        let found_promoted_seed = (1..160).find(|&seed| {
+            let patch = generate_voronoi_graph_patch(test_request(seed, 0, 0));
+            let site_indices = patch
+                .sites
+                .iter()
+                .enumerate()
+                .map(|(index, site)| (site.id, index))
+                .collect::<HashMap<_, _>>();
+            let adjacency = site_adjacency(&patch, &site_indices);
+            let config = test_macro_config(seed);
+            let land_mask = patch
+                .sites
+                .iter()
+                .map(|site| is_land_base(site.base_fields, config))
+                .collect::<Vec<_>>();
+            let components = connected_components(&patch.sites, &adjacency, &land_mask);
+            let water_component_sizes = component_sizes(&components);
+            let ocean_components = explicit_ocean_components(
+                &patch.sites,
+                &components,
+                &land_mask,
+                &water_component_sizes,
+            );
+            let ocean_mask = components
+                .iter()
+                .enumerate()
+                .map(|(index, component)| {
+                    !land_mask[index] && ocean_components.get(component).copied().unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
+            let coast_distances = graph_distances_to_ocean_coast(&adjacency, &ocean_mask);
+            let mask = tiny_local_minima_lake_mask(
+                &patch.sites,
+                &adjacency,
+                &land_mask,
+                &coast_distances,
+                config,
+            );
+            let repeated = tiny_local_minima_lake_mask(
+                &patch.sites,
+                &adjacency,
+                &land_mask,
+                &coast_distances,
+                config,
+            );
+            assert_eq!(
+                mask, repeated,
+                "tiny lake promotion must be seed deterministic"
+            );
+            assert!(
+                mask.iter()
+                    .enumerate()
+                    .all(|(index, promoted)| !*promoted || land_mask[index]),
+                "tiny local-minima lake promotion must not confuse ocean/water ownership"
+            );
+
+            let groups = connected_components(&patch.sites, &adjacency, &mask);
+            let promoted_sizes = component_sizes(&groups);
+            let component_limited = mask.iter().enumerate().all(|(index, promoted)| {
+                !*promoted
+                    || promoted_sizes.get(&groups[index]).is_some_and(|&size| {
+                        (1..=DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CELLS).contains(&size)
+                    })
+            });
+            assert!(
+                component_limited,
+                "tiny local-minima lakes should be limited to 1..=3 cells"
+            );
+
+            mask.iter().any(|promoted| *promoted)
+        });
+
+        assert!(
+            found_promoted_seed.is_some(),
+            "a bounded deterministic seed scan should find at least one tiny local-minima lake"
         );
     }
 

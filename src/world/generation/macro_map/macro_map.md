@@ -162,11 +162,13 @@ launch 정책은 아래처럼 잡는다.
   동시에 맞을 때만 드물게 허용한다. 그 외 큰 폐쇄 저지대는 wetland 또는 dry basin으로 흡수한다.
   이 값은 launch tuning용 soft cap이며, 이후 heightfield/water level solve가 들어오면 component
   내부 일부만 수면으로 남기는 방식으로 더 정교화한다.
-- 1~4 site/cell 규모의 작은 stream-pocket lake는 큰 호수 억제 정책과 별개로 낮은 확률로 허용한다.
-  이 후보는 land-owned 저지대 안에서 `basinness`, hydration, 낮은 `elevation_seed`, 낮은 coastness,
-  site/corner id 기반 deterministic roll을 함께 통과해야 한다. 목적은 강줄기 중간의 local-minima-like
-  pocket을 드물게 만들되, 모든 local minimum을 물로 채우지 않고 dry basin / closed basin 표현을
-  계속 유지하는 것이다.
+- 1~3 site/cell 규모의 작은 tiny local-minima lake는 큰 호수 억제 정책과 별개로 낮은 확률로 허용한다.
+  이 후보는 river-side일 필요가 없다. macro_map은 graph adjacency에서 더 낮은 land neighbor가 없는
+  land-owned local-minima component를 찾고, component size가 1~3 cell이며 낮은 `elevation_seed`,
+  충분한 hydration, ocean coast에서 떨어진 위치, deterministic component roll을 통과할 때만
+  `LakeCandidate`로 승격한다. launch 기본 확률은 `DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K =
+  1200`이며, 강줄기 중간 또는 독립 폐쇄 저지대의 작은 물웅덩이를 드물게 만들되 모든 local minimum을
+  물로 채우지 않고 dry basin / closed basin 표현을 계속 유지하는 것이 목적이다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - land signed macro elevation은 coast-adjacent cell에서 바로 높은 양수값으로 시작하면 안 된다.
@@ -316,8 +318,9 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - ocean/lake ownership은 water component connectivity를 함께 읽는다. patch/open boundary에 연결된다는
   사실만으로 ocean이 되지는 않으며, explicit ocean basin으로 분류되지 않은 고립 water component는
   lake candidate로 surface kind를 바꾼다.
-- 큰 lake는 드문 deep/wet basin 조건으로 제한하고, 1~4 site/cell stream-pocket lake는 land-owned
-  저지대에서 deterministic low-probability 조건을 통과할 때만 추가한다.
+- 큰 lake는 드문 deep/wet basin 조건으로 제한하고, 1~3 site/cell tiny local-minima lake는 land-owned
+  저지대에서 graph local-minima component 판정과 deterministic low-probability 조건을 통과할 때만
+  추가한다. 이 작은 lake는 river-side에 붙어 있을 필요가 없다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 explicit ocean-coast 기준 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는

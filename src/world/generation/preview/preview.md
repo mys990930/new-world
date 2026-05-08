@@ -240,8 +240,11 @@ selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`�
 빠르게 읽기 위한 graph-derived signed distance / influence field cache다.
 
 preview와 runtime cache miss는 ridge/coast/river curve distance를 sample마다 반복 계산하지 않아야
-한다. stage 8 preview는 먼저 selected river, ridge, coast의 canonical noisy curve를 tile source
-pixel로 rasterize하고, distance propagation으로 influence field를 만든 뒤 그 결과를 렌더한다.
+한다. stage 8 preview는 ridge/coast의 canonical noisy curve를 tile source pixel로 rasterize하고
+distance propagation으로 influence field를 만들 수 있지만, selected river는 point source/chamfer가
+아니라 canonical noisy curve를 anti-aliased thick polyline corridor로 굽는다. 이 river pass는
+subpixel coverage 기반 valley strength, nearest-segment distance, blended display flow를 저장한 뒤
+그 결과를 렌더한다.
 ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launch 단계에서 per-sample query가
 남을 수 있지만, 이 비용은 chunk fill hot path가 아니라 macro field tile cache miss에 한정된다.
 
@@ -274,8 +277,9 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   land 사이의 경계가 노란 coast처럼 보이면 회귀다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
 - `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변 distance, flow,
-  carve strength. 이 channel은 selected curve segment의 capsule distance를 tile-local field로 굽는
-  influence pass를 사용해야 하며, source pixel 점열/chamfer만으로 원형 blob이 이어져 보이면 회귀다.
+  carve strength. 이 channel은 selected curve를 anti-aliased thick polyline corridor로 굽는
+  influence pass를 사용해야 하며, source pixel 점열/chamfer나 segment endpoint cap 때문에 원형 blob이
+  이어져 보이면 회귀다.
   river valley는
   flat-bottom + shoulder falloff profile이어야 해서, 하류 trunk는 더 넓고 평평한 강바닥을 보여야 하며
   상류도 칼같은 V자로 파이면 회귀다.

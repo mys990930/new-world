@@ -166,11 +166,11 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   raw feeder를 요구한다. 선택된 lake-bound chain은 더 이상 호수 직전 몇 segment로 잘리지 않는다.
   lake edge 자체는 계속 금지하지만, 기준을 통과한 기존 upstream trunk는 lake boundary 직전
   land-side endpoint까지 selected river로 유지될 수 있다.
-- 1~4 site/cell stream-pocket lake는 macro_map이 land-owned 저지대에서 낮은 확률로 만든 작은
-  lake 후보를 읽는다. hydrology는 이 후보를 특별한 water mask로 뭉개지 않고 일반 lake contact
-  topology에 태운다. selected flow가 연결되면 lake boundary edge를 쓰지 않는 land-side endpoint에서
-  `LakeInlet` 또는 `LakeOutlet`으로 분류되어야 하며, 연결된 selected flow가 marker 없이 남으면
-  `unclassified_lake_connected_flow_count` 회귀로 잡힌다.
+- 1~3 site/cell tiny local-minima lake는 macro_map이 land-owned graph 저지대에서 낮은 확률로 만든
+  작은 lake 후보를 읽는다. 이 후보는 river-side 조건 없이 생길 수 있으므로 hydrology는 selected
+  flow가 없더라도 lake footprint 자체를 유지한다. selected flow가 연결되면 lake boundary edge를 쓰지
+  않는 land-side endpoint에서 `LakeInlet` 또는 `LakeOutlet`으로 분류되어야 하며, 연결된 selected
+  flow가 marker 없이 남으면 `unclassified_lake_connected_flow_count` 회귀로 잡힌다.
 - lake terminal/inlet display discharge는 lake 면적에 따라 범위가 함께 올라간다. launch 기본 cap은
   `min(32, 4 + area_units * 0.35)`이고, display floor는 `min(32 * 0.55, 4 * 0.55 + area_units * 0.18)`이다.
   raw accumulation은 `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는

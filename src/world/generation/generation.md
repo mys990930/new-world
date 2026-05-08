@@ -95,9 +95,10 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - launch 기본 `land_bias`는 기본 preview에서 대략 land:water = 6:4를 목표로 한다. 이 조정은
      graph base `continentality`의 coherent coastline을 그대로 threshold 이동으로 해석하는 것이며,
      단순 직선 coastline을 새로 만들면 안 된다.
-   - 1~4 site/cell 규모의 작은 stream-pocket lake는 land-owned 저지대에서 낮은 확률로 생성될 수
-     있다. 조건은 local-minima-like basinness, hydration, 낮은 elevation seed, 낮은 coastness,
-     deterministic roll을 함께 만족해야 하며, 모든 local minimum을 lake로 승격해서는 안 된다.
+   - 1~3 site/cell 규모의 작은 tiny local-minima lake는 river-side 여부와 무관하게 land-owned
+     graph 저지대에서 낮은 확률로 생성될 수 있다. 조건은 graph adjacency 기준 더 낮은 land neighbor가
+     없는 tiny local-minima component, 낮은 elevation seed, hydration, 낮은 ocean-coastness,
+     deterministic component roll을 함께 만족해야 하며, 모든 local minimum을 lake로 승격해서는 안 된다.
 4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault edge guide를 선정한다.
    - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness/mountainness context, drainage divide 가능성을 함께 만족해야 한다.
 5. land/ocean ownership 경계에서 coast edge guide를 선정한다.
@@ -156,8 +157,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      material policy가 읽는 distance/mask다.
    - ridge influence는 ridge edge가 산맥 local maxima guide라는 사실을 heightfield로 옮기기 위한
      distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
-   - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge 주변 distance,
-     flow, carve strength를 저장한다. 강을 별도 noise curve로 다시 만들지 않는다.
+   - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge를 anti-aliased
+     thick polyline corridor로 구운 coverage/strength, nearest distance, flow를 저장한다. 강을 별도
+     noise curve로 다시 만들지 않는다.
    - river valley field는 고정 폭으로 모든 강을 칠하지 않는다. selected/display flow가 작은 상류는
      좁고 얕은 carve guide를 만들고, flow가 큰 하류 trunk에서만 넓고 깊은 carve guide를 만든다.
    - river valley profile은 V자 center carve 하나가 아니라 flat-bottom + shoulder falloff 구조다.

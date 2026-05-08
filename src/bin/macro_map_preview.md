@@ -61,6 +61,9 @@
     top-N chain limits, lake-area inlet raw-flow thresholds, and lake-area discharge caps all
     affect the displayed segment set. A qualifying lake-bound trunk is not clipped to only the
     final few lake-adjacent segments; it can remain visible until the land-side inlet endpoint.
+  - tiny 1..3-cell local-minima lakes may appear away from rivers. These are macro_map
+    `LakeCandidate` components promoted by deterministic low-probability graph minima policy, not
+    selected river artifacts.
   - lake inlet, lake outlet, sink, and coast outlet drainage nodes are marked with small
     overlay symbols whose colors are intentionally distinct from the selected river stroke. Internal
     lake debug nodes are hidden in the default preview. Lake inlet/outlet markers are selected graph endpoint markers: inlet markers

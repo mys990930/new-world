@@ -107,7 +107,8 @@ of giving every tile its own artificial low and high.
   - noisy-boundary owner/blend for macro elevation and masks,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
-  - selected hydrology river noisy curves through a tile-local segment capsule distance bake.
+  - selected hydrology river noisy curves through a tile-local anti-aliased thick polyline bake
+    that stores smooth valley coverage, nearest-segment distance, and blended display flow.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
@@ -162,6 +163,8 @@ Each PNG contains:
   broad continent/ridge/basin/coast height differences visible as white-material hillshade.
 - `DryBasin` is not water. In `combined` and `lit`, it should read as a shallow closed land floor,
   not as a lake/ocean surface and not as a mandatory deep carve.
+- Tiny 1..3-cell local-minima lakes are water/lake mask features even when no selected river reaches
+  them. They should not be recolored or shaped as dry basin bowls in `mask`, `combined`, or `lit`.
 - `combined` uses the same absolute height scale as before, but its colors should read like a
   top-down pre-Perlin terrain surface: muted blue-gray low/ocean values, subdued green-gray low
   land, olive/gray midlands, and pale gray high values without white saturation. It should not show

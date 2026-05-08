@@ -135,9 +135,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
 2. ridge, coast, selected river curve를 tile-local influence field로 rasterize한다.
    - ridge/coast는 launch 성능을 위해 source pixel과 chamfer distance propagation을 계속 사용할 수 있다.
-   - selected river는 source pixel 점열이 아니라 canonical noisy polyline segment에 대한 capsule
-     distance field로 굽는다. 각 sample은 가까운 segment까지의 실제 거리와 주변 segment의 display
-     flow를 함께 읽어, round된 source point가 만드는 원형 blob/scallop과 segment 사이 뾰족함을 피한다.
+   - selected river는 source pixel 점열이 아니라 canonical noisy polyline을 anti-aliased thick
+     stroke/corridor로 굽는다. 각 sample cell은 중심점 하나만 보지 않고 subpixel coverage를 읽어
+     flat-bottom + shoulder profile strength를 누적하며, 가까운 segment까지의 실제 거리와 주변 segment의
+     display flow를 함께 보존한다. round된 source point나 segment endpoint cap이 만드는 원형
+     blob/scallop과 segment join 사이 뾰족함이 보이면 회귀다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -169,7 +171,7 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      guide/source 진단용으로 유지하지만, ridge raise는 broad mountain elevation model이 들어올 때까지
      disabled/stub 상태다. 기존 narrow ridge envelope가 1블록 등고선 기준에서 pinpoint maxima를 만들어
      contour가 층마다 불연속적으로 튀어 보였기 때문이다.
-7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve distance와 selected/display flow로 river valley field를 만든다.
+7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve의 anti-aliased thick polyline coverage, distance, selected/display flow로 river valley field를 만든다.
    - river 전용 noisy curve는 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
    - river valley width, flat-bed radius, depth는 모두 selected/display flow에서 파생한다. launch
@@ -204,6 +206,11 @@ above-sea-level bowl profile을 만든다. 중앙부는 낮되 macro elevation v
 dry/non-dry noisy boundary에 가까운 sample은 rim blend로 완만히 올라가야 한다. macro field 단계에서
 dry basin 주변을 물처럼 낮추거나, 반대로 분지 내부가 contour를 전혀 만들지 않는 flat field로
 눌리면 회귀다.
+
+macro_map이 1~3 site/cell tiny local-minima lake로 승격한 작은 `LakeCandidate`는 dry basin bowl이
+아니라 lake/wetland mask 계열로 rasterize한다. 이 작은 호수는 river-side일 필요가 없으며, selected
+river가 연결되지 않아도 lake footprint는 유지한다. 다만 hydrology가 selected flow를 연결한 경우에는
+기존 lake boundary/internal/adjacent edge 금지와 inlet/outlet marker 계약을 그대로 따라야 한다.
 
 Coast flatten은 일반 후처리 압축만으로 높은 coastal land를 억지로 낮추는 장치가 아니다.
 `macro_map`의 coastal elevation ramp와 `macro_field`의 coast-specific boundary profile이 먼저
@@ -246,7 +253,7 @@ sample한다.
 
 launch 구현은 ridge/coast/river influence를 per-sample full curve scan 대신 tile-local raster pass로
 굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 canonical
-noisy segment capsule distance field를 직접 굽는다. ownership과 macro elevation의 noisy-boundary
+noisy polyline을 anti-aliased thick stroke로 직접 굽는다. ownership과 macro elevation의 noisy-boundary
 side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visible mask boundary 정확도를
 지키기 위한 보수적 선택이다. 4K preview의 남은 주된
 비용은 이 ownership side query와 nearest site lookup이며, 후속 최적화는 owner classification field를
@@ -357,7 +364,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   canonical noisy boundary curve의 side test로 owner/mask/elevation boundary를 고른다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
   뒤 chamfer distance field로 만든다. river influence는 selected edge id가 참조하는 canonical noisy
-  curve의 segment capsule distance field로 굽는다. 이로써 강줄기가 점 splat의 원형 흔적으로 보이는
-  문제를 줄이면서도 sample마다 전체 curve 후보를 반복 탐색하지 않는다.
+  curve를 anti-aliased thick polyline corridor로 굽고, subpixel coverage 기반 valley strength와
+  nearest-segment distance, blended flow hint를 함께 저장한다. 이로써 강줄기가 점 splat이나 segment
+  endpoint cap의 원형 흔적으로 보이는 문제를 줄이면서도 sample마다 전체 curve 후보를 반복 탐색하지 않는다.
 - signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
   visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.
