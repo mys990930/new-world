@@ -1984,17 +1984,17 @@ mod tests {
                 if biome.biome == GraphBiomeKind::AlpineMeadow {
                     alpine_count += 1;
                     assert!(
-                        biome.context.elevation >= 0.68,
+                        biome.context.elevation >= 0.56,
                         "AlpineMeadow should be restricted to higher macro elevation: {:?}",
                         biome.context
                     );
                     assert!(
-                        biome.context.mountainness >= 0.56,
+                        biome.context.mountainness >= 0.34,
                         "AlpineMeadow should keep mountain context: {:?}",
                         biome.context
                     );
                     assert!(
-                        biome.context.ruggedness >= 0.42,
+                        biome.context.ruggedness >= 0.10,
                         "AlpineMeadow should keep rugged mountain context: {:?}",
                         biome.context
                     );
