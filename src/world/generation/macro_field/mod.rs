@@ -17,10 +17,10 @@ pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.34;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
-pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.75;
-pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.25;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -64.0;
-pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 224.0;
+pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.5;
+pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -1024.0;
+pub const MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS: f32 = 2048.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS: f32 = 4.0;
 pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 
@@ -2219,10 +2219,19 @@ mod tests {
     }
 
     #[test]
-    fn contour_block_scale_uses_doubled_macro_block_resolution() {
-        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, -64.0);
-        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, 224.0);
-        assert_eq!(combined_macro_height_to_blocks(0.625), 112.0);
+    fn contour_block_scale_uses_experimental_large_block_domain() {
+        assert_eq!(MACRO_FIELD_CONTOUR_NORMALIZED_MIN, -0.5);
+        assert_eq!(MACRO_FIELD_CONTOUR_NORMALIZED_MAX, 1.0);
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, -1024.0);
+        assert_eq!(MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, 2048.0);
+        assert_eq!(combined_macro_height_to_blocks(-0.25), -512.0);
+        assert_eq!(combined_macro_height_to_blocks(0.75), 1536.0);
+    }
+
+    #[test]
+    fn contour_block_scale_saturates_outside_effective_range() {
+        assert_eq!(combined_macro_height_to_blocks(-0.75), -1024.0);
+        assert_eq!(combined_macro_height_to_blocks(1.25), 2048.0);
     }
 
     #[test]

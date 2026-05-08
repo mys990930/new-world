@@ -115,14 +115,15 @@ Contour block-height scale은 heightfield launch slice와 맞춘다. `combined_m
 항상 signed sea level인 `0 block`이다.
 
 ```text
-combined_macro_height -0.75 -> -64 blocks
+combined_macro_height -0.50 -> -1024 blocks
 combined_macro_height  0.00 ->   0 blocks
-combined_macro_height  1.25 -> 224 blocks
+combined_macro_height  1.00 -> 2048 blocks
 ```
 
-launch macro preview는 macro 단계가 micro terrain처럼 너무 구체적으로 보이지 않도록 이
-block-height domain을 이전 full 실험 스케일보다 낮춘 중간 압축값으로 사용한다. 이 압축은 preview
-렌더링 트릭이 아니라 contour 추출과 heightfield band resolve가 공유하는 실제 block-domain 변환이다.
+현재 실험 관심 구간은 `combined_macro_height -0.25..0.75`이며, 같은 piecewise slope에서
+`-512..1536 blocks`로 매핑된다. `-0.5..1.0` 바깥 값은 contour/heightfield block conversion에서
+각각 `-1024` 또는 `2048` block으로 포화된다. 이 변환은 preview 렌더링 트릭이 아니라 contour
+추출과 heightfield band resolve가 공유하는 실제 block-domain 변환이다.
 
 ---
 
@@ -211,8 +212,9 @@ sea-level aligned shoreline scalar를 제공해야 한다. coast flatten은 그 
    - contour 추출은 Marching Squares 기반이다.
    - level은 normalized scalar가 아니라 heightfield 직전 block-height 기준이다.
    - 기본 preview step은 4 blocks, major contour는 5 level마다 20 blocks 간격이다. contour가 읽는
-     block-height relief는 `-64..0..224` block scale로 2배 촘촘해진 vertical block domain을 사용해,
-     같은 macro context 안에서 contour와 heightfield 계단을 더 세밀하게 진단한다.
+     block-height relief는 effective `-1024..0..2048` block scale을 사용한다. 이는 현재
+     `combined_macro_height` 분포를 크게 확대해 contour와 heightfield 계단을 실험적으로 진단하기
+     위한 값이다.
    - preview contour 색은 height에 따라 달라져야 한다. 낮은/oceanward contour는 푸른 계열,
      높은 contour는 붉은/주황 계열을 사용하고, sea level `y = 0` contour는 별도 preview 색상으로
      구분할 수 있어야 한다.
@@ -279,7 +281,7 @@ interior가 micro detail처럼 보이면 ridge tail/lighting/contrast를 먼저 
 
 ```text
 macro elevation preview: -1.00 .. 1.00
-combined macro height preview: -0.75 .. 1.25
+combined macro height preview: -0.50 .. 1.00
 ```
 
 per-image min/max와 robust percentile은 metadata/stdout 진단값일 뿐 color scale의 source가 아니다.

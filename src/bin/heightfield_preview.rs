@@ -12,13 +12,14 @@ use new_world::world::CHUNK_EDGE_I32;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HeightfieldColumn,
-    HeightfieldConfig, HeightfieldTerrainKind, HeightfieldTile, MacroFieldTile,
-    MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig, VoronoiGraphPatch,
-    VoronoiGraphPatchRequest, generate_heightfield_tile, generate_macro_field_tile,
-    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
+    DEFAULT_HEIGHTFIELD_NORMALIZED_MAX, DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
+    GraphRegionCoord, HeightfieldColumn, HeightfieldConfig, HeightfieldTerrainKind,
+    HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig,
+    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_heightfield_tile,
+    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
+    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
 mod common;
@@ -377,7 +378,7 @@ impl PreviewHeader {
                 self.columns_per_chunk
                     .map_or_else(|| "not_chunk_derived".to_string(), |value| value.to_string())
             ),
-            "height_values=doubled_block_domain_relief_before_preview".to_string(),
+            "height_values=experimental_large_block_domain_relief_before_preview".to_string(),
             "render_scale_policy=cubic_block_pixels_no_vertical_normalization".to_string(),
             format!("chunk_edge_blocks={}", self.chunk_edge_blocks),
             format!("major_chunk_grid_blocks={}", self.major_grid_edge_blocks),
@@ -463,10 +464,13 @@ impl PreviewHeader {
             "block_line_style=thin_face_edges_with_integer_side_steps".to_string(),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
             format!(
-                "height_mapping=signed_combined_macro_height_-0.75_to_0_to_1.25_maps_{:.0}_to_0_to_{:.0}_blocks",
+                "height_mapping=signed_combined_macro_height_{:.2}_to_0_to_{:.2}_maps_{:.0}_to_0_to_{:.0}_blocks",
+                DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
+                DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
                 DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
                 DEFAULT_HEIGHTFIELD_MAX_BLOCKS
             ),
+            "height_mapping_interest_range=-0.25_to_0.75_maps_-512_to_1536_blocks".to_string(),
             format!(
                 "timing_ms=build:{} macro_field:{} heightfield:{} projection:{} render:{} total:{}",
                 self.build_ms,

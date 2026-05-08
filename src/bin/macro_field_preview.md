@@ -72,7 +72,7 @@ min/max stretching. The launch preview scale is:
 
 ```text
 macro elevation: -1.00 .. 1.00
-combined height: -0.75 .. 1.25
+combined height: -0.50 .. 1.00
 ```
 
 The renderer still records per-image min/max/robust percentiles as diagnostics, but those values do
@@ -106,7 +106,8 @@ of giving every tile its own artificial low and high.
    - coast noisy curves through a tile-local influence raster pass,
    - selected hydrology river noisy curves through a tile-local influence raster pass.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
-   `combined_macro_height -0.75..1.25 -> -64..224 blocks`.
+   effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
+   `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a scale bar, a compass overlay, and a thin macro-field cache tile grid.

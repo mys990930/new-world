@@ -4,10 +4,10 @@ use super::graph::WorldPlanePoint;
 use super::macro_field::{MacroFieldSample, MacroFieldTile};
 
 pub const DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS: f32 = 0.0;
-pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -64.0;
-pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 224.0;
-pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MIN: f32 = -0.75;
-pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.25;
+pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -1024.0;
+pub const DEFAULT_HEIGHTFIELD_MAX_BLOCKS: f32 = 2048.0;
+pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MIN: f32 = -0.5;
+pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD: f32 = 0.72;
 pub const DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS: f32 = -12.0;
 pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
@@ -964,9 +964,9 @@ mod tests {
     fn general_land_contour_gap_uses_one_raw_block_before_next_terrace() {
         let config = HeightfieldConfig::default();
         let just_below_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.0105, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00095, 0.0, 0.0, 0.0, 0.0), config);
         let after_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.012, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00110, 0.0, 0.0, 0.0, 0.0), config);
 
         assert!(
             just_below_next_stride.raw_surface_height_blocks > 1.0,
@@ -986,9 +986,9 @@ mod tests {
     fn default_river_corridor_gap_matches_land_gap() {
         let config = HeightfieldConfig::default();
         let land =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.012, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00110, 0.0, 0.0, 0.0, 0.0), config);
         let river =
-            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.012, 0.75), config);
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.00110, 0.75), config);
 
         assert_eq!(
             config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
@@ -1011,9 +1011,9 @@ mod tests {
             ..HeightfieldConfig::default()
         };
         let land =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.012, 0.0, 0.0, 0.0, 0.0), config);
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00110, 0.0, 0.0, 0.0, 0.0), config);
         let river =
-            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.012, 0.75), config);
+            heightfield_column_from_sample(&sample_with_river(0.0, 0.0, 0.00110, 0.75), config);
 
         assert_eq!(
             land.surface_height_blocks, 0.0,
@@ -1026,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_relief_scale_uses_doubled_block_resolution() {
+    fn launch_relief_scale_uses_experimental_large_block_domain() {
         let high = heightfield_column_from_sample(
             &sample(
                 0.0,
@@ -1040,11 +1040,43 @@ mod tests {
             HeightfieldConfig::default(),
         );
 
-        assert_eq!(DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 224.0);
-        assert_eq!(DEFAULT_HEIGHTFIELD_MIN_BLOCKS, -64.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_NORMALIZED_MIN, -0.5);
+        assert_eq!(DEFAULT_HEIGHTFIELD_NORMALIZED_MAX, 1.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 2048.0);
+        assert_eq!(DEFAULT_HEIGHTFIELD_MIN_BLOCKS, -1024.0);
         assert_eq!(
             high.raw_surface_height_blocks, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
-            "macro relief should use the doubled heightfield block-domain resolution"
+            "macro relief should use the experimental heightfield block-domain resolution"
+        );
+    }
+
+    #[test]
+    fn experimental_interest_range_maps_to_large_block_span() {
+        let config = HeightfieldConfig::default();
+        let low =
+            heightfield_column_from_sample(&sample(0.0, 0.0, -0.25, 0.0, 0.0, 0.0, 0.0), config);
+        let high =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.75, 0.0, 0.0, 0.0, 0.0), config);
+
+        assert_eq!(low.raw_surface_height_blocks, -512.0);
+        assert_eq!(high.raw_surface_height_blocks, 1536.0);
+    }
+
+    #[test]
+    fn experimental_effective_range_saturates_outside_limits() {
+        let config = HeightfieldConfig::default();
+        let low =
+            heightfield_column_from_sample(&sample(0.0, 0.0, -0.75, 0.0, 0.0, 0.0, 0.0), config);
+        let high =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 1.25, 0.0, 0.0, 0.0, 0.0), config);
+
+        assert_eq!(
+            low.raw_surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_MIN_BLOCKS
+        );
+        assert_eq!(
+            high.raw_surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_MAX_BLOCKS
         );
     }
 
@@ -1068,7 +1100,7 @@ mod tests {
     #[test]
     fn small_positive_coastal_macro_height_starts_near_sea_level() {
         let column = heightfield_column_from_sample(
-            &sample(0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0),
+            &sample(0.0, 0.0, 0.0008, 0.0, 0.0, 0.0, 0.0),
             HeightfieldConfig::default(),
         );
 

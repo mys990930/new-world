@@ -408,9 +408,9 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 ### 현재 구현 상태
 
 - meso feature와 Perlin micro relief는 `0` stub이다.
-- `combined_macro_height -0.75..0.0..1.25`를 `-64..0..224 block` signed sea-level scale로 매핑한다.
-  이 launch scale은 macro heightfield가 micro terrain처럼 과도하게 세밀하게 보이지 않도록 이전
-  full 실험 스케일보다 낮춘 중간 압축값이다.
+- `combined_macro_height -0.5..0.0..1.0`를 `-1024..0..2048 block` signed sea-level scale로 매핑한다.
+  중심 관심 구간 `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. 이 launch scale은 현재
+  `combined_macro_height` 분포를 크게 확대해서 보는 실험값이다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
   ocean/lake visible surface도 `y = 0`이며, bathymetry/bed depression을 preview terrain으로 렌더하지
   않는다.

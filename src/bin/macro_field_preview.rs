@@ -33,8 +33,8 @@ const DEFAULT_STAGE: &str = "macro_field";
 const OUTPUT_DIR: &str = "target/macro-field-preview";
 const MACRO_PREVIEW_MIN_HEIGHT: f32 = -1.0;
 const MACRO_PREVIEW_MAX_HEIGHT: f32 = 1.0;
-const COMBINED_PREVIEW_MIN_HEIGHT: f32 = -0.75;
-const COMBINED_PREVIEW_MAX_HEIGHT: f32 = 1.25;
+const COMBINED_PREVIEW_MIN_HEIGHT: f32 = -0.5;
+const COMBINED_PREVIEW_MAX_HEIGHT: f32 = 1.0;
 const WHITE_SATURATION_THRESHOLD: u8 = 248;
 const LIT_NORMAL_SAMPLE_RADIUS: usize = 8;
 const LIT_NORMAL_PREFILTER_RADIUS: usize = 5;
@@ -2515,7 +2515,7 @@ mod tests {
             "absolute combined preview scale should preserve world height ordering"
         );
         assert!(
-            normalize_absolute_combined_height(0.85) < 0.90,
+            normalize_absolute_combined_height(0.75) < 0.90,
             "ordinary high terrain should not map straight to white"
         );
     }

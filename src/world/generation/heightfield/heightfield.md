@@ -120,20 +120,22 @@ footprint를 더 촘촘히 보고 싶으면 더 많은 column을 가진 `MacroFi
 generator version에서 조정될 수 있지만, sea level은 pipeline 계약대로 world-space `y = 0`을 유지한다.
 
 ```text
-combined_macro_height -0.75 -> -64 blocks
+combined_macro_height -0.50 -> -1024 blocks
 combined_macro_height  0.00 ->   0 blocks = sea level
-combined_macro_height  1.25 -> 224 blocks
+combined_macro_height  1.00 -> 2048 blocks
 ```
 
 이 매핑은 단일 선형 remap이 아니라 signed sea-level을 기준으로 한 piecewise remap이다. 음수
-macro height는 `-0.75..0.0` 범위에서 `-64..0` block으로, 양수 macro height는 `0.0..1.25`
-범위에서 `0..224` block으로 변환한다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed
-height를 가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은
-terrace로 튀어서는 안 된다.
+macro height는 `-0.5..0.0` 범위에서 `-1024..0` block으로, 양수 macro height는 `0.0..1.0`
+범위에서 `0..2048` block으로 변환한다. 현재 실험 관심 구간 `-0.25..0.75`는 같은 기울기에서
+`-512..1536 blocks`로 매핑된다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed height를
+가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은 terrace로
+튀어서는 안 된다. effective range 바깥 값은 block conversion에서 `-1024` 또는 `2048` block으로
+포화된다.
 
-이 launch scale은 같은 world footprint 안에서 X/Z와 Y block resolution을 함께 2배 높인 block-domain
-계약이다. preview 렌더링에서만 세로 비율을 속이는 것이 아니라, macro field contour 추출과
-heightfield band resolve가 같은 block-height domain을 공유한다.
+이 launch scale은 현재 분포를 크게 확대해 보는 실험용 block-domain 계약이다. preview 렌더링에서만
+세로 비율을 속이는 것이 아니라, macro field contour 추출과 heightfield band resolve가 같은
+block-height domain을 공유한다.
 
 `combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
 합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
@@ -245,9 +247,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   계수가 아니다. `heightfield_preview`는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   `vertical_px_per_block == tile_h_px`인 cubic scale로 그린다.
 - macro relief는 preview 렌더링이 아니라 `macro_field`/`heightfield`가 공유하는 block-height 변환이
-  소유한다. 현재 launch scale은
-  `-0.75..0.0..1.25 -> -64..0..224 blocks`이며 preview에서 같은 Y 값을 다시
-  낮춰 그리면 중복 압축이다.
+  소유한다. 현재 실험 launch scale은 effective
+  `-0.5..0.0..1.0 -> -1024..0..2048 blocks`이며, 관심 구간 `-0.25..0.75`는 `-512..1536 blocks`다.
+  preview에서 같은 Y 값을 다시 낮춰 그리면 중복 압축이다.
 - heightfield preview의 X/Z 밀도는 scale 계층이 아니라 column count로 직접 표현한다. chunk-radius
   preview의 기본값은 chunk 하나를 `64`개 column으로 샘플링하고, free window preview는 기본
   `768`개 X column을 사용한다. `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
@@ -315,6 +317,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     river descent는 이 snap 결과 위에서 유지되어야 한다.
 14. X/Z column density는 입력 macro field tile의 column count와 sample spacing이 직접 소유한다.
     별도 fixed scale이나 horizontal subdivision 값으로 heightfield Y를 해석하면 안 된다. launch relief는
-    shared block-height domain의 `-64..224` 기본 범위가 소유한다. preview 렌더러는 산출된
+    shared block-height domain의 `-1024..2048` 기본 범위가 소유한다. preview 렌더러는 산출된
     `surface_y`와 water hint를 cubic block scale로 그려야 하며, column density로 같은 Y 값을 다시
     낮춰 보이면 중복 압축이다.

@@ -70,9 +70,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   normalization 계수가 아니다. 이 binary는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   cubic scale로 렌더한다.
 - Macro relief는 preview 렌더링이 아니라 `macro_field` contour와 `heightfield` band resolve가
-  공유하는 block-height domain에서 이미 산출된다. 현재 기본 scale은
-  `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`이며, preview에서 같은 Y 값을 다시
-  낮춰 그리면 중복 압축이다.
+  공유하는 block-height domain에서 이미 산출된다. 현재 실험 기본 scale은 effective
+  `combined_macro_height -0.5..0.0..1.0 -> -1024..0..2048 blocks`이며, 중심 관심 구간
+  `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. preview에서 같은 Y 값을 다시 낮춰 그리면 중복
+  압축이다.
 - Horizontal density is a direct column-count contract. In free-window mode the default X column
   count is `768`; Z is derived from the image aspect unless `--columns-z` is provided. In
   `--chunk-radius` mode, the default grid uses `64` columns per chunk on each axis, so a radius

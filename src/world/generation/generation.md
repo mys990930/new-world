@@ -187,10 +187,10 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      만든다. 이 block-height domain은 signed sea level과 정렬되어 `combined_macro_height = 0`이
      `y = 0`이 되어야 한다. contour segment 자체는 debug layer이며 source of truth가 아니지만, column
      output은 같은 contour level domain과 일관되어야 한다.
-   - launch macro heightfield는 macro preview가 micro terrain처럼 너무 구체적인 블럭 단위 지형으로
-     읽히지 않도록 block-height relief를 이전 full 실험 스케일보다 낮춘 중간 압축값으로 사용한다.
-     현재 기본 signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`이며, 이 값은
-     `macro_field` contour와 `heightfield` band resolve가 공유한다.
+   - launch macro heightfield는 실험적으로 큰 block-height domain을 사용한다. 관심 구간
+     `combined_macro_height -0.25..0.75`는 `-512..1536 blocks`로 매핑하고, effective clamp는
+     `-0.5..1.0 -> -1024..2048 blocks`다. 이 값은 `macro_field` contour와 `heightfield` band
+     resolve가 공유한다.
    - launch contour terrace는 smoothing 없이 integer step을 유지하되, raw 1-block band를 그대로
      surface로 쓰지는 않고 `step + min_gap` stride로 visible terrace를 연다. 현재 기본 land
      `min_gap = 1`이고 river corridor 기본 `river_min_gap = 1`도 같은 값이다. 즉 raw height가
@@ -207,10 +207,11 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      보려면 해당 footprint를 더 많은 column으로 직접 샘플링한다. chunk-radius preview의 기본값은
      chunk 하나당 64개 column이며, free window preview는 기본 768개 X column을 사용한다.
      `--columns-x`/`--columns-z`가 지정되면 그것이 최종 column count다.
-   - 완만한 macro relief는 렌더링 트릭이 아니라 `macro_field` contour와 `heightfield` band resolve가
-     공유하는 block-height domain에서 적용한다. 현재 launch 기본
-     signed scale은 `combined_macro_height -0.75..0.0..1.25 -> -64..0..224 blocks`다. preview는 이
-     산출 `surface_y`를 정육면체에 가까운 block primitive로 그대로 렌더한다.
+   - macro relief scale은 렌더링 트릭이 아니라 `macro_field` contour와 `heightfield` band resolve가
+     공유하는 block-height domain에서 적용한다. 현재 실험 기본 signed scale은 effective
+     `combined_macro_height -0.5..0.0..1.0 -> -1024..0..2048 blocks`이며, 중심 관심 구간
+     `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. preview는 이 산출 `surface_y`를 정육면체에 가까운
+     block primitive로 그대로 렌더한다.
    - heightfield preview의 block outline은 기본 on이다. top/visible side face 외곽선과 side face의
      정수 `y` step guide를 얇게 그려 작은 chunk-radius preview에서 block scale을 읽게 하되, final
      mesh/material 계약으로 해석하지 않는다. 필요하면 preview 전용 `--no-block-lines`로 끌 수 있다.
