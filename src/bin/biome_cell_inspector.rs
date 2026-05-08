@@ -423,8 +423,8 @@ main {{ min-width:0; padding:14px; }}
 aside {{ border-left:1px solid #2c3439; padding:16px; background:#151b1f; overflow:auto; }}
 .map-wrap {{ position:relative; width:100%; height:calc(100vh - 28px); min-height:420px; background:#080d12; overflow:hidden; }}
 svg {{ width:100%; height:100%; display:block; }}
-.cell {{ stroke:#13191c; stroke-width:0.75; cursor:pointer; transition:filter .12s, stroke-width .12s; }}
-.cell:hover, .cell.active {{ filter:brightness(1.22); stroke:#fff5b8; stroke-width:2.2; }}
+.cell {{ stroke:#13191c; stroke-width:0.38; cursor:pointer; }}
+.cell.active {{ filter:brightness(1.18); stroke:#fff5b8; stroke-width:1.1; }}
 .river {{ fill:none; stroke:#21b8da; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }}
 .lake-edge {{ fill:none; stroke:#9de8fb; stroke-width:2; stroke-linecap:round; pointer-events:none; opacity:.86; }}
 .lake-marker {{ pointer-events:none; }}
@@ -459,7 +459,7 @@ h1 {{ font-size:18px; margin:0 0 4px; }}
 <aside>
 <h1>Biome Cell Inspector</h1>
 <div class="meta">seed={seed} center=({center_x}, {center_z}) span={span} graph=({min_rx},{min_rz})..({max_rx},{max_rz})</div>
-<p class="hint">Hover or click a Voronoi cell. Fill color is the resolved biome; cyan strokes are selected rivers; pale cyan strokes mark macro lake edges.</p>
+<p class="hint">Click a Voronoi cell to highlight it and update these values. Fill color is the resolved biome; cyan strokes are selected rivers; pale cyan strokes mark macro lake edges.</p>
 <div id="details"></div>
 <h1 style="margin-top:18px">Legend</h1>
 <div class="legend">{legend}</div>
@@ -477,7 +477,6 @@ function showCell(index) {{
 }}
 document.querySelectorAll('.cell').forEach(cell => {{
   const index = Number(cell.dataset.index);
-  cell.addEventListener('mouseenter', () => showCell(index));
   cell.addEventListener('click', () => {{
     if (active) active.classList.remove('active');
     active = cell;
@@ -670,13 +669,13 @@ fn river_amount(flow: f32) -> f32 {
 
 fn river_width(flow: f32) -> i32 {
     if flow >= 80.0 {
-        7
-    } else if flow >= 36.0 {
         5
-    } else if flow >= 18.0 {
+    } else if flow >= 36.0 {
         4
-    } else {
+    } else if flow >= 18.0 {
         3
+    } else {
+        2
     }
 }
 
@@ -1065,6 +1064,20 @@ mod tests {
         assert!(html.contains("river_segments"));
         assert!(html.contains("lake_boundary_edges"));
         assert!(html.contains("class=\"river\""));
+        assert!(html.contains("Click a Voronoi cell"));
+        assert!(!html.contains("mouseenter"));
+        assert!(!html.contains(".cell:hover"));
+        assert!(html.contains("stroke-width:0.38"));
+        assert!(html.contains("stroke-width:1.1"));
+        assert!(html.contains("if (active) active.classList.remove('active')"));
+    }
+
+    #[test]
+    fn river_preview_widths_are_thinner_than_macro_map_default() {
+        assert_eq!(river_width(0.0), 2);
+        assert_eq!(river_width(18.0), 3);
+        assert_eq!(river_width(36.0), 4);
+        assert_eq!(river_width(80.0), 5);
     }
 
     #[test]

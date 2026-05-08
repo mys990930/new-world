@@ -7,8 +7,8 @@ cells.
 
 The tool builds the same graph-first inputs used by `biome_map_preview`, colors Voronoi cells by
 the resolved `GraphBiomeKind`, and overlays selected hydrology/lake diagnostics from the
-macro-map preview path. Hovering or clicking a cell updates the side panel with that cell's final
-context values.
+macro-map preview path. Clicking a cell highlights it and updates the side panel with that cell's
+final context values.
 
 ## Ownership
 
@@ -46,7 +46,8 @@ cargo run --bin biome_cell_inspector -- 42 0 0 --output target/biome-cell-inspec
 - Cell fill color matches the detailed biome palette used by `biome_map_preview`.
 - Pale cyan lake strokes come from macro lake edge classes.
 - Cyan river strokes come from selected `GraphHydrologyGraph` river segments and use selected
-  display flow, not raw flow.
+  display flow, not raw flow. The inspector draws them thinner than the macro-map composite so
+  they stay readable over dense cell polygons.
 - Lake inlet/outlet/sink/coast outlet markers are exposed as overlay diagnostics.
 - The side panel exposes at least:
   - biome
