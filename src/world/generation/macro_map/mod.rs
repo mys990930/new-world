@@ -16,7 +16,8 @@ const OCEAN_COMPONENT_NAMESPACE: u64 = 0x9a72_c80d_31ef_624b;
 const SMALL_STREAM_POCKET_LAKE_NAMESPACE: u64 = 0x3c2d_8f19_641a_b057;
 const TINY_LOCAL_MINIMA_LAKE_NAMESPACE: u64 = 0x85e5_3c3f_51ef_9c2a;
 const DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS: f32 = 192.0;
-pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K: u32 = 1_200;
+pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K: u32 = 3_600;
+pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CHANCE_PER_10K: u32 = 4_000;
 pub const DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CELLS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -506,7 +507,8 @@ fn tiny_local_minima_lake_roll(component_size: usize, score: f32, component_hash
     } else {
         0
     };
-    let chance_per_10k = DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K + score_bonus;
+    let chance_per_10k = (DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K + score_bonus)
+        .min(DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CHANCE_PER_10K);
 
     ((component_hash % 10_000) as u32) < chance_per_10k
 }
@@ -1399,24 +1401,31 @@ mod tests {
     fn small_stream_pocket_lakes_are_more_common_than_large_lakes() {
         let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
         let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
-        let mut lake_sizes = HashMap::<MacroContinentId, usize>::new();
-
-        for site in map
+        let macro_sites = macro_sites_by_id(&map);
+        let site_indices = patch
             .sites
             .iter()
-            .filter(|site| in_default_preview_window(site.position))
-            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::LakeCandidate))
-        {
-            if let Some(component) = site.continent {
-                *lake_sizes.entry(component).or_default() += 1;
-            }
-        }
+            .enumerate()
+            .map(|(index, site)| (site.id, index))
+            .collect::<HashMap<_, _>>();
+        let adjacency = site_adjacency(&patch, &site_indices);
+        let lake_mask = patch
+            .sites
+            .iter()
+            .map(|site| {
+                in_default_preview_window(site.position)
+                    && macro_sites.get(&site.id).is_some_and(|macro_site| {
+                        matches!(macro_site.surface_kind, MacroSurfaceKind::LakeCandidate)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let lake_sizes = connected_true_component_sizes(&adjacency, &lake_mask);
 
         let small_lakes = lake_sizes
-            .values()
+            .iter()
             .filter(|&&size| (1..=4).contains(&size))
             .count();
-        let large_lakes = lake_sizes.values().filter(|&&size| size > 10).count();
+        let large_lakes = lake_sizes.iter().filter(|&&size| size > 10).count();
 
         assert!(
             small_lakes >= 2,
@@ -1508,9 +1517,14 @@ mod tests {
 
     #[test]
     fn tiny_local_minima_lake_roll_is_low_probability_and_size_limited() {
-        assert_eq!(DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K, 1_200);
+        assert_eq!(DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K, 3_600);
+        assert_eq!(DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CHANCE_PER_10K, 4_000);
         assert!(tiny_local_minima_lake_roll(1, 0.70, 0));
-        assert!(tiny_local_minima_lake_roll(3, 0.86, 1_499));
+        assert!(tiny_local_minima_lake_roll(3, 0.86, 3_899));
+        assert!(
+            !tiny_local_minima_lake_roll(3, 0.86, 4_000),
+            "score bonus should stay capped instead of making tiny lakes too common"
+        );
         assert!(
             !tiny_local_minima_lake_roll(4, 0.90, 0),
             "4+ cell basins should stay under the existing lake/wetland/dry basin policy"
@@ -1831,6 +1845,36 @@ mod tests {
 
     fn macro_sites_by_id(map: &GraphMacroMap) -> HashMap<VoronoiSiteId, MacroSite> {
         map.sites.iter().map(|site| (site.id, *site)).collect()
+    }
+
+    fn connected_true_component_sizes(adjacency: &[Vec<usize>], mask: &[bool]) -> Vec<usize> {
+        let mut sizes = Vec::new();
+        let mut visited = vec![false; mask.len()];
+
+        for start in 0..mask.len() {
+            if visited[start] || !mask[start] {
+                continue;
+            }
+
+            let mut stack = vec![start];
+            let mut size = 0;
+            visited[start] = true;
+
+            while let Some(index) = stack.pop() {
+                size += 1;
+                for &neighbor in &adjacency[index] {
+                    if visited[neighbor] || !mask[neighbor] {
+                        continue;
+                    }
+                    visited[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            }
+
+            sizes.push(size);
+        }
+
+        sizes
     }
 
     fn in_default_preview_window(position: WorldPlanePoint) -> bool {

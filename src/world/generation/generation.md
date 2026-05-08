@@ -98,7 +98,8 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - 1~3 site/cell 규모의 작은 tiny local-minima lake는 river-side 여부와 무관하게 land-owned
      graph 저지대에서 낮은 확률로 생성될 수 있다. 조건은 graph adjacency 기준 더 낮은 land neighbor가
      없는 tiny local-minima component, 낮은 elevation seed, hydration, 낮은 ocean-coastness,
-     deterministic component roll을 함께 만족해야 하며, 모든 local minimum을 lake로 승격해서는 안 된다.
+     deterministic component roll을 함께 만족해야 한다. launch 기본 roll은 10,000분의 3,600이고,
+     score bonus를 포함해도 10,000분의 4,000을 넘지 않는다. 모든 local minimum을 lake로 승격해서는 안 된다.
 4. macro ownership, signed macro elevation, gradient, component context를 읽어 ridge/fault edge guide를 선정한다.
    - ridge는 단순 high elevation edge가 아니라, elevation gradient, land component 내부 위치, ruggedness/mountainness context, drainage divide 가능성을 함께 만족해야 한다.
 5. land/ocean ownership 경계에서 coast edge guide를 선정한다.

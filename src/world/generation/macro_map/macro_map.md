@@ -167,8 +167,9 @@ launch 정책은 아래처럼 잡는다.
   land-owned local-minima component를 찾고, component size가 1~3 cell이며 낮은 `elevation_seed`,
   충분한 hydration, ocean coast에서 떨어진 위치, deterministic component roll을 통과할 때만
   `LakeCandidate`로 승격한다. launch 기본 확률은 `DEFAULT_TINY_LOCAL_MINIMA_LAKE_CHANCE_PER_10K =
-  1200`이며, 강줄기 중간 또는 독립 폐쇄 저지대의 작은 물웅덩이를 드물게 만들되 모든 local minimum을
-  물로 채우지 않고 dry basin / closed basin 표현을 계속 유지하는 것이 목적이다.
+  3600`이며, 좋은 score의 후보도 `DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CHANCE_PER_10K = 4000` 상한을
+  넘지 않는다. 강줄기 중간 또는 독립 폐쇄 저지대의 작은 물웅덩이를 이전보다 자주 만들되 모든 local
+  minimum을 물로 채우지 않고 dry basin / closed basin 표현을 계속 유지하는 것이 목적이다.
 - signed macro elevation은 graph `elevation_seed`, `continentality`, explicit ocean-coast distance, basinness를
   합성하며, sign 하나만으로 대륙/바다 의미를 결정하지 않는다.
 - land signed macro elevation은 coast-adjacent cell에서 바로 높은 양수값으로 시작하면 안 된다.
