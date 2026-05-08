@@ -36,10 +36,10 @@
 
 - One RGB PNG:
   - each pixel uses nearest-site diagnostic fill, matching the current macro map preview style;
-  - ocean, lake, wetland, dry basin, beach, desert, savanna, grassland, forest, cold, alpine, and
-    mountain classes use distinct colors;
+  - every current `GraphBiomeKind` variant uses its own distinct color code, including split ocean,
+    forest, cold, and alpine variants;
   - graph Voronoi edges are drawn as a faint actual corner-to-corner overlay;
-  - a compact legend and common topdown compass are drawn over the image.
+  - a larger one-row-per-biome legend and common topdown compass are drawn over the image.
 - A PNG iTXt chunk named `new-world-preview-header` records seed, generator version, stage, center,
   dimensions, graph area, site spacing, land bias, site count, and per-biome site counts.
 
