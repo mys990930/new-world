@@ -54,12 +54,10 @@
   as a mountain belt shoulder around the ridge maxima guide, not isolated bright pixels and not
   global low-level texture.
 - `river`: flow-scaled flat-bottom valley influence from selected hydrology topology, baked through
-  a chain-level derived river spline/corridor. The source centerline preserves selected noisy
-  boundary detail by stitching edge points downstream, then arc-length resampling and smoothing.
+  a chain-level derived river spline/corridor rather than the raw noisy Voronoi edge polyline.
   Upstream segments are narrow and shallow but should not read as knife-cut V shapes; downstream
   trunks are wider with flatter beds and broader shoulders. Sharp bends should not balloon into
-  round stamp/blob shapes, and one-edge rivers should not collapse into corner-to-corner straight
-  lines.
+  round stamp/blob shapes.
 - `combined`: macro elevation minus visible river valley carve guide, coast flatten, and water
   flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map. Ridge influence is
   diagnostic-only in the current launch slice and does not raise combined height until a broader
@@ -111,9 +109,9 @@ of giving every tile its own artificial low and high.
   - noisy-boundary owner/blend for macro elevation and masks,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
-  - selected hydrology river topology through a tile-local chain-level noisy-boundary-preserving
-    spline/corridor bake that stores smooth valley coverage, nearest-segment distance,
-    curvature-aware width, and smoothed display flow.
+  - selected hydrology river topology through a tile-local chain-level spline/corridor bake that
+    stores smooth valley coverage, nearest-segment distance, curvature-aware width, and smoothed
+    display flow.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
