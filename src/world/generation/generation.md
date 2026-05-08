@@ -297,9 +297,11 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   구현은 corner downhill, graph-stage local minimum, outlet carve, watershed, flow accumulation,
   selected river segment를 계산한다. 이 단계의 river는 후보 surface가 아니라
   downhill/local-minimum/outlet 정책을 통과한 결과다.
-- stage 7 river plan: selected river segment를 chain/reach 단위 morphology로 번역한다. 현재 문서 계약은
-  broad valley와 narrow bed를 분리하고, macro_field가 combined height에 강바닥 외곽을 과하게 새기지
-  않도록 reach별 width/depth/flow parameter를 제공하는 것을 목표로 한다. 구현은 아직 없다.
+- stage 7 river plan: selected river segment를 chain/reach 단위 morphology로 번역한다. 현재 구현은
+  hydrology selected segment 수를 보존하면서 downstream node 관계로 chain/reach를 만들고, reach별
+  broad valley와 narrow bed width/depth/flow parameter를 분리해 제공한다. lake inlet/outlet reach는
+  hydrology의 lake marker와 selected/display discharge cap을 읽어 ocean trunk처럼 과하게 커지지
+  않도록 제한한다.
 - stage 8 final cell context: graph base field, macro ownership/elevation, coast/lake/ocean/dry basin
   context, selected hydrology role, water proximity, rain shadow를 합성해 final temperature/hydration과
   biome influence를 resolve한다. biome은 macro_field보다 먼저 확정되며, downstream stage는 이를
@@ -313,7 +315,8 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   이 field는 새 noise source가 아니라 heightfield와 chunk fill이 읽을 cache다. macro elevation,
   coast/lake/ocean/dry basin mask, ridge/fault influence, river valley, final biome influence,
   combined macro height는 각각
-  독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
+  독립 preview target이어야 하며, river channel은 reach type, broad valley range, narrow bed hint를
+  보존하고 combined macro height는 broad valley만 주로 반영한다. combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
   직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
 - stage 13 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
   meso/perlin delta는 아직 `0`인 stub이며, macro field contour step과 일관된 band interpolation을

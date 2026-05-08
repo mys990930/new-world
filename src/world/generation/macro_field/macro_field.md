@@ -386,10 +386,10 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
-  뒤 chamfer distance field로 만든다. river influence는 아직 구현상 selected edge id가 참조하는
-  canonical noisy curve를 anti-aliased thick polyline corridor로 굽고, subpixel coverage 기반 valley
-  strength와 nearest-segment distance, blended flow hint를 함께 저장한다. 다음 구현 단계에서는 이 책임을
-  `river_plan`의 broad valley / narrow bed parameter 소비로 옮겨, combined height가 좁은 river bed
-  외곽을 직접 강하게 새기지 않도록 단순화한다.
+  뒤 chamfer distance field로 만든다. river influence는 `RiverPlan`의 per-segment broad valley와
+  narrow bed hint를 canonical noisy curve 위에 anti-aliased polyline corridor로 굽고, subpixel
+  coverage 기반 broad valley strength, nearest-segment distance, blended display flow hint, reach type,
+  bed hint를 함께 저장한다. combined height는 broad valley strength만 주로 읽으며, narrow bed
+  width/depth는 heightfield/water/surface 단계가 읽을 hint로 보존한다.
 - signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
   visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.

@@ -11,14 +11,15 @@ use rayon::prelude::*;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
-    GraphRegionCoord, HydrologyConfig, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MacroFieldContourSet,
-    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
-    MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, extract_macro_field_contours,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
-    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HydrologyConfig,
+    MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    MacroFieldContourSet, MacroFieldSample as CoreMacroFieldSample,
+    MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, RiverPlan, RiverReachType,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint,
+    extract_macro_field_contours, generate_macro_field_tile, generate_macro_map,
+    generate_noisy_boundaries, generate_river_plan, generate_voronoi_graph_patch,
+    graph_region_for_world_block, solve_hydrology,
 };
 use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
@@ -329,7 +330,7 @@ impl PreviewWindow {
 struct PreviewWorld {
     patch: VoronoiGraphPatch,
     macro_map: GraphMacroMap,
-    hydrology: GraphHydrologyGraph,
+    river_plan: RiverPlan,
     boundary: BoundaryCache,
     river_segment_count: usize,
 }
@@ -500,6 +501,25 @@ impl PreviewHeader {
             format!("site_count={}", self.site_count),
             format!("macro_edge_count={}", self.macro_edge_count),
             format!("river_segment_count={}", self.river_segment_count),
+            format!(
+                "river_reach_type_samples={}",
+                river_reach_type_counts_metadata(self.core_stats.river_reach_type_counts)
+            ),
+            format!(
+                "river_broad_valley_width_min_max_blocks={:.2},{:.2}",
+                self.core_stats.min_river_broad_valley_width_blocks,
+                self.core_stats.max_river_broad_valley_width_blocks
+            ),
+            format!(
+                "river_bed_hint_width_min_max_blocks={:.2},{:.2}",
+                self.core_stats.min_river_bed_width_hint_blocks,
+                self.core_stats.max_river_bed_width_hint_blocks
+            ),
+            format!(
+                "river_bed_hint_depth_min_max={:.3},{:.3}",
+                self.core_stats.min_river_bed_depth_hint,
+                self.core_stats.max_river_bed_depth_hint
+            ),
             format!("boundary_curve_count={}", self.boundary_curve_count),
             format!(
                 "boundary_displacement_avg_max_blocks={:.4},{:.4}",
@@ -622,8 +642,9 @@ impl PreviewHeader {
             "macro_elevation=noisy_boundary_owner_blended_signed_elevation".to_string(),
             "mask=ocean_lake_coast_dry_land_context_following_noisy_boundaries".to_string(),
             "ridge_influence=distance_to_ridge_noisy_edge_envelope".to_string(),
-            "river_valley=distance_to_selected_river_noisy_edge_envelope".to_string(),
-            "combined=macro_elevation_plus_ridge_minus_river_and_water_flatten".to_string(),
+            "river_valley=river_plan_broad_valley_with_bed_hint_preserved".to_string(),
+            "combined=macro_elevation_plus_ridge_minus_broad_river_valley_and_water_flatten"
+                .to_string(),
             "contour=block_height_marching_squares_from_combined_macro_height_before_heightfield"
                 .to_string(),
             "lit=topdown_white_heightfield_shaded_from_combined_height_gradient".to_string(),
@@ -869,6 +890,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         tile.river_stats.min, tile.river_stats.average, tile.river_stats.max
     );
     println!(
+        "river reach type samples: {}",
+        river_reach_type_counts_metadata(tile.core_stats.river_reach_type_counts)
+    );
+    println!(
+        "river broad valley width range: {:.2}..{:.2} blocks; bed hint width range: {:.2}..{:.2} blocks; bed depth range: {:.3}..{:.3}",
+        tile.core_stats.min_river_broad_valley_width_blocks,
+        tile.core_stats.max_river_broad_valley_width_blocks,
+        tile.core_stats.min_river_bed_width_hint_blocks,
+        tile.core_stats.max_river_bed_width_hint_blocks,
+        tile.core_stats.min_river_bed_depth_hint,
+        tile.core_stats.max_river_bed_depth_hint
+    );
+    println!(
         "combined height min/avg/max {:.3}/{:.3}/{:.3}",
         tile.combined_stats.min, tile.combined_stats.average, tile.combined_stats.max
     );
@@ -1095,6 +1129,7 @@ fn build_preview_world(
         },
     );
     let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+    let river_plan = generate_river_plan(&patch, &macro_map, &hydrology);
     let boundary = generate_noisy_boundaries(
         &patch,
         &macro_map,
@@ -1105,7 +1140,7 @@ fn build_preview_world(
     Ok(PreviewWorld {
         patch,
         macro_map,
-        hydrology,
+        river_plan,
         boundary,
         river_segment_count,
     })
@@ -1141,7 +1176,7 @@ fn rasterize_macro_field(
     let core_tile = generate_macro_field_tile(
         &preview.patch,
         &preview.macro_map,
-        &preview.hydrology,
+        &preview.river_plan,
         &preview.boundary,
         core_config,
     );
@@ -1225,6 +1260,14 @@ fn fraction(count: usize, total: usize) -> f32 {
     } else {
         count as f32 / total as f32
     }
+}
+
+fn river_reach_type_counts_metadata(counts: [usize; 7]) -> String {
+    RiverReachType::all()
+        .into_iter()
+        .map(|reach_type| format!("{}:{}", reach_type.as_str(), counts[reach_type.as_index()]))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn render_channel(

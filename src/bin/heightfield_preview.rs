@@ -16,9 +16,9 @@ use new_world::world::generation::{
     DEFAULT_HEIGHTFIELD_NORMALIZED_MAX, DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
     DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
     GraphRegionCoord, HeightfieldColumn, HeightfieldConfig, HeightfieldTerrainKind,
-    HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_heightfield_tile,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
+    HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, RiverPlan,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_heightfield_tile,
+    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries, generate_river_plan,
     generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
@@ -516,12 +516,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let graph_area = window.graph_area(config.region_size_blocks)?;
 
     let build_start = Instant::now();
-    let (patch, macro_map, hydrology, boundary) =
+    let (patch, macro_map, _hydrology, river_plan, boundary) =
         build_generation_inputs(&meta, &config, graph_area)?;
     let build_ms = build_start.elapsed().as_millis();
 
     let macro_start = Instant::now();
-    let macro_tile = build_macro_field_tile(window, &patch, &macro_map, &hydrology, &boundary);
+    let macro_tile = build_macro_field_tile(window, &patch, &macro_map, &river_plan, &boundary);
     let macro_field_ms = macro_start.elapsed().as_millis();
 
     let heightfield_start = Instant::now();
@@ -773,6 +773,7 @@ fn build_generation_inputs(
         VoronoiGraphPatch,
         GraphMacroMap,
         GraphHydrologyGraph,
+        RiverPlan,
         BoundaryCache,
     ),
     Box<dyn Error>,
@@ -800,13 +801,14 @@ fn build_generation_inputs(
         },
     );
     let hydrology = solve_hydrology(&patch, &macro_map, Default::default());
+    let river_plan = generate_river_plan(&patch, &macro_map, &hydrology);
     let boundary = generate_noisy_boundaries(
         &patch,
         &macro_map,
         BoundaryConfig::new(meta.seed, meta.generator_version),
     );
 
-    Ok((patch, macro_map, hydrology, boundary))
+    Ok((patch, macro_map, hydrology, river_plan, boundary))
 }
 
 fn required_padding_regions(
@@ -827,7 +829,7 @@ fn build_macro_field_tile(
     window: PreviewWindow,
     patch: &VoronoiGraphPatch,
     macro_map: &GraphMacroMap,
-    hydrology: &GraphHydrologyGraph,
+    river_plan: &RiverPlan,
     boundary: &BoundaryCache,
 ) -> MacroFieldTile {
     let sample_spacing = window.sample_spacing();
@@ -839,7 +841,7 @@ fn build_macro_field_tile(
         sample_spacing,
     );
 
-    generate_macro_field_tile(patch, macro_map, hydrology, boundary, config)
+    generate_macro_field_tile(patch, macro_map, river_plan, boundary, config)
 }
 
 fn chunk_range_for_window(window: PreviewWindow) -> (i32, i32, i32, i32) {

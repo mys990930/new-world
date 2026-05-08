@@ -7,6 +7,7 @@ pub mod hydrology;
 pub mod macro_field;
 pub mod macro_map;
 pub mod pipeline;
+pub mod river_plan;
 
 // Legacy generation remains available through `world::generation::*` until the
 // graph-first pipeline replaces the current runtime generator entrypoints.
@@ -86,4 +87,9 @@ pub use macro_map::{
 pub use pipeline::{
     ColumnSynthesisRequest, ColumnSynthesisSample, GRAPH_GENERATION_STAGES, GraphGenerationStage,
     GraphWorldGenerationConfig, graph_generation_stages,
+};
+#[allow(unused_imports)]
+pub use river_plan::{
+    RiverChain, RiverChainId, RiverPlan, RiverPlanStats, RiverReach, RiverReachId, RiverReachType,
+    RiverSegmentPlan, generate_river_plan,
 };

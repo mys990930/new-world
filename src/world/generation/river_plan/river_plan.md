@@ -205,8 +205,15 @@ diagnostic overlay로 볼 수 있어야 한다.
 
 ## 현재 구현 상태
 
-- 아직 구현되지 않은 문서 전용 단계다.
-- 현재 river morphology 일부는 `macro_field` 내부에서 selected river segment와 flow를 직접 읽어
-  계산하고 있다.
-- 다음 구현 단계에서는 이 책임을 `river_plan`으로 옮기고, `macro_field`는 broad valley guide를
-  소비하는 쪽으로 단순화한다.
+- `src/world/generation/river_plan/mod.rs`가 `pub mod river_plan`으로 연결되어 있다.
+- `generate_river_plan(&VoronoiGraphPatch, &GraphMacroMap, &GraphHydrologyGraph) -> RiverPlan`은
+  hydrology selected river segment를 새로 만들거나 제거하지 않고, downstream node 관계를 따라
+  chain/reach와 per-segment morphology table을 만든다.
+- `RiverReachType`은 `Headwater`, `Upper`, `Middle`, `Lower`, `Trunk`, `LakeInlet`, `LakeOutlet`을
+  구분한다. lake inlet/outlet reach는 hydrology의 lake marker node를 읽고, lake capacity가 적용된
+  selected/display discharge를 우선해 broad valley와 bed hint를 보수적으로 cap한다.
+- per-segment plan은 broad valley width/depth와 narrow bed width/depth, bank transition,
+  floodplain hint를 분리해 제공한다.
+- `macro_field`는 이제 selected river segment flow를 직접 morphology로 번역하지 않고 `RiverPlan`의
+  broad valley parameter를 rasterize한다. narrow bed width/depth는 macro field sample과 preview
+  metadata에 hint로 보존하며 combined macro height에는 broad valley만 주로 반영한다.
