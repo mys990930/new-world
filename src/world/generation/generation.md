@@ -158,10 +158,7 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - 기본 amplitude는 4K topdown preview에서 식별 가능해야 하며, 너무 짧은 edge를 제외한 curve가
      거의 직선으로 남으면 회귀다.
    - coast/ridge/fault/lake/ordinary boundary 차이는 curve 존재 여부가 아니라 profile/amplitude/constraint parameter에 반영한다.
-   - river는 별도 noisy curve를 만들지 않는다. hydrology selected segment는 edge id path이며,
-     boundary stage의 canonical noisy geometry는 topology/corridor reference로 남는다. 실제
-     macro_field carve 외곽은 stage 9에서 이 path를 chain-level river spline/corridor로 다시
-     해석할 수 있다.
+   - river는 별도 noisy curve를 만들지 않는다. hydrology selected segment는 edge id path이며, preview, heightfield, water corridor는 해당 edge id의 canonical noisy geometry를 따라간다.
    - lake boundary/internal/lake-adjacent edge에도 noisy curve는 존재하지만, selected river segment가 해당 edge를 타는 것은 계속 금지된다.
 9. graph guide, hydrology, final cell context, noisy boundary를 합쳐 macro field tile을 rasterize한다.
    - 이 단계는 noise map 생성이 아니라 graph-derived signed distance / influence field cache 생성이다.
@@ -180,11 +177,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      material policy가 읽는 distance/mask다.
    - ridge influence는 ridge edge가 산맥 local maxima guide라는 사실을 heightfield로 옮기기 위한
      distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
-   - river valley field는 selected hydrology segment의 graph topology를 읽어 chain-level river
-     spline/corridor로 변환한 뒤 anti-aliased thick polyline corridor로 구운 coverage/strength,
-     nearest distance, flow를 저장한다. 강을 별도 boundary noise curve로 다시 만들지 않지만, bend에서
-     noisy Voronoi edge capsule union이 둥근 blob처럼 부푸는 것을 피하기 위해 carve source geometry는
-     hydrology chain/corner anchor 기반 derived spline을 사용한다.
+   - river valley field는 selected hydrology segment가 참조하는 canonical noisy edge를 anti-aliased
+     thick polyline corridor로 구운 coverage/strength, nearest distance, flow를 저장한다. 강을 별도
+     noise curve로 다시 만들지 않는다.
    - river valley field는 고정 폭으로 모든 강을 칠하지 않는다. selected/display flow가 작은 상류는
      좁고 얕은 carve guide를 만들고, flow가 큰 하류 trunk에서만 넓고 깊은 carve guide를 만든다.
    - river valley profile은 V자 center carve 하나가 아니라 flat-bottom + shoulder falloff 구조다.
@@ -295,17 +290,14 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
 - stage 8 boundary: graph/macro annotation과 final cell context를 읽어 모든 Voronoi edge의 deterministic canonical noisy
   curve layer를 만든다. 구현은 Amit식 noisy edge 원칙을 따라 하나의 Voronoi edge의 두 corner와 두
   site center가 만드는 guard 안에서 midpoint displacement polyline을 생성한다. raw graph topology는
-  그대로 남고, selected river는 별도 river curve를 만들지 않는다. boundary curve는 river topology와
-  corridor reference로 쓰이며, stage 9의 carve shape는 hydrology chain/corner anchor에서 만든 derived
-  river spline/corridor로 해석될 수 있다.
+  그대로 남고, selected river는 별도 river curve가 아니라 hydrology segment의 edge id가 가리키는
+  canonical curve를 따라 preview/heightfield에서 해석된다.
 - stage 9 macro field: graph/macro/hydrology/final-cell-context/boundary cache를 읽어 tile 단위 raster field를 만든다.
   이 field는 새 noise source가 아니라 heightfield와 chunk fill이 읽을 cache다. macro elevation,
   coast/lake/ocean/dry basin mask, ridge/fault influence, river valley, final biome influence,
   combined macro height는 각각
   독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
   직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
-  river valley는 selected edge topology를 보존하되, visible carve corridor는 chain-level spline,
-  chain-direction flow smoothing, curvature-aware width scale을 사용해 sharp bend의 round blob을 줄인다.
 - stage 12 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
   meso/perlin delta는 아직 `0`인 stub이며, macro field contour step과 일관된 band interpolation을
   거친 뒤 integer block height로 snap한다. ocean/lake mask는 water level hint로, river/ridge/dry basin
