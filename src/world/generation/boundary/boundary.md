@@ -70,8 +70,9 @@ NoisyBoundaryCurve {
 불변식은 `macro_map.edges.len() == boundary.curves.len()`이다. downstream stage는 coast, ridge,
 fault, lake shore를 새 curve로 다시 만들지 않고, 각 feature가 참조하는 `VoronoiEdgeId`의
 `NoisyBoundaryCurve`를 읽는다. river도 boundary 전용 noisy curve를 만들지는 않지만, macro_field의
-visible carve corridor는 hydrology chain/corner anchor에서 파생한 spline/corridor일 수 있다. 이때
-canonical noisy edge는 selected topology와 corridor reference로 남는다.
+visible carve corridor는 selected segment의 canonical noisy curve shape를 가능한 유지하고 단순
+downstream join 주변만 별도 transition patch로 보강할 수 있다. 이때 canonical noisy edge는 selected
+topology와 segment-internal carve reference로 남는다.
 
 ---
 
@@ -101,11 +102,11 @@ hydrology의 `GraphRiverSegment`는 selected edge id path다. boundary 단계는
 river curve를 만들지 않는다. preview overlay와 topology/corridor reference는 river segment의 `edge`
 id로 `BoundaryCache.curve_for_edge(edge)`를 찾는다.
 
-단, macro_field의 valley carve shape는 canonical noisy edge polyline을 그대로 centerline으로 굽는
-것으로 고정하지 않는다. bend에서 thick capsule union이 둥근 blob처럼 부푸는 문제를 줄이기 위해,
-macro_field는 selected segment topology를 chain 단위로 읽고 drainage node/corner anchor를 통과하는
-derived river spline/corridor를 만들 수 있다. 이 spline은 selected graph path에서 과하게 벗어나면
-안 되며, boundary cache는 여전히 raw topology와 visible boundary reference를 소유한다.
+macro_field의 valley carve shape는 각 selected segment 내부에서는 canonical noisy edge polyline을
+downstream 방향 source로 사용한다. 단 segment와 segment가 단순 downstream path로 만나는 공통 node
+주변에서는 thick stroke union이 둥근 blob처럼 부풀거나 뚝 끊겨 보이지 않도록 짧은 transition patch를
+추가할 수 있다. 이 patch는 node 주변 제한 반경 안에 머물러야 하며, boundary cache는 여전히 raw
+topology와 visible boundary reference를 소유한다.
 
 lake rule은 그대로 유지한다.
 
@@ -207,10 +208,10 @@ curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 w
 - canonical noisy edge: 모든 edge에 존재하는 noisy geometry
 - coast/ridge/fault/lake overlay: 별도 curve가 아니라 해당 edge id의 canonical curve를 따라 그림
 - river overlay: topology reference는 selected edge id의 canonical curve를 사용하되, macro_field
-  river valley/carve channel은 chain-level derived spline/corridor로 보일 수 있다.
+  river valley/carve channel은 단순 downstream join에만 짧은 transition patch가 덧붙은 형태로 보일 수 있다.
 - river topology/flow overlay: hydrology selected/display `flow_accumulation`을 사용하되 topology
   reference는 `BoundaryCache.curve_for_edge(segment.edge)`를 사용한다. macro_field의 carve channel은
-  이 reference를 바탕으로 별도 derived spline/corridor를 표시할 수 있다.
+  이 reference를 segment source로 쓰고, 단순 join transition patch만 추가할 수 있다.
 
 PNG metadata에는 total curve count, profile별 count, guard violation count, missing macro edge count,
 평균/최대 amplitude block, 현재 preview scale에서의 평균/최대 pixel displacement, nearly-straight
@@ -241,8 +242,8 @@ curve가 없으므로 boundary stats의 책임이 아니다. river/lake 접촉 �
 1. 모든 macro Voronoi edge는 canonical noisy curve를 하나 가진다.
 2. raw Voronoi edge가 그대로 직선 river/coast/biome boundary로 보이면 안 된다.
 3. river는 별도 noisy curve를 만들지 않는다. selected edge id path는 canonical noisy geometry를
-   topology/corridor reference로 사용하고, macro_field carve shape는 별도 derived spline/corridor로
-   해석될 수 있다.
+   topology/corridor reference와 segment-internal carve source로 사용하고, macro_field carve shape는
+   단순 downstream join 주변만 제한된 transition patch로 보강할 수 있다.
 4. noisy boundary는 raw graph topology를 대체하지 않는다.
 5. noisy point는 edge guard 영역 밖으로 나가거나 이웃 edge와 교차하면 안 된다.
 6. 같은 edge id, seed, profile은 같은 curve를 만들어야 한다.

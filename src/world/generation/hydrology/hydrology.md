@@ -28,7 +28,7 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 - base noise heightfield 생성
 - final voxel channel carve
 - sediment 또는 surface material 선택
-- noisy river spline curve 생성
+- noisy river carve geometry 생성
 - live world storage mutation
 
 ---
@@ -201,10 +201,13 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   confluence geometry로 표현하기 전까지는 여러 headwater가 같은 trunk vertex에 따로 붙는 형태보다
   가장 큰 selected branch 하나를 남기는 쪽을 우선한다.
 
-최종 river geometry는 raw edge segment가 아니다.
+최종 river geometry는 hydrology가 직접 생성하지 않는다. hydrology는 selected edge topology와 flow
+ledger를 제공하고, macro_field가 boundary의 canonical noisy curve를 읽어 segment별 carve source와
+join-local transition patch를 만든다.
 
-- edge chain을 spline으로 잇는다.
-- edge guard quadrilateral 안에서 noisy line을 만든다.
+- selected edge id와 downstream direction을 유지한다.
+- segment 내부 shape는 boundary의 canonical noisy curve를 참조하고, 단순 join smoothing은 downstream
+  stage에서 제한적으로 처리한다.
 - river width, floodplain, gravel bar, wetland는 flow와 local slope에 따라 조절한다.
 - lake terminal/inlet river의 width는 raw accumulation이 아니라 lake capacity가 적용된 selected
   discharge를 우선 사용한다. raw flow는 hydrology ledger와 inlet threshold 판정에 남고, display flow는
@@ -281,7 +284,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 5. selected river path는 generation order와 chunk order에 독립적이어야 한다.
 6. Perlin 이후 micro depression은 macro river routing을 새로 정의하지 않는다.
 7. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
-8. final river geometry는 raw straight edge가 아니라 spline/domain-warped realization을 사용해야 한다.
+8. final river geometry는 raw straight edge가 아니라 boundary canonical noisy curve와 downstream
+   join transition을 읽는 realization을 사용해야 한다.
 9. lake terminal/inlet river는 lake 면적/capacity에 비례해서 선택되어야 한다. 큰 lake는 더 큰
    raw inlet feeder를 요구하고 더 큰 selected/display discharge를 허용하지만, raw accumulation이 커도
    selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
@@ -329,4 +333,4 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   표면으로 취급한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
-  noisy river spline realization, valley carve와 heightfield coupling.
+  더 정교한 river bank/floodplain realization, valley carve와 heightfield coupling.
