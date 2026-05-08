@@ -834,7 +834,7 @@ fn macro_field_sample_from_context(
         continentality,
         coastness,
         mountainness,
-        basinness,
+        ridgeness,
     );
     let biome = classify_graph_biome(biome_context);
 
@@ -859,7 +859,7 @@ fn graph_biome_context(
     continentality: f32,
     coastness: f32,
     mountainness: f32,
-    basinness: f32,
+    ruggedness: f32,
 ) -> GraphBiomeContext {
     GraphBiomeContext {
         temperature: fields.temperature,
@@ -868,7 +868,7 @@ fn graph_biome_context(
         continentality,
         coastness,
         mountainness,
-        basinness,
+        ruggedness,
         water_role: graph_biome_water_role(surface_kind, signed_macro_elevation, coastness),
     }
     .clamped()
@@ -1860,6 +1860,10 @@ mod tests {
             map.biome(site.id)
                 .is_some_and(|biome| biome.site == site.id && biome.context.coastness.is_finite())
         }));
+        assert!(map.sites.iter().all(|site| {
+            map.biome(site.id)
+                .is_some_and(|biome| (biome.context.ruggedness - site.ridgeness).abs() <= 0.000_001)
+        }));
         assert!(
             map.biomes.iter().any(|biome| matches!(
                 biome.biome,
@@ -1942,6 +1946,11 @@ mod tests {
                     assert!(
                         biome.context.mountainness >= 0.56,
                         "AlpineMeadow should keep mountain context: {:?}",
+                        biome.context
+                    );
+                    assert!(
+                        biome.context.ruggedness >= 0.42,
+                        "AlpineMeadow should keep rugged mountain context: {:?}",
                         biome.context
                     );
                 }

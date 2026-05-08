@@ -133,7 +133,7 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - 이 단계는 elevation, water proximity, rain shadow, hydrology role을 반영해 final temperature,
      hydration, biome influence를 확정한다.
    - 여기서 말하는 elevation은 final heightfield가 아니라 graph/macro 단계의 signed macro elevation,
-     coast distance, basinness, ridge/mountainness context, hydrology-selected drainage context다.
+     coast distance, ridge/mountainness/ruggedness context, hydrology-selected drainage context다.
    - water proximity는 ocean/coast, lake/wetland, selected river corridor, dry/closed basin을 같은
      water mask로 뭉개지 않고 별도 role로 반영한다.
    - rain shadow는 prevailing wind, mountain/ridge guide, macro elevation gradient, watershed context를

@@ -58,6 +58,10 @@ GraphBiomeKind
 
 The preview does not classify core biome policy itself. `macro_map` owns the graph biome context and
 calls `classify_graph_biome(...)`; this binary only colors the returned cells.
+The returned biome already reflects the final cell context that the core classifier exposes, including
+temperature, hydration, continentality, elevation, water role, coastness, mountainness, and ruggedness.
+Preview metadata intentionally records the resolved biome counts rather than intermediate classifier
+inputs.
 
 ## Output Path Rules
 

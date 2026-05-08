@@ -48,8 +48,9 @@
   - `elevation`: resolved macro elevation context, lowland water/green through upland and snow colors
 - `--mode biome` emits one PNG colored by resolved `GraphBiomeKind`, including shallow/deep ocean,
   coast, lake, wetland, dry basin, cold, forest, tropical, dry, and alpine variants.
-- graph-only diagnostic modes remain useful where they do not claim final climate/biome meaning:
-  - `ruggedness`: flat to rough, green/yellow through rock gray
+- final context modes also include terrain-shape inputs that affect biome selection:
+  - `ruggedness`: flat to rough, green/yellow through rock gray; this helps explain why
+    rugged/coastal or mountain-sensitive biome rules may fire
 - `--mode all` emits `identity`, `temperature`, `hydration`, `biome`, `continentality`, `elevation`, and `ruggedness` PNG files in an output directory.
 - each PNG includes a compact legend overlay in one corner:
   - identity mode shows a small map label/header only
@@ -87,8 +88,10 @@
 
 The temperature, hydration, continentality, elevation, and biome modes read the final cell context /
 classification from `GraphMacroMap.biomes`. They fall back to graph base fields only if a biome context is
-missing, which should be treated as a diagnostic fallback rather than normal output. Ruggedness remains a
-site-level graph roughness seed until a later terrain stage derives a richer roughness field.
+missing, which should be treated as a diagnostic fallback rather than normal output. Biome output is always
+the resolved final `GraphBiomeKind` from the core classifier; preview code does not duplicate coast,
+continental, dry, wetland, alpine, or ruggedness policy. Ruggedness mode also reads final biome context
+when present, then falls back to the graph roughness seed only if that context is missing.
 
 Identity mode still uses nearest-site raster color fill because it is useful for inspecting site ownership.
 The overlaid edges are the source-of-truth Delaunay/circumcenter Voronoi dual topology, so the darkened

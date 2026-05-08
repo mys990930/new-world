@@ -265,9 +265,9 @@ impl PreviewMode {
             Self::Temperature => "final cell temperature",
             Self::Hydration => "final cell hydration",
             Self::Biome => "resolved graph biome",
-            Self::Continentality => "site continentality",
-            Self::Elevation => "site elevation bias",
-            Self::Ruggedness => "site ruggedness",
+            Self::Continentality => "final cell continentality",
+            Self::Elevation => "final cell elevation",
+            Self::Ruggedness => "final cell ruggedness",
         }
     }
 
@@ -974,9 +974,13 @@ fn color_for_site(site: VoronoiSite, biome: Option<GraphBiomeCell>, mode: Previe
                     .unwrap_or(site.base_fields.elevation_seed),
             ),
         ),
-        PreviewMode::Ruggedness => {
-            gradient_color_for_mode(PreviewMode::Ruggedness, site.ruggedness.clamp(0.0, 1.0))
-        }
+        PreviewMode::Ruggedness => gradient_color_for_mode(
+            PreviewMode::Ruggedness,
+            biome
+                .map(|biome| biome.context.ruggedness)
+                .unwrap_or(site.ruggedness)
+                .clamp(0.0, 1.0),
+        ),
     }
 }
 

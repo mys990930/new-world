@@ -122,8 +122,8 @@ selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source 
 `GraphMacroMap.biomes`는 site id별 final cell biome context와 classification을 가진다. 이
 classification은 macro_map 끝에서 생성되어 macro_field가 nearest site의 biome 의미를 함께 전달할 수
 있게 한다. Oceanic은 단일 biome으로 남기지 않고 `ShallowOcean`과 `DeepOcean`으로 분리한다.
-land biome classification은 graph temperature/hydration, signed macro elevation, coastness,
-mountainness, basinness를 읽되 water/coast/lake/wetland/dry-basin role이 climate-only class보다
+land biome classification은 graph temperature/hydration, signed macro elevation, continentality,
+coastness, mountainness, ridgeness-derived ruggedness를 읽되 water/coast/lake/wetland/dry-basin role이 climate-only class보다
 우선한다. Temperate grassland와 hot dry/wet tropical classes가 사라지지 않도록 bounded seed
 distribution test로 확인한다.
 

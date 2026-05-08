@@ -126,6 +126,9 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 - Notes:
   - Field-map modes read resolved `GraphMacroMap.biomes` context when available and fall back to
     smoothed `VoronoiSite::base_fields` only as a diagnostic fallback.
+  - Biome mode colors the resolved final `GraphBiomeKind`; the core classifier owns how final
+    temperature, hydration, continentality, elevation, water role, coastness, mountainness, and
+    ruggedness influence that result.
   - `--mode biome` colors every detailed `GraphBiomeKind` variant with a distinct palette and
     includes a compact two-column legend.
   - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
