@@ -5,7 +5,7 @@
 `pipeline`은 graph-first world generation의 stage order와 column synthesis scaffold를 정의한다.
 
 이 모듈은 새 파이프라인이 legacy generator를 대체하기 전까지 compile-time stage contract를
-제공한다. 실제 stage 구현은 `graph`, `macro_map`, `hydrology`, `boundary`, `field`,
+제공한다. 실제 stage 구현은 `graph`, `macro_map`, `hydrology`, `river_plan`, `boundary`, `field`,
 `macro_field`, `meso_feature`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
 
 ---
@@ -39,15 +39,16 @@
 4. ridge/fault guide selection
 5. coast edge guide selection
 6. hydrology solve
-7. final cell context / climate / hydration / biome resolve
-8. noisy boundary realization
-9. macro field rasterization
-10. meso feature planning
-11. Perlin micro relief
-12. heightfield and water surface
-13. surface plan
-14. vegetation plan
-15. voxel fill
+7. river realization / river plan
+8. final cell context / climate / hydration / biome resolve
+9. noisy boundary realization
+10. macro field rasterization
+11. meso feature planning
+12. Perlin micro relief
+13. heightfield and water surface
+14. surface plan
+15. vegetation plan
+16. voxel fill
 
 pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜야 한다.
 
@@ -60,13 +61,16 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - ridge/fault edge guide와 coast edge guide는 hydrology보다 먼저다. mountainness/rugged context는 이 guide를 고르는 입력이다.
 - hydrology는 final heightfield와 voxel fill보다 먼저다.
 - hydrology는 potential river guide가 아니라 selected river chain, flow accumulation, lake/sink/outlet resolution을 만든다.
+- river plan은 hydrology 이후에 selected river chain을 terrain morphology parameter로 번역한다.
+  hydrology가 “어디로 흐르는가”를 결정한다면, river plan은 “이 reach가 얼마나 넓고 깊은 valley와
+  bed를 가져야 하는가”를 결정한다.
 - final cell context는 macro signed elevation, water proximity, rain shadow, selected hydrology role을 읽어
   final temperature, hydration, biome influence, optional dominant biome id를 제공한다.
 - biome은 macro_field보다 먼저 resolve된다. macro_field는 biome을 새로 결정하지 않고 final cell
   context를 raster/cache 가능한 sample channel이나 downstream hint로 보존한다.
 - noisy boundary는 모든 Voronoi edge의 canonical geometry layer이며 raw graph topology를 대체하지 않는다.
   river는 별도 noisy curve를 만들지 않고 selected edge id path가 이 canonical geometry를 따른다.
-- macro field rasterization은 graph/macro/hydrology/final-cell-context/boundary 결과를 heightfield와 chunk sampling이
+- macro field rasterization은 graph/macro/hydrology/river-plan/final-cell-context/boundary 결과를 heightfield와 chunk sampling이
   빠르게 읽을 수 있는 graph-derived signed distance / influence field cache로 굽는 중간 layer다.
   이 단계는 새 noise source가 아니며, source of truth는 앞 단계의 vector/graph annotation에 남아 있다.
 - meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.
@@ -87,6 +91,7 @@ path는 이미 계산된 world-owned generation cache를 읽어 column/voxel 결
 graph region cache
 -> macro map cache
 -> hydrology cache
+-> river plan cache
 -> final cell context cache
 -> boundary cache
 -> macro field tile cache
@@ -115,6 +120,8 @@ miss에서만 worker thread가 수행한다.
 - `GraphRegionCache`: site/corner/edge topology와 base graph field
 - `MacroMapCache`: continent/ocean/island ownership, signed macro elevation, ridge/fault/coast guide
 - `HydrologyCache`: selected river chain, watershed, lake/sink/outlet resolution
+- `RiverPlanCache`: selected river chain의 downstream progress, reach type, broad valley와 narrow
+  river bed parameter
 - `FinalCellContextCache`: final temperature, hydration, hydrology role, water proximity, rain shadow,
   biome influence, optional dominant biome id
 - `BoundaryCache`: 모든 graph edge id에 대한 canonical noisy polyline/spline
@@ -127,8 +134,8 @@ miss에서만 worker thread가 수행한다.
 
 `MacroFieldTileCache`는 chunk fill hot path의 graph query 반복을 막기 위한 cache canvas다. chunk
 column sampler는 nearest graph edge, noisy curve distance, lake containment, ridge envelope,
-river distance를 직접 반복 계산하지 않고, macro field tile의 sample 값을 읽는다. tile cache miss는
-worker에서 graph/macro/hydrology/final-cell-context/boundary cache를 입력으로 rasterize한다.
+river plan guide distance를 직접 반복 계산하지 않고, macro field tile의 sample 값을 읽는다. tile cache miss는
+worker에서 graph/macro/hydrology/river-plan/final-cell-context/boundary cache를 입력으로 rasterize한다.
 
 ridge/coast/river influence는 tile cache miss에서 curve source를 rasterize하고 distance/influence
 field로 전파한다. 따라서 chunk fill이나 preview render loop는 selected river/ridge/coast curve의
@@ -141,8 +148,9 @@ macro field tile의 기본 channel은 아래를 포함해야 한다.
 - macro elevation: signed macro elevation을 noisy boundary 기준으로 연속 샘플링한 큰 지형 높이
 - coast/lake/ocean/dry basin mask: water ownership과 shoreline/lake flatten이 읽는 mask/distance
 - ridge/fault influence: ridge/fault guide edge의 canonical noisy curve 주변 envelope
-- river valley: selected hydrology segment의 noisy curve 주변 distance, flow, carve strength
-- combined macro height: macro elevation, ridge raise, river carve, coast/lake flatten을 합성한 pre-Perlin height
+- river valley: river plan의 broad valley parameter를 rasterize한 distance/flow/carve strength와,
+  heightfield/water가 읽을 narrow bed hint
+- combined macro height: macro elevation, ridge raise, broad river valley, coast/lake flatten을 합성한 pre-Perlin height
 
 heightfield cache는 macro field 이후에 생성된다. launch vertical slice에서는 meso feature plan과
 Perlin micro relief를 아직 실행하지 않고 `meso_delta = 0`, `micro_relief = 0`으로 둔다. 이 상태에서도

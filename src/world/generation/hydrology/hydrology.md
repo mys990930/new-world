@@ -7,7 +7,8 @@
 polygon 경계는 river path가 될 수 있는 graph substrate지만, 모든 경계가 강이 되어서는 안 된다.
 hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation, ridge, coast, basin
 정보를 읽어 downhill routing, watershed, selected river segment, lake/outlet 처리를 계산하고,
-이후 heightfield가 valley와 water surface를 알 수 있게 제약을 제공한다.
+이후 `river_plan`이 reach morphology를 정하며 heightfield가 valley와 water surface를 알 수 있게
+제약을 제공한다.
 
 ---
 
@@ -17,7 +18,7 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 - selected graph edge를 headwater, tributary, trunk, floodplain, outlet으로 분류
 - flow accumulation과 downstream progress 유지
 - lake, sink, outlet carve 같은 local minima 처리 계약 정의
-- heightfield와 surface plan이 읽을 valley/water constraint 제공
+- river_plan, heightfield와 surface plan이 읽을 selected river/lake/water constraint 제공
 - macro_map의 `MacroLakeEdgeClass`를 읽어 selected river가 lake internal/boundary/adjacent edge를
   쓰지 않도록 강제
 
@@ -29,6 +30,7 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 - final voxel channel carve
 - sediment 또는 surface material 선택
 - noisy river spline curve 생성
+- reach별 valley width/depth, river bed width/depth, bank/floodplain morphology 결정
 - live world storage mutation
 
 ---
@@ -46,9 +48,8 @@ hydrology 단계는 아래를 계산한다.
 - selected river segment
 - lake inlet/outlet vertex
 - topology validation stats
-- river role: headwater, tributary, trunk, floodplain, outlet
 - downstream progress
-- approximate river width
+- terminal role and selected/display discharge hints for `river_plan`
 - lake level / water surface
 
 Amit의 mapgen2에서는 mountain corner에서 시작해 downhill 방향을 따라 ocean까지 강을 흘렸고,
@@ -136,7 +137,8 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
      tree는 제거한다. 이렇게 해서 flow accumulation 원장은 합류를 보존하되, selected river overlay는
      별도 강줄기가 같은 꼭짓점을 공유하며 겹쳐 보이지 않게 한다.
 10. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
-11. final heightfield가 river corridor를 알고 생성되도록 valley constraint를 제공한다.
+11. `river_plan`이 reach morphology를 만들 수 있도록 selected river segment, flow, downstream
+    progress, lake/sink/outlet terminal role을 제공한다.
 
 launch 구현은 아래의 보수적인 정책을 사용한다.
 
@@ -201,15 +203,18 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   confluence geometry로 표현하기 전까지는 여러 headwater가 같은 trunk vertex에 따로 붙는 형태보다
   가장 큰 selected branch 하나를 남기는 쪽을 우선한다.
 
-최종 river geometry는 raw edge segment가 아니다.
+최종 river morphology는 hydrology가 직접 만들지 않는다.
 
-- edge chain을 spline으로 잇는다.
-- edge guard quadrilateral 안에서 noisy line을 만든다.
-- river width, floodplain, gravel bar, wetland는 flow와 local slope에 따라 조절한다.
-- lake terminal/inlet river의 width는 raw accumulation이 아니라 lake capacity가 적용된 selected
-  discharge를 우선 사용한다. raw flow는 hydrology ledger와 inlet threshold 판정에 남고, display flow는
-  lake area에 비례한 cap을 통과한 값이다.
-- confluence는 각진 snapping이 보이지 않도록 downstream smoothing을 적용한다.
+- hydrology edge chain은 river topology다.
+- `river_plan`은 selected chain의 downstream progress와 selected/display discharge를 읽어
+  `headwater`, `upper`, `middle`, `lower`, `trunk`, `lake inlet/outlet` 같은 reach type을 정한다.
+- river width, broad valley, bed depth, bank/floodplain parameter는 `river_plan`이 flow와 local
+  role에 따라 결정한다.
+- lake terminal/inlet river의 morphology는 raw accumulation이 아니라 lake capacity가 적용된 selected
+  discharge와 lake terminal role을 우선 사용한다. raw flow는 hydrology ledger와 inlet threshold 판정에
+  남고, display flow는 lake area에 비례한 cap을 통과한 값이다.
+- confluence smoothing이나 visible river axis 조정은 hydrology가 아니라 `river_plan` 또는 downstream
+  field/heightfield stage의 책임이다.
 
 ---
 
@@ -281,7 +286,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 5. selected river path는 generation order와 chunk order에 독립적이어야 한다.
 6. Perlin 이후 micro depression은 macro river routing을 새로 정의하지 않는다.
 7. river, lake, ocean, wetland는 같은 water mask로 뭉개지지 않고 의미가 구분되어야 한다.
-8. final river geometry는 raw straight edge가 아니라 spline/domain-warped realization을 사용해야 한다.
+8. final river morphology는 raw straight edge를 직접 terrain carve로 쓰지 않고, `river_plan`의
+   reach morphology를 거쳐야 한다.
 9. lake terminal/inlet river는 lake 면적/capacity에 비례해서 선택되어야 한다. 큰 lake는 더 큰
    raw inlet feeder를 요구하고 더 큰 selected/display discharge를 허용하지만, raw accumulation이 커도
    selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
@@ -329,4 +335,4 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   표면으로 취급한다.
 - preview는 `macro_map_preview` composite 위에 selected river, lake/sink/outlet node를 overlay한다.
 - 아직 구현되지 않은 것: lazy downstream portal의 region 간 persistence, lake water level solve,
-  noisy river spline realization, valley carve와 heightfield coupling.
+  river plan realization, valley carve와 heightfield coupling.

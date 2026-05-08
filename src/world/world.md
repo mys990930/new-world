@@ -66,9 +66,10 @@
 
 - graph region, site, corner, edge id와 patch
 - graph base `continentality/elevation_seed`와 macro ownership/elevation resolve annotation
-- graph region cache, macro map cache, hydrology/boundary/macro field/heightfield cache key와 cached stage output
+- graph region cache, macro map cache, hydrology/river-plan/final-cell-context/boundary/macro field/heightfield cache key와 cached stage output
 - continuous blended field sample
 - hydrology watershed, drainage node, river segment
+- river plan chain/reach morphology, broad valley parameter, river bed hint
 - generation stage, generation config, column synthesis request/result
 
 ---
@@ -153,6 +154,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/graph/graph.md`: Voronoi graph ownership과 graph-region coordinate 계약
 - `generation/macro_map/macro_map.md`: 대륙/바다, macro elevation, ridge/fault/coast guide와 mountainness/rugged context
 - `generation/hydrology/hydrology.md`: graph-first watershed, river, lake, local minima 계약
+- `generation/river_plan/river_plan.md`: selected river를 reach morphology와 broad valley / narrow bed plan으로 번역하는 계약
 - `generation/boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry
 - `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
@@ -182,6 +184,9 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   macro_map은 독자 continent/island noise source를 만들지 않는다.
 - 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
   flow accumulation, selected river segment scaffold를 제공한다.
+- `river_plan`은 문서 전용 단계로 추가되었으며, hydrology selected river를 reach type, broad valley,
+  narrow bed hint로 번역하는 책임을 소유한다. 현재 구현은 아직 `macro_field` 내부 river influence가
+  일부 morphology 계산을 직접 수행한다.
 - 현재 `heightfield` leaf는 `MacroFieldTile`을 column-oriented heightfield cache로 변환하는 vertical
   slice를 제공한다. meso feature와 Perlin micro relief는 아직 `0` stub이다.
 - 아직 구현되지 않은 것: Perlin micro relief 실제 합성, final surface/material resolve, voxel fill 연결.

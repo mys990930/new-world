@@ -2,10 +2,10 @@
 
 ## 역할
 
-`heightfield`는 graph-first generator의 12단계인 heightfield / water surface 합성 계약을 소유한다.
+`heightfield`는 graph-first generator의 13단계인 heightfield / water surface 합성 계약을 소유한다.
 
-현재 구현은 vertical slice다. stage 9 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
-heightfield cache로 바꾸며, stage 10 meso feature와 stage 11 Perlin micro relief는 아직 값을 더하지
+현재 구현은 vertical slice다. stage 10 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
+heightfield cache로 바꾸며, stage 11 meso feature와 stage 12 Perlin micro relief는 아직 값을 더하지
 않는 stub으로 둔다.
 
 ```text
@@ -32,7 +32,7 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 - `MacroFieldTile` sample을 world-space column으로 변환한다.
 - `combined_macro_height`를 block-space surface height로 매핑한다.
 - ocean/lake mask에서 water level과 water column hint를 만든다.
-- river valley, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
+- river valley, river bed hint, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
 - meso/perlin stub 값이 0임을 데이터와 문서에 명시한다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
@@ -137,10 +137,10 @@ macro height는 `-0.5..0.0` 범위에서 `-1024..0` block으로, 양수 macro he
 세로 비율을 속이는 것이 아니라, macro field contour 추출과 heightfield band resolve가 같은
 block-height domain을 공유한다.
 
-`combined_macro_height`는 이미 macro elevation, ridge raise, river valley carve, coast/lake flatten을
-합친 pre-Perlin 값이다. 따라서 heightfield stage는 river carve를 다시 강하게 중복 적용하지 않는다.
-river 정보는 water hint와 terrain kind hint로 보존하고, 실제 channel carve/water body 폭은 후속
-surface/voxel 단계에서 확정한다.
+`combined_macro_height`는 이미 macro elevation, ridge raise, broad river valley, coast/lake flatten을
+합친 pre-Perlin 값이다. 따라서 heightfield stage는 river channel carve를 다시 강하게 중복 적용하지 않는다.
+river plan에서 온 narrow river bed 정보는 water hint와 terrain kind hint로 보존하고, 실제
+channel carve/water body 폭은 후속 surface/voxel 단계에서 확정한다.
 
 입력 `MacroFieldTile`은 sea-level aligned coastal ramp를 제공해야 한다. 즉 connected ocean coast의
 land-side scalar는 `0` 근처에서 시작하고 내륙으로 갈수록 회복되어야 한다. heightfield는 이 원천
@@ -180,8 +180,8 @@ block-height가 `step_blocks + min_gap_blocks`, 즉 기본 2 blocks만큼 진행
 
 현재 기본값에서는 일반 land와 river corridor가 모두 1-block minimum gap을 사용한다. 다만
 `river_min_gap_blocks` 필드는 유지한다. 이후 일반 land gap을 다시 넓히더라도 river corridor와
-river-adjacent carve 영역은 hydrology/macro_field가 제공한 selected river valley strength와 display
-flow hint를 읽어 더 작은 gap으로 override할 수 있어야 하기 때문이다. final river routing을
+river-adjacent carve 영역은 river_plan/macro_field가 제공한 selected river bed hint, valley strength,
+display flow hint를 읽어 더 작은 gap으로 override할 수 있어야 하기 때문이다. final river routing을
 heightfield에서 다시 풀지는 않는다.
 smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다. raw continuous height는
 `raw_surface_height_blocks`와 `combined_macro_height`에 남지만 final terrain surface 결정에는 직접 쓰지 않는다.
@@ -203,10 +203,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   단위로만 올라간다.
 - water-adjacent safety pass는 ocean/lake 같은 standing water만 기준으로 삼는다. river water hint를
   shoreline ocean/lake ramp 기준으로 사용하지 않는다.
-- `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있다. river column은
+- `river_valley_strength >= river_water_threshold`이거나 river bed hint가 충분한 column은 `River` hint가 될 수 있다. river column은
   integer river water height를 갖고, 인접 river/standing-water surface와 비교해 한 column 이웃 사이에서
   한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full hydrology
-  water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.
+  water surface solve가 아니라 stage 13 vertical slice용 안전 장치다.
 - dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
 
 ---
@@ -223,7 +223,7 @@ macro field tile cache
 ```
 
 초기 구현에서는 preview binary가 하나의 macro field tile과 heightfield tile을 직접 생성한다. 런타임
-연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/final-cell-context/boundary를
+연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/river-plan/final-cell-context/boundary를
 반복 query하지 않는다.
 
 ---
@@ -298,7 +298,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 3. 모든 height와 mask 값은 finite여야 한다.
 4. water mask가 있는 column은 water level hint를 가져야 한다.
 5. meso/perlin stub 값은 현재 항상 0이다.
-6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/final-cell-context/boundary를 직접 재해석하지 않는다.
+6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/river-plan/final-cell-context/boundary를 직접 재해석하지 않는다.
 7. final column surface/water height는 integer block height로 snap되어야 한다.
 8. coast-adjacent land는 explicit cliff feature가 없는 한 sea level에서 완만히 올라가야 하며, ocean
    water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.

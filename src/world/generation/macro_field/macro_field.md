@@ -2,10 +2,11 @@
 
 ## 역할
 
-`macro_field`는 graph-first generator의 9단계인 Voronoi-derived macro field cache를 소유한다.
+`macro_field`는 graph-first generator의 10단계인 Voronoi-derived macro field cache를 소유한다.
 
 이 모듈은 새 지형 의미를 다시 noise로 생성하지 않는다. source of truth는 앞 단계의
-`VoronoiGraphPatch`, `GraphMacroMap`, `GraphHydrologyGraph`, final cell context, `BoundaryCache`이며, `macro_field`는
+`VoronoiGraphPatch`, `GraphMacroMap`, `GraphHydrologyGraph`, `RiverPlan`, final cell context,
+`BoundaryCache`이며, `macro_field`는
 그 vector/graph 결과를 heightfield, preview, chunk column sampler가 빠르게 읽을 수 있는 raster/scalar
 tile로 굽는다.
 
@@ -17,13 +18,13 @@ tile로 굽는다.
 ## 책임
 
 - tile bounds, resolution, world-space sample spacing 계약 정의
-- macro elevation, water/coast/lake/dry basin mask, ridge influence, river valley field, final cell
+- macro elevation, water/coast/lake/dry basin mask, ridge influence, river valley field, river bed hint, final cell
   context/biome influence channel 정의
 - noisy boundary 이후의 canonical curve geometry를 읽어 ridge/coast/river distance envelope를 계산하되,
   chunk/preview sample마다 모든 curve 후보를 반복 탐색하지 않도록 tile 단위 influence pass를 먼저 만든다.
 - combined macro height를 만들어 heightfield 합성 전의 큰 지형 형태를 제공
 - combined macro height를 block-space로 해석한 contour 진단 layer 제공
-- chunk fill hot path가 graph/macro/hydrology/final-cell-context/boundary를 직접 재탐색하지 않도록 중간 cache surface 제공
+- chunk fill hot path가 graph/macro/hydrology/river-plan/final-cell-context/boundary를 직접 재탐색하지 않도록 중간 cache surface 제공
 - stage preview binary가 각 channel과 combined height를 2D topdown map으로 뽑을 수 있는 데이터 제공
 
 ---
@@ -33,6 +34,7 @@ tile로 굽는다.
 - Voronoi graph 생성
 - macro ownership/elevation resolve
 - hydrology routing 또는 selected river 결정
+- river reach type, broad valley/bed width/depth morphology 결정
 - noisy boundary curve 생성
 - Perlin micro relief 생성
 - final water surface solve
@@ -52,6 +54,7 @@ generate_macro_field_tile(
     &VoronoiGraphPatch,
     &GraphMacroMap,
     &GraphHydrologyGraph,
+    &RiverPlan,
     &BoundaryCache,
     MacroFieldTileConfig,
 ) -> MacroFieldTile
@@ -137,19 +140,20 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 병렬로 채운다.
 
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
-2. ridge, coast, selected river curve를 tile-local influence field로 rasterize한다.
+2. ridge, coast, river plan guide를 tile-local influence field로 rasterize한다.
    - ridge/coast는 launch 성능을 위해 source pixel과 chamfer distance propagation을 계속 사용할 수 있다.
-   - selected river는 source pixel 점열이 아니라 canonical noisy polyline을 anti-aliased thick
-     stroke/corridor로 굽는다. 각 sample cell은 중심점 하나만 보지 않고 subpixel coverage를 읽어
-     flat-bottom + shoulder profile strength를 누적하며, 가까운 segment까지의 실제 거리와 주변 segment의
-     display flow를 함께 보존한다. round된 source point나 segment endpoint cap이 만드는 원형
-     blob/scallop과 segment join 사이 뾰족함이 보이면 회귀다.
+   - river는 stage 7 `RiverPlan`이 제공한 reach별 broad valley parameter와 narrow bed hint를
+     canonical noisy edge geometry 위에 굽는다. macro field가 직접 selected segment를 reach로
+     분류하거나 river path를 새로 고르면 안 된다.
+   - 각 sample cell은 broad valley strength, reach type, display flow, narrow bed hint를 보존한다.
+     combined height에는 broad valley를 주로 반영하고, narrow bed 외곽을 강하게 파서 round source
+     point나 segment endpoint cap이 만드는 원형 blob/scallop이 보이면 회귀다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
 3. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
-   - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 8
+   - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
      `BoundaryCache`의 `NoisyBoundaryCurve`를 따라야 한다.
    - macro elevation은 primary owner의 값을 기준으로 하되 boundary blend band 안에서는 반대편 site
      elevation을 일부 섞어 계단형 단절을 줄인다.
@@ -175,30 +179,30 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      guide/source 진단용으로 유지하지만, ridge raise는 broad mountain elevation model이 들어올 때까지
      disabled/stub 상태다. 기존 narrow ridge envelope가 1블록 등고선 기준에서 pinpoint maxima를 만들어
      contour가 층마다 불연속적으로 튀어 보였기 때문이다.
-7. hydrology selected river segment의 edge id가 가리키는 canonical noisy curve의 anti-aliased thick polyline coverage, distance, selected/display flow로 river valley field를 만든다.
-   - river 전용 noisy curve는 만들지 않는다.
+7. river plan의 reach parameter를 읽어 broad valley field와 narrow bed hint를 만든다.
+   - river 전용 noisy curve나 새 river topology를 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
-   - river valley width, flat-bed radius, depth는 모두 selected/display flow에서 파생한다. launch
-     기본 정책은 `flow_hint = clamp(sqrt(flow_accumulation) / 32, 0, 1)`을 만들고, outer valley
-     radius는 대략 `28..176` blocks, flat-bed radius는 대략 `3.5..56` blocks 범위에서 flow에 따라
-     커진다. 중심부는 즉시 V자로 떨어지지 않고 일정 depth를 유지하는 flat-bottom profile이며,
-     flat-bed 밖 shoulder에서 smooth falloff로 완만하게 원래 지형으로 회복한다. carve depth는 과도한
-     canyon을 피하기 위해 `0.12..0.68` 계열로 capped된다. 따라서 상류는 좁고 얕되 칼같은 V가 아니고,
-     하류 trunk는 더 넓고 평평한 강바닥과 완만한 어깨를 가져야 한다.
+   - macro_field가 combined height에 강하게 반영하는 값은 좁은 river bed가 아니라 broad valley다.
+     broad valley width/depth는 reach type과 selected/display flow에서 파생한다.
+   - narrow bed width/depth, bank transition, floodplain parameter는 heightfield/water/surface stage가
+     읽을 hint로 보존한다. 이 hint는 preview의 river channel에서 진단할 수 있지만, combined macro
+     height에 강바닥 외곽을 그대로 새기면 안 된다.
+   - 상류 reach는 좁고 급한 broad valley와 얕고 좁은 bed hint를 갖고, 하류 trunk는 넓고 완만한
+     broad valley와 깊고 넓은 flat bed hint를 가져야 한다.
 8. final cell context를 sample 위치에 맞춰 raster/cache한다.
    - final temperature, final hydration, hydrology role, water proximity, rain shadow, biome influence는
-     stage 7에서 이미 resolve된 값이다.
+     stage 8에서 이미 resolve된 값이다.
    - macro_field는 biome을 새로 분류하지 않는다. 필요한 경우 boundary/domain-warped blend와 sample
      interpolation을 적용해 downstream stage가 읽을 cache channel로 옮긴다.
    - biome influence가 hard owner straight boundary처럼 보이면 회귀다. visible material 경계는
      surface_plan에서 hydrology role, slope/exposure, dithering과 함께 최종 표현된다.
-9. 아래 계열로 combined macro height를 계산한다. 이 단계의 river carve는 최종 물/복셀 carve가
-   아니라 heightfield가 읽을 2D valley/carve guide이며, preview에서 보여야 한다.
+9. 아래 계열로 combined macro height를 계산한다. 이 단계의 river contribution은 최종 물/복셀
+   channel carve가 아니라 heightfield가 읽을 broad valley guide이며, preview에서 보여야 한다.
 
 ```text
 combined_macro_height =
     macro_elevation
-  - river_valley_strength * river_carve_scale
+  - broad_river_valley_strength * river_carve_scale
   - coast_flatten
   - lake_flatten
 ```
@@ -251,6 +255,7 @@ sea-level aligned shoreline scalar를 제공해야 한다. coast flatten은 그 
 graph region cache
 -> macro map cache
 -> hydrology cache
+-> river plan cache
 -> final cell context cache
 -> boundary cache
 -> macro field tile cache
@@ -264,8 +269,8 @@ chunk fill은 매 column마다 가장 가까운 ridge curve, river curve, coast 
 sample한다.
 
 launch 구현은 ridge/coast/river influence를 per-sample full curve scan 대신 tile-local raster pass로
-굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 canonical
-noisy polyline을 anti-aliased thick stroke로 직접 굽는다. ownership과 macro elevation의 noisy-boundary
+굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 river plan의
+broad valley parameter를 tile-local guide로 굽는다. ownership과 macro elevation의 noisy-boundary
 side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visible mask boundary 정확도를
 지키기 위한 보수적 선택이다. 4K preview의 남은 주된
 비용은 이 ownership side query와 nearest site lookup이며, 후속 최적화는 owner classification field를
@@ -283,13 +288,13 @@ side/blend 판정은 아직 per-sample query로 남아 있는데, 이것은 visi
 - ocean/coast/lake/dry basin mask. coast/lake/ocean 경계는 noisy boundary를 따라 보여야 한다.
   dry basin은 별도 mask/color로 표시되며 coast 노란색과 구분되어야 한다.
 - ridge influence
-- river valley strength/distance/flow hint. selected hydrology edge path의 canonical noisy curve 주변
-  carve guide가 보여야 하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고
-  얕지만 knife-cut V가 아니어야 하고, 하류는 넓은 flat bed와 완만한 shoulder를 가져야 한다.
-- combined macro height. river valley carve가 Perlin 전 높이에 반영되어야 하며,
+- river valley strength/distance/flow hint와 river bed hint. river plan의 broad valley guide가 보여야
+  하며, 이 guide는 tile influence raster pass 결과를 사용한다. 상류는 좁고 급한 valley, 하류는 넓고
+  완만한 valley로 보여야 한다. 좁은 river bed 외곽이 combined height에서 두꺼운 blob처럼 보이면 회귀다.
+- combined macro height. broad river valley가 Perlin 전 높이에 반영되어야 하며,
   preview 색상은 진단용 heat map이 아니라 muted blue-gray, green-gray, olive/gray, pale gray로 이어지는
   subtle terrain ramp를 사용해 pre-Perlin topdown 지형 표면처럼 읽혀야 한다.
-- final cell context / biome influence. stage 7에서 resolve된 final temperature, hydration,
+- final cell context / biome influence. stage 8에서 resolve된 final temperature, hydration,
   hydrology role, water proximity, rain shadow, biome influence를 보여주며, macro_field가 biome을
   재결정하지 않았음을 metadata/source note로 기록해야 한다.
 - contour. heightfield 직전 block-height scale의 combined macro height 등고선을 보여준다. minor
@@ -312,7 +317,7 @@ combined macro height preview: -0.50 .. 1.00
 
 per-image min/max와 robust percentile은 metadata/stdout 진단값일 뿐 color scale의 source가 아니다.
 모든 channel은 canonical noisy Voronoi graph edge overlay를 기본으로 표시해야 한다. 사용자가
-terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field cache grid가 아니라, stage 8의
+terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field cache grid가 아니라, stage 9의
 `BoundaryCache`가 제공하는 noisy edge geometry다. 이 overlay는 field 값을 가리지 않는 faint
 reference layer여야 하며, 기본 alpha는 강한 선 레이어가 아니라 위치 확인용 수준이어야 한다.
 straight nearest-site 경계가 아니라 canonical noisy curve를 따른다.
@@ -340,7 +345,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 
 ## 불변식
 
-1. `macro_field`는 graph/macro/hydrology/final-cell-context/boundary를 대체하는 source of truth가 아니다.
+1. `macro_field`는 graph/macro/hydrology/river-plan/final-cell-context/boundary를 대체하는 source of truth가 아니다.
 2. Perlin micro relief는 `macro_field` 이후에 합성되며 macro ownership을 뒤집으면 안 된다.
 3. ridge guide는 edge maxima skeleton이고, ridge influence는 heightfield가 읽을 수 있는 주변 envelope
    진단 channel이다. 현재 launch slice에서는 ridge raise가 combined height에서 disabled 상태다.
@@ -349,11 +354,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    Perlin 전 단계에서 ridge influence가 거의 모든 tile sample에 nonzero low-level grain으로 깔리면
    안 된다. ridge를 높이로 재도입할 때는 guide 위 한 점만 밝은 pinpoint로 남지 않고, selected ridge
    path를 따라 연결된 mountain belt shoulder가 보여야 한다.
-4. river valley는 hydrology selected segment만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
-5. river geometry는 selected edge id의 canonical noisy boundary curve를 따른다. river valley width,
-   flat-bed radius, carve depth는 selected/display flow에 비례해야 하며, 고정 폭 corridor를 모든 강에
-   적용하면 안 된다. valley profile은 center flat-bottom과 shoulder falloff를 분리해야 하며, 하류일수록
-   flat bed가 넓고 완만하게 보여야 한다.
+4. river valley는 hydrology selected segment를 번역한 river plan만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
+5. river morphology는 river plan의 reach parameter를 따라야 한다. broad valley width/depth와 narrow
+   bed width/depth는 selected/display flow와 reach type에 비례해야 하며, 고정 폭 corridor를 모든 강에
+   적용하면 안 된다. macro_field combined height는 broad valley를 주로 반영하고, narrow river bed를
+   강하게 직접 파서 bend blob을 만들면 안 된다.
 6. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 7. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 8. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
@@ -361,7 +366,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    mask는 connected ocean basin과 non-ocean terrain 사이의 explicit coast context만 읽는다.
 10. preview renderer는 macro field tile 내부를 local low/high로 정규화하지 않고, 문서화된 absolute
    normalized scale을 사용해야 한다.
-11. contour segment는 preview/debug layer이며, source graph/macro/hydrology/final-cell-context/boundary나 heightfield
+11. contour segment는 preview/debug layer이며, source graph/macro/hydrology/river-plan/final-cell-context/boundary나 heightfield
     scalar source를 대체하지 않는다. heightfield가 contour-guided mode를 사용할 때도 같은 level/step
     domain을 공유할 뿐, contour polyline을 새 terrain source로 삼지 않는다.
 12. explicit coast boundary profile은 signed sea level과 정렬되어야 한다. coast curve 위 land-side
@@ -381,9 +386,10 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
-  뒤 chamfer distance field로 만든다. river influence는 selected edge id가 참조하는 canonical noisy
-  curve를 anti-aliased thick polyline corridor로 굽고, subpixel coverage 기반 valley strength와
-  nearest-segment distance, blended flow hint를 함께 저장한다. 이로써 강줄기가 점 splat이나 segment
-  endpoint cap의 원형 흔적으로 보이는 문제를 줄이면서도 sample마다 전체 curve 후보를 반복 탐색하지 않는다.
+  뒤 chamfer distance field로 만든다. river influence는 아직 구현상 selected edge id가 참조하는
+  canonical noisy curve를 anti-aliased thick polyline corridor로 굽고, subpixel coverage 기반 valley
+  strength와 nearest-segment distance, blended flow hint를 함께 저장한다. 다음 구현 단계에서는 이 책임을
+  `river_plan`의 broad valley / narrow bed parameter 소비로 옮겨, combined height가 좁은 river bed
+  외곽을 직접 강하게 새기지 않도록 단순화한다.
 - signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
   visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.
