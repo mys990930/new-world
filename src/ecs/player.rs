@@ -72,7 +72,8 @@ impl Default for FrameDeltaSeconds {
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct PlayerMovementConfig {
-    pub horizontal_units_per_second: f32,
+    pub walk_units_per_second: f32,
+    pub sprint_units_per_second: f32,
     pub gravity_units_per_second_sq: f32,
     pub terminal_fall_speed: f32,
     pub max_step_height: f32,
@@ -81,7 +82,8 @@ pub struct PlayerMovementConfig {
 impl Default for PlayerMovementConfig {
     fn default() -> Self {
         Self {
-            horizontal_units_per_second: 8.0,
+            walk_units_per_second: 7.0,
+            sprint_units_per_second: 11.0,
             gravity_units_per_second_sq: 28.0,
             terminal_fall_speed: 32.0,
             max_step_height: 1.0,
@@ -167,6 +169,7 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
     }
 
     let movement = *ecs_world.resource::<PlayerMovementConfig>();
+    let sprint_down = ecs_world.resource::<EcsInputSnapshot>().sprint_down;
     let mut query = ecs_world.query_filtered::<(
         &mut Transform,
         &mut Velocity,
@@ -180,6 +183,11 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
 
     let mut position = transform.translation;
     let body = *body;
+    let horizontal_speed = if sprint_down {
+        movement.sprint_units_per_second
+    } else {
+        movement.walk_units_per_second
+    };
 
     if is_grounded(world, position, body) && velocity.linear[1] < 0.0 {
         velocity.linear[1] = 0.0;
@@ -187,7 +195,7 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
 
     let horizontal_delta = horizontal_motion_delta(
         velocity.linear,
-        movement.horizontal_units_per_second,
+        horizontal_speed,
         frame_delta,
     );
     if horizontal_delta != [0.0, 0.0] {

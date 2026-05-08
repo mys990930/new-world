@@ -20,6 +20,8 @@ impl GameApp {
                 input.pressed_keys.contains(&KeyCode::KeyW),
                 input.pressed_keys.contains(&KeyCode::KeyS),
             ),
+            sprint_down: input.pressed_keys.contains(&KeyCode::ShiftLeft)
+                || input.pressed_keys.contains(&KeyCode::ShiftRight),
             zoom_scroll_delta: if input.modifiers.control {
                 input.wheel_delta.1
             } else {

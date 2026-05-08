@@ -1,5 +1,12 @@
 # context.md
 
+## Movement Speed Targets
+
+- Normal walking targets `3.2..3.8 m/s`, currently implemented as `7 blocks/s`.
+- Holding Shift sprints while held, not as a toggle, and targets `4.8..5.8 m/s`, currently implemented as `11 blocks/s`.
+- Road/path fast movement targets `6.0..7.0 m/s`, roughly `13 blocks/s`, but road detection is future work.
+- Difficult terrain such as wetland, snow, or dense forest targets `1.8..2.8 m/s`, roughly `5 blocks/s`, but terrain slowdown is future work.
+
 ## 1. 프로젝트 한줄 개요
 
 이 프로젝트는 **쿼터뷰 복셀 샌드박스 게임**이다.  

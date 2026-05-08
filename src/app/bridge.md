@@ -53,6 +53,7 @@
 - `platform -> ecs` only maps raw transient/held input into frame input resources
 - `platform -> ecs` also splits wheel input into `Ctrl + wheel = zoom` and plain wheel = quickslot cycling
 - `Q/E` raw key presses are normalized here into the ECS camera-rotation axis sign convention
+- held Shift is passed through as sprint state; ECS player logic decides how that affects speed
 - `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI sprites
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code

@@ -11,6 +11,7 @@
 
 - `move_screen_x`
 - `move_screen_y`
+- `sprint_down`
 - `zoom_scroll_delta`
 - `quickslot_scroll_steps`
 - `primary_down`
@@ -39,6 +40,7 @@
 ## State Rules
 
 - `move_screen_x` and `move_screen_y` remain screen-relative intent state rather than discrete commands
+- `sprint_down` is held state, not a toggle, and is consumed by `player.rs` when choosing the current horizontal speed
 - `primary_just_pressed` becomes `PrimaryAction`
 - `secondary_just_pressed` becomes `PlaceBlock`
 - `rotate_camera` becomes `RotateCamera`

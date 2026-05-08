@@ -103,6 +103,9 @@
 - player locomotion
   - horizontal velocity derives from `MoveWorldIntent`
   - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
+  - normal walking currently targets `7` blocks/s
+  - holding Shift sprints at `11` blocks/s
+  - road speed and difficult-terrain slowdown remain future world/material-aware movement policies
 - time / season / weather consumption
   - ECS does not own the authoritative world calendar or season state
   - ECS fixed-phase logic selects the active simulation region around the player

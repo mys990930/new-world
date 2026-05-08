@@ -51,6 +51,9 @@
 - `CameraState.quarter_turns` is then applied to produce the current world-relative movement intent
 - if `RotateCamera` and movement happen in the same frame, movement uses the post-rotation basis
 - `MoveWorldIntent` is copied into the local player horizontal velocity channels
+- base walking speed is `7` blocks/s, matching the current target walking band of `6.4..7.6` blocks/s
+- holding Shift uses sprint speed `11` blocks/s, matching the current target sprint band of `9.6..11.6` blocks/s
+- road speed and difficult-terrain slowdown are documented future policies and are not applied yet
 - vertical velocity is preserved across frames so gravity and falling can accumulate
 - inventory-open state blocks movement intent generation and leaves horizontal velocity at zero
 - world-aware motion then resolves:
@@ -87,5 +90,5 @@
 
 - the current minimal implementation spawns one local player during bootstrap
 - bootstrap and created-world reload now stage a spawn anchor first; app snaps the local player onto a safe loaded surface once jobs have streamed enough nearby chunk data into `WorldCore`
-- the current default horizontal move speed is `8.0` world units per second
+- the current walking speed is `7.0` world units per second and hold-Shift sprint speed is `11.0` world units per second
 - the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet
