@@ -83,11 +83,11 @@ pub fn classify_graph_biome(context: GraphBiomeContext) -> GraphBiomeKind {
     }
 
     let effective_temperature =
-        (context.temperature - context.mountainness * 0.18 - context.elevation.max(0.0) * 0.10)
+        (context.temperature - context.mountainness * 0.14 - context.elevation.max(0.0) * 0.08)
             .clamp(0.0, 1.0);
     let hydration = context.hydration;
 
-    if context.mountainness >= 0.84 && context.elevation >= 0.52 {
+    if context.elevation >= 0.68 && context.mountainness >= 0.56 {
         return GraphBiomeKind::Alpine;
     }
     if effective_temperature <= 0.08 {
@@ -103,23 +103,23 @@ pub fn classify_graph_biome(context: GraphBiomeContext) -> GraphBiomeKind {
             GraphBiomeKind::Tundra
         };
     }
-    if effective_temperature <= 0.68 {
-        return if hydration < 0.24 {
+    if effective_temperature <= 0.62 {
+        return if hydration < 0.34 {
             GraphBiomeKind::TemperateGrassland
-        } else if hydration < 0.58 {
+        } else if hydration < 0.60 {
             GraphBiomeKind::TemperateForest
-        } else if hydration < 0.82 {
+        } else if hydration < 0.86 {
             GraphBiomeKind::TemperateRainforest
         } else {
             GraphBiomeKind::Wetland
         };
     }
 
-    if hydration < 0.18 {
+    if hydration < 0.34 {
         GraphBiomeKind::HotDesert
-    } else if hydration < 0.44 {
+    } else if hydration < 0.54 {
         GraphBiomeKind::Savanna
-    } else if hydration < 0.72 {
+    } else if hydration < 0.64 {
         GraphBiomeKind::TropicalSeasonalForest
     } else {
         GraphBiomeKind::TropicalRainforest
@@ -185,6 +185,24 @@ mod tests {
             classify_graph_biome(context(GraphBiomeWaterRole::Land, 0.30, 0.66, 0.16)),
             GraphBiomeKind::BorealForest
         );
+    }
+
+    #[test]
+    fn temperate_dry_land_classifies_as_grassland_before_desert() {
+        assert_eq!(
+            classify_graph_biome(context(GraphBiomeWaterRole::Land, 0.58, 0.30, 0.12)),
+            GraphBiomeKind::TemperateGrassland
+        );
+    }
+
+    #[test]
+    fn alpine_requires_high_elevation_not_just_cold_mountains() {
+        let mut mountain = context(GraphBiomeWaterRole::Land, 0.54, 0.42, 0.55);
+        mountain.mountainness = 0.72;
+        assert_ne!(classify_graph_biome(mountain), GraphBiomeKind::Alpine);
+
+        mountain.elevation = 0.72;
+        assert_eq!(classify_graph_biome(mountain), GraphBiomeKind::Alpine);
     }
 
     fn context(

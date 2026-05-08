@@ -30,3 +30,16 @@ voxel stages can consume.
 2. Ocean classification must distinguish `ShallowOcean` and `DeepOcean`.
 3. Classification depends only on explicit context values and is deterministic.
 4. Legacy `RegionClassCell` or atlas archetype types are not part of this contract.
+
+## Current Classification Policy
+
+- Effective temperature is graph temperature reduced by mountainness and positive macro elevation.
+- `Alpine` is not a generic cold mountain fallback. It requires high signed macro elevation plus
+  mountain context; lower mountain cells can still classify as tundra, boreal forest, or another
+  climate biome.
+- Temperate dry land resolves to `TemperateGrassland` before it is treated as forest.
+- The hot band uses wider hydration thresholds so `HotDesert`, `Savanna`,
+  `TropicalSeasonalForest`, and `TropicalRainforest` remain reachable in bounded deterministic
+  seed scans.
+- Distribution tests in `macro_map` verify that grassland, hot dry/wet tropical classes, and
+  high-elevation Alpine cells appear without changing water-role priority.

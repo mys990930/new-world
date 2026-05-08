@@ -2,9 +2,10 @@
 
 ## Role
 
-- Render deterministic 4K top-down PNG previews for the graph-first Voronoi macro graph stage and current site-field maps.
+- Render deterministic 4K top-down PNG previews for graph-first Voronoi identity/topology and resolved final-cell context maps.
 - Preserve detailed preview configuration in PNG metadata while keeping default filenames short.
 - Use the world-owned `world::generation::graph` patch construction API.
+- Use `GraphMacroMap.biomes` / `GraphBiomeContext` / `GraphBiomeKind` for climate and biome-related output.
 
 ## Inputs
 
@@ -17,7 +18,7 @@
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--stage graph_voronoi`
-  - `--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>`
+  - `--mode <all|identity|temperature|hydration|humidity|biome|continentality|elevation|ruggedness>`
   - `--output <path>`
 
 ## Defaults
@@ -40,13 +41,15 @@
   - actual graph topology is overlaid from `VoronoiEdge.corners` corner-to-corner geometry
   - site centers are highlighted
   - graph region cache boundaries are lightly marked
-- single field modes emit one PNG with a numeric color gradient sampled from smoothed `VoronoiSite::base_fields` where applicable:
-  - `temperature`: cold to warm, blue through pale neutral to red
-  - `hydration` / `humidity`: dry to wet, ochre through green to blue
-  - `continentality`: oceanic to continental, blue coastal colors through inland greens/browns
-  - `elevation`: low to high, lowland water/green through upland and snow colors
+- single context modes emit one PNG with a numeric color gradient sampled from resolved `GraphBiomeContext` where applicable:
+  - `temperature`: final cell cold to warm, blue through pale neutral to red
+  - `hydration` / `humidity`: final cell dry to wet, ochre through green to blue
+  - `continentality`: resolved oceanic to continental context, blue coastal colors through inland greens/browns
+  - `elevation`: resolved macro elevation context, lowland water/green through upland and snow colors
+- `--mode biome` emits one PNG colored by resolved `GraphBiomeKind`, including shallow/deep ocean, coast, lake, wetland, dry basin, and climate-driven land biomes.
+- graph-only diagnostic modes remain useful where they do not claim final climate/biome meaning:
   - `ruggedness`: flat to rough, green/yellow through rock gray
-- `--mode all` emits `identity`, `temperature`, `hydration`, `continentality`, `elevation`, and `ruggedness` PNG files in an output directory.
+- `--mode all` emits `identity`, `temperature`, `hydration`, `biome`, `continentality`, `elevation`, and `ruggedness` PNG files in an output directory.
 - each PNG includes a compact legend overlay in one corner:
   - identity mode shows a small map label/header only
   - field modes show a small gradient bar with low/high meaning labels
@@ -71,14 +74,18 @@
 2. Resolve the graph preview window from image dimensions and `--world-span-blocks`.
 3. Build a `VoronoiGraphPatch` through `generate_voronoi_graph_patch(...)`.
    - The preview derives the required padding from the requested image footprint so the visible area has surrounding sites.
-4. Calculate nearest-site spacing diagnostics from the generated patch.
-5. Generate the RGB pixel buffer with Rayon via parallel chunks.
-6. Convert that buffer through `image::RgbImage`.
-7. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
-8. Draw the compact legend overlay directly into the RGB image without external font dependencies.
-9. Encode PNG with the `png` crate so the header is preserved as metadata.
+4. Build `GraphMacroMap` through `generate_macro_map(...)` and index `GraphMacroMap.biomes` by site id.
+5. Calculate nearest-site spacing diagnostics from the generated patch.
+6. Generate the RGB pixel buffer with Rayon via parallel chunks.
+7. Convert that buffer through `image::RgbImage`.
+8. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
+9. Draw the compact legend overlay directly into the RGB image without external font dependencies.
+10. Encode PNG with the `png` crate so the header is preserved as metadata.
 
-The temperature, hydration, continentality, and elevation modes read the graph base-field stage's smoothed `VoronoiSite::base_fields`. Ruggedness remains a site-level graph roughness seed until a later terrain stage derives a richer roughness field.
+The temperature, hydration, continentality, elevation, and biome modes read the final cell context /
+classification from `GraphMacroMap.biomes`. They fall back to graph base fields only if a biome context is
+missing, which should be treated as a diagnostic fallback rather than normal output. Ruggedness remains a
+site-level graph roughness seed until a later terrain stage derives a richer roughness field.
 
 Identity mode still uses nearest-site raster color fill because it is useful for inspecting site ownership.
 The overlaid edges are the source-of-truth Delaunay/circumcenter Voronoi dual topology, so the darkened

@@ -122,6 +122,10 @@ selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source 
 `GraphMacroMap.biomes`는 site id별 final cell biome context와 classification을 가진다. 이
 classification은 macro_map 끝에서 생성되어 macro_field가 nearest site의 biome 의미를 함께 전달할 수
 있게 한다. Oceanic은 단일 biome으로 남기지 않고 `ShallowOcean`과 `DeepOcean`으로 분리한다.
+land biome classification은 graph temperature/hydration, signed macro elevation, coastness,
+mountainness, basinness를 읽되 water/coast/lake/wetland/dry-basin role이 climate-only class보다
+우선한다. Temperate grassland와 hot dry/wet tropical classes가 사라지지 않도록 bounded seed
+distribution test로 확인한다.
 
 ---
 
@@ -197,6 +201,11 @@ launch 정책은 아래처럼 잡는다.
 - 섬은 macro_map이 대륙 ownership을 뒤집어 만든 예외가 아니라 graph `continentality`의 component
   해석 결과여야 한다.
 - 이후 hydrology/surface 단계에서는 큰 대륙에 붙지 않은 land component를 island로 취급하고, 최소 크기, 해안 폭, 담수 생성 가능성, 식생 밀도 정책을 다르게 줄 수 있어야 한다.
+
+closed inland basin은 단일 `DryBasin` bucket으로 몰아넣지 않는다. 깊거나 작은 물 component와
+tiny local-minima lake는 `LakeCandidate`, 습하고 완만한 폐쇄 저지대는 `WetlandCandidate`, 지속
+수면 조건이 약한 큰 폐쇄 저지대는 `DryBasin`으로 남긴다. 이 구분은 biome water role까지 전달되어
+surface/material 단계에서 서로 다른 정책을 적용할 수 있어야 한다.
 
 무한 월드에서는 전체 land cell 수와 ocean cell 수를 전역으로 세어 제약할 수 없다. 대신
 deterministic graph base field, 충분한 padding, component pruning/assimilation 규칙, border portal
@@ -338,6 +347,8 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
   추가한다. 이 작은 lake는 river-side에 붙어 있을 필요가 없다.
 - signed macro elevation은 land 양수, ocean 음수 contract를 유지한다.
 - site/corner annotation은 explicit ocean-coast 기준 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
+- `mountainness`와 `ridgeness`는 graph의 coherent smoothed ruggedness를 입력으로 읽는다. 단일 site hash
+  ruggedness를 그대로 쓰지 않으므로 인접 macro cell 사이의 산악/평원 전환이 덜 discrete하다.
 - edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는
   단순 high elevation edge가 아니라 같은 land component 내부성, signed elevation gradient,
   inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.

@@ -1289,6 +1289,7 @@ fn clamp_signed(value: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::biome::GraphBiomeKind;
     use super::*;
     use crate::world::generation::graph::{
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
@@ -1421,6 +1422,36 @@ mod tests {
         assert!(
             dry_basin_sites > 0,
             "large closed inland depressions should be allowed to resolve as dry basins instead of all becoming lakes"
+        );
+    }
+
+    #[test]
+    fn closed_basin_policy_keeps_dry_and_wet_basin_roles_distinct() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+        let dry_basin_sites = map
+            .sites
+            .iter()
+            .filter(|site| matches!(site.surface_kind, MacroSurfaceKind::DryBasin))
+            .count();
+        let wet_basin_sites = map
+            .sites
+            .iter()
+            .filter(|site| {
+                matches!(
+                    site.surface_kind,
+                    MacroSurfaceKind::LakeCandidate | MacroSurfaceKind::WetlandCandidate
+                )
+            })
+            .count();
+
+        assert!(
+            dry_basin_sites > 0,
+            "closed inland depressions should not all be promoted to standing water"
+        );
+        assert!(
+            wet_basin_sites > 0,
+            "closed inland depressions should not all become DryBasin"
         );
     }
 
@@ -1836,6 +1867,65 @@ mod tests {
                     | super::super::biome::GraphBiomeKind::DeepOcean
             )),
             "preview-sized macro map should carry ocean biome classification"
+        );
+    }
+
+    #[test]
+    fn bounded_seed_scan_exposes_expected_land_biome_distribution() {
+        let mut counts = HashMap::<GraphBiomeKind, usize>::new();
+
+        for seed in 1..=128 {
+            let patch = generate_voronoi_graph_patch(test_request(seed, 0, 0));
+            let map = generate_macro_map(&patch, test_macro_config(seed));
+
+            for biome in &map.biomes {
+                *counts.entry(biome.biome).or_default() += 1;
+            }
+        }
+
+        for expected in [
+            GraphBiomeKind::TemperateGrassland,
+            GraphBiomeKind::HotDesert,
+            GraphBiomeKind::Savanna,
+            GraphBiomeKind::TropicalSeasonalForest,
+            GraphBiomeKind::TropicalRainforest,
+            GraphBiomeKind::Alpine,
+        ] {
+            assert!(
+                counts.get(&expected).copied().unwrap_or(0) > 0,
+                "{expected:?} should appear in a bounded deterministic seed scan; counts={counts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn alpine_sites_are_high_elevation_mountain_sites() {
+        let mut alpine_count = 0;
+
+        for seed in 1..=128 {
+            let patch = generate_voronoi_graph_patch(test_request(seed, 0, 0));
+            let map = generate_macro_map(&patch, test_macro_config(seed));
+
+            for biome in &map.biomes {
+                if biome.biome == GraphBiomeKind::Alpine {
+                    alpine_count += 1;
+                    assert!(
+                        biome.context.elevation >= 0.68,
+                        "Alpine should be restricted to higher macro elevation: {:?}",
+                        biome.context
+                    );
+                    assert!(
+                        biome.context.mountainness >= 0.56,
+                        "Alpine should keep mountain context: {:?}",
+                        biome.context
+                    );
+                }
+            }
+        }
+
+        assert!(
+            alpine_count > 0,
+            "bounded deterministic seed scan should find high-elevation Alpine cells"
         );
     }
 

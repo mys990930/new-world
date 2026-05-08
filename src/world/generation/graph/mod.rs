@@ -17,6 +17,7 @@ const HASH_CONTINENTALITY_FIELD: u64 = 0x92d3_4f11_6b9a_c807;
 const HASH_ELEVATION_FIELD: u64 = 0x5e6f_18b2_a1c7_49d3;
 const HASH_TEMPERATURE_FIELD: u64 = 0xb047_a3d9_2871_f6c5;
 const HASH_HYDRATION_FIELD: u64 = 0x70c9_f51a_30de_4417;
+const HASH_RUGGEDNESS_FIELD: u64 = 0x3dd0_17b7_29fc_6053;
 const HASH_EDGE: u64 = 0x4d2c_6f01_9ab8_e327;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -331,21 +332,29 @@ pub fn apply_base_graph_fields(patch: &mut VoronoiGraphPatch, config: GraphBaseF
         .iter()
         .map(|site| site.raw_base_fields)
         .collect::<Vec<_>>();
+    let mut ruggedness = patch
+        .sites
+        .iter()
+        .map(|site| site.ruggedness)
+        .collect::<Vec<_>>();
 
     for _ in 0..config.smoothing_passes {
         fields = smooth_base_field_pass(&fields, &adjacency, config.self_weight);
+        ruggedness = smooth_scalar_pass(&ruggedness, &adjacency, config.self_weight);
     }
 
     patch
         .sites
         .par_iter_mut()
         .zip(fields.into_par_iter())
-        .for_each(|(site, fields)| {
+        .zip(ruggedness.into_par_iter())
+        .for_each(|((site, fields), ruggedness)| {
             site.base_fields = fields;
             site.temperature = fields.temperature;
             site.hydration = fields.hydration;
             site.height_bias = fields.elevation_seed;
             site.continentality = fields.continentality;
+            site.ruggedness = clamp_unit(ruggedness);
         });
 
     assign_corner_base_fields(&mut patch.corners, &patch.sites, &patch.edges);
@@ -469,7 +478,7 @@ fn generate_site(coord: SiteGridCoord, config: VoronoiGraphConfig) -> VoronoiSit
         hydration: raw_base_fields.hydration,
         height_bias: raw_base_fields.elevation_seed,
         continentality: raw_base_fields.continentality,
-        ruggedness: unit_f32(splitmix64(field_hash ^ 0x082e_fa98_ec4e_6c89)),
+        ruggedness: coherent_ruggedness(position, field_hash, config),
     }
 }
 
@@ -521,15 +530,33 @@ fn raw_macro_friendly_base_fields(
     let latitude = ((position.z / (spacing * 96.0)).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
     let temperature_noise = fbm_signed(position, spacing * 18.0, HASH_TEMPERATURE_FIELD, config);
     let temperature = clamp_unit(
-        0.68 - latitude * 0.36 - elevation_seed.max(0.0) * 0.12 + temperature_noise * 0.14,
+        0.72 - latitude * 0.32 - elevation_seed.max(0.0) * 0.08 + temperature_noise * 0.17,
     );
     let humidity_noise = fbm_signed(position, spacing * 16.0, HASH_HYDRATION_FIELD, config);
     let hydration = clamp_unit(
-        0.50 + humidity_noise * 0.28 - continentality.max(0.0) * 0.10
-            + (-continentality).max(0.0) * 0.08,
+        0.50 + humidity_noise * 0.34 - continentality.max(0.0) * 0.13
+            + (-continentality).max(0.0) * 0.10,
     );
 
     GraphBaseFields::new(temperature, hydration, continentality, elevation_seed)
+}
+
+fn coherent_ruggedness(
+    position: WorldPlanePoint,
+    field_hash: u64,
+    config: VoronoiGraphConfig,
+) -> f32 {
+    let spacing = config.site_spacing_blocks as f32;
+    let broad = fbm_unit(position, spacing * 12.0, HASH_RUGGEDNESS_FIELD, config);
+    let regional = fbm_unit(
+        WorldPlanePoint::new(position.x - spacing * 5.0, position.z + spacing * 8.0),
+        spacing * 5.0,
+        HASH_RUGGEDNESS_FIELD ^ 0xd1b5_4a32_d192_ed03,
+        config,
+    );
+    let local = unit_f32(splitmix64(field_hash ^ HASH_RUGGEDNESS_FIELD));
+
+    clamp_unit(broad * 0.52 + regional * 0.34 + local * 0.14)
 }
 
 fn fbm_signed(
@@ -656,6 +683,27 @@ fn smooth_base_field_pass(
                 });
 
             blend_base_fields(*current, neighbor_average, self_weight)
+        })
+        .collect()
+}
+
+fn smooth_scalar_pass(values: &[f32], adjacency: &[Vec<usize>], self_weight: f32) -> Vec<f32> {
+    values
+        .par_iter()
+        .enumerate()
+        .map(|(index, &current)| {
+            let neighbors = &adjacency[index];
+            if neighbors.is_empty() {
+                return current;
+            }
+
+            let neighbor_average = neighbors
+                .iter()
+                .map(|&neighbor| values[neighbor])
+                .sum::<f32>()
+                / neighbors.len() as f32;
+
+            lerp(neighbor_average, current, self_weight).clamp(0.0, 1.0)
         })
         .collect()
 }
@@ -1214,6 +1262,23 @@ mod tests {
     }
 
     #[test]
+    fn site_ruggedness_is_coherent_and_smoothed() {
+        let patch = generate_voronoi_graph_patch(test_request(312, 0, 0));
+        let adjacent_difference =
+            average_edge_site_scalar_difference(&patch, |site| site.ruggedness);
+        let span = site_scalar_span(&patch, |site| site.ruggedness);
+
+        assert!(
+            span >= 0.18,
+            "ruggedness should retain enough patch-scale range for mountain context; span={span}"
+        );
+        assert!(
+            adjacent_difference <= 0.14,
+            "neighboring cells should not jump between discrete ruggedness buckets; adjacent={adjacent_difference} span={span}"
+        );
+    }
+
+    #[test]
     fn adjacent_center_requests_keep_overlapping_sites_stable() {
         let left = generate_voronoi_graph_patch(test_request(77, 0, 0));
         let right =
@@ -1316,6 +1381,7 @@ mod tests {
         hydration: f32,
         height_bias: f32,
         continentality: f32,
+        ruggedness: f32,
     }
 
     fn site_fields_in_region_by_id(
@@ -1337,6 +1403,7 @@ mod tests {
                         hydration: site.hydration,
                         height_bias: site.height_bias,
                         continentality: site.continentality,
+                        ruggedness: site.ruggedness,
                     },
                 )
             })
@@ -1418,6 +1485,49 @@ mod tests {
 
         for site in &patch.sites {
             let value = select_component(site.base_fields);
+            min = min.min(value);
+            max = max.max(value);
+        }
+
+        max - min
+    }
+
+    fn average_edge_site_scalar_difference(
+        patch: &VoronoiGraphPatch,
+        select_component: impl Fn(&VoronoiSite) -> f32,
+    ) -> f32 {
+        let site_map = patch
+            .sites
+            .iter()
+            .map(|site| (site.id, site))
+            .collect::<HashMap<_, _>>();
+        let mut total = 0.0;
+        let mut count = 0;
+
+        for edge in &patch.edges {
+            let Some(a) = site_map.get(&edge.sites[0]) else {
+                continue;
+            };
+            let Some(b) = site_map.get(&edge.sites[1]) else {
+                continue;
+            };
+
+            total += (select_component(a) - select_component(b)).abs();
+            count += 1;
+        }
+
+        total / count as f32
+    }
+
+    fn site_scalar_span(
+        patch: &VoronoiGraphPatch,
+        select_component: impl Fn(&VoronoiSite) -> f32,
+    ) -> f32 {
+        let mut min = f32::INFINITY;
+        let mut max = f32::NEG_INFINITY;
+
+        for site in &patch.sites {
+            let value = select_component(site);
             min = min.min(value);
             max = max.max(value);
         }

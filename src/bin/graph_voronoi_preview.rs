@@ -10,10 +10,11 @@ use rayon::prelude::*;
 
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
-    GraphRegionCoord, GraphSiteSpacingStats, VoronoiGraphConfig, VoronoiGraphPatch,
-    VoronoiGraphPatchRequest, VoronoiSite, WorldPlanePoint, generate_voronoi_graph_patch,
-    graph_region_for_world_block, graph_site_spacing_stats,
+    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphBiomeCell, GraphBiomeKind,
+    GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphSiteSpacingStats, MacroMapConfig,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSite, WorldPlanePoint,
+    generate_macro_map, generate_voronoi_graph_patch, graph_region_for_world_block,
+    graph_site_spacing_stats,
 };
 
 mod common;
@@ -26,10 +27,11 @@ const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "graph_voronoi";
 const OUTPUT_DIR: &str = "target/graph-voronoi-preview";
 
-const RENDERABLE_MODES: [PreviewMode; 6] = [
+const RENDERABLE_MODES: [PreviewMode; 7] = [
     PreviewMode::Identity,
     PreviewMode::Temperature,
     PreviewMode::Hydration,
+    PreviewMode::Biome,
     PreviewMode::Continentality,
     PreviewMode::Elevation,
     PreviewMode::Ruggedness,
@@ -130,9 +132,10 @@ impl PreviewModeSelection {
             PreviewModeSelection::Single(PreviewMode::Identity) => &RENDERABLE_MODES[0..1],
             PreviewModeSelection::Single(PreviewMode::Temperature) => &RENDERABLE_MODES[1..2],
             PreviewModeSelection::Single(PreviewMode::Hydration) => &RENDERABLE_MODES[2..3],
-            PreviewModeSelection::Single(PreviewMode::Continentality) => &RENDERABLE_MODES[3..4],
-            PreviewModeSelection::Single(PreviewMode::Elevation) => &RENDERABLE_MODES[4..5],
-            PreviewModeSelection::Single(PreviewMode::Ruggedness) => &RENDERABLE_MODES[5..6],
+            PreviewModeSelection::Single(PreviewMode::Biome) => &RENDERABLE_MODES[3..4],
+            PreviewModeSelection::Single(PreviewMode::Continentality) => &RENDERABLE_MODES[4..5],
+            PreviewModeSelection::Single(PreviewMode::Elevation) => &RENDERABLE_MODES[5..6],
+            PreviewModeSelection::Single(PreviewMode::Ruggedness) => &RENDERABLE_MODES[6..7],
         }
     }
 }
@@ -142,6 +145,7 @@ enum PreviewMode {
     Identity,
     Temperature,
     Hydration,
+    Biome,
     Continentality,
     Elevation,
     Ruggedness,
@@ -154,6 +158,7 @@ impl PreviewMode {
             "identity" => Some(PreviewModeSelection::Single(Self::Identity)),
             "temperature" => Some(PreviewModeSelection::Single(Self::Temperature)),
             "hydration" | "humidity" => Some(PreviewModeSelection::Single(Self::Hydration)),
+            "biome" => Some(PreviewModeSelection::Single(Self::Biome)),
             "continentality" => Some(PreviewModeSelection::Single(Self::Continentality)),
             "elevation" => Some(PreviewModeSelection::Single(Self::Elevation)),
             "ruggedness" => Some(PreviewModeSelection::Single(Self::Ruggedness)),
@@ -166,6 +171,7 @@ impl PreviewMode {
             Self::Identity => "identity",
             Self::Temperature => "temperature",
             Self::Hydration => "hydration",
+            Self::Biome => "biome",
             Self::Continentality => "continentality",
             Self::Elevation => "elevation",
             Self::Ruggedness => "ruggedness",
@@ -175,8 +181,9 @@ impl PreviewMode {
     fn map_name(self) -> &'static str {
         match self {
             Self::Identity => "graph site identity",
-            Self::Temperature => "site temperature",
-            Self::Hydration => "site hydration",
+            Self::Temperature => "final cell temperature",
+            Self::Hydration => "final cell hydration",
+            Self::Biome => "resolved graph biome",
             Self::Continentality => "site continentality",
             Self::Elevation => "site elevation bias",
             Self::Ruggedness => "site ruggedness",
@@ -188,6 +195,7 @@ impl PreviewMode {
             Self::Identity => "IDENTITY",
             Self::Temperature => "TEMP",
             Self::Hydration => "HYDRATION",
+            Self::Biome => "BIOME",
             Self::Continentality => "CONTINENT",
             Self::Elevation => "ELEVATION",
             Self::Ruggedness => "RUGGED",
@@ -199,6 +207,7 @@ impl PreviewMode {
             Self::Identity => None,
             Self::Temperature => Some("COLD"),
             Self::Hydration => Some("DRY"),
+            Self::Biome => None,
             Self::Continentality => Some("OCEAN"),
             Self::Elevation => Some("LOW"),
             Self::Ruggedness => Some("FLAT"),
@@ -210,6 +219,7 @@ impl PreviewMode {
             Self::Identity => None,
             Self::Temperature => Some("WARM"),
             Self::Hydration => Some("WET"),
+            Self::Biome => None,
             Self::Continentality => Some("LAND"),
             Self::Elevation => Some("HIGH"),
             Self::Ruggedness => Some("ROUGH"),
@@ -346,7 +356,9 @@ struct SiteGridCoord {
 #[derive(Debug, Clone)]
 struct PreviewGraph {
     patch: VoronoiGraphPatch,
+    macro_map: GraphMacroMap,
     site_grid: HashMap<SiteGridCoord, usize>,
+    biome_by_site_index: Vec<Option<GraphBiomeCell>>,
     spacing_stats: GraphSiteSpacingStats,
     spacing: f32,
 }
@@ -518,6 +530,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         graph.patch.sites.len()
     );
     println!(
+        "final cell biome contexts: {}",
+        graph.macro_map.biomes.len()
+    );
+    println!(
         "site spacing stats: nearest min/avg/max {:.2}/{:.2}/{:.2} blocks, stddev {:.2}, cv {:.3}",
         graph.spacing_stats.min_nearest_distance_blocks,
         graph.spacing_stats.average_nearest_distance_blocks,
@@ -670,6 +686,20 @@ fn build_graph_patch_for_preview(
     };
     let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
     let patch = generate_voronoi_graph_patch(request);
+    let macro_map = generate_macro_map(
+        &patch,
+        MacroMapConfig::new(meta.seed, meta.generator_version),
+    );
+    let biome_by_site_id = macro_map
+        .biomes
+        .iter()
+        .map(|biome| (biome.site, *biome))
+        .collect::<HashMap<_, _>>();
+    let biome_by_site_index = patch
+        .sites
+        .iter()
+        .map(|site| biome_by_site_id.get(&site.id).copied())
+        .collect::<Vec<_>>();
 
     let site_grid = patch
         .sites
@@ -685,7 +715,9 @@ fn build_graph_patch_for_preview(
 
     Ok(PreviewGraph {
         patch,
+        macro_map,
         site_grid,
+        biome_by_site_index,
         spacing_stats,
         spacing,
     })
@@ -754,7 +786,8 @@ fn color_for_world_sample(
 ) -> [u8; 3] {
     let nearest = nearest_sites(graph, world_x, world_z);
     let site = graph.patch.sites[nearest.nearest_index];
-    let mut color = color_for_site(site, mode);
+    let biome = graph.biome_by_site_index[nearest.nearest_index];
+    let mut color = color_for_site(site, biome, mode);
 
     let nearest_distance = nearest.nearest_distance_sq.sqrt();
     let second_distance = nearest.second_distance_sq.sqrt();
@@ -770,7 +803,7 @@ fn color_for_world_sample(
 
     let dot_radius = (graph.spacing * 0.032).max(window.pixel_span() * 1.25);
     if nearest_distance <= dot_radius {
-        let dot = blend([246, 248, 240], color_for_site(site, mode), 0.28);
+        let dot = blend([246, 248, 240], color_for_site(site, biome, mode), 0.28);
         color = blend(color, dot, 0.88);
     }
 
@@ -824,24 +857,41 @@ fn nearest_sites(graph: &PreviewGraph, world_x: f32, world_z: f32) -> NearestSit
     }
 }
 
-fn color_for_site(site: VoronoiSite, mode: PreviewMode) -> [u8; 3] {
+fn color_for_site(site: VoronoiSite, biome: Option<GraphBiomeCell>, mode: PreviewMode) -> [u8; 3] {
     match mode {
         PreviewMode::Identity => color_for_identity_site(site),
         PreviewMode::Temperature => gradient_color_for_mode(
             PreviewMode::Temperature,
-            site.base_fields.temperature.clamp(0.0, 1.0),
+            biome
+                .map(|biome| biome.context.temperature)
+                .unwrap_or(site.base_fields.temperature)
+                .clamp(0.0, 1.0),
         ),
         PreviewMode::Hydration => gradient_color_for_mode(
             PreviewMode::Hydration,
-            site.base_fields.hydration.clamp(0.0, 1.0),
+            biome
+                .map(|biome| biome.context.hydration)
+                .unwrap_or(site.base_fields.hydration)
+                .clamp(0.0, 1.0),
         ),
+        PreviewMode::Biome => biome
+            .map(|biome| color_for_biome_kind(biome.biome))
+            .unwrap_or_else(|| color_for_identity_site(site)),
         PreviewMode::Continentality => gradient_color_for_mode(
             PreviewMode::Continentality,
-            signed_to_unit(site.base_fields.continentality),
+            signed_to_unit(
+                biome
+                    .map(|biome| biome.context.continentality)
+                    .unwrap_or(site.base_fields.continentality),
+            ),
         ),
         PreviewMode::Elevation => gradient_color_for_mode(
             PreviewMode::Elevation,
-            signed_to_unit(site.base_fields.elevation_seed),
+            signed_to_unit(
+                biome
+                    .map(|biome| biome.context.elevation)
+                    .unwrap_or(site.base_fields.elevation_seed),
+            ),
         ),
         PreviewMode::Ruggedness => {
             gradient_color_for_mode(PreviewMode::Ruggedness, site.ruggedness.clamp(0.0, 1.0))
@@ -859,6 +909,28 @@ fn color_for_identity_site(site: VoronoiSite) -> [u8; 3] {
     let elevation =
         (0.82 + site.base_fields.elevation_seed * 0.20 + site.ruggedness * 0.10).clamp(0.62, 1.18);
     scale(blend(identity, climate, 0.62), elevation)
+}
+
+fn color_for_biome_kind(kind: GraphBiomeKind) -> [u8; 3] {
+    match kind {
+        GraphBiomeKind::ShallowOcean => [58, 132, 180],
+        GraphBiomeKind::DeepOcean => [24, 72, 136],
+        GraphBiomeKind::Coast => [218, 199, 132],
+        GraphBiomeKind::Lake => [62, 136, 178],
+        GraphBiomeKind::Wetland => [73, 135, 103],
+        GraphBiomeKind::DryBasin => [184, 147, 91],
+        GraphBiomeKind::PolarIce => [224, 238, 242],
+        GraphBiomeKind::Tundra => [153, 168, 151],
+        GraphBiomeKind::BorealForest => [69, 112, 91],
+        GraphBiomeKind::TemperateGrassland => [151, 166, 82],
+        GraphBiomeKind::TemperateForest => [74, 139, 76],
+        GraphBiomeKind::TemperateRainforest => [45, 126, 96],
+        GraphBiomeKind::HotDesert => [213, 178, 94],
+        GraphBiomeKind::Savanna => [188, 157, 75],
+        GraphBiomeKind::TropicalSeasonalForest => [77, 154, 70],
+        GraphBiomeKind::TropicalRainforest => [31, 121, 72],
+        GraphBiomeKind::Alpine => [168, 164, 154],
+    }
 }
 
 fn signed_to_unit(value: f32) -> f32 {
@@ -892,6 +964,7 @@ fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
 fn gradient_color_for_mode(mode: PreviewMode, value: f32) -> [u8; 3] {
     match mode {
         PreviewMode::Identity => [220, 224, 216],
+        PreviewMode::Biome => [220, 224, 216],
         PreviewMode::Temperature => gradient_color(
             value,
             &[
@@ -1319,7 +1392,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin graph_voronoi_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--stage graph_voronoi] [--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>] [--output <path>]"
+    "usage: cargo run --bin graph_voronoi_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--stage graph_voronoi] [--mode <all|identity|temperature|hydration|humidity|biome|continentality|elevation|ruggedness>] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {

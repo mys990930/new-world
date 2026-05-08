@@ -130,6 +130,8 @@ macro-friendly해야 한다.
   뭉치는 coherent field여야 하며, macro_map의 land/ocean component resolve source of truth다.
 - `elevation_seed`: -1..1 hydrology 전 macro elevation bias seed. `continentality`와 완전히 독립된
   salt-and-pepper noise가 아니라, land/ocean context와 합성 가능한 broad elevation bias여야 한다.
+- `ruggedness`: 0..1 산악/거친 지형 context seed. 독립 site hash bucket이 아니라 coherent field와
+  graph adjacency smoothing을 거친 값이어야 하며, 인접 site 사이에서 과도하게 튀면 안 된다.
 
 site는 두 값을 함께 가진다.
 
@@ -153,6 +155,9 @@ hydrology 단계가 별도 layer에서 소유한다.
   하는 deterministic value-noise/fBm 계열 coherent field와 작은 site-level deterministic variation을
   함께 읽는다.
 - smoothing은 local noise를 줄이되 대륙/해양 component의 큰 형태를 흐트러뜨리지 않는다.
+- `ruggedness`도 같은 방향을 따른다. broad/regional coherent source와 작은 local variation을 합성한 뒤
+  base field smoothing pass와 같은 graph adjacency smoothing을 적용해, macro_map의 mountainness와
+  ridgeness 입력이 셀 단위의 discrete salt-and-pepper 값으로 보이지 않게 한다.
 - `continentality`는 macro_map이 연결 component를 안정적으로 찾을 수 있을 만큼 넓은 양수/음수
   덩어리를 만들어야 한다.
 - `elevation_seed`는 대륙 내부 highland/lowland, ocean basin depth, ridge guide 후보를 만들 수
