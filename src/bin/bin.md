@@ -103,10 +103,10 @@ cargo run --bin chunk_topdown_preview -- --world-dir <existing-world-dir> --cent
 
 ## graph_voronoi_preview
 
-- Purpose: render 4K top-down PNG previews for the graph-first Voronoi macro graph stage and current site-field maps.
+- Purpose: render 4K top-down PNG previews for the graph-first Voronoi macro graph stage, current site-field maps, and resolved biome mode.
 - Parameters:
   - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
-  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage graph_voronoi`, `--mode <all|identity|temperature|hydration|humidity|continentality|elevation|ruggedness>`, `--output <path>`
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage graph_voronoi`, `--mode <all|identity|temperature|hydration|humidity|biome|continentality|elevation|ruggedness>`, `--output <path>`
 - Defaults:
   - `--width 3840`
   - `--height 2160`
@@ -124,7 +124,10 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
 ```
 
 - Notes:
-  - Field-map modes read the smoothed `VoronoiSite::base_fields` values produced by the graph base-field stage.
+  - Field-map modes read resolved `GraphMacroMap.biomes` context when available and fall back to
+    smoothed `VoronoiSite::base_fields` only as a diagnostic fallback.
+  - `--mode biome` colors every detailed `GraphBiomeKind` variant with a distinct palette and
+    includes a compact two-column legend.
   - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
 
 ## heightfield_preview

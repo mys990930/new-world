@@ -26,6 +26,87 @@ const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "graph_voronoi";
 const OUTPUT_DIR: &str = "target/graph-voronoi-preview";
+const BIOME_PALETTE: [BiomePaletteEntry; 30] = [
+    BiomePaletteEntry::new(GraphBiomeKind::DeepOcean, "DEEP-OCEAN", [0, 32, 96]),
+    BiomePaletteEntry::new(GraphBiomeKind::ShallowOcean, "SHALLOW-OCN", [0, 147, 196]),
+    BiomePaletteEntry::new(GraphBiomeKind::Mangrove, "MANGROVE", [0, 86, 63]),
+    BiomePaletteEntry::new(GraphBiomeKind::EstuarineCoast, "ESTUARY", [96, 171, 130]),
+    BiomePaletteEntry::new(GraphBiomeKind::LagoonCoast, "LAGOON", [85, 210, 198]),
+    BiomePaletteEntry::new(GraphBiomeKind::RockyCoast, "ROCKY-COAST", [115, 118, 130]),
+    BiomePaletteEntry::new(GraphBiomeKind::SandyCoast, "SANDY-COAST", [238, 213, 132]),
+    BiomePaletteEntry::new(GraphBiomeKind::Lake, "LAKE", [52, 88, 209]),
+    BiomePaletteEntry::new(GraphBiomeKind::Marsh, "MARSH", [116, 150, 110]),
+    BiomePaletteEntry::new(GraphBiomeKind::Swamp, "SWAMP", [57, 69, 42]),
+    BiomePaletteEntry::new(GraphBiomeKind::FloodedForest, "FLOOD-FRST", [32, 78, 136]),
+    BiomePaletteEntry::new(GraphBiomeKind::Desert, "DESERT", [224, 173, 43]),
+    BiomePaletteEntry::new(GraphBiomeKind::SemiDesert, "SEMI-DESERT", [190, 119, 57]),
+    BiomePaletteEntry::new(GraphBiomeKind::Steppe, "STEPPE", [154, 178, 105]),
+    BiomePaletteEntry::new(GraphBiomeKind::DryShrubland, "DRY-SHRUB", [136, 88, 52]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::MediterraneanShrubland,
+        "MED-SHRUB",
+        [104, 116, 38],
+    ),
+    BiomePaletteEntry::new(GraphBiomeKind::PolarIce, "POLAR-ICE", [232, 245, 250]),
+    BiomePaletteEntry::new(GraphBiomeKind::PolarBarrens, "POLAR-BARR", [188, 188, 188]),
+    BiomePaletteEntry::new(GraphBiomeKind::Tundra, "TUNDRA", [169, 178, 153]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::SubalpineWoodland,
+        "SUBALPINE",
+        [52, 106, 94],
+    ),
+    BiomePaletteEntry::new(GraphBiomeKind::AlpineMeadow, "ALP-MEADOW", [144, 128, 166]),
+    BiomePaletteEntry::new(GraphBiomeKind::BorealForest, "BOREAL-FRST", [24, 80, 98]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TropicalRainforest,
+        "TROP-RAIN",
+        [0, 116, 54],
+    ),
+    BiomePaletteEntry::new(GraphBiomeKind::MonsoonForest, "MONSOON", [38, 156, 69]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TropicalDryForest,
+        "TROP-DRY",
+        [108, 162, 39],
+    ),
+    BiomePaletteEntry::new(GraphBiomeKind::Savanna, "SAVANNA", [201, 190, 55]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateRainforest,
+        "TEMP-RAIN",
+        [0, 128, 116],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateMixedForest,
+        "TEMP-MIXED",
+        [48, 132, 47],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateBroadleafForest,
+        "TEMP-BROAD",
+        [81, 154, 64],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateGrassland,
+        "TEMP-GRASS",
+        [130, 190, 89],
+    ),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BiomePaletteEntry {
+    biome: GraphBiomeKind,
+    label: &'static str,
+    color: [u8; 3],
+}
+
+impl BiomePaletteEntry {
+    const fn new(biome: GraphBiomeKind, label: &'static str, color: [u8; 3]) -> Self {
+        Self {
+            biome,
+            label,
+            color,
+        }
+    }
+}
 
 const RENDERABLE_MODES: [PreviewMode; 7] = [
     PreviewMode::Identity,
@@ -912,25 +993,11 @@ fn color_for_identity_site(site: VoronoiSite) -> [u8; 3] {
 }
 
 fn color_for_biome_kind(kind: GraphBiomeKind) -> [u8; 3] {
-    match kind {
-        GraphBiomeKind::ShallowOcean => [58, 132, 180],
-        GraphBiomeKind::DeepOcean => [24, 72, 136],
-        GraphBiomeKind::Coast => [218, 199, 132],
-        GraphBiomeKind::Lake => [62, 136, 178],
-        GraphBiomeKind::Wetland => [73, 135, 103],
-        GraphBiomeKind::DryBasin => [184, 147, 91],
-        GraphBiomeKind::PolarIce => [224, 238, 242],
-        GraphBiomeKind::Tundra => [153, 168, 151],
-        GraphBiomeKind::BorealForest => [69, 112, 91],
-        GraphBiomeKind::TemperateGrassland => [151, 166, 82],
-        GraphBiomeKind::TemperateForest => [74, 139, 76],
-        GraphBiomeKind::TemperateRainforest => [45, 126, 96],
-        GraphBiomeKind::HotDesert => [213, 178, 94],
-        GraphBiomeKind::Savanna => [188, 157, 75],
-        GraphBiomeKind::TropicalSeasonalForest => [77, 154, 70],
-        GraphBiomeKind::TropicalRainforest => [31, 121, 72],
-        GraphBiomeKind::Alpine => [168, 164, 154],
-    }
+    BIOME_PALETTE
+        .iter()
+        .find(|entry| entry.biome == kind)
+        .map(|entry| entry.color)
+        .expect("palette should contain every GraphBiomeKind")
 }
 
 fn signed_to_unit(value: f32) -> f32 {
@@ -1142,8 +1209,24 @@ fn draw_legend_overlay(image: &mut RgbImage, mode: PreviewMode) {
     };
     let margin = 8 * scale;
     let field_mode = mode.legend_min_label().is_some();
-    let panel_width = if field_mode { 156 * scale } else { 92 * scale }.min(image.width());
-    let panel_height = if field_mode { 48 * scale } else { 28 * scale }.min(image.height());
+    let biome_mode = mode == PreviewMode::Biome;
+    let palette_rows = BIOME_PALETTE.len().div_ceil(2) as u32;
+    let panel_width = if biome_mode {
+        262 * scale
+    } else if field_mode {
+        156 * scale
+    } else {
+        92 * scale
+    }
+    .min(image.width());
+    let panel_height = if biome_mode {
+        (30 + palette_rows * 13) * scale
+    } else if field_mode {
+        48 * scale
+    } else {
+        28 * scale
+    }
+    .min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
     let y = margin.min(image.height().saturating_sub(panel_height));
 
@@ -1156,6 +1239,36 @@ fn draw_legend_overlay(image: &mut RgbImage, mode: PreviewMode) {
         [238, 241, 232],
         scale,
     );
+
+    if biome_mode {
+        let swatch_width = 12 * scale;
+        let swatch_height = 7 * scale;
+        let column_width = 126 * scale;
+        let row_step = 13 * scale;
+        for (index, entry) in BIOME_PALETTE.iter().enumerate() {
+            let column = index as u32 / palette_rows;
+            let row = index as u32 % palette_rows;
+            let entry_x = x + 8 * scale + column * column_width;
+            let entry_y = y + 21 * scale + row * row_step;
+            fill_rect(
+                image,
+                entry_x,
+                entry_y,
+                swatch_width,
+                swatch_height,
+                entry.color,
+            );
+            draw_text(
+                image,
+                entry_x + swatch_width + 5 * scale,
+                entry_y,
+                entry.label,
+                [218, 224, 212],
+                scale,
+            );
+        }
+        return;
+    }
 
     if let (Some(left), Some(right)) = (mode.legend_min_label(), mode.legend_max_label()) {
         let bar_x = x + 8 * scale;
@@ -1180,6 +1293,16 @@ fn draw_legend_overlay(image: &mut RgbImage, mode: PreviewMode) {
             [218, 224, 212],
             scale,
         );
+    }
+}
+
+fn fill_rect(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: [u8; 3]) {
+    let max_x = (x + width).min(image.width());
+    let max_y = (y + height).min(image.height());
+    for py in y..max_y {
+        for px in x..max_x {
+            set_pixel(image, px, py, color);
+        }
     }
 }
 
@@ -1590,5 +1713,83 @@ mod tests {
             gradient_color_for_mode(PreviewMode::Temperature, 1.0),
             [164, 37, 43]
         );
+    }
+
+    #[test]
+    fn biome_palette_covers_every_graph_biome_kind_with_distinct_colors() {
+        let expected = [
+            GraphBiomeKind::ShallowOcean,
+            GraphBiomeKind::DeepOcean,
+            GraphBiomeKind::Mangrove,
+            GraphBiomeKind::EstuarineCoast,
+            GraphBiomeKind::LagoonCoast,
+            GraphBiomeKind::RockyCoast,
+            GraphBiomeKind::SandyCoast,
+            GraphBiomeKind::Lake,
+            GraphBiomeKind::Marsh,
+            GraphBiomeKind::Swamp,
+            GraphBiomeKind::FloodedForest,
+            GraphBiomeKind::Desert,
+            GraphBiomeKind::SemiDesert,
+            GraphBiomeKind::Steppe,
+            GraphBiomeKind::DryShrubland,
+            GraphBiomeKind::MediterraneanShrubland,
+            GraphBiomeKind::PolarIce,
+            GraphBiomeKind::PolarBarrens,
+            GraphBiomeKind::Tundra,
+            GraphBiomeKind::SubalpineWoodland,
+            GraphBiomeKind::AlpineMeadow,
+            GraphBiomeKind::BorealForest,
+            GraphBiomeKind::TropicalRainforest,
+            GraphBiomeKind::MonsoonForest,
+            GraphBiomeKind::TropicalDryForest,
+            GraphBiomeKind::Savanna,
+            GraphBiomeKind::TemperateRainforest,
+            GraphBiomeKind::TemperateMixedForest,
+            GraphBiomeKind::TemperateBroadleafForest,
+            GraphBiomeKind::TemperateGrassland,
+        ];
+
+        assert_eq!(BIOME_PALETTE.len(), expected.len());
+        for biome in expected {
+            let matches = BIOME_PALETTE
+                .iter()
+                .filter(|entry| entry.biome == biome)
+                .count();
+            assert_eq!(
+                matches, 1,
+                "{biome:?} should have exactly one palette entry"
+            );
+        }
+        for (left_index, left) in BIOME_PALETTE.iter().enumerate() {
+            for right in BIOME_PALETTE.iter().skip(left_index + 1) {
+                assert_ne!(left.color, right.color);
+                assert!(
+                    color_distance_sq(left.color, right.color) >= 900,
+                    "{:?} and {:?} colors are too similar",
+                    left.biome,
+                    right.biome
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn biome_legend_overlay_changes_image_pixels() {
+        let mut image = RgbImage::from_pixel(560, 260, image::Rgb([4, 5, 6]));
+
+        draw_legend_overlay(&mut image, PreviewMode::Biome);
+
+        assert_ne!(image.as_raw(), &vec![4_u8, 5, 6].repeat(560 * 260));
+    }
+
+    fn color_distance_sq(left: [u8; 3], right: [u8; 3]) -> i32 {
+        left.iter()
+            .zip(right)
+            .map(|(left, right)| {
+                let delta = *left as i32 - right as i32;
+                delta * delta
+            })
+            .sum()
     }
 }

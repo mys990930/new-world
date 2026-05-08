@@ -46,13 +46,16 @@
   - `hydration` / `humidity`: final cell dry to wet, ochre through green to blue
   - `continentality`: resolved oceanic to continental context, blue coastal colors through inland greens/browns
   - `elevation`: resolved macro elevation context, lowland water/green through upland and snow colors
-- `--mode biome` emits one PNG colored by resolved `GraphBiomeKind`, including shallow/deep ocean, coast, lake, wetland, dry basin, and climate-driven land biomes.
+- `--mode biome` emits one PNG colored by resolved `GraphBiomeKind`, including shallow/deep ocean,
+  coast, lake, wetland, dry basin, cold, forest, tropical, dry, and alpine variants.
 - graph-only diagnostic modes remain useful where they do not claim final climate/biome meaning:
   - `ruggedness`: flat to rough, green/yellow through rock gray
 - `--mode all` emits `identity`, `temperature`, `hydration`, `biome`, `continentality`, `elevation`, and `ruggedness` PNG files in an output directory.
 - each PNG includes a compact legend overlay in one corner:
   - identity mode shows a small map label/header only
   - field modes show a small gradient bar with low/high meaning labels
+  - biome mode shows a two-column detailed biome legend using the same distinct palette as
+    `biome_map_preview`
 - each PNG includes a compass overlay using the common preview orientation: image top=N, right=E,
   bottom=S, left=W
 - stdout summary for seed, generator version, selected modes, world footprint, graph region area, site count, metadata, and generated file paths

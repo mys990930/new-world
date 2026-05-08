@@ -39,7 +39,7 @@
   - every current `GraphBiomeKind` variant uses its own distinct color code, including split ocean,
     forest, cold, and alpine variants;
   - graph Voronoi edges are drawn as a faint actual corner-to-corner overlay;
-  - a larger one-row-per-biome legend and common topdown compass are drawn over the image.
+  - a readable two-column detailed biome legend and common topdown compass are drawn over the image.
 - A PNG iTXt chunk named `new-world-preview-header` records seed, generator version, stage, center,
   dimensions, graph area, site spacing, land bias, site count, and per-biome site counts.
 

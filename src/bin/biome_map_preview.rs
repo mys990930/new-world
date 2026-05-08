@@ -25,44 +25,69 @@ const DEFAULT_HEIGHT: u32 = 2160;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "biome_map";
 const OUTPUT_DIR: &str = "target/biome-map-preview";
-const BIOME_PALETTE: [BiomePaletteEntry; 17] = [
-    BiomePaletteEntry::new(GraphBiomeKind::DeepOcean, "DEEP-OCEAN", [22, 45, 121]),
+const BIOME_PALETTE: [BiomePaletteEntry; 30] = [
+    BiomePaletteEntry::new(GraphBiomeKind::DeepOcean, "DEEP-OCEAN", [0, 32, 96]),
     BiomePaletteEntry::new(GraphBiomeKind::ShallowOcean, "SHALLOW-OCN", [0, 147, 196]),
-    BiomePaletteEntry::new(GraphBiomeKind::Coast, "COAST", [239, 214, 117]),
+    BiomePaletteEntry::new(GraphBiomeKind::Mangrove, "MANGROVE", [0, 86, 63]),
+    BiomePaletteEntry::new(GraphBiomeKind::EstuarineCoast, "ESTUARY", [96, 171, 130]),
+    BiomePaletteEntry::new(GraphBiomeKind::LagoonCoast, "LAGOON", [85, 210, 198]),
+    BiomePaletteEntry::new(GraphBiomeKind::RockyCoast, "ROCKY-COAST", [115, 118, 130]),
+    BiomePaletteEntry::new(GraphBiomeKind::SandyCoast, "SANDY-COAST", [238, 213, 132]),
     BiomePaletteEntry::new(GraphBiomeKind::Lake, "LAKE", [52, 88, 209]),
-    BiomePaletteEntry::new(GraphBiomeKind::Wetland, "WETLAND", [35, 142, 116]),
-    BiomePaletteEntry::new(GraphBiomeKind::DryBasin, "DRY-BASIN", [157, 119, 72]),
+    BiomePaletteEntry::new(GraphBiomeKind::Marsh, "MARSH", [116, 150, 110]),
+    BiomePaletteEntry::new(GraphBiomeKind::Swamp, "SWAMP", [57, 69, 42]),
+    BiomePaletteEntry::new(GraphBiomeKind::FloodedForest, "FLOOD-FRST", [32, 78, 136]),
+    BiomePaletteEntry::new(GraphBiomeKind::Desert, "DESERT", [224, 173, 43]),
+    BiomePaletteEntry::new(GraphBiomeKind::SemiDesert, "SEMI-DESERT", [190, 119, 57]),
+    BiomePaletteEntry::new(GraphBiomeKind::Steppe, "STEPPE", [154, 178, 105]),
+    BiomePaletteEntry::new(GraphBiomeKind::DryShrubland, "DRY-SHRUB", [136, 88, 52]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::MediterraneanShrubland,
+        "MED-SHRUB",
+        [104, 116, 38],
+    ),
     BiomePaletteEntry::new(GraphBiomeKind::PolarIce, "POLAR-ICE", [232, 245, 250]),
+    BiomePaletteEntry::new(GraphBiomeKind::PolarBarrens, "POLAR-BARR", [188, 188, 188]),
     BiomePaletteEntry::new(GraphBiomeKind::Tundra, "TUNDRA", [169, 178, 153]),
-    BiomePaletteEntry::new(GraphBiomeKind::BorealForest, "BOREAL-FRST", [32, 83, 75]),
     BiomePaletteEntry::new(
-        GraphBiomeKind::TemperateGrassland,
-        "TEMP-GRASS",
-        [126, 186, 79],
+        GraphBiomeKind::SubalpineWoodland,
+        "SUBALPINE",
+        [52, 106, 94],
     ),
-    BiomePaletteEntry::new(
-        GraphBiomeKind::TemperateForest,
-        "TEMP-FOREST",
-        [41, 125, 65],
-    ),
-    BiomePaletteEntry::new(
-        GraphBiomeKind::TemperateRainforest,
-        "TEMP-RAIN",
-        [0, 109, 92],
-    ),
-    BiomePaletteEntry::new(GraphBiomeKind::HotDesert, "HOT-DESERT", [218, 169, 67]),
-    BiomePaletteEntry::new(GraphBiomeKind::Savanna, "SAVANNA", [170, 188, 44]),
-    BiomePaletteEntry::new(
-        GraphBiomeKind::TropicalSeasonalForest,
-        "TROP-SEASON",
-        [70, 150, 43],
-    ),
+    BiomePaletteEntry::new(GraphBiomeKind::AlpineMeadow, "ALP-MEADOW", [144, 128, 166]),
+    BiomePaletteEntry::new(GraphBiomeKind::BorealForest, "BOREAL-FRST", [24, 80, 98]),
     BiomePaletteEntry::new(
         GraphBiomeKind::TropicalRainforest,
         "TROP-RAIN",
-        [13, 92, 45],
+        [0, 116, 54],
     ),
-    BiomePaletteEntry::new(GraphBiomeKind::Alpine, "ALPINE", [139, 137, 146]),
+    BiomePaletteEntry::new(GraphBiomeKind::MonsoonForest, "MONSOON", [38, 156, 69]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TropicalDryForest,
+        "TROP-DRY",
+        [108, 162, 39],
+    ),
+    BiomePaletteEntry::new(GraphBiomeKind::Savanna, "SAVANNA", [201, 190, 55]),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateRainforest,
+        "TEMP-RAIN",
+        [0, 128, 116],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateMixedForest,
+        "TEMP-MIXED",
+        [48, 132, 47],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateBroadleafForest,
+        "TEMP-BROAD",
+        [81, 154, 64],
+    ),
+    BiomePaletteEntry::new(
+        GraphBiomeKind::TemperateGrassland,
+        "TEMP-GRASS",
+        [130, 190, 89],
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -571,7 +596,9 @@ fn color_for_biome_site(site: GraphBiomeCell, macro_site: Option<MacroSite>) -> 
         GraphBiomeKind::DeepOcean
             | GraphBiomeKind::ShallowOcean
             | GraphBiomeKind::Lake
-            | GraphBiomeKind::Wetland
+            | GraphBiomeKind::Marsh
+            | GraphBiomeKind::Swamp
+            | GraphBiomeKind::FloodedForest
     ) {
         return base;
     }
@@ -655,8 +682,11 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     let swatch_width = 26;
     let swatch_height = 16;
     let row_step = 24;
-    let panel_width = 250;
-    let panel_height = BIOME_PALETTE.len() as u32 * row_step + 42;
+    let columns = 2_u32;
+    let rows = BIOME_PALETTE.len().div_ceil(columns as usize) as u32;
+    let column_width = 246;
+    let panel_width = columns * column_width + 16;
+    let panel_height = rows * row_step + 50;
     blend_rect(
         image,
         x - 12,
@@ -668,11 +698,21 @@ fn draw_legend_overlay(image: &mut RgbImage) {
     );
     draw_text(image, x, y, "BIOME MAP", [246, 246, 232], title_scale);
     for (index, entry) in BIOME_PALETTE.iter().enumerate() {
-        let row_y = y + 34 + index as u32 * row_step;
-        fill_rect(image, x, row_y, swatch_width, swatch_height, entry.color);
+        let column = index as u32 / rows;
+        let row = index as u32 % rows;
+        let entry_x = x + column * column_width;
+        let row_y = y + 38 + row * row_step;
+        fill_rect(
+            image,
+            entry_x,
+            row_y,
+            swatch_width,
+            swatch_height,
+            entry.color,
+        );
         draw_text(
             image,
-            x + swatch_width + 12,
+            entry_x + swatch_width + 12,
             row_y,
             entry.label,
             [238, 238, 222],
@@ -687,19 +727,33 @@ fn preview_biome_stats<'a>(sites: impl Iterator<Item = &'a GraphBiomeCell>) -> P
         match site.biome {
             GraphBiomeKind::DeepOcean | GraphBiomeKind::ShallowOcean => stats.ocean += 1,
             GraphBiomeKind::Lake => stats.lake += 1,
-            GraphBiomeKind::Wetland => stats.wetland += 1,
-            GraphBiomeKind::DryBasin => stats.dry_basin += 1,
-            GraphBiomeKind::Coast => stats.beach += 1,
-            GraphBiomeKind::HotDesert => stats.desert += 1,
+            GraphBiomeKind::Marsh | GraphBiomeKind::Swamp | GraphBiomeKind::FloodedForest => {
+                stats.wetland += 1
+            }
+            GraphBiomeKind::SemiDesert
+            | GraphBiomeKind::Steppe
+            | GraphBiomeKind::DryShrubland
+            | GraphBiomeKind::MediterraneanShrubland => stats.dry_basin += 1,
+            GraphBiomeKind::Mangrove
+            | GraphBiomeKind::EstuarineCoast
+            | GraphBiomeKind::LagoonCoast
+            | GraphBiomeKind::RockyCoast
+            | GraphBiomeKind::SandyCoast => stats.beach += 1,
+            GraphBiomeKind::Desert => stats.desert += 1,
             GraphBiomeKind::Savanna => stats.savanna += 1,
             GraphBiomeKind::TemperateGrassland => stats.grassland += 1,
-            GraphBiomeKind::TemperateForest => stats.temperate_forest += 1,
+            GraphBiomeKind::TemperateMixedForest | GraphBiomeKind::TemperateBroadleafForest => {
+                stats.temperate_forest += 1
+            }
             GraphBiomeKind::BorealForest => stats.boreal_forest += 1,
             GraphBiomeKind::TemperateRainforest
-            | GraphBiomeKind::TropicalSeasonalForest
+            | GraphBiomeKind::MonsoonForest
+            | GraphBiomeKind::TropicalDryForest
             | GraphBiomeKind::TropicalRainforest => stats.rainforest += 1,
-            GraphBiomeKind::Tundra | GraphBiomeKind::PolarIce => stats.tundra += 1,
-            GraphBiomeKind::Alpine => stats.alpine += 1,
+            GraphBiomeKind::Tundra | GraphBiomeKind::PolarIce | GraphBiomeKind::PolarBarrens => {
+                stats.tundra += 1
+            }
+            GraphBiomeKind::SubalpineWoodland | GraphBiomeKind::AlpineMeadow => stats.alpine += 1,
         }
     }
     stats
@@ -1147,21 +1201,34 @@ mod tests {
         let expected = [
             GraphBiomeKind::ShallowOcean,
             GraphBiomeKind::DeepOcean,
-            GraphBiomeKind::Coast,
+            GraphBiomeKind::Mangrove,
+            GraphBiomeKind::EstuarineCoast,
+            GraphBiomeKind::LagoonCoast,
+            GraphBiomeKind::RockyCoast,
+            GraphBiomeKind::SandyCoast,
             GraphBiomeKind::Lake,
-            GraphBiomeKind::Wetland,
-            GraphBiomeKind::DryBasin,
+            GraphBiomeKind::Marsh,
+            GraphBiomeKind::Swamp,
+            GraphBiomeKind::FloodedForest,
+            GraphBiomeKind::Desert,
+            GraphBiomeKind::SemiDesert,
+            GraphBiomeKind::Steppe,
+            GraphBiomeKind::DryShrubland,
+            GraphBiomeKind::MediterraneanShrubland,
             GraphBiomeKind::PolarIce,
+            GraphBiomeKind::PolarBarrens,
             GraphBiomeKind::Tundra,
+            GraphBiomeKind::SubalpineWoodland,
+            GraphBiomeKind::AlpineMeadow,
             GraphBiomeKind::BorealForest,
-            GraphBiomeKind::TemperateGrassland,
-            GraphBiomeKind::TemperateForest,
-            GraphBiomeKind::TemperateRainforest,
-            GraphBiomeKind::HotDesert,
-            GraphBiomeKind::Savanna,
-            GraphBiomeKind::TropicalSeasonalForest,
             GraphBiomeKind::TropicalRainforest,
-            GraphBiomeKind::Alpine,
+            GraphBiomeKind::MonsoonForest,
+            GraphBiomeKind::TropicalDryForest,
+            GraphBiomeKind::Savanna,
+            GraphBiomeKind::TemperateRainforest,
+            GraphBiomeKind::TemperateMixedForest,
+            GraphBiomeKind::TemperateBroadleafForest,
+            GraphBiomeKind::TemperateGrassland,
         ];
 
         assert_eq!(BIOME_PALETTE.len(), expected.len());

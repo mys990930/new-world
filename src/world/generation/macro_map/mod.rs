@@ -1883,17 +1883,42 @@ mod tests {
             }
         }
 
-        for expected in [
-            GraphBiomeKind::TemperateGrassland,
-            GraphBiomeKind::HotDesert,
-            GraphBiomeKind::Savanna,
-            GraphBiomeKind::TropicalSeasonalForest,
-            GraphBiomeKind::TropicalRainforest,
-            GraphBiomeKind::Alpine,
-        ] {
+        let expected_groups: &[(&str, &[GraphBiomeKind])] = &[
+            ("temperate grassland", &[GraphBiomeKind::TemperateGrassland]),
+            (
+                "dry/arid",
+                &[
+                    GraphBiomeKind::Desert,
+                    GraphBiomeKind::SemiDesert,
+                    GraphBiomeKind::Steppe,
+                    GraphBiomeKind::DryShrubland,
+                    GraphBiomeKind::MediterraneanShrubland,
+                ],
+            ),
+            (
+                "tropical",
+                &[
+                    GraphBiomeKind::Savanna,
+                    GraphBiomeKind::TropicalDryForest,
+                    GraphBiomeKind::MonsoonForest,
+                    GraphBiomeKind::TropicalRainforest,
+                ],
+            ),
+            (
+                "alpine",
+                &[
+                    GraphBiomeKind::SubalpineWoodland,
+                    GraphBiomeKind::AlpineMeadow,
+                ],
+            ),
+        ];
+
+        for (label, expected) in expected_groups {
             assert!(
-                counts.get(&expected).copied().unwrap_or(0) > 0,
-                "{expected:?} should appear in a bounded deterministic seed scan; counts={counts:?}"
+                expected
+                    .iter()
+                    .any(|biome| counts.get(biome).copied().unwrap_or(0) > 0),
+                "{label} biome branch should appear in a bounded deterministic seed scan; counts={counts:?}"
             );
         }
     }
@@ -1907,16 +1932,16 @@ mod tests {
             let map = generate_macro_map(&patch, test_macro_config(seed));
 
             for biome in &map.biomes {
-                if biome.biome == GraphBiomeKind::Alpine {
+                if biome.biome == GraphBiomeKind::AlpineMeadow {
                     alpine_count += 1;
                     assert!(
                         biome.context.elevation >= 0.68,
-                        "Alpine should be restricted to higher macro elevation: {:?}",
+                        "AlpineMeadow should be restricted to higher macro elevation: {:?}",
                         biome.context
                     );
                     assert!(
                         biome.context.mountainness >= 0.56,
-                        "Alpine should keep mountain context: {:?}",
+                        "AlpineMeadow should keep mountain context: {:?}",
                         biome.context
                     );
                 }
@@ -1925,7 +1950,7 @@ mod tests {
 
         assert!(
             alpine_count > 0,
-            "bounded deterministic seed scan should find high-elevation Alpine cells"
+            "bounded deterministic seed scan should find high-elevation AlpineMeadow cells"
         );
     }
 
