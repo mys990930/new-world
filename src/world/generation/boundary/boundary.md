@@ -101,11 +101,13 @@ hydrology의 `GraphRiverSegment`는 selected edge id path다. boundary 단계는
 river curve를 만들지 않는다. preview overlay와 topology/corridor reference는 river segment의 `edge`
 id로 `BoundaryCache.curve_for_edge(edge)`를 찾는다.
 
-단, macro_field의 valley carve shape는 canonical noisy edge polyline을 그대로 centerline으로 굽는
-것으로 고정하지 않는다. bend에서 thick capsule union이 둥근 blob처럼 부푸는 문제를 줄이기 위해,
-macro_field는 selected segment topology를 chain 단위로 읽고 drainage node/corner anchor를 통과하는
-derived river spline/corridor를 만들 수 있다. 이 spline은 selected graph path에서 과하게 벗어나면
-안 되며, boundary cache는 여전히 raw topology와 visible boundary reference를 소유한다.
+단, macro_field의 valley carve shape는 canonical noisy edge polyline을 raw 그대로 centerline으로
+굽는 것으로 고정하지 않는다. bend에서 thick capsule union이 둥근 blob처럼 부푸는 문제를 줄이고
+corner anchor만 잇는 직선 조각도 피하기 위해, macro_field는 selected segment topology를 chain
+단위로 읽고 각 selected edge의 `NoisyBoundaryCurve.points`를 downstream 방향으로 이어 붙인 뒤
+resample/smoothing한 derived river spline/corridor를 만들 수 있다. 이 spline은 selected graph
+path에서 과하게 벗어나면 안 되며, boundary cache는 여전히 raw topology와 visible boundary reference를
+소유한다.
 
 lake rule은 그대로 유지한다.
 

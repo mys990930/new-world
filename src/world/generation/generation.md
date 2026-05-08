@@ -182,9 +182,11 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      distance-based envelope다. ridge 중심은 canonical noisy edge 위에 있고, 영향은 양옆으로 감쇠한다.
    - river valley field는 selected hydrology segment의 graph topology를 읽어 chain-level river
      spline/corridor로 변환한 뒤 anti-aliased thick polyline corridor로 구운 coverage/strength,
-     nearest distance, flow를 저장한다. 강을 별도 boundary noise curve로 다시 만들지 않지만, bend에서
-     noisy Voronoi edge capsule union이 둥근 blob처럼 부푸는 것을 피하기 위해 carve source geometry는
-     hydrology chain/corner anchor 기반 derived spline을 사용한다.
+     nearest distance, flow를 저장한다. 강을 별도 boundary noise curve로 다시 만들지 않지만, carve
+     source geometry는 selected edge의 `NoisyBoundaryCurve.points`를 downstream 방향으로 이어 붙이고
+     arc-length resample/smoothing한 derived spline을 사용한다. 이렇게 해서 hydrology topology와 noisy
+     edge detail을 보존하면서, bend에서 noisy Voronoi edge capsule union이 둥근 blob처럼 부푸는 문제와
+     corner-only straight segment 문제를 함께 줄인다.
    - river valley field는 고정 폭으로 모든 강을 칠하지 않는다. selected/display flow가 작은 상류는
      좁고 얕은 carve guide를 만들고, flow가 큰 하류 trunk에서만 넓고 깊은 carve guide를 만든다.
    - river valley profile은 V자 center carve 하나가 아니라 flat-bottom + shoulder falloff 구조다.
@@ -304,8 +306,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   combined macro height는 각각
   독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
   직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
-  river valley는 selected edge topology를 보존하되, visible carve corridor는 chain-level spline,
-  chain-direction flow smoothing, curvature-aware width scale을 사용해 sharp bend의 round blob을 줄인다.
+  river valley는 selected edge topology를 보존하되, visible carve corridor는 selected noisy edge
+  points를 chain 방향으로 이어 붙인 river-specific spline, chain-direction flow smoothing,
+  curvature-aware width scale을 사용해 sharp bend의 round blob과 corner-only straight segment를 줄인다.
 - stage 12 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
   meso/perlin delta는 아직 `0`인 stub이며, macro field contour step과 일관된 band interpolation을
   거친 뒤 integer block height로 snap한다. ocean/lake mask는 water level hint로, river/ridge/dry basin
