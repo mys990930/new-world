@@ -2,7 +2,7 @@
 
 ## 역할
 
-`surface_plan`은 heightfield와 continuous field, hydrology role을 읽어 biome/material/water/coast
+`surface_plan`은 heightfield와 stage 7 final cell context, hydrology role을 읽어 biome/material/water/coast
 surface policy를 resolve하는 plan 계약을 소유한다.
 
 이 단계는 visible material boundary를 안정적으로 만들지만, hard polygon owner를 그대로 색칠하지
@@ -12,7 +12,7 @@ surface policy를 resolve하는 plan 계약을 소유한다.
 
 ## 책임
 
-- biome influence와 hydrology role에서 surface policy 선택
+- 이미 resolve된 biome influence와 hydrology role에서 surface policy 선택
 - ocean, coast, lake, river, wetland, floodplain의 material 의미 구분
 - slope, exposure, elevation, hydration에 따른 beach/cliff/rock/soil/vegetation 전환
 - column voxel fill이 읽을 surface column plan 정의
@@ -34,7 +34,7 @@ surface policy를 resolve하는 plan 계약을 소유한다.
 
 surface resolve는 아래 입력을 함께 본다.
 
-- continuous temperature / hydration / ruggedness
+- stage 7 final cell context의 continuous temperature / hydration / ruggedness
 - dominant site와 blended biome influence
 - heightfield surface y와 slope
 - ocean/lake/river/wetland/coast role
@@ -68,6 +68,8 @@ visible material boundary는 hard owner 경계를 그대로 따라가면 안 된
 3. material transition은 chunk 경계와 graph region 경계에 독립적이어야 한다.
 4. surface plan은 renderer 리소스를 소유하지 않는다.
 5. surface plan은 `ChunkData`를 직접 수정하지 않고 voxel fill이 소비할 계획을 만든다.
+6. surface plan은 biome을 새로 resolve하지 않고 stage 7 final cell context와 macro_field cache가
+   보존한 biome influence를 소비한다.
 
 ---
 

@@ -51,7 +51,9 @@ world-space column sampling은 주변 site/corner의 influence를 섞어 continu
 
 - base graph field: graph 생성 직후 site/corner에 temperature, humidity, macro-friendly continentality,
   elevation seed를 부여하고 이웃 smoothing한다.
-- final column field: heightfield와 hydrology 이후 elevation, water proximity, rain shadow, river/lake/wetland proximity를 반영해 temperature/hydration/biome influence를 다시 resolve한다.
+- final cell context field: hydrology 이후, boundary와 macro_field 이전에 macro signed elevation,
+  water proximity, rain shadow, river/lake/wetland proximity를 반영해 temperature/hydration/biome
+  influence를 다시 resolve한다.
 
 현재 base graph field는 `graph` leaf의 `GraphBaseFields`가 소유한다. site는 seed hash에서 직접 나온
 `raw_base_fields`와 neighbor smoothing 후의 `base_fields`를 함께 가진다. corner는 주변 site 4개의
@@ -62,6 +64,17 @@ raw/smoothed field를 거리 가중 평균해 같은 두 값을 가진다. 이�
 `continentality`와 `elevation_seed`는 macro_map의 source of truth다. 즉, macro_map은 독자적인
 continent/island noise source를 새로 만들기보다, 이 smoothed graph field를 연결 component와
 context로 해석해 continent/ocean/island ownership과 signed macro elevation을 resolve한다.
+
+final cell context는 이후 stage가 공유하는 계약으로, 최소한 아래 값을 제공해야 한다.
+
+- dominant site owner와 normalized blended graph influence
+- final temperature와 final hydration
+- hydrology role과 ocean/coast/lake/wetland/dry-basin role
+- rain shadow와 fresh-water proximity
+- blended biome influence와 optional dominant biome id
+
+biome은 이 final cell context에서 macro_field보다 먼저 resolve된다. `macro_field`는 biome을 새로
+결정하지 않고 이 context를 raster/cache 가능한 channel이나 downstream hint로 옮긴다.
 
 방법 후보:
 

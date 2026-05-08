@@ -1,3 +1,4 @@
+pub mod biome;
 pub mod boundary;
 pub mod field;
 pub mod graph;
@@ -12,6 +13,10 @@ pub mod pipeline;
 #[allow(unused_imports)]
 pub use crate::world::legacy::generation::*;
 
+#[allow(unused_imports)]
+pub use biome::{
+    GraphBiomeCell, GraphBiomeContext, GraphBiomeKind, GraphBiomeWaterRole, classify_graph_biome,
+};
 #[allow(unused_imports)]
 pub use boundary::{
     BoundaryAnchors, BoundaryCache, BoundaryConfig, BoundaryGuard, BoundaryProfile, BoundaryStats,

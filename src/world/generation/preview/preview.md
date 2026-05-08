@@ -41,12 +41,12 @@
 8. elevation/corner downhill arrow map
 9. watershed map
 10. river flow accumulation map
-11. noisy edge preview
-12. macro field rasterization preview
-13. meso feature plan preview
-14. Perlin micro relief preview
-15. heightfield and water surface preview
-16. final temperature/hydration/biome influence preview
+11. final temperature/hydration/biome influence preview
+12. noisy edge preview
+13. macro field rasterization preview
+14. meso feature plan preview
+15. Perlin micro relief preview
+16. heightfield and water surface preview
 17. biome/material/surface plan preview
 18. vegetation placement preview
 19. voxel fill preview
@@ -141,7 +141,7 @@
   가장 높은 peak는 흰색으로 표현한다.
 - 모든 graph Voronoi edge는 실제 graph corner-to-corner segment를 기준으로 희미한 base overlay로
   표시한다.
-- stage 7 boundary overlay는 모든 graph Voronoi edge의 canonical noisy curve를 그린다. 이 overlay는
+- stage 8 boundary overlay는 모든 graph Voronoi edge의 canonical noisy curve를 그린다. 이 overlay는
   straight edge를 재샘플링한 선이 아니라 endpoint는 유지하고 중간 point를 edge normal 방향으로
   흔든 울퉁불퉁한 polyline이어야 한다. boundary curve는 독립 jitter가 아니라 correlated wave/value
   noise와 smoothing을 거친 자연스러운 곡선이어야 하며, 기본 4K preview와 640 smoke preview에서도
@@ -151,7 +151,7 @@
   구현된 뒤에는 같은 composite 위에 selected river result를 추가 overlay한다.
 - selected river는 hydrology가 확정한 `GraphRiverSegment`만 표시한다. pre-hydrology river candidate나
   macro_map river potential은 표시하지 않는다.
-- selected river segment는 stage 7 `BoundaryCache`가 제공하는 canonical noisy edge geometry를 따라 cyan/blue line으로 표시하고,
+- selected river segment는 stage 8 `BoundaryCache`가 제공하는 canonical noisy edge geometry를 따라 cyan/blue line으로 표시하고,
   segment의 selected/display `flow_accumulation`이 클수록 더 두껍게 그린다. hydrology raw corner
   accumulation과 lake capacity가 적용된 selected discharge가 다를 수 있으며, lake terminal/inlet
   river는 ocean outlet river보다 보수적인 두께 cap을 가진다. lake terminal/inlet은 hydrology
@@ -220,7 +220,7 @@
 - coast/ridge/fault candidate overlay는 nearest-site fill 근사 경계에 맞추지 않고,
   `MacroEdge.corners`가 참조하는 graph patch의 실제 `VoronoiCorner.position` 두 점을 world-space에서
   clipping한 뒤 픽셀 중심 좌표계로 투영한 선분으로 그린다.
-- hydrology overlay는 stage 7 이후 같은 edge id의 canonical noisy curve를 사용한다. 따라서 selected river는 raw
+- hydrology overlay는 stage 8 이후 같은 edge id의 canonical noisy curve를 사용한다. 따라서 selected river는 raw
   nearest-site raster boundary가 아니라 hydrology가 선택한 Voronoi edge chain의 noisy geometry 위에 놓인다.
 - hydrology overlay는 macro_map의 명시적 lake edge class를 통과한 selected segment만 그린다. 따라서
   nearest-site lake fill 경계와 corner surface 기준이 어긋나도 selected river가 lake boundary/internal/
@@ -231,16 +231,16 @@
 
 ## `macro_field_preview` CLI 계약
 
-`macro_field_preview`는 stage 8 macro field rasterization을 chunk 생성 없이 검사하는 topdown preview
+`macro_field_preview`는 stage 9 macro field rasterization을 chunk 생성 없이 검사하는 topdown preview
 binary다.
 
-macro field는 noise source가 아니다. 이 preview는 graph/macro/hydrology/boundary cache를
+macro field는 noise source가 아니다. 이 preview는 graph/macro/hydrology/final-cell-context/boundary cache를
 world-space sample grid로 굽는 과정을 검사한다. source of truth는 graph topology, macro annotation,
 selected hydrology result, canonical noisy boundary에 남고, `MacroFieldTile`은 heightfield와 chunk fill이
 빠르게 읽기 위한 graph-derived signed distance / influence field cache다.
 
 preview와 runtime cache miss는 ridge/coast/river curve distance를 sample마다 반복 계산하지 않아야
-한다. stage 8 preview는 ridge/coast의 canonical noisy curve를 tile source pixel로 rasterize하고
+한다. stage 9 preview는 ridge/coast의 canonical noisy curve를 tile source pixel로 rasterize하고
 distance propagation으로 influence field를 만들 수 있지만, selected river는 point source/chamfer가
 아니라 canonical noisy curve를 anti-aliased thick polyline corridor로 굽는다. 이 river pass는
 subpixel coverage 기반 valley strength, nearest-segment distance, blended display flow를 저장한 뒤
@@ -292,6 +292,10 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
 - `contour`: heightfield 직전 `combined_macro_height`를 block-height scale으로 변환한 뒤 Marching
   Squares로 추출한 contour line preview. 기본 level step은 32 blocks이며, 5 level마다 major contour를
   그린다. sea level `y=0` contour는 별도 blue 계열로 표시한다.
+- `cell_context` 또는 `biome`: stage 7에서 resolve된 final temperature, hydration, hydrology role,
+  water proximity, rain shadow, biome influence를 표시한다. 이 preview는 macro_field가 biome을
+  새로 분류하는 표면이 아니라, pre-macro_field final cell context를 tile/sample 형태로 보존했는지
+  확인하는 표면이다.
 
 중간 단계는 2D gradient/mask preview여야 한다. 최종 산출물은 색상 지형도가 아니라 흰색 texture에
 간단한 normal/light shading을 입힌 top-down heightfield rendering이어야 한다. lighting은 진단용이며
@@ -304,7 +308,7 @@ renderer/GPU 계약을 만들지 않는다.
 - width, height, generator version, stage, world span, tile resolution은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
 - PNG에는 `new-world-preview-header` iTXt metadata chunk가 들어간다.
-- metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/boundary version,
+- metadata/stdout은 tile bounds, sample resolution, source graph/macro/hydrology/final-cell-context/boundary version,
   channel name, min/max/avg, absolute preview scale, robust percentile diagnostic range, noisy
   boundary displacement stats, finite/NaN count, overlap guard width, source cache key, legend
   labels, influence source curve/pixel count, tile generation timing을 기록한다.
@@ -313,7 +317,7 @@ renderer/GPU 계약을 만들지 않는다.
   direction만 표시한다. contour channel은 minor/major/sea-level key와 contour step/major spacing을 표시한다.
 - 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
   같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
-- 모든 `macro_field_preview` channel은 stage 7 `BoundaryCache`의 canonical noisy Voronoi graph edge
+- 모든 `macro_field_preview` channel은 stage 8 `BoundaryCache`의 canonical noisy Voronoi graph edge
   overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
   field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
   macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다.
@@ -341,7 +345,7 @@ renderer/GPU 계약을 만들지 않는다.
 - hydrology endpoint attachment: river valley field는 selected segment의 canonical noisy curve와
   lake inlet/outlet endpoint를 따라가야 한다.
 - noisy boundary ownership: macro elevation과 mask 경계는 nearest-site straight boundary가 아니라
-  stage 7 noisy boundary curve를 따라야 한다.
+  stage 8 noisy boundary curve를 따라야 한다.
 - no lake-edge river invariant: river valley field는 `MacroLakeEdgeClass::NonLake` selected segment만
   rasterize해야 한다.
 - preview nonblank: 각 channel은 blank 단색 이미지가 아니어야 하며 legend와 metadata를 포함해야 한다.
@@ -352,7 +356,7 @@ renderer/GPU 계약을 만들지 않는다.
 
 ## `heightfield_preview` CLI 계약
 
-`heightfield_preview`는 stage 11 heightfield / water surface vertical slice를 chunk 생성 없이 검사하는
+`heightfield_preview`는 stage 12 heightfield / water surface vertical slice를 chunk 생성 없이 검사하는
 isometric preview binary다.
 
 이 preview는 `MacroFieldTile`을 `HeightfieldTile` column cache로 변환한 뒤, column을 diagnostic box로

@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
+use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::{
     GraphBaseFields, GraphRegionCoord, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch,
     VoronoiSiteId, WorldPlanePoint,
@@ -164,6 +165,7 @@ pub struct GraphMacroMap {
     pub sites: Vec<MacroSite>,
     pub corners: Vec<MacroCorner>,
     pub edges: Vec<MacroEdge>,
+    pub biomes: Vec<GraphBiomeCell>,
 }
 
 impl GraphMacroMap {
@@ -181,6 +183,10 @@ impl GraphMacroMap {
 
     pub fn edge(&self, id: VoronoiEdgeId) -> Option<&MacroEdge> {
         self.edges.iter().find(|edge| edge.id == id)
+    }
+
+    pub fn biome(&self, site: VoronoiSiteId) -> Option<&GraphBiomeCell> {
+        self.biomes.iter().find(|biome| biome.site == site)
     }
 
     pub fn coast_edges(&self) -> impl Iterator<Item = &MacroEdge> {
@@ -210,7 +216,7 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
     validate_macro_map_config(config);
 
     let site_context = resolve_site_context(patch, config);
-    let mut sites = patch
+    let mut site_builds = patch
         .sites
         .par_iter()
         .enumerate()
@@ -219,7 +225,15 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
             macro_site_from_context(site.id, site.owner_region, site.position, context, config)
         })
         .collect::<Vec<_>>();
-    sites.sort_by_key(|site| site.id.0);
+    site_builds.sort_by_key(|build| build.site.id.0);
+    let sites = site_builds
+        .iter()
+        .map(|build| build.site)
+        .collect::<Vec<_>>();
+    let biomes = site_builds
+        .iter()
+        .map(|build| build.biome)
+        .collect::<Vec<_>>();
 
     let site_map = sites
         .iter()
@@ -258,7 +272,14 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
         sites,
         corners,
         edges,
+        biomes,
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MacroSiteBuild {
+    site: MacroSite,
+    biome: GraphBiomeCell,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -670,10 +691,10 @@ fn macro_site_from_context(
     position: WorldPlanePoint,
     context: SiteContext,
     config: MacroMapConfig,
-) -> MacroSite {
+) -> MacroSiteBuild {
     let sample = macro_field_sample_from_context(context, config);
     let macro_land_side = sample.surface_kind.is_land_owned();
-    MacroSite {
+    let site = MacroSite {
         id,
         owner_region,
         position,
@@ -697,12 +718,22 @@ fn macro_site_from_context(
         mountainness: sample.mountainness,
         ridgeness: sample.ridgeness,
         basinness: sample.basinness,
+    };
+    MacroSiteBuild {
+        site,
+        biome: GraphBiomeCell {
+            site: id,
+            context: sample.biome_context,
+            biome: sample.biome,
+        },
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct MacroFieldSample {
     surface_kind: MacroSurfaceKind,
+    biome_context: GraphBiomeContext,
+    biome: super::biome::GraphBiomeKind,
     signed_macro_elevation: f32,
     continentality: f32,
     coastness: f32,
@@ -784,19 +815,33 @@ fn macro_field_sample_from_context(
     }
     .clamp(-1.0, 1.5);
 
+    let surface_kind = surface_kind(
+        fields,
+        context.is_land_owned,
+        context.is_island_owned,
+        context.is_tiny_local_minima_lake,
+        context.is_inland_water,
+        context.inland_water_surface,
+        coastness,
+        basinness,
+        raw_signed_macro_elevation.max(0.01),
+        context.feature_hash,
+    );
+    let biome_context = graph_biome_context(
+        fields,
+        surface_kind,
+        signed_macro_elevation,
+        continentality,
+        coastness,
+        mountainness,
+        basinness,
+    );
+    let biome = classify_graph_biome(biome_context);
+
     MacroFieldSample {
-        surface_kind: surface_kind(
-            fields,
-            context.is_land_owned,
-            context.is_island_owned,
-            context.is_tiny_local_minima_lake,
-            context.is_inland_water,
-            context.inland_water_surface,
-            coastness,
-            basinness,
-            raw_signed_macro_elevation.max(0.01),
-            context.feature_hash,
-        ),
+        surface_kind,
+        biome_context,
+        biome,
         signed_macro_elevation,
         continentality,
         coastness,
@@ -804,6 +849,49 @@ fn macro_field_sample_from_context(
         mountainness,
         ridgeness,
         basinness,
+    }
+}
+
+fn graph_biome_context(
+    fields: GraphBaseFields,
+    surface_kind: MacroSurfaceKind,
+    signed_macro_elevation: f32,
+    continentality: f32,
+    coastness: f32,
+    mountainness: f32,
+    basinness: f32,
+) -> GraphBiomeContext {
+    GraphBiomeContext {
+        temperature: fields.temperature,
+        hydration: fields.hydration,
+        elevation: signed_macro_elevation,
+        continentality,
+        coastness,
+        mountainness,
+        basinness,
+        water_role: graph_biome_water_role(surface_kind, signed_macro_elevation, coastness),
+    }
+    .clamped()
+}
+
+fn graph_biome_water_role(
+    surface_kind: MacroSurfaceKind,
+    signed_macro_elevation: f32,
+    coastness: f32,
+) -> GraphBiomeWaterRole {
+    match surface_kind {
+        MacroSurfaceKind::OceanBasin | MacroSurfaceKind::CoastOcean => {
+            if signed_macro_elevation <= -0.32 && coastness < 0.25 {
+                GraphBiomeWaterRole::DeepOcean
+            } else {
+                GraphBiomeWaterRole::ShallowOcean
+            }
+        }
+        MacroSurfaceKind::CoastLand | MacroSurfaceKind::CoastIsland => GraphBiomeWaterRole::Coast,
+        MacroSurfaceKind::LakeCandidate => GraphBiomeWaterRole::Lake,
+        MacroSurfaceKind::WetlandCandidate => GraphBiomeWaterRole::Wetland,
+        MacroSurfaceKind::DryBasin => GraphBiomeWaterRole::DryBasin,
+        MacroSurfaceKind::Continent | MacroSurfaceKind::Island => GraphBiomeWaterRole::Land,
     }
 }
 
@@ -1728,6 +1816,50 @@ mod tests {
         assert!(
             boundary_edges > 0,
             "lake edge classification should distinguish visible lake boundaries"
+        );
+    }
+
+    #[test]
+    fn macro_map_resolves_biome_cells_for_sites_before_macro_field() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(42, 0, 0));
+        let map = generate_macro_map(&patch, MacroMapConfig::new(42, 11));
+
+        assert_eq!(map.biomes.len(), map.sites.len());
+        assert!(map.sites.iter().all(|site| {
+            map.biome(site.id)
+                .is_some_and(|biome| biome.site == site.id && biome.context.coastness.is_finite())
+        }));
+        assert!(
+            map.biomes.iter().any(|biome| matches!(
+                biome.biome,
+                super::super::biome::GraphBiomeKind::ShallowOcean
+                    | super::super::biome::GraphBiomeKind::DeepOcean
+            )),
+            "preview-sized macro map should carry ocean biome classification"
+        );
+    }
+
+    #[test]
+    fn graph_biome_water_role_splits_shallow_and_deep_ocean() {
+        assert_eq!(
+            graph_biome_water_role(MacroSurfaceKind::OceanBasin, -0.08, 0.70),
+            GraphBiomeWaterRole::ShallowOcean
+        );
+        assert_eq!(
+            graph_biome_water_role(MacroSurfaceKind::OceanBasin, -0.64, 0.0),
+            GraphBiomeWaterRole::DeepOcean
+        );
+    }
+
+    #[test]
+    fn graph_biome_water_role_preserves_coast_and_wetland_meaning() {
+        assert_eq!(
+            graph_biome_water_role(MacroSurfaceKind::CoastLand, 0.02, 0.90),
+            GraphBiomeWaterRole::Coast
+        );
+        assert_eq!(
+            graph_biome_water_role(MacroSurfaceKind::WetlandCandidate, 0.04, 0.10),
+            GraphBiomeWaterRole::Wetland
         );
     }
 

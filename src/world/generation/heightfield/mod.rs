@@ -1419,6 +1419,8 @@ mod tests {
             position: WorldPlanePoint::new(x, z),
             nearest_site: None,
             surface_kind: None,
+            biome_context: None,
+            biome: None,
             macro_elevation: height,
             ocean_mask: ocean,
             coast_mask: 0.0,

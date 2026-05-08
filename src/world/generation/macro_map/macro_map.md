@@ -49,6 +49,7 @@ GraphMacroMap {
     sites: Vec<MacroSite>,
     corners: Vec<MacroCorner>,
     edges: Vec<MacroEdge>,
+    biomes: Vec<GraphBiomeCell>,
 }
 
 MacroSurfaceKind::{
@@ -80,6 +81,16 @@ MacroLakeEdgeClass::{
     LakeBoundary,
     LakeInternal,
 }
+
+GraphBiomeKind::{
+    ShallowOcean,
+    DeepOcean,
+    Coast,
+    Lake,
+    Wetland,
+    DryBasin,
+    ...
+}
 ```
 
 `MacroMapConfig`는 land/ocean 비율을 진단하고 조율하기 위한 공개 tuning handle을 가진다.
@@ -108,6 +119,9 @@ stage 3 macro_map은 river corridor를 선택하지 않는다. selected river ch
 lake/sink/outlet carve는 hydrology 단계가 확정한다.
 현재 구현에서도 `MacroEdgeGuide.is_river_candidate`는 selected river 의미로 사용하지 않는다.
 selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source of truth다.
+`GraphMacroMap.biomes`는 site id별 final cell biome context와 classification을 가진다. 이
+classification은 macro_map 끝에서 생성되어 macro_field가 nearest site의 biome 의미를 함께 전달할 수
+있게 한다. Oceanic은 단일 biome으로 남기지 않고 `ShallowOcean`과 `DeepOcean`으로 분리한다.
 
 ---
 

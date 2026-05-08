@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeKind};
 use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
 use super::hydrology::GraphHydrologyGraph;
@@ -95,6 +96,8 @@ pub struct MacroFieldSample {
     pub position: WorldPlanePoint,
     pub nearest_site: Option<VoronoiSiteId>,
     pub surface_kind: Option<MacroSurfaceKind>,
+    pub biome_context: Option<GraphBiomeContext>,
+    pub biome: Option<GraphBiomeKind>,
     pub macro_elevation: f32,
     pub ocean_mask: f32,
     pub coast_mask: f32,
@@ -385,6 +388,7 @@ pub fn sample_macro_field_point(
     let owner_sample = context.owner_sample(position, config);
     let nearest_site = owner_sample.primary;
     let surface_kind = nearest_site.map(|site| site.surface_kind);
+    let biome_cell = nearest_site.and_then(|site| context.biome_for_site(site.id));
     let macro_elevation = owner_sample.macro_elevation;
     let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
     let ocean_mask = surface_kind
@@ -437,6 +441,8 @@ pub fn sample_macro_field_point(
         position,
         nearest_site: nearest_site.map(|site| site.id),
         surface_kind,
+        biome_context: biome_cell.map(|biome| biome.context),
+        biome: biome_cell.map(|biome| biome.biome),
         macro_elevation,
         ocean_mask,
         coast_mask,
@@ -459,6 +465,7 @@ fn sample_macro_field_point_with_influence(
     let owner_sample = context.owner_sample(position, config);
     let nearest_site = owner_sample.primary;
     let surface_kind = nearest_site.map(|site| site.surface_kind);
+    let biome_cell = nearest_site.and_then(|site| context.biome_for_site(site.id));
     let macro_elevation = owner_sample.macro_elevation;
     let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
     let ocean_mask = surface_kind
@@ -499,6 +506,8 @@ fn sample_macro_field_point_with_influence(
         position,
         nearest_site: nearest_site.map(|site| site.id),
         surface_kind,
+        biome_context: biome_cell.map(|biome| biome.context),
+        biome: biome_cell.map(|biome| biome.biome),
         macro_elevation,
         ocean_mask,
         coast_mask,
@@ -961,6 +970,7 @@ fn update_from_neighbor(
 pub struct MacroFieldRasterContext<'a> {
     sites: &'a [MacroSite],
     site_by_id: HashMap<VoronoiSiteId, MacroSite>,
+    biome_by_site_id: HashMap<VoronoiSiteId, GraphBiomeCell>,
     site_grid: SiteIndexGrid,
     boundary_edges: Vec<BoundaryEdgeRef<'a>>,
     boundary_grid: CurveIndexGrid,
@@ -993,6 +1003,11 @@ impl<'a> MacroFieldRasterContext<'a> {
             .sites
             .iter()
             .map(|site| (site.id, *site))
+            .collect::<HashMap<_, _>>();
+        let biome_by_site_id = macro_map
+            .biomes
+            .iter()
+            .map(|biome| (biome.site, *biome))
             .collect::<HashMap<_, _>>();
         let site_grid = SiteIndexGrid::from_sites(&macro_map.sites);
         let mut river_flow_by_edge = HashMap::<VoronoiEdgeId, f32>::new();
@@ -1065,6 +1080,7 @@ impl<'a> MacroFieldRasterContext<'a> {
         Self {
             sites: &macro_map.sites,
             site_by_id,
+            biome_by_site_id,
             site_grid,
             boundary_edges,
             boundary_grid,
@@ -1090,6 +1106,10 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .total_cmp(&squared_distance(position, right.position))
                     .then_with(|| left.id.0.cmp(&right.id.0))
             })
+    }
+
+    pub fn biome_for_site(&self, site: VoronoiSiteId) -> Option<GraphBiomeCell> {
+        self.biome_by_site_id.get(&site).copied()
     }
 
     fn owner_sample(&self, position: WorldPlanePoint, config: MacroFieldTileConfig) -> OwnerSample {
@@ -2325,6 +2345,7 @@ mod tests {
                 },
                 lake_class: MacroLakeEdgeClass::NonLake,
             }],
+            biomes: Vec::new(),
         };
         let boundary = BoundaryCache {
             curves: vec![curve],
@@ -2415,6 +2436,7 @@ mod tests {
                 },
                 lake_class: MacroLakeEdgeClass::NonLake,
             }],
+            biomes: Vec::new(),
         };
         let boundary = BoundaryCache {
             curves: vec![curve],
@@ -2518,6 +2540,7 @@ mod tests {
                 },
                 lake_class: MacroLakeEdgeClass::NonLake,
             }],
+            biomes: Vec::new(),
         };
         let boundary = BoundaryCache {
             curves: vec![curve],
@@ -2536,6 +2559,32 @@ mod tests {
             "dry basin / land noisy boundary blend must not render as coast: {}",
             sample.coast_mask
         );
+    }
+
+    #[test]
+    fn macro_field_sample_carries_nearest_site_biome() {
+        let inputs = test_inputs(42);
+        let context = MacroFieldRasterContext::new(
+            &inputs.patch,
+            &inputs.macro_map,
+            &inputs.hydrology,
+            &inputs.boundary,
+        );
+        let site = inputs
+            .macro_map
+            .sites
+            .iter()
+            .find(|site| inputs.macro_map.biome(site.id).is_some())
+            .expect("generated macro map should expose biome cells");
+        let sample = sample_macro_field_point(&context, test_tile_config(), site.position);
+        let expected = inputs
+            .macro_map
+            .biome(site.id)
+            .expect("site biome should be stable");
+
+        assert_eq!(sample.nearest_site, Some(site.id));
+        assert_eq!(sample.biome, Some(expected.biome));
+        assert_eq!(sample.biome_context, Some(expected.context));
     }
 
     #[test]
@@ -2709,6 +2758,8 @@ mod tests {
                     position: config.sample_position(index),
                     nearest_site: None,
                     surface_kind: None,
+                    biome_context: None,
+                    biome: None,
                     macro_elevation: combined_macro_height,
                     ocean_mask: 0.0,
                     coast_mask: 0.0,

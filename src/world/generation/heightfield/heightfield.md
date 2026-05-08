@@ -2,10 +2,10 @@
 
 ## 역할
 
-`heightfield`는 graph-first generator의 11단계인 heightfield / water surface 합성 계약을 소유한다.
+`heightfield`는 graph-first generator의 12단계인 heightfield / water surface 합성 계약을 소유한다.
 
-현재 구현은 vertical slice다. stage 8 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
-heightfield cache로 바꾸며, stage 9 meso feature와 stage 10 Perlin micro relief는 아직 값을 더하지
+현재 구현은 vertical slice다. stage 9 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
+heightfield cache로 바꾸며, stage 10 meso feature와 stage 11 Perlin micro relief는 아직 값을 더하지
 않는 stub으로 둔다.
 
 ```text
@@ -206,7 +206,7 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 - `river_valley_strength >= river_water_threshold`인 column은 `River` hint가 될 수 있다. river column은
   integer river water height를 갖고, 인접 river/standing-water surface와 비교해 한 column 이웃 사이에서
   한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full hydrology
-  water surface solve가 아니라 stage 11 vertical slice용 안전 장치다.
+  water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.
 - dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
 
 ---
@@ -223,7 +223,7 @@ macro field tile cache
 ```
 
 초기 구현에서는 preview binary가 하나의 macro field tile과 heightfield tile을 직접 생성한다. 런타임
-연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/boundary를
+연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/final-cell-context/boundary를
 반복 query하지 않는다.
 
 ---
@@ -298,7 +298,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 3. 모든 height와 mask 값은 finite여야 한다.
 4. water mask가 있는 column은 water level hint를 가져야 한다.
 5. meso/perlin stub 값은 현재 항상 0이다.
-6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/boundary를 직접 재해석하지 않는다.
+6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/final-cell-context/boundary를 직접 재해석하지 않는다.
 7. final column surface/water height는 integer block height로 snap되어야 한다.
 8. coast-adjacent land는 explicit cliff feature가 없는 한 sea level에서 완만히 올라가야 하며, ocean
    water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.

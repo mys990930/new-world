@@ -156,6 +156,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry
 - `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
+- `generation/biome/biome.md`: graph-first final cell biome context와 classification 계약
 - `generation/macro_field/macro_field.md`: graph-derived signed distance / influence field tile cache
 - `generation/heightfield/heightfield.md`: macro field와 Perlin micro relief 합성
 - `generation/surface_plan/surface_plan.md`: biome/material/water/coast surface policy resolve

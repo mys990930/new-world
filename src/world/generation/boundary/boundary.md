@@ -36,7 +36,7 @@ curve를 따라 해석되도록 한다.
 
 ## Canonical Noisy Edge Layer
 
-pipeline 7단계는 noisy boundary realization이다. 이 단계의 출력은 graph edge 전체에 대한
+pipeline 8단계는 noisy boundary realization이다. 이 단계의 출력은 graph edge 전체에 대한
 canonical geometry annotation이다.
 
 ```rust
@@ -180,13 +180,14 @@ runtime cache chain은 아래 순서를 따른다.
 graph region cache
 -> macro map cache
 -> hydrology cache
+-> final cell context cache
 -> boundary cache
--> heightfield cache
+-> macro field / heightfield cache
 -> chunk generation samples column/window data
 ```
 
 `BoundaryCache`는 `graph edge id -> noisy polyline/spline` 전체를 저장한다. chunk fill은 boundary
-curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서 graph/macro/hydrology와
+curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서 graph/macro/hydrology/final-cell-context와
 같은 deterministic key/padding 정책으로 생성한다.
 
 ---

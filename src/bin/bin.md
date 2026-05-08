@@ -14,6 +14,7 @@
 
 | Binary | Purpose | Current status |
 | --- | --- | --- |
+| `biome_map_preview` | Top-down graph-first biome map preview, one color per resolved Voronoi cell | Works; reads `GraphMacroMap.biomes` from the core biome classifier output |
 | `chunk_preview` | Quarter-view chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
 | `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph and site-field preview maps | Works |
@@ -53,6 +54,29 @@ cargo run --bin chunk_preview -- 42 --stage prototype --center-x 4 --center-z -3
   - `--lod-blocks > 1` currently depends on `sample_chunk_surface_lod(...)`, which is also still a generation `todo!`.
   - Created-world `full` preview can work if you already have a valid dumped world directory.
   - See [chunk_preview.md](./chunk_preview.md).
+
+## biome_map_preview
+
+- Purpose: render a top-down PNG preview that colors each graph Voronoi cell by resolved biome.
+- Parameters:
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--land-bias <f32>`, `--stage biome_map`, `--output <path>`
+- Defaults:
+  - `--width 3840`
+  - `--height 2160`
+  - `--world-span-blocks 32768`
+  - `--stage biome_map`
+- Example:
+
+```bash
+cargo run --bin biome_map_preview -- 42 0 0 --width 640 --height 360 --output target/biome-map-preview/smoke.png
+```
+
+- Notes:
+  - The binary builds a Voronoi graph patch and macro map through public generation APIs, then colors
+    the `GraphBiomeCell` values exposed through `GraphMacroMap.biomes`.
+  - It does not edit or duplicate core biome classifier policy.
+  - See [biome_map_preview.md](./biome_map_preview.md).
 
 ## chunk_topdown_preview
 
