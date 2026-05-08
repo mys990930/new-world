@@ -53,9 +53,10 @@
 - `ridge`: connected distance-envelope influence around ridge noisy boundary curves. It should read
   as a mountain belt shoulder around the ridge maxima guide, not isolated bright pixels and not
   global low-level texture.
-- `river`: flow-scaled flat-bottom valley influence around selected hydrology river curves.
+- `river`: flow-scaled flat-bottom valley influence around selected hydrology river chains.
   Upstream segments are narrow and shallow but should not read as knife-cut V shapes; downstream
-  trunks are wider with flatter beds and broader shoulders.
+  trunks are wider with flatter beds and broader shoulders. The rendered source is a chain-level
+  smoothed centerline, not a row of independent rounded edge stamps.
 - `combined`: macro elevation minus visible river valley carve guide, coast flatten, and water
   flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map. Ridge influence is
   diagnostic-only in the current launch slice and does not raise combined height until a broader
@@ -107,7 +108,8 @@ of giving every tile its own artificial low and high.
   - noisy-boundary owner/blend for macro elevation and masks,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
-  - selected hydrology river noisy curves through a tile-local anti-aliased thick polyline bake
+  - selected hydrology river segments grouped into downstream chains, converted to smoothed
+    canonical noisy centerlines, and baked through a tile-local anti-aliased thick polyline pass
     that stores smooth valley coverage, nearest-segment distance, and blended display flow.
 8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central

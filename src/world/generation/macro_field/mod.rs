@@ -1,10 +1,10 @@
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeKind};
 use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
-use super::hydrology::GraphHydrologyGraph;
+use super::hydrology::{GraphDrainageNodeId, GraphHydrologyGraph, GraphRiverSegment};
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
@@ -582,22 +582,16 @@ fn rasterize_influence_fields(
         .iter()
         .map(|curve| (*curve, 1.0))
         .collect::<Vec<_>>();
-    let river_sources = context
-        .river_curves
-        .iter()
-        .map(|river| (river.curve, flow_hint(river.flow_accumulation)))
-        .collect::<Vec<_>>();
-
     let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
     let coast = rasterize_curve_distance_field(&coast_sources, config, config.coast_radius_blocks);
-    let river = rasterize_curve_anti_aliased_polyline_field(
-        &river_sources,
+    let river = rasterize_river_chain_anti_aliased_polyline_field(
+        &context.river_chains,
         config,
         config.river_radius_blocks,
     );
     let stats = MacroFieldInfluenceStats {
         ridge_source_curve_count: ridge_sources.len(),
-        river_source_curve_count: river_sources.len(),
+        river_source_curve_count: context.river_chains.len(),
         coast_source_curve_count: coast_sources.len(),
         ridge_source_pixel_count: ridge.source_pixel_count,
         river_source_pixel_count: river.source_pixel_count,
@@ -692,8 +686,24 @@ fn rasterize_curve_distance_field(
     }
 }
 
+#[cfg(test)]
 fn rasterize_curve_anti_aliased_polyline_field(
     sources: &[(&NoisyBoundaryCurve, f32)],
+    config: MacroFieldTileConfig,
+    radius_blocks: f32,
+) -> RasterDistanceField {
+    let chains = sources
+        .iter()
+        .map(|(curve, strength)| RiverChainSource {
+            points: curve.points.clone(),
+            flow_hints: vec![*strength; curve.points.len()],
+        })
+        .collect::<Vec<_>>();
+    rasterize_river_chain_anti_aliased_polyline_field(&chains, config, radius_blocks)
+}
+
+fn rasterize_river_chain_anti_aliased_polyline_field(
+    sources: &[RiverChainSource],
     config: MacroFieldTileConfig,
     radius_blocks: f32,
 ) -> RasterDistanceField {
@@ -714,8 +724,8 @@ fn rasterize_curve_anti_aliased_polyline_field(
     let mut flow_weighted_sum = vec![0.0; sample_count];
     let mut flow_weight_sum = vec![0.0; sample_count];
 
-    for (curve, strength) in sources {
-        for segment in curve.points.windows(2) {
+    for source in sources {
+        for index in 0..source.points.len().saturating_sub(1) {
             rasterize_segment_anti_aliased_stroke(
                 &mut distance_blocks,
                 &mut river_valley_strength,
@@ -724,10 +734,11 @@ fn rasterize_curve_anti_aliased_polyline_field(
                 width,
                 height,
                 config,
-                segment[0],
-                segment[1],
+                source.points[index],
+                source.points[index + 1],
                 radius_blocks,
-                *strength,
+                source.flow_hints[index],
+                source.flow_hints[index + 1],
             );
         }
     }
@@ -768,7 +779,8 @@ fn rasterize_segment_anti_aliased_stroke(
     start: WorldPlanePoint,
     end: WorldPlanePoint,
     radius_blocks: f32,
-    strength: f32,
+    start_flow_hint: f32,
+    end_flow_hint: f32,
 ) {
     let spacing = config.sample_spacing_blocks;
     let aa_margin = spacing * 0.75;
@@ -805,25 +817,33 @@ fn rasterize_segment_anti_aliased_stroke(
                 continue;
             }
             let mut profile_sum = 0.0;
+            let mut flow_profile_sum = 0.0;
             let mut closest_subpixel_distance = distance;
             for (offset_x, offset_z) in subpixel_offsets {
                 let subpixel = WorldPlanePoint::new(
                     position.x + offset_x * spacing,
                     position.z + offset_z * spacing,
                 );
-                let subpixel_distance = point_segment_distance(subpixel, start, end);
+                let (subpixel_distance, segment_t) =
+                    point_segment_distance_and_t(subpixel, start, end);
+                let subpixel_flow = lerp(start_flow_hint, end_flow_hint, segment_t).clamp(0.0, 1.0);
                 closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
-                profile_sum +=
-                    river_valley_strength_for_distance(subpixel_distance, strength, radius_blocks);
+                profile_sum += river_valley_strength_for_distance(
+                    subpixel_distance,
+                    subpixel_flow,
+                    radius_blocks,
+                );
+                flow_profile_sum += subpixel_flow;
             }
             let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
             if anti_aliased_strength <= 0.0 {
                 continue;
             }
+            let blended_flow = (flow_profile_sum / subpixel_count).clamp(0.0, 1.0);
 
             distance_blocks[index] = distance_blocks[index].min(closest_subpixel_distance);
             river_valley_strength[index] = river_valley_strength[index].max(anti_aliased_strength);
-            flow_weighted_sum[index] += strength * anti_aliased_strength;
+            flow_weighted_sum[index] += blended_flow * anti_aliased_strength;
             flow_weight_sum[index] += anti_aliased_strength;
         }
     }
@@ -978,8 +998,7 @@ pub struct MacroFieldRasterContext<'a> {
     coast_grid: CurveIndexGrid,
     ridge_curves: Vec<&'a NoisyBoundaryCurve>,
     ridge_grid: CurveIndexGrid,
-    river_curves: Vec<RiverCurveRef<'a>>,
-    river_grid: CurveIndexGrid,
+    river_chains: Vec<RiverChainSource>,
 }
 
 impl<'a> MacroFieldRasterContext<'a> {
@@ -1010,14 +1029,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             .map(|biome| (biome.site, *biome))
             .collect::<HashMap<_, _>>();
         let site_grid = SiteIndexGrid::from_sites(&macro_map.sites);
-        let mut river_flow_by_edge = HashMap::<VoronoiEdgeId, f32>::new();
-        for segment in &hydrology.segments {
-            river_flow_by_edge
-                .entry(segment.edge)
-                .and_modify(|flow| *flow = flow.max(segment.flow_accumulation))
-                .or_insert(segment.flow_accumulation);
-        }
-
         let coast_curves = macro_map
             .edges
             .iter()
@@ -1043,20 +1054,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        let mut river_curves = river_flow_by_edge
-            .into_iter()
-            .filter_map(|(edge, flow_accumulation)| {
-                boundary_curves
-                    .get(&edge)
-                    .copied()
-                    .map(|curve| RiverCurveRef {
-                        edge,
-                        curve,
-                        flow_accumulation,
-                    })
-            })
-            .collect::<Vec<_>>();
-        river_curves.sort_by_key(|river| river.edge.0);
+        let river_chains = build_river_chain_sources(hydrology, &boundary_curves);
         let mut boundary_edges = macro_map
             .edges
             .iter()
@@ -1071,11 +1069,6 @@ impl<'a> MacroFieldRasterContext<'a> {
         let boundary_grid = CurveIndexGrid::from_boundary_edges(&boundary_edges);
         let coast_grid = CurveIndexGrid::from_curves(&coast_curves);
         let ridge_grid = CurveIndexGrid::from_curves(&ridge_curves);
-        let river_curves_only = river_curves
-            .iter()
-            .map(|river| river.curve)
-            .collect::<Vec<_>>();
-        let river_grid = CurveIndexGrid::from_curves(&river_curves_only);
 
         Self {
             sites: &macro_map.sites,
@@ -1088,8 +1081,7 @@ impl<'a> MacroFieldRasterContext<'a> {
             coast_grid,
             ridge_curves,
             ridge_grid,
-            river_curves,
-            river_grid,
+            river_chains,
         }
     }
 
@@ -1178,33 +1170,305 @@ impl<'a> MacroFieldRasterContext<'a> {
         config: MacroFieldTileConfig,
     ) -> (f32, f32, f32) {
         let Some((distance, flow)) = self
-            .river_grid
-            .candidate_indices(position, config.river_radius_blocks)
-            .into_iter()
-            .filter_map(|index| self.river_curves.get(index))
-            .map(|river| {
-                (
-                    polyline_distance(position, &river.curve.points),
-                    river.flow_accumulation.max(0.0),
-                )
-            })
+            .river_chains
+            .iter()
+            .filter_map(|chain| nearest_river_chain_sample(position, chain))
             .min_by(|left, right| left.0.total_cmp(&right.0))
         else {
             return (f32::INFINITY, 0.0, 0.0);
         };
-        let flow_hint = flow_hint(flow);
-        let valley =
-            river_valley_strength_for_distance(distance, flow_hint, config.river_radius_blocks);
+        let valley = river_valley_strength_for_distance(distance, flow, config.river_radius_blocks);
 
-        (distance, flow_hint, valley.clamp(0.0, 1.0))
+        (distance, flow, valley.clamp(0.0, 1.0))
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct RiverCurveRef<'a> {
-    edge: VoronoiEdgeId,
-    curve: &'a NoisyBoundaryCurve,
-    flow_accumulation: f32,
+#[derive(Debug, Clone, PartialEq)]
+struct RiverChainSource {
+    points: Vec<WorldPlanePoint>,
+    flow_hints: Vec<f32>,
+}
+
+fn build_river_chain_sources<'a>(
+    hydrology: &'a GraphHydrologyGraph,
+    boundary_curves: &HashMap<VoronoiEdgeId, &'a NoisyBoundaryCurve>,
+) -> Vec<RiverChainSource> {
+    let node_positions = hydrology
+        .nodes
+        .iter()
+        .map(|node| (node.id, node.position))
+        .collect::<HashMap<_, _>>();
+    let selected_segments = hydrology
+        .segments
+        .iter()
+        .filter(|segment| boundary_curves.contains_key(&segment.edge))
+        .collect::<Vec<_>>();
+    let mut outgoing_by_from = HashMap::<GraphDrainageNodeId, Vec<&GraphRiverSegment>>::new();
+    let mut incoming_count_by_to = HashMap::<GraphDrainageNodeId, usize>::new();
+    for segment in &selected_segments {
+        outgoing_by_from
+            .entry(segment.from)
+            .or_default()
+            .push(*segment);
+        *incoming_count_by_to.entry(segment.to).or_default() += 1;
+    }
+    for outgoing in outgoing_by_from.values_mut() {
+        outgoing.sort_by(|left, right| {
+            right
+                .flow_accumulation
+                .total_cmp(&left.flow_accumulation)
+                .then_with(|| left.id.0.cmp(&right.id.0))
+        });
+    }
+
+    let mut chain_starts = selected_segments
+        .iter()
+        .copied()
+        .filter(|segment| {
+            let incoming = incoming_count_by_to
+                .get(&segment.from)
+                .copied()
+                .unwrap_or(0);
+            let outgoing = outgoing_by_from.get(&segment.from).map_or(0, Vec::len);
+            incoming != 1 || outgoing != 1
+        })
+        .collect::<Vec<_>>();
+    chain_starts.sort_by(|left, right| {
+        left.from
+            .0
+            .cmp(&right.from.0)
+            .then_with(|| left.to.0.cmp(&right.to.0))
+            .then_with(|| left.id.0.cmp(&right.id.0))
+    });
+
+    let mut visited = HashSet::<u64>::new();
+    let mut sources = Vec::new();
+    for start in chain_starts {
+        if visited.contains(&start.id.0) {
+            continue;
+        }
+        if let Some(source) = build_river_chain_source(
+            start,
+            &outgoing_by_from,
+            &incoming_count_by_to,
+            &node_positions,
+            boundary_curves,
+            &mut visited,
+        ) {
+            sources.push(source);
+        }
+    }
+
+    let mut remaining = selected_segments;
+    remaining.sort_by_key(|segment| segment.id.0);
+    for start in remaining {
+        if visited.contains(&start.id.0) {
+            continue;
+        }
+        if let Some(source) = build_river_chain_source(
+            start,
+            &outgoing_by_from,
+            &incoming_count_by_to,
+            &node_positions,
+            boundary_curves,
+            &mut visited,
+        ) {
+            sources.push(source);
+        }
+    }
+
+    sources.sort_by(|left, right| {
+        left.points
+            .first()
+            .map(|point| point.x)
+            .unwrap_or_default()
+            .total_cmp(
+                &right
+                    .points
+                    .first()
+                    .map(|point| point.x)
+                    .unwrap_or_default(),
+            )
+            .then_with(|| {
+                left.points
+                    .first()
+                    .map(|point| point.z)
+                    .unwrap_or_default()
+                    .total_cmp(
+                        &right
+                            .points
+                            .first()
+                            .map(|point| point.z)
+                            .unwrap_or_default(),
+                    )
+            })
+    });
+    sources
+}
+
+fn build_river_chain_source<'a>(
+    start: &'a GraphRiverSegment,
+    outgoing_by_from: &HashMap<GraphDrainageNodeId, Vec<&'a GraphRiverSegment>>,
+    incoming_count_by_to: &HashMap<GraphDrainageNodeId, usize>,
+    node_positions: &HashMap<GraphDrainageNodeId, WorldPlanePoint>,
+    boundary_curves: &HashMap<VoronoiEdgeId, &'a NoisyBoundaryCurve>,
+    visited: &mut HashSet<u64>,
+) -> Option<RiverChainSource> {
+    let mut points = Vec::<WorldPlanePoint>::new();
+    let mut flow_hints = Vec::<f32>::new();
+    let mut current = start;
+
+    loop {
+        if !visited.insert(current.id.0) {
+            break;
+        }
+        let curve = boundary_curves.get(&current.edge)?;
+        let segment_points = oriented_river_segment_points(curve, current, node_positions);
+        append_river_segment_points(
+            &mut points,
+            &mut flow_hints,
+            &segment_points,
+            flow_hint(current.flow_accumulation),
+        );
+
+        let incoming_at_target = incoming_count_by_to.get(&current.to).copied().unwrap_or(0);
+        let Some(outgoing) = outgoing_by_from.get(&current.to) else {
+            break;
+        };
+        if incoming_at_target != 1 || outgoing.len() != 1 {
+            break;
+        }
+        current = outgoing[0];
+        if visited.contains(&current.id.0) {
+            break;
+        }
+    }
+
+    smooth_river_chain_source(points, flow_hints)
+}
+
+fn oriented_river_segment_points(
+    curve: &NoisyBoundaryCurve,
+    segment: &GraphRiverSegment,
+    node_positions: &HashMap<GraphDrainageNodeId, WorldPlanePoint>,
+) -> Vec<WorldPlanePoint> {
+    let mut points = curve.points.clone();
+    let Some(from) = node_positions.get(&segment.from).copied() else {
+        return points;
+    };
+    let Some(to) = node_positions.get(&segment.to).copied() else {
+        return points;
+    };
+    let forward_score =
+        squared_distance(from, curve.anchors.start) + squared_distance(to, curve.anchors.end);
+    let reverse_score =
+        squared_distance(from, curve.anchors.end) + squared_distance(to, curve.anchors.start);
+    if reverse_score + 0.001 < forward_score {
+        points.reverse();
+    }
+    points
+}
+
+fn append_river_segment_points(
+    points: &mut Vec<WorldPlanePoint>,
+    flow_hints: &mut Vec<f32>,
+    segment_points: &[WorldPlanePoint],
+    segment_flow_hint: f32,
+) {
+    if segment_points.is_empty() {
+        return;
+    }
+    let mut start_index = 0;
+    if let Some(last) = points.last().copied() {
+        if squared_distance(last, segment_points[0]) <= 0.01 {
+            if let Some(last_flow) = flow_hints.last_mut() {
+                *last_flow = (*last_flow + segment_flow_hint) * 0.5;
+            }
+            start_index = 1;
+        }
+    }
+    for point in &segment_points[start_index..] {
+        points.push(*point);
+        flow_hints.push(segment_flow_hint.clamp(0.0, 1.0));
+    }
+}
+
+fn smooth_river_chain_source(
+    points: Vec<WorldPlanePoint>,
+    flow_hints: Vec<f32>,
+) -> Option<RiverChainSource> {
+    if points.len() < 2 || points.len() != flow_hints.len() {
+        return None;
+    }
+    let flow_hints = smooth_river_flow_hints(&flow_hints);
+    if points.len() < 3 {
+        return Some(RiverChainSource { points, flow_hints });
+    }
+
+    let mut smoothed_points = Vec::with_capacity(points.len() * 2);
+    let mut smoothed_flows = Vec::with_capacity(flow_hints.len() * 2);
+    smoothed_points.push(points[0]);
+    smoothed_flows.push(flow_hints[0]);
+    for index in 0..points.len() - 1 {
+        let left = points[index];
+        let right = points[index + 1];
+        let left_flow = flow_hints[index];
+        let right_flow = flow_hints[index + 1];
+        smoothed_points.push(lerp_point(left, right, 0.25));
+        smoothed_flows.push(lerp(left_flow, right_flow, 0.25));
+        smoothed_points.push(lerp_point(left, right, 0.75));
+        smoothed_flows.push(lerp(left_flow, right_flow, 0.75));
+    }
+    smoothed_points.push(*points.last().expect("checked non-empty points"));
+    smoothed_flows.push(*flow_hints.last().expect("checked non-empty flows"));
+
+    Some(RiverChainSource {
+        points: smoothed_points,
+        flow_hints: smooth_river_flow_hints(&smoothed_flows),
+    })
+}
+
+fn smooth_river_flow_hints(flow_hints: &[f32]) -> Vec<f32> {
+    if flow_hints.len() <= 2 {
+        return flow_hints.iter().map(|flow| flow.clamp(0.0, 1.0)).collect();
+    }
+    let mut smoothed = flow_hints
+        .iter()
+        .map(|flow| flow.clamp(0.0, 1.0))
+        .collect::<Vec<_>>();
+    for _ in 0..2 {
+        let previous = smoothed.clone();
+        for index in 1..previous.len() - 1 {
+            smoothed[index] =
+                previous[index - 1] * 0.25 + previous[index] * 0.5 + previous[index + 1] * 0.25;
+        }
+    }
+    for index in 1..smoothed.len() {
+        smoothed[index] = smoothed[index]
+            .max(smoothed[index - 1] * 0.88)
+            .clamp(0.0, 1.0);
+    }
+    smoothed
+}
+
+fn nearest_river_chain_sample(
+    position: WorldPlanePoint,
+    chain: &RiverChainSource,
+) -> Option<(f32, f32)> {
+    if chain.points.len() < 2 || chain.points.len() != chain.flow_hints.len() {
+        return None;
+    }
+    (0..chain.points.len() - 1)
+        .map(|index| {
+            let (distance, t) = point_segment_distance_and_t(
+                position,
+                chain.points[index],
+                chain.points[index + 1],
+            );
+            let flow = lerp(chain.flow_hints[index], chain.flow_hints[index + 1], t);
+            (distance, flow.clamp(0.0, 1.0))
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1657,15 +1921,31 @@ fn point_segment_distance(
     start: WorldPlanePoint,
     end: WorldPlanePoint,
 ) -> f32 {
+    point_segment_distance_and_t(point, start, end).0
+}
+
+fn point_segment_distance_and_t(
+    point: WorldPlanePoint,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+) -> (f32, f32) {
     let dx = end.x - start.x;
     let dz = end.z - start.z;
     let len2 = dx * dx + dz * dz;
     if len2 <= f32::EPSILON {
-        return squared_distance(point, start).sqrt();
+        return (squared_distance(point, start).sqrt(), 0.0);
     }
     let t = (((point.x - start.x) * dx + (point.z - start.z) * dz) / len2).clamp(0.0, 1.0);
     let projected = WorldPlanePoint::new(start.x + dx * t, start.z + dz * t);
-    squared_distance(point, projected).sqrt()
+    (squared_distance(point, projected).sqrt(), t)
+}
+
+fn lerp(left: f32, right: f32, t: f32) -> f32 {
+    left + (right - left) * t.clamp(0.0, 1.0)
+}
+
+fn lerp_point(left: WorldPlanePoint, right: WorldPlanePoint, t: f32) -> WorldPlanePoint {
+    WorldPlanePoint::new(lerp(left.x, right.x, t), lerp(left.z, right.z, t))
 }
 
 fn squared_distance(a: WorldPlanePoint, b: WorldPlanePoint) -> f32 {
@@ -2180,6 +2460,177 @@ mod tests {
         assert!(
             trunk.river_valley_strength[shoulder] > headwater.river_valley_strength[shoulder],
             "downstream thick polyline should keep a wider flat/shoulder bed than headwater"
+        );
+    }
+
+    #[test]
+    fn river_chain_builder_splits_at_confluence_and_branch_nodes() {
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::hydrology::{
+            GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph,
+            GraphHydrologyRole, GraphRiverSegment, GraphRiverSegmentId, WatershedId,
+        };
+
+        let watershed = WatershedId(1);
+        let nodes = [
+            (GraphDrainageNodeId(1), WorldPlanePoint::new(0.0, 0.0)),
+            (GraphDrainageNodeId(2), WorldPlanePoint::new(64.0, 0.0)),
+            (GraphDrainageNodeId(3), WorldPlanePoint::new(64.0, 64.0)),
+            (GraphDrainageNodeId(4), WorldPlanePoint::new(128.0, 32.0)),
+            (GraphDrainageNodeId(5), WorldPlanePoint::new(192.0, 0.0)),
+            (GraphDrainageNodeId(6), WorldPlanePoint::new(192.0, 64.0)),
+        ];
+        let hydrology = GraphHydrologyGraph {
+            nodes: nodes
+                .iter()
+                .map(|(id, position)| GraphDrainageNode {
+                    id: *id,
+                    kind: GraphDrainageNodeKind::Confluence,
+                    corner: VoronoiCornerId(id.0),
+                    position: *position,
+                    watershed,
+                })
+                .collect(),
+            segments: vec![
+                test_river_segment(1, 1, 1, 2, 64.0),
+                test_river_segment(2, 2, 3, 2, 72.0),
+                test_river_segment(3, 3, 2, 4, 144.0),
+                test_river_segment(4, 4, 4, 5, 160.0),
+                test_river_segment(5, 5, 4, 6, 150.0),
+            ],
+            ..GraphHydrologyGraph::default()
+        };
+        let curves = vec![
+            test_noisy_curve(1, 1, 2, nodes[0].1, nodes[1].1),
+            test_noisy_curve(2, 3, 2, nodes[2].1, nodes[1].1),
+            test_noisy_curve(3, 2, 4, nodes[1].1, nodes[3].1),
+            test_noisy_curve(4, 4, 5, nodes[3].1, nodes[4].1),
+            test_noisy_curve(5, 4, 6, nodes[3].1, nodes[5].1),
+        ];
+        let curve_map = curves
+            .iter()
+            .map(|curve| (curve.edge, curve))
+            .collect::<HashMap<_, _>>();
+
+        let chains = build_river_chain_sources(&hydrology, &curve_map);
+
+        assert_eq!(
+            chains.len(),
+            5,
+            "confluence and branch nodes should split render chains instead of sewing unrelated paths"
+        );
+        assert!(
+            chains.iter().all(|chain| chain.points.len() >= 2),
+            "each selected branch should still provide a renderable centerline"
+        );
+        assert!(
+            chains
+                .iter()
+                .any(|chain| chain.points.first() == Some(&nodes[1].1)
+                    && chain.points.last() == Some(&nodes[3].1)),
+            "downstream segment after confluence should begin as its own chain"
+        );
+
+        fn test_river_segment(
+            id: u64,
+            edge: u64,
+            from: u64,
+            to: u64,
+            flow_accumulation: f32,
+        ) -> GraphRiverSegment {
+            GraphRiverSegment {
+                id: GraphRiverSegmentId(id),
+                edge: VoronoiEdgeId(edge),
+                from: GraphDrainageNodeId(from),
+                to: GraphDrainageNodeId(to),
+                watershed: WatershedId(1),
+                role: GraphHydrologyRole::Trunk,
+                raw_flow_accumulation: flow_accumulation,
+                flow_accumulation,
+                downstream_progress: id as f32,
+            }
+        }
+
+        fn test_noisy_curve(
+            edge: u64,
+            start_corner: u64,
+            end_corner: u64,
+            start: WorldPlanePoint,
+            end: WorldPlanePoint,
+        ) -> NoisyBoundaryCurve {
+            use crate::world::generation::boundary::{
+                BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+            };
+
+            NoisyBoundaryCurve {
+                edge: VoronoiEdgeId(edge),
+                profile: BoundaryProfile::Ordinary,
+                anchors: BoundaryAnchors {
+                    corners: [VoronoiCornerId(start_corner), VoronoiCornerId(end_corner)],
+                    sites: [VoronoiSiteId(edge * 2), VoronoiSiteId(edge * 2 + 1)],
+                    start,
+                    end,
+                },
+                points: vec![start, end],
+                amplitude: 0.0,
+                seed: edge,
+                guard: BoundaryGuard {
+                    min_x: start.x.min(end.x) - 16.0,
+                    max_x: start.x.max(end.x) + 16.0,
+                    min_z: start.z.min(end.z) - 16.0,
+                    max_z: start.z.max(end.z) + 16.0,
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn river_chain_flow_smoothing_reduces_edge_level_jumps() {
+        let raw = vec![0.10, 0.95, 0.12, 0.90, 0.30];
+        let smoothed = smooth_river_flow_hints(&raw);
+
+        let raw_max_jump = raw
+            .windows(2)
+            .map(|pair| (pair[0] - pair[1]).abs())
+            .fold(0.0, f32::max);
+        let smoothed_max_jump = smoothed
+            .windows(2)
+            .map(|pair| (pair[0] - pair[1]).abs())
+            .fold(0.0, f32::max);
+
+        assert!(
+            smoothed_max_jump < raw_max_jump,
+            "chain-direction flow smoothing should reduce edge-to-edge display width jumps"
+        );
+        assert!(
+            smoothed.iter().all(|flow| (0.0..=1.0).contains(flow)),
+            "display flow hints must stay normalized"
+        );
+    }
+
+    #[test]
+    fn river_chain_smoothed_source_keeps_join_valley_continuous() {
+        let source = smooth_river_chain_source(
+            vec![
+                WorldPlanePoint::new(0.0, 16.0),
+                WorldPlanePoint::new(48.0, 16.0),
+                WorldPlanePoint::new(48.0, 80.0),
+            ],
+            vec![0.25, 0.85, 0.45],
+        )
+        .expect("test chain should be renderable");
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 7, 7, 16.0);
+        let field = rasterize_river_chain_anti_aliased_polyline_field(&[source], config, 48.0);
+        let joint = 1 * 7 + 3;
+        let before_joint = 1 * 7 + 2;
+        let after_joint = 2 * 7 + 3;
+
+        assert!(
+            field.river_valley_strength[joint]
+                >= field.river_valley_strength[before_joint]
+                    .min(field.river_valley_strength[after_joint])
+                    * 0.85,
+            "chain-smoothed AA stroke should not reopen a pointed gap at a Voronoi edge join"
         );
     }
 

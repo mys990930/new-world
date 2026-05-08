@@ -298,6 +298,10 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   combined macro height는 각각
   독립 preview target이어야 하며, combined macro height는 Perlin 합성 전 결과만 표시한다. heightfield
   직전 macro field 연속성을 진단하기 위해 block-height 기준 contour preview를 추가로 뽑을 수 있어야 한다.
+  river valley는 selected river edge를 그대로 하나씩 굽지 않고, hydrology segment를 downstream chain으로
+  묶은 뒤 canonical noisy edge points를 방향에 맞게 이어 smoothed centerline과 smoothed display-flow로
+  rasterize한다. confluence/branch/lake contact는 chain split point이며, edge별 width/depth jump가 preview에
+  원형 blob처럼 남으면 회귀다.
 - stage 12 heightfield: 현재 구현은 `MacroFieldTile`을 읽어 `HeightfieldTile` column cache로 변환한다.
   meso/perlin delta는 아직 `0`인 stub이며, macro field contour step과 일관된 band interpolation을
   거친 뒤 integer block height로 snap한다. ocean/lake mask는 water level hint로, river/ridge/dry basin
@@ -381,7 +385,8 @@ column/window만 sample해 `ChunkData`를 채운다.
   재구성하면 안 된다. launch slice의 final land surface는 smoothing 없이 integer contour step을
   따른다.
 - river valley width와 depth는 selected/display flow에 단조 증가해야 한다. 상류와 하류가 같은 폭으로
-  보이면 회귀다.
+  보이면 회귀다. macro field raster source는 chain 방향 flow smoothing을 사용해 edge 단위 max-flow jump가
+  곧바로 원형 carve blob으로 보이지 않게 해야 한다.
 - ridge influence는 selected ridge path 주변에서 연결된 산맥 envelope를 진단할 수 있어야 하지만,
   broad mountain elevation model이 들어오기 전까지 combined macro height를 직접 올리지 않는다.
   ridge가 전역 low-level grain으로 퍼지거나 pinpoint maxima로 보이면 안 된다.
