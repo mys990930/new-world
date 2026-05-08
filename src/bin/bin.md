@@ -14,6 +14,7 @@
 
 | Binary | Purpose | Current status |
 | --- | --- | --- |
+| `biome_cell_inspector` | Responsive HTML/SVG cell inspector for resolved biome cells plus lake/river overlays | Works; reads graph macro map biomes, macro lake edge classes, and selected hydrology output |
 | `biome_map_preview` | Top-down graph-first biome map preview, one color per resolved Voronoi cell | Works; reads `GraphMacroMap.biomes` from the core biome classifier output |
 | `chunk_preview` | Quarter-view chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
@@ -77,6 +78,32 @@ cargo run --bin biome_map_preview -- 42 0 0 --width 640 --height 360 --output ta
     the `GraphBiomeCell` values exposed through `GraphMacroMap.biomes`.
   - It does not edit or duplicate core biome classifier policy.
   - See [biome_map_preview.md](./biome_map_preview.md).
+
+## biome_cell_inspector
+
+- Purpose: write a responsive HTML/SVG inspector where hovering or clicking a Voronoi cell shows
+  that cell's resolved biome, final context values, macro surface kind, lake overlay counts, and
+  selected river overlay data.
+- Parameters:
+  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
+  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`,
+    `--site-spacing-blocks <i32>`, `--land-bias <f32>`, `--stage biome_cell_inspector`, `--output <path>`
+- Defaults:
+  - `--width 1400`
+  - `--height 900`
+  - `--world-span-blocks 32768`
+  - `--stage biome_cell_inspector`
+- Example:
+
+```bash
+cargo run --bin biome_cell_inspector -- 42 0 0 --output target/biome-cell-inspector/s42.html
+```
+
+- Notes:
+  - Cell colors come from resolved `GraphMacroMap.biomes`, matching the detailed biome palette.
+  - Lake edge and selected river overlays come from the macro-map/hydrology path rather than from
+    duplicated preview-only rules.
+  - See [biome_cell_inspector.md](./biome_cell_inspector.md).
 
 ## chunk_topdown_preview
 
