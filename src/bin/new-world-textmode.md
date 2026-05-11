@@ -25,15 +25,18 @@ Optional center flags:
 - Chunk cells are drawn inside a box-drawing grid using the ECS `ActiveChunkObserverScope` `3x3` window.
 - Each chunk cell includes:
   - cell biome sampled from graph-first `GraphMacroMap.biomes`, matching `biome_cell_inspector`
-  - current weather from world runtime state
+  - current chunk weather scalar state from world runtime state, for example
+    `weather : Cloudy temp=0.62 moist=0.44 cloud=0.71 rain=0.18`
   - world-owned surface condition
   - multiple ecology events from structured `SimEvent`
-  - world update records observed while applying simulation results or realizing temporary chunks
+  - world update records observed while applying simulation results, applying chunk weather updates, or realizing temporary chunks
 
 ## Boundaries
 
 - This binary may realize temporary empty chunks for observer ergonomics.
 - Simulation rule meaning remains in `simulation`.
 - Source-of-truth state remains in `world`.
+- Weather simulation input is built from graph-first biome samples, graph biome context, previous
+  world-owned chunk weather, and already-known neighbor chunk weather.
 - Chunk scope selection remains ECS-owned.
 - `--seconds` exists for smoke tests and demos; without it the binary runs until `Ctrl+C`.

@@ -14,15 +14,17 @@ use new_world::simulation::{
     EcologySimBundleInput, EcologySimChunkInput, SimEcologyEvent, SimEvent, SimInputBundle,
     SimPlantGrowthStage, SimPlantKind, SimRegion, SimSpatialScope, SimSpecies, SimTick,
     SimulationConfig, SimulationCore, SimulationResult, TimeSimBundleInput, TimeSimCellInput,
+    WeatherSimBundleInput, WeatherSimChunkInput,
 };
 use new_world::world::{
-    AtlasArea, AtlasCoord, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkData, LocalWeatherKind,
-    LocalWeatherState, SeasonalPhase, SurfaceCondition, SurfaceConditionKind, WorldCalendar,
-    WorldCore, WorldEdit, WorldMeta, atlas_coord_for_chunk,
+    AtlasArea, AtlasCoord, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkData, ChunkWeatherKind,
+    ChunkWeatherState, LocalWeatherState, SeasonalPhase, SurfaceCondition, SurfaceConditionKind,
+    WorldCalendar, WorldCore, WorldEdit, WorldMeta, atlas_coord_for_chunk,
     generation::{
-        GraphBiomeKind, HydrologyConfig, MacroMapConfig, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, WorldPlanePoint, apply_headwater_source_hydration_to_biomes,
-        generate_macro_map, generate_voronoi_graph_patch, solve_hydrology,
+        GraphBiomeCell, GraphBiomeContext, GraphBiomeKind, HydrologyConfig, MacroMapConfig,
+        VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
+        apply_headwater_source_hydration_to_biomes, generate_macro_map,
+        generate_voronoi_graph_patch, solve_hydrology,
     },
 };
 
@@ -30,7 +32,7 @@ const DEFAULT_SEED: u64 = 42;
 const DEFAULT_TICKS_PER_SECOND: u32 = 20;
 const DAYS_PER_YEAR: u32 = 360;
 const DAYS_PER_MONTH: u32 = 30;
-const GRID_CELL_WIDTH: usize = 56;
+const GRID_CELL_WIDTH: usize = 68;
 const GRID_LABEL_WIDTH: usize = 8;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -82,7 +84,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     active_region.center_atlas,
                     active_region.area,
                 )),
-                weather: None,
+                weather: Some(build_weather_input(
+                    &world,
+                    &graph_biomes,
+                    &active_chunks.chunks,
+                )),
             };
             let results = simulation.step_all(tick, region, input);
             apply_simulation_results(
@@ -188,9 +194,15 @@ impl ChunkUpdateLog {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 struct TextModeGraphBiomes {
-    chunks: HashMap<ChunkCoord, GraphBiomeKind>,
+    chunks: HashMap<ChunkCoord, TextModeGraphBiomeSample>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TextModeGraphBiomeSample {
+    biome: GraphBiomeKind,
+    context: GraphBiomeContext,
 }
 
 impl TextModeGraphBiomes {
@@ -219,21 +231,21 @@ impl TextModeGraphBiomes {
             .copied()
             .map(|coord| {
                 let point = chunk_center_point(coord);
-                let biome = macro_map
+                let sample = macro_map
                     .biomes
                     .iter()
                     .filter_map(|biome| {
                         let site = patch.site(biome.site)?;
-                        Some((distance_squared(site.position, point), biome.biome))
+                        Some((distance_squared(site.position, point), *biome))
                     })
                     .min_by(|left, right| {
                         left.0
                             .partial_cmp(&right.0)
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })
-                    .map(|(_, biome)| biome)
-                    .unwrap_or(GraphBiomeKind::TemperateGrassland);
-                (coord, biome)
+                    .map(|(_, biome)| sample_from_graph_biome_cell(biome))
+                    .unwrap_or_else(default_graph_biome_sample);
+                (coord, sample)
             })
             .collect();
 
@@ -243,8 +255,38 @@ impl TextModeGraphBiomes {
     fn biome_for_chunk(&self, coord: ChunkCoord) -> GraphBiomeKind {
         self.chunks
             .get(&coord)
-            .copied()
-            .unwrap_or(GraphBiomeKind::TemperateGrassland)
+            .map(|sample| sample.biome)
+            .unwrap_or_else(|| default_graph_biome_sample().biome)
+    }
+
+    fn context_for_chunk(&self, coord: ChunkCoord) -> GraphBiomeContext {
+        self.chunks
+            .get(&coord)
+            .map(|sample| sample.context)
+            .unwrap_or_else(|| default_graph_biome_sample().context)
+    }
+}
+
+fn sample_from_graph_biome_cell(cell: GraphBiomeCell) -> TextModeGraphBiomeSample {
+    TextModeGraphBiomeSample {
+        biome: cell.biome,
+        context: cell.context,
+    }
+}
+
+fn default_graph_biome_sample() -> TextModeGraphBiomeSample {
+    TextModeGraphBiomeSample {
+        biome: GraphBiomeKind::TemperateGrassland,
+        context: GraphBiomeContext {
+            temperature: 0.5,
+            hydration: 0.5,
+            elevation: 0.0,
+            continentality: 0.0,
+            coastness: 0.0,
+            mountainness: 0.0,
+            ruggedness: 0.0,
+            water_role: Default::default(),
+        },
     }
 }
 
@@ -350,6 +392,40 @@ fn build_time_input(
     }
 }
 
+fn build_weather_input(
+    world: &WorldCore,
+    graph_biomes: &TextModeGraphBiomes,
+    chunks: &[ChunkCoord],
+) -> WeatherSimBundleInput {
+    WeatherSimBundleInput {
+        world_seed: world.meta().seed,
+        calendar: *world.calendar(),
+        chunks: chunks
+            .iter()
+            .copied()
+            .map(|coord| WeatherSimChunkInput {
+                coord,
+                biome: graph_biomes.biome_for_chunk(coord),
+                context: graph_biomes.context_for_chunk(coord),
+                previous_weather: chunk_weather_or_clear(world, coord),
+                neighbor_weather: neighbor_chunk_weather(world, coord),
+            })
+            .collect(),
+    }
+}
+
+fn neighbor_chunk_weather(world: &WorldCore, coord: ChunkCoord) -> Vec<ChunkWeatherState> {
+    [
+        ChunkCoord(coord.0 - 1, coord.1, coord.2),
+        ChunkCoord(coord.0 + 1, coord.1, coord.2),
+        ChunkCoord(coord.0, coord.1, coord.2 - 1),
+        ChunkCoord(coord.0, coord.1, coord.2 + 1),
+    ]
+    .into_iter()
+    .filter_map(|neighbor| world.chunk_weather(neighbor))
+    .collect()
+}
+
 fn apply_simulation_results(
     world: &mut WorldCore,
     active_chunks: &[ChunkCoord],
@@ -381,6 +457,21 @@ fn apply_simulation_results(
                     );
                 }
             }
+        }
+
+        for update in result.chunk_weather_updates.iter().copied() {
+            let apply = world.apply_chunk_weather_update(update);
+            updates.push(
+                apply.coord,
+                format!(
+                    "chunk_weather_applied:{}",
+                    if apply.changed {
+                        "changed"
+                    } else {
+                        "unchanged"
+                    }
+                ),
+            );
         }
 
         for edit in result.world_edits.iter().cloned() {
@@ -526,7 +617,7 @@ fn format_chunk_cell(
     let observation = world.observe_chunk_surface_condition(coord);
     let biome = graph_biomes.biome_for_chunk(coord);
     let atlas = atlas_coord_for_chunk(coord);
-    let weather = weather_for_chunk(world, coord);
+    let weather = chunk_weather_or_clear(world, coord);
     let ecology = join_or_none(ecology_events_for_chunk(events, coord));
     let world_updates = join_or_none(updates.records_for(coord).iter().cloned().collect());
 
@@ -585,17 +676,10 @@ fn truncate_for_grid(text: &str, max_chars: usize) -> String {
     output
 }
 
-fn weather_for_chunk(world: &WorldCore, coord: ChunkCoord) -> LocalWeatherState {
-    let atlas = atlas_coord_for_chunk(coord);
-    world.local_weather(atlas).unwrap_or_else(|| {
-        let region = world.sample_region_class_atlas(atlas);
-        LocalWeatherState::clear(
-            atlas,
-            region.climate_regime,
-            world.calendar().absolute_tick,
-            world.calendar().absolute_tick,
-        )
-    })
+fn chunk_weather_or_clear(world: &WorldCore, coord: ChunkCoord) -> ChunkWeatherState {
+    world
+        .chunk_weather(coord)
+        .unwrap_or_else(|| ChunkWeatherState::clear(world.calendar().absolute_tick))
 }
 
 fn ecology_events_for_chunk(events: &[SimEvent], coord: ChunkCoord) -> Vec<String> {
@@ -643,18 +727,25 @@ fn format_graph_biome(biome: GraphBiomeKind) -> String {
     format!("{biome:?}")
 }
 
-fn format_weather(weather: LocalWeatherState) -> String {
+fn format_weather(weather: ChunkWeatherState) -> String {
     format!(
-        "{}({:.2})",
-        match weather.kind {
-            LocalWeatherKind::Clear => "clear",
-            LocalWeatherKind::Overcast => "overcast",
-            LocalWeatherKind::Rain => "rain",
-            LocalWeatherKind::Snow => "snow",
-            LocalWeatherKind::Storm => "storm",
-        },
-        weather.intensity
+        "{} temp={:.2} moist={:.2} cloud={:.2} rain={:.2}",
+        format_chunk_weather_kind(weather.kind),
+        weather.temperature,
+        weather.moisture,
+        weather.cloud,
+        weather.rain
     )
+}
+
+fn format_chunk_weather_kind(kind: ChunkWeatherKind) -> &'static str {
+    match kind {
+        ChunkWeatherKind::Clear => "Clear",
+        ChunkWeatherKind::Cloudy => "Cloudy",
+        ChunkWeatherKind::Rain => "Rain",
+        ChunkWeatherKind::Snow => "Snow",
+        ChunkWeatherKind::Storm => "Storm",
+    }
 }
 
 fn format_surface(condition: SurfaceCondition) -> String {
@@ -833,7 +924,7 @@ mod tests {
         let mut updates = ChunkUpdateLog::default();
         updates.push(coord, "realized_empty_chunk");
         let graph_biomes = TextModeGraphBiomes {
-            chunks: HashMap::from([(coord, GraphBiomeKind::TemperateGrassland)]),
+            chunks: HashMap::from([(coord, default_graph_biome_sample())]),
         };
 
         let summary = format_second_summary(
@@ -850,9 +941,26 @@ mod tests {
         assert!(summary.contains("time=00-01-01 11:00 (spring)"));
         assert!(summary.contains("┌"));
         assert!(summary.contains("biome   : "));
-        assert!(summary.contains("weather : "));
+        assert!(summary.contains("weather : Clear temp=0.50 moist=0.00 cloud=0.00 rain=0.00"));
         assert!(summary.contains("surface : "));
         assert!(summary.contains("animal_spawn:small_herbivore"));
         assert!(summary.contains("updates : realized_empty_chunk"));
+    }
+
+    #[test]
+    fn weather_format_displays_chunk_scalar_state() {
+        let weather = ChunkWeatherState {
+            temperature: 0.62,
+            moisture: 0.44,
+            cloud: 0.71,
+            rain: 0.18,
+            kind: ChunkWeatherKind::Cloudy,
+            updated_at_tick: 1200,
+        };
+
+        assert_eq!(
+            format_weather(weather),
+            "Cloudy temp=0.62 moist=0.44 cloud=0.71 rain=0.18"
+        );
     }
 }

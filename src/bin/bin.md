@@ -295,7 +295,8 @@ cargo run --bin new-world-textmode -- --seconds 5
 
 - Notes:
   - Output formatting is a binary adapter. It reads ECS chunk scope, world observers, and structured simulation events.
-  - Chunk biome labels are sampled from graph-first `GraphMacroMap.biomes`, matching `biome_cell_inspector`.
+  - Chunk biome labels and weather input context are sampled from graph-first `GraphMacroMap.biomes`, matching `biome_cell_inspector`.
+  - Weather runs through the simulation weather subsystem, applies `ChunkWeatherUpdate` records to `WorldCore`, and displays world-owned scalar state as `weather : Cloudy temp=0.62 moist=0.44 cloud=0.71 rain=0.18`.
   - The console is cleared and redrawn once per second with box-drawing grid borders.
   - The default run has no second limit; use `Ctrl+C` to stop it. `--seconds` is only for smoke tests and demos.
   - Chunk-cell labels use a fixed label width so values align line-by-line.
