@@ -238,9 +238,9 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      raw `1.0..1.999`는 `y = 1`처럼 lower integer band로 snap된다. river corridor override 구조는
      남겨두어 이후 water descent 보존이 다시 필요해지면 별도 gap으로 분리할 수 있지만, 현재 launch
      기본값은 land와 river가 같은 0-block minimum gap을 쓴다.
-   - 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snapped visible terrain은 인접
-     column 사이에서 한 contour step보다 크게 뛰지 않도록 final surface ceiling을 적용한다. 이 pass는
-     raw/macro diagnostic height를 바꾸지 않는다.
+   - 일반 terrain에는 인접 column 기준 final surface ceiling을 적용하지 않는다. raw/macro source가
+     크게 뛰면 integer snap 뒤 visible surface도 같은 block scale로 뛰어야 하며, 그 차이는
+     macro/raw source 경로를 진단하는 신호로 남긴다.
    - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
      final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
      올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을

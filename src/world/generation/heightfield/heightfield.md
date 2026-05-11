@@ -196,10 +196,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   설정으로만 남는다. preview나 heightfield visible top에 bed depression을 섞으면 회귀다.
 - 일반 land column은 raw block height를 contour lower band로 양자화한 뒤 sea level 아래로 내려가지
   않는다. 즉 water가 아닌 terrain의 기본 floor는 `y = 0`이다.
-- 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snap 이후 일반 land/shoreline visible
-  surface는 인접 column 사이에서 한 번에 한 contour step보다 크게 뛰지 않아야 한다. 이 safety pass는
-  raw diagnostic height를 바꾸지 않고 final snapped visible surface만 낮추는 ceiling이며, 평균화나
-  전역 smoothing source가 아니다.
+- 일반 land에는 인접 column 기준 final surface ceiling을 적용하지 않는다. raw block height를 floor
+  integer snap한 값이 visible `surface_y`의 기본 source이며, raw source가 크게 뛰면 visible surface도
+  같은 block scale로 뛰어야 한다. 이 차이는 smoothing 대상이 아니라 macro/raw source 경로를 진단하는
+  신호다.
 - 바다/호수와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다. tile 생성 후
   standing water(ocean/lake) column으로부터 grid distance를 계산하고, 주변 land에 shoreline contour
   ceiling을 적용한다. 이 pass는 continuous smoothing이 아니라 `0, 1, 2, ...` 계단 ceiling이다.
@@ -272,9 +272,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `center-x/center-z`가 chunk coordinate임을 기본 계약으로 기록하고, 내부에서 변환한 center chunk,
   center world block, column resolution, sample spacing, chunk range/radius, world footprint, sea level,
   height range를 기록해야 한다. `heightfield_preview`의 주 grid는 `macro_field_preview`와 같은 1024-block
-  macro field tile/cache boundary다. chunk boundary는 `CHUNK_EDGE` block 간격의 very faint minor
-  line으로 유지하고, `CHUNK_EDGE * 8`인 256-block major grid는 보조 chunk-group reference로 더
-  약하게 표시한다. 1024-block macro tile line이 terrain scale을 읽는 primary overlay여야 한다.
+  macro field tile/cache boundary다. chunk overlay는 preview footprint의 chunk-aligned 외곽선만
+  표시하고, `CHUNK_EDGE` block 간격의 내부 minor grid는 표면 자글거림처럼 보일 수 있으므로 그리지
+  않는다. `CHUNK_EDGE * 8`인 256-block major grid는 보조 chunk-group reference로 약하게 표시한다.
+  1024-block macro tile line이 terrain scale을 읽는 primary overlay여야 한다.
 - `heightfield_preview`의 positional `center-x/center-z`는 기본적으로 chunk coordinate다.
   `--chunk-radius r`을 받으면 해당 center chunk를 중심으로 `center_chunk-r .. center_chunk+r`
   inclusive square range를 샘플링한다. 이 모드에서 `width/height`는 이미지 해상도만 정하고,

@@ -184,12 +184,6 @@ pub fn generate_heightfield_tile(
         macro_tile.config.sample_spacing_blocks,
         config,
     );
-    apply_neighbor_surface_step_continuity(
-        &mut columns,
-        macro_tile.config.width as usize,
-        macro_tile.config.height as usize,
-        config,
-    );
     apply_river_water_descent(
         &mut columns,
         macro_tile.config.width as usize,
@@ -381,48 +375,6 @@ fn apply_neighbor_shoreline_continuity(
             if matches!(column.terrain_kind, HeightfieldTerrainKind::Land) {
                 column.terrain_kind = HeightfieldTerrainKind::Coast;
             }
-        }
-    }
-}
-
-fn apply_neighbor_surface_step_continuity(
-    columns: &mut [HeightfieldColumn],
-    width: usize,
-    height: usize,
-    config: HeightfieldConfig,
-) {
-    if columns.is_empty() || width == 0 || height == 0 {
-        return;
-    }
-    let max_step = config.contour.step_blocks.max(1.0);
-    for _ in 0..(width + height).max(1) {
-        let mut changed = false;
-        for index in 0..columns.len() {
-            if is_standing_water(columns[index]) {
-                continue;
-            }
-            let current = columns[index].surface_height_blocks;
-            let allowed = neighbor_indices(index, width, height)
-                .map(|neighbor| columns[neighbor].visible_surface_height_blocks() + max_step)
-                .fold(current, f32::min);
-            if allowed < current {
-                let snapped = snap_to_contour_step(allowed, config.contour);
-                let surface_y = snap_height_to_block(snapped);
-                columns[index].surface_y = surface_y;
-                columns[index].surface_height_blocks = surface_y as f32;
-                columns[index].constrained_surface_height_blocks =
-                    columns[index].surface_height_blocks;
-                if matches!(columns[index].terrain_kind, HeightfieldTerrainKind::River) {
-                    let water = columns[index].surface_y.saturating_add(1);
-                    columns[index].water_y = Some(water);
-                    columns[index].water_level_blocks = Some(water as f32);
-                    columns[index].river_water_height_blocks = Some(water as f32);
-                }
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
         }
     }
 }
@@ -1086,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn snapped_land_visible_steps_are_limited_to_one_block() {
+    fn ordinary_land_visible_surface_preserves_raw_neighbor_jump() {
         let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 1, 1.0);
         let samples = vec![
             sample(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -1112,10 +1064,18 @@ mod tests {
                 .raw_surface_height_blocks,
             DEFAULT_HEIGHTFIELD_MAX_BLOCKS
         );
-        assert_eq!(heights, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(
+            heights,
+            vec![
+                0.0,
+                DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
+                DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
+                DEFAULT_HEIGHTFIELD_MAX_BLOCKS
+            ]
+        );
         assert!(
-            tile.stats.max_visible_neighbor_delta_blocks <= 1.0,
-            "visible terrain step should be capped without changing raw diagnostic heights"
+            tile.stats.max_visible_neighbor_delta_blocks > 1.0,
+            "ordinary land should preserve raw-scale jumps when the source field jumps"
         );
     }
 

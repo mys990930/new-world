@@ -403,8 +403,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   chunk x/z range, chunk radius, chunk edge blocks, macro-field tile edge blocks, column step/resolution,
   sea level과 height range를 함께 기록한다.
 - overlay는 stage 이름, column resolution, surface height min/avg/max, diagnostic color key,
-  primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, very faint
-  32-block chunk boundary key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
+  primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, chunk footprint
+  outline key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
   column resolution은 실제 샘플링된 column count를 뜻하며, legend에는 sample spacing과
   chunk-radius 모드의 columns-per-chunk도 함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
@@ -438,9 +438,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
-- 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snapped land/shoreline visible surface는
-  인접 column 사이에서 한 contour step보다 크게 뛰지 않도록 ceiling pass를 적용한다. raw diagnostic
-  height는 그대로 보존한다.
+- 일반 terrain에는 인접 column 기준 ceiling pass를 적용하지 않는다. raw/macro source가 크게 뛰면
+  integer snap 뒤 visible surface도 같은 block scale로 뛰며, 그 점프는 source field 진단 대상으로 남긴다.
 - ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 grid-distance 기반
   contour ceiling으로 `0, 1, 2, ...` 계단을 따라 올라가야 한다. explicit cliff/meso feature가 없는
   launch slice에서 바다 옆 land가 즉시 높은 vertical cliff로 솟으면 회귀다.
@@ -475,11 +474,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   policy as terrain columns. It should not introduce fixed east/south faces that break rotated
   previews, and existing block outline mode should remain readable on both terrain and cube faces.
 - Macro-field tile boundary overlay is drawn at the generation cache tile scale, currently 1024
-  blocks, and is the primary readable grid so the scale matches `macro_field_preview`. Chunk
-  boundary overlay is still drawn at the runtime chunk size (`CHUNK_EDGE`, currently 32 blocks) as a
-  very faint minor grid. A secondary major chunk-group grid is drawn every 256 blocks, equal to
-  8 chunks, but it must not visually dominate the 1024-block macro tile grid. These lines are
-  diagnostic overlays, not terrain features.
+  blocks, and is the primary readable grid so the scale matches `macro_field_preview`. The
+  heightfield preview draws only the chunk-aligned preview footprint outline instead of every
+  32-block internal chunk line, because a dense minor grid can read as noisy surface detail. A
+  secondary major chunk-group grid is drawn every 256 blocks, equal to 8 chunks, but it must not
+  visually dominate the 1024-block macro tile grid. These lines are diagnostic overlays, not terrain
+  features.
 - `--chunk-radius r` is a square chunk-coordinate footprint, not separate x/z radii. It includes the
   center chunk and covers `2r+1` chunks on each horizontal axis. A radius of `0` previews one chunk.
 

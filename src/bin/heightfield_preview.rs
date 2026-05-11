@@ -412,7 +412,7 @@ impl PreviewHeader {
                 self.macro_tile_edge_blocks
             ),
             format!(
-                "grid_overlay=primary_macro_tile_{}blocks_secondary_major_{}blocks_faint_chunk_{}blocks",
+                "grid_overlay=primary_macro_tile_{}blocks_secondary_major_{}blocks_chunk_footprint_outline_{}blocks",
                 self.macro_tile_edge_blocks,
                 self.major_grid_edge_blocks,
                 self.chunk_edge_blocks
@@ -700,7 +700,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.max_z()
     );
     println!(
-        "grid overlay: primary macro tile {} blocks, secondary major {} blocks, chunk {} blocks very faint",
+        "grid overlay: primary macro tile {} blocks, secondary major {} blocks, chunk footprint outline {} blocks",
         MACRO_FIELD_TILE_EDGE_BLOCKS, PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, CHUNK_EDGE_I32
     );
     println!(
@@ -1549,15 +1549,7 @@ fn draw_boundary_overlays(
     else {
         return;
     };
-    draw_world_grid_overlay(
-        &mut rgba,
-        tile,
-        plan,
-        window,
-        CHUNK_EDGE_I32,
-        [20, 27, 33, 18],
-        6,
-    );
+    draw_world_window_outline(&mut rgba, tile, plan, window, [20, 27, 33, 72]);
     draw_world_grid_overlay(
         &mut rgba,
         tile,
@@ -1577,6 +1569,33 @@ fn draw_boundary_overlays(
         1,
     );
     image.rgba = rgba.into_raw();
+}
+
+fn draw_world_window_outline(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    _window: PreviewWindow,
+    color: [u8; 4],
+) {
+    let overlay_y = tile.stats.max_surface_height_blocks + 1.0;
+    let max_x = tile.width as f32;
+    let max_z = tile.height as f32;
+    let corners = [
+        plan.project_grid(0.0, 0.0, overlay_y, tile),
+        plan.project_grid(max_x, 0.0, overlay_y, tile),
+        plan.project_grid(max_x, max_z, overlay_y, tile),
+        plan.project_grid(0.0, max_z, overlay_y, tile),
+    ];
+    for index in 0..corners.len() {
+        draw_projected_line(
+            image,
+            corners[index],
+            corners[(index + 1) % corners.len()],
+            color,
+            1,
+        );
+    }
 }
 
 fn draw_world_grid_overlay(
@@ -2195,7 +2214,10 @@ fn draw_grid_legend_keys(
             format!("G{}B", header.major_grid_edge_blocks),
             [70, 91, 104, 255],
         ),
-        (format!("C{}B", header.chunk_edge_blocks), [20, 27, 33, 255]),
+        (
+            format!("C{}B_OUT", header.chunk_edge_blocks),
+            [20, 27, 33, 255],
+        ),
     ];
     let mut cursor = x;
     for (label, color) in keys {
