@@ -38,18 +38,22 @@
 - `FixedStepConfig`
 - `SimTick`
 - `SubSystemId`
+- `WeatherSimConfig`
 
 #### Input Data
 
 - `SimRegion`
 - `SimInput`
 - `SimInputBundle`
+- `WeatherSimBundleInput`
+- `WeatherSimChunkInput`
 
 #### Output Data
 
 - `SimulationResult`
 - `SimEvent`
 - `SimFollowupRequest`
+- `SimulationResult::chunk_weather_updates` carries world-owned `ChunkWeatherUpdate` contracts
 - ecology observer payloads are chunk-scoped structured events keyed by graph-first biome, not stored animal entities
 - surface observer payloads are aliases/references to `world::SurfaceCondition` rather than simulation-owned storage
 - weather observer payloads should be derived from world-owned chunk weather scalar state, not renderer-only values
@@ -107,6 +111,7 @@ FluidSim::step(input: SimInput) -> SimulationResult
 FireSim::step(input: SimInput) -> SimulationResult
 FarmingSim::step(input: SimInput) -> SimulationResult
 TimeSim::step(input: SimInput) -> SimulationResult
+WeatherSim::step(input: SimInput) -> SimulationResult
 ```
 
 ### Dependencies
@@ -148,11 +153,13 @@ NOT:
 
 ### Current Implementation Notes
 
-- the first concrete implementation only wires the `time` subsystem
-- `SimulationResult` can now carry a world-owned `CalendarAdvance` contract plus generic `WorldEdit` / event / follow-up fields
+- the first concrete implementation wires the `time`, `ecology`, and chunk `weather` subsystems
+- `SimulationResult` can now carry a world-owned `CalendarAdvance` contract, chunk weather updates, plus generic `WorldEdit` / event / follow-up fields
+- `SimulationResult::chunk_weather_updates` carries `ChunkWeatherUpdate` values; simulation computes them, while world applies and stores them
 - `SimSurfaceCondition` is aligned to the world-owned `SurfaceCondition` contract so textmode output can later be replaced by renderer/gameplay consumers without changing rule meaning
 - the same `time` module now also exports read-only local climate interpretation helpers so ECS HUD can display biome-consistent Celsius / humidity values without inventing a separate app-only climate scale
-- chunk-scoped weather is specified in `weather.md`; implementation should move weather meaning toward that contract while preserving old atlas local weather only as migration compatibility
+- chunk-scoped weather is implemented in `weather.rs` using graph biome/context input, previous state, neighbor state, seasonal coefficients, biome clamps, and hourly gating from `WeatherSimConfig::ticks_per_game_hour`
+- old atlas local weather remains a migration compatibility path for existing renderer/app environment consumers
 - ecology now has a deterministic observer slice that emits graph-biome-scoped animal/plant events for active chunks, without storing final entities
 - power, fluid, fire, and farming remain planned subsystem boundaries but are not implemented yet
 - the textmode observer slice should extend `SimEvent` first, then let app/binary-level code format one-second summaries from those structured events

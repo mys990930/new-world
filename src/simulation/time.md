@@ -81,7 +81,7 @@
 
 - the current step advances `WorldCalendar.absolute_tick` every fixed tick
 - the current minute boundary updates per-atlas-cell climate drift and legacy local weather windows
-- future chunk weather should update on in-game hour boundaries using `weather.md`
+- chunk weather updates on in-game hour boundaries in `weather.rs`; time supplies `WorldCalendar.season_phase` and calendar context but does not own chunk weather policy
 - the current season-change path emits deferred `SetSeasonalState(...)` patches rather than direct block edits
 - the current implementation is deterministic and tested, but it intentionally keeps nearby `WorldEdit` emission for later slices
 - HUD-facing temperature / humidity now deliberately reuse the same local climate signal that weather derivation reads:

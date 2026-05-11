@@ -1,12 +1,13 @@
 mod ecology;
 mod time;
+mod weather;
 
 use std::time::Duration;
 
 use crate::world::{
-    AtlasArea, AtlasCoord, BiomeFamily, CalendarAdvance, ChunkCoord, EditResult, LocalWeatherKind,
-    LocalWeatherState, SurfaceCondition, SurfaceConditionKind, WorldEdit,
-    generation::GraphBiomeKind,
+    AtlasArea, AtlasCoord, BiomeFamily, CalendarAdvance, ChunkCoord, ChunkWeatherState,
+    ChunkWeatherUpdate, EditResult, LocalWeatherKind, LocalWeatherState, SurfaceCondition,
+    SurfaceConditionKind, WorldEdit, generation::GraphBiomeKind,
 };
 
 pub use ecology::{
@@ -15,6 +16,10 @@ pub use ecology::{
 pub use time::{
     LocalClimateDisplay, LocalClimateState, TimeSim, TimeSimBundleInput, TimeSimCellInput,
     TimeSimConfig, TimeSimInput, display_local_climate, evaluate_local_climate,
+};
+pub use weather::{
+    WeatherSim, WeatherSimBundleInput, WeatherSimChunkInput, WeatherSimConfig, WeatherSimInput,
+    derive_chunk_weather_kind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +40,7 @@ pub struct SimulationConfig {
     pub fixed: FixedStepConfig,
     pub ecology: EcologySimConfig,
     pub time: TimeSimConfig,
+    pub weather: WeatherSimConfig,
 }
 
 impl SimulationConfig {
@@ -45,6 +51,7 @@ impl SimulationConfig {
         Self {
             ecology: EcologySimConfig::for_fixed_rate(fixed.ticks_per_second),
             time: TimeSimConfig::for_fixed_rate(fixed.ticks_per_second),
+            weather: WeatherSimConfig::for_fixed_rate(fixed.ticks_per_second),
             fixed,
         }
     }
@@ -70,6 +77,7 @@ pub enum SubSystemId {
     Fire,
     Farming,
     Time,
+    Weather,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,12 +90,14 @@ pub struct SimRegion {
 pub enum SimInput {
     Ecology(EcologySimInput),
     Time(TimeSimInput),
+    Weather(WeatherSimInput),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SimInputBundle {
     pub ecology: Option<EcologySimBundleInput>,
     pub time: Option<TimeSimBundleInput>,
+    pub weather: Option<WeatherSimBundleInput>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +105,7 @@ pub struct SimulationResult {
     pub subsystem: SubSystemId,
     pub tick: SimTick,
     pub calendar_advance: Option<CalendarAdvance>,
+    pub chunk_weather_updates: Vec<ChunkWeatherUpdate>,
     pub world_edits: Vec<WorldEdit>,
     pub dirty_chunks: Vec<ChunkCoord>,
     pub events: Vec<SimEvent>,
@@ -107,6 +118,7 @@ impl SimulationResult {
             subsystem,
             tick,
             calendar_advance: None,
+            chunk_weather_updates: Vec::new(),
             world_edits: Vec::new(),
             dirty_chunks: Vec::new(),
             events: Vec::new(),
@@ -134,6 +146,12 @@ pub enum SimEvent {
         coord: AtlasCoord,
         biome: BiomeFamily,
         state: LocalWeatherState,
+    },
+    ChunkWeatherUpdated {
+        scope: SimSpatialScope,
+        biome: GraphBiomeKind,
+        previous: ChunkWeatherState,
+        state: ChunkWeatherState,
     },
     SurfaceConditionObserved {
         scope: SimSpatialScope,
@@ -237,16 +255,19 @@ pub struct SimulationCore {
     config: SimulationConfig,
     ecology: EcologySim,
     time: TimeSim,
+    weather: WeatherSim,
 }
 
 impl SimulationCore {
     pub fn new(config: SimulationConfig) -> Self {
         let ecology = EcologySim::new(config.ecology.clone());
         let time = TimeSim::new(config.time.clone());
+        let weather = WeatherSim::new(config.weather.clone());
         Self {
             config,
             ecology,
             time,
+            weather,
         }
     }
 
@@ -258,6 +279,7 @@ impl SimulationCore {
         match (subsystem, input) {
             (SubSystemId::Ecology, SimInput::Ecology(input)) => self.ecology.step(input),
             (SubSystemId::Time, SimInput::Time(input)) => self.time.step(input),
+            (SubSystemId::Weather, SimInput::Weather(input)) => self.weather.step(input),
             (expected, received) => panic!(
                 "simulation input/subsystem mismatch: expected {:?}, received {:?}",
                 expected, received
@@ -294,6 +316,19 @@ impl SimulationCore {
                     world_seed: time.world_seed,
                     calendar: time.calendar,
                     cells: time.cells,
+                }),
+            ));
+        }
+
+        if let Some(weather) = input.weather {
+            results.push(self.step(
+                SubSystemId::Weather,
+                SimInput::Weather(WeatherSimInput {
+                    tick,
+                    region,
+                    world_seed: weather.world_seed,
+                    calendar: weather.calendar,
+                    chunks: weather.chunks,
                 }),
             ));
         }

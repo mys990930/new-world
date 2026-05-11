@@ -1,12 +1,15 @@
 use crate::renderer::RenderEnvironment;
 use crate::simulation::{
     EcologySimBundleInput, EcologySimChunkInput, SimInputBundle, SimRegion, SimTick,
-    SimulationResult, TimeSimBundleInput, TimeSimCellInput,
+    SimulationResult, TimeSimBundleInput, TimeSimCellInput, WeatherSimBundleInput,
+    WeatherSimChunkInput,
 };
 use crate::world::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, BiomeFamily,
-    CHUNK_EDGE_I32, ChunkCoord, LocalWeatherState, RegionClassSample, WorldCalendar, WorldCore,
-    generation::GraphBiomeKind,
+    CHUNK_EDGE_I32, ChunkCoord, ChunkWeatherState, CoastalContext, ElevationBand, HydrologyContext,
+    LocalWeatherState, MoistureBand, RegionClassSample, TemperatureBand, WorldCalendar, WorldCore,
+    atlas_coord_for_chunk,
+    generation::{GraphBiomeContext, GraphBiomeKind, GraphBiomeWaterRole},
 };
 
 use super::GameApp;
@@ -40,6 +43,9 @@ impl GameApp {
                     active_region.area,
                     tick,
                 )),
+                weather: Some(
+                    self.build_weather_sim_input_bundle(&active_chunk_scope.chunks, tick),
+                ),
             };
             let results = self.simulation.step_all(tick, sim_region, input);
             self.ecs.enqueue_simulation_results(results);
@@ -172,9 +178,35 @@ impl GameApp {
         }
     }
 
+    fn build_weather_sim_input_bundle(
+        &self,
+        active_chunks: &[ChunkCoord],
+        tick: SimTick,
+    ) -> WeatherSimBundleInput {
+        let ticks_per_game_hour =
+            u64::from(self.simulation.config().weather.ticks_per_game_hour.max(1));
+        if tick.index % ticks_per_game_hour != 0 {
+            return WeatherSimBundleInput {
+                world_seed: self.world.meta().seed,
+                calendar: *self.world.calendar(),
+                chunks: Vec::new(),
+            };
+        }
+
+        WeatherSimBundleInput {
+            world_seed: self.world.meta().seed,
+            calendar: *self.world.calendar(),
+            chunks: weather_chunk_inputs_from_world(&self.world, active_chunks, tick.index),
+        }
+    }
+
     fn apply_simulation_result(&mut self, result: &SimulationResult) {
         if let Some(advance) = result.calendar_advance.clone() {
             self.world.apply_calendar_advance(advance);
+        }
+
+        for update in result.chunk_weather_updates.iter().copied() {
+            self.world.apply_chunk_weather_update(update);
         }
 
         for edit in result.world_edits.iter().cloned() {
@@ -200,6 +232,45 @@ fn ecology_chunk_inputs_from_world(
             }
         })
         .collect()
+}
+
+fn weather_chunk_inputs_from_world(
+    world: &WorldCore,
+    active_chunks: &[ChunkCoord],
+    tick_index: u64,
+) -> Vec<WeatherSimChunkInput> {
+    active_chunks
+        .iter()
+        .copied()
+        .map(|coord| {
+            let observation = world.observe_chunk_surface_condition(coord);
+            let atlas = atlas_coord_for_chunk(coord);
+            let region = world
+                .sample_cached_region_class_atlas(atlas)
+                .unwrap_or_else(|| world.sample_region_class_atlas(atlas));
+            WeatherSimChunkInput {
+                coord,
+                biome: graph_biome_for_runtime_compat(observation.cell_biome),
+                context: graph_biome_context_for_runtime_compat(region),
+                previous_weather: world
+                    .chunk_weather(coord)
+                    .unwrap_or_else(|| ChunkWeatherState::clear(tick_index)),
+                neighbor_weather: chunk_weather_neighbors(world, coord),
+            }
+        })
+        .collect()
+}
+
+fn chunk_weather_neighbors(world: &WorldCore, coord: ChunkCoord) -> Vec<ChunkWeatherState> {
+    [
+        coord.offset(-1, 0, 0),
+        coord.offset(1, 0, 0),
+        coord.offset(0, 0, -1),
+        coord.offset(0, 0, 1),
+    ]
+    .into_iter()
+    .filter_map(|neighbor| world.chunk_weather(neighbor))
+    .collect()
 }
 
 fn graph_biome_for_runtime_compat(biome: BiomeFamily) -> GraphBiomeKind {
@@ -232,6 +303,66 @@ fn graph_biome_for_runtime_compat(biome: BiomeFamily) -> GraphBiomeKind {
         BiomeFamily::TemperateMixedForest => GraphBiomeKind::TemperateMixedForest,
         BiomeFamily::TemperateBroadleafForest => GraphBiomeKind::TemperateBroadleafForest,
         BiomeFamily::TemperateGrassland => GraphBiomeKind::TemperateGrassland,
+    }
+}
+
+fn graph_biome_context_for_runtime_compat(region: RegionClassSample) -> GraphBiomeContext {
+    GraphBiomeContext {
+        temperature: temperature_band_signal(region.temperature_band),
+        hydration: moisture_band_signal(region.moisture_band),
+        elevation: elevation_band_signal(region.elevation_band),
+        continentality: match region.coastal_context {
+            CoastalContext::Marine | CoastalContext::Coastal => -0.10,
+            CoastalContext::NearCoast => 0.05,
+            CoastalContext::Inland => 0.30,
+        },
+        coastness: match region.coastal_context {
+            CoastalContext::Marine => 1.0,
+            CoastalContext::Coastal => 0.75,
+            CoastalContext::NearCoast => 0.35,
+            CoastalContext::Inland => 0.0,
+        },
+        mountainness: if matches!(region.elevation_band, ElevationBand::Alpine) {
+            1.0
+        } else {
+            0.0
+        },
+        ruggedness: 0.0,
+        water_role: match region.hydrology_context {
+            HydrologyContext::LakeBasin => GraphBiomeWaterRole::Lake,
+            HydrologyContext::WetLowland => GraphBiomeWaterRole::Wetland,
+            HydrologyContext::Dryland => GraphBiomeWaterRole::DryBasin,
+            _ => GraphBiomeWaterRole::Land,
+        },
+    }
+}
+
+fn temperature_band_signal(band: TemperatureBand) -> f32 {
+    match band {
+        TemperatureBand::Polar => 0.08,
+        TemperatureBand::Cold => 0.26,
+        TemperatureBand::Temperate => 0.50,
+        TemperatureBand::Warm => 0.68,
+        TemperatureBand::Hot => 0.86,
+    }
+}
+
+fn moisture_band_signal(band: MoistureBand) -> f32 {
+    match band {
+        MoistureBand::Arid => 0.10,
+        MoistureBand::SemiArid => 0.24,
+        MoistureBand::Subhumid => 0.46,
+        MoistureBand::Humid => 0.66,
+        MoistureBand::Wet => 0.84,
+    }
+}
+
+fn elevation_band_signal(band: ElevationBand) -> f32 {
+    match band {
+        ElevationBand::Low => 0.08,
+        ElevationBand::Upland => 0.32,
+        ElevationBand::Highland => 0.54,
+        ElevationBand::Alpine => 0.78,
     }
 }
 

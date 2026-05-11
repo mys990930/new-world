@@ -82,6 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     active_region.center_atlas,
                     active_region.area,
                 )),
+                weather: None,
             };
             let results = simulation.step_all(tick, region, input);
             apply_simulation_results(

@@ -34,6 +34,7 @@ ChunkWeatherState {
 
 - Fixed ticks advance the calendar through `time.md`.
 - Weather updates only on in-game hour boundaries.
+- The concrete Step 3 implementation gates weather execution with `WeatherSimConfig::ticks_per_game_hour`; app/ECS should pass active chunk input only for those hour windows.
 - The first implementation should update only active/loaded chunks selected by ECS/app.
 - Lazy catch-up for unloaded chunks may later replay hour steps or sample a coarser deterministic state.
 
@@ -47,6 +48,7 @@ For each chunk, the target scalar values derive from:
 - neighboring chunk weather states
 - biome seasonal coefficients
 - deterministic seed/calendar noise for small local variation
+- `WorldCalendar.season_phase` as the seasonal coefficient selector
 
 Draft blend:
 
@@ -58,6 +60,28 @@ next = lerp(previous, mix(season_target, neighbor_target, 0.20), 0.25)
 ```
 
 Clamp every scalar to both `0.0..=1.0` and the biome's hard range. Desert-like biomes may keep `rain` and `moisture` near zero even when neighbors are wet.
+
+## Step 3 API
+
+The simulation leaf exposes:
+
+```text
+WeatherSimConfig { ticks_per_game_hour }
+WeatherSimBundleInput { world_seed, calendar, chunks }
+WeatherSimInput { tick, region, world_seed, calendar, chunks }
+WeatherSimChunkInput {
+  coord,
+  biome: GraphBiomeKind,
+  context: GraphBiomeContext,
+  previous_weather: ChunkWeatherState,
+  neighbor_weather: Vec<ChunkWeatherState>
+}
+```
+
+`SimulationResult::chunk_weather_updates` carries `ChunkWeatherUpdate` values for world application.
+`SimEvent::ChunkWeatherUpdated` mirrors each update as structured observer data with chunk scope,
+graph biome, previous state, and next state. Text formatting and renderer presentation are intentionally
+not part of this leaf.
 
 ## Biome Base Ranges
 
