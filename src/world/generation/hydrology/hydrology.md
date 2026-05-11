@@ -107,6 +107,11 @@ corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation�
 `raw_flow_accumulation`과 정책 적용 후의 `flow_accumulation`을 함께 가진다. preview의 강 두께와
 초기 river width는 segment의 정책 적용 후 `flow_accumulation`을 사용한다.
 
+Hydrology가 확정된 뒤에는 selected `Headwater` segment가 final biome context의 수원지 보정 입력이
+된다. 수원지 근처 cell은 해당 headwater segment edge 양쪽 site이며, land/dry-basin biome context의
+hydration은 최소 `0.46`으로 보정된다. 이 보정은 river routing을 다시 고르지 않고, 이미 선택된
+hydrology result를 biome context에 반영하는 얇은 final pass다.
+
 ---
 
 ## 처리 순서
@@ -155,6 +160,8 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
 - selected river는 threshold를 넘은 headwater에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
+- selected headwater edge 양쪽 land/dry-basin site는 final biome context에서 건조지대로 남으면 안 된다.
+  launch 기본 floor는 `DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR = 0.46`이다.
 - ocean outlet으로 이어지는 river는 raw/selected display flow accumulation을 기준으로 넓어질 수 있다.
   이후 macro_field/heightfield 단계에서 이 값은 width와 depth를 함께 키운다. 상류는 좁고 얕고,
   하류 trunk는 넓고 깊어야 하며, launch preview에서 모든 selected river가 같은 폭으로 보이면 회귀다.

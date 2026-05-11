@@ -148,6 +148,11 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      coast distance, ridge/mountainness/ruggedness context, hydrology-selected drainage context다.
    - water proximity는 ocean/coast, lake/wetland, selected river corridor, dry/closed basin을 같은
      water mask로 뭉개지 않고 별도 role로 반영한다.
+   - selected `Headwater` river segment에 인접한 land/dry-basin site는 수원지 근처 cell로 보고,
+     final hydration을 최소 `0.46`으로 보정한다. 따라서 수원지 바로 옆 final biome은
+     `Steppe`, `SemiDesert`, `Desert`, `DryShrubland`, `TemperateGrassland` 같은 건조지대로 남지 않는다.
+     이 보정은 hydrology selected result를 읽는 post-hydrology pass이며, pre-hydrology river candidate를
+     강처럼 취급하지 않는다.
    - rain shadow는 prevailing wind, mountain/ridge guide, macro elevation gradient, watershed context를
      읽는 deterministic graph/cell-scale field다. 이 단계 뒤에 macro_field가 샘플할 수 있도록 cache
      가능한 cell/edge/corner 또는 tile-independent column context로 남아야 한다.

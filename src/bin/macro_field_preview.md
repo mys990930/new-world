@@ -102,14 +102,15 @@ of giving every tile its own artificial low and high.
 3. Build the padded Voronoi graph through `generate_voronoi_graph_patch(...)`.
 4. Resolve macro ownership/elevation through `generate_macro_map(...)`.
 5. Solve selected hydrology through `solve_hydrology(...)`.
-6. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
-7. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
+6. Apply the post-hydrology selected-headwater hydration floor to final biome cells.
+7. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
+8. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
   - noisy-boundary owner/blend for macro elevation and masks,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - selected hydrology river noisy curves through a tile-local anti-aliased thick polyline bake
     that stores smooth valley coverage, nearest-segment distance, and blended display flow.
-8. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
+9. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.

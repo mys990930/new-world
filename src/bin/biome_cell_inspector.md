@@ -9,6 +9,8 @@ The tool builds the same graph-first inputs used by `biome_map_preview`, colors 
 the resolved `GraphBiomeKind`, and overlays selected hydrology/lake diagnostics from the
 macro-map preview path. Clicking a cell highlights it and updates the side panel with that cell's
 final context values.
+The displayed biome context includes the post-hydrology selected-headwater hydration floor, so
+headwater-adjacent land cells show the same final values as the biome preview.
 
 ## Ownership
 
@@ -69,5 +71,4 @@ cargo run --bin biome_cell_inspector -- 42 0 0 --output target/biome-cell-inspec
 - The generated artifact is HTML/SVG, not a native GUI.
 - Voronoi cells are drawn from sorted raw corner polygons for inspection. The visible biome
   boundary smoothing/noisy-domain transition belongs to later generation stages.
-- The binary does not create preview PNGs and does not change lake or biome classification
-  semantics.
+- The binary does not create preview PNGs and does not own lake or biome classification semantics.

@@ -122,6 +122,11 @@ selected river는 `hydrology::solve_hydrology`의 `GraphRiverSegment`만 source 
 `GraphMacroMap.biomes`는 site id별 final cell biome context와 classification을 가진다. 이
 classification은 macro_map 끝에서 생성되어 macro_field가 nearest site의 biome 의미를 함께 전달할 수
 있게 한다. Oceanic은 단일 biome으로 남기지 않고 `ShallowOcean`과 `DeepOcean`으로 분리한다.
+macro_map이 만드는 biome context는 hydrology 이전 base pass이며, selected hydrology가 풀린 뒤
+`apply_headwater_source_hydration_to_biomes`가 수원지 근처 land/dry-basin cell을 다시 보정할 수 있다.
+수원지 근처는 `GraphHydrologyRole::Headwater` segment의 edge 양쪽 site로 정의하고, final hydration
+floor는 `0.46`이다. 이 pass는 macro ownership/surface kind를 바꾸지 않고 `GraphBiomeCell.context`와
+`GraphBiomeCell.biome`만 갱신한다.
 `MacroSurfaceKind::LakeCandidate`는 biome lake 판정의 source of truth다. 따라서 site가
 `LakeCandidate`이면 같은 site의 `GraphBiomeCell.context.water_role`은 반드시 `Lake`이고,
 `GraphBiomeCell.biome`은 반드시 `GraphBiomeKind::Lake`여야 한다. 반대로 `LakeCandidate`가 아닌

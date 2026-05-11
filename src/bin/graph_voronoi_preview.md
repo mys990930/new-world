@@ -78,13 +78,15 @@
 2. Resolve the graph preview window from image dimensions and `--world-span-blocks`.
 3. Build a `VoronoiGraphPatch` through `generate_voronoi_graph_patch(...)`.
    - The preview derives the required padding from the requested image footprint so the visible area has surrounding sites.
-4. Build `GraphMacroMap` through `generate_macro_map(...)` and index `GraphMacroMap.biomes` by site id.
-5. Calculate nearest-site spacing diagnostics from the generated patch.
-6. Generate the RGB pixel buffer with Rayon via parallel chunks.
-7. Convert that buffer through `image::RgbImage`.
-8. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
-9. Draw the compact legend overlay directly into the RGB image without external font dependencies.
-10. Encode PNG with the `png` crate so the header is preserved as metadata.
+4. Build `GraphMacroMap` through `generate_macro_map(...)`.
+5. Solve selected hydrology and apply the post-hydrology headwater hydration floor before indexing
+   `GraphMacroMap.biomes` by site id.
+6. Calculate nearest-site spacing diagnostics from the generated patch.
+7. Generate the RGB pixel buffer with Rayon via parallel chunks.
+8. Convert that buffer through `image::RgbImage`.
+9. Draw the actual graph edge/corner overlay from explicit `VoronoiEdge` and `VoronoiCorner` topology.
+10. Draw the compact legend overlay directly into the RGB image without external font dependencies.
+11. Encode PNG with the `png` crate so the header is preserved as metadata.
 
 The temperature, hydration, continentality, elevation, and biome modes read the final cell context /
 classification from `GraphMacroMap.biomes`. They fall back to graph base fields only if a biome context is

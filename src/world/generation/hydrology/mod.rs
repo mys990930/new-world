@@ -1,12 +1,14 @@
 use rayon::prelude::*;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
+use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroCorner, MacroEdge, MacroSurfaceKind};
 
 pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 10.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
+pub const DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR: f32 = 0.46;
 pub const DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER: f32 = 5.0;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA: f32 = 0.35;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_FLOOR: f32 = 4.0;
@@ -334,6 +336,73 @@ pub fn solve_hydrology(
         segments,
         topology_stats,
     }
+}
+
+pub fn apply_headwater_source_hydration_to_biomes(
+    patch: &VoronoiGraphPatch,
+    macro_map: &mut GraphMacroMap,
+    hydrology: &GraphHydrologyGraph,
+) -> usize {
+    let headwater_sites = headwater_adjacent_sites(patch, hydrology);
+    if headwater_sites.is_empty() {
+        return 0;
+    }
+
+    let mut updated = 0;
+    for cell in &mut macro_map.biomes {
+        if !headwater_sites.contains(&cell.site) {
+            continue;
+        }
+        if !matches!(
+            cell.context.water_role,
+            GraphBiomeWaterRole::Land | GraphBiomeWaterRole::DryBasin
+        ) {
+            continue;
+        }
+
+        let mut context = cell.context;
+        let original_context = context;
+        context.hydration = context
+            .hydration
+            .max(DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR);
+        if context.water_role == GraphBiomeWaterRole::DryBasin {
+            context.water_role = GraphBiomeWaterRole::Land;
+        }
+        context = context.clamped();
+
+        if context != original_context {
+            cell.context = context;
+            cell.biome = classify_graph_biome(context);
+            updated += 1;
+        }
+    }
+
+    updated
+}
+
+fn headwater_adjacent_sites(
+    patch: &VoronoiGraphPatch,
+    hydrology: &GraphHydrologyGraph,
+) -> HashSet<super::graph::VoronoiSiteId> {
+    let edge_sites = patch
+        .edges
+        .iter()
+        .map(|edge| (edge.id, edge.sites))
+        .collect::<HashMap<_, _>>();
+    let mut sites = HashSet::new();
+
+    for segment in &hydrology.segments {
+        if segment.role != GraphHydrologyRole::Headwater {
+            continue;
+        }
+        let Some(edge_sites) = edge_sites.get(&segment.edge) else {
+            continue;
+        };
+        sites.insert(edge_sites[0]);
+        sites.insert(edge_sites[1]);
+    }
+
+    sites
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1844,6 +1913,7 @@ fn splitmix64(mut value: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
         VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
@@ -2722,6 +2792,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn headwater_source_proximity_raises_final_biome_hydration() {
+        let mut saw_headwater = false;
+
+        for seed in 1..=32 {
+            let (patch, mut macro_map) = test_inputs(seed);
+            let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+            let headwater_sites = headwater_adjacent_sites(&patch, &hydrology);
+            if headwater_sites.is_empty() {
+                continue;
+            }
+
+            saw_headwater = true;
+            let updated =
+                apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
+
+            assert!(
+                updated > 0
+                    || headwater_sites.iter().all(|site| {
+                        macro_map.biome(*site).is_some_and(|cell| {
+                            cell.context.hydration >= DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR
+                        })
+                    }),
+                "headwater source pass should either update cells or find them already hydrated"
+            );
+
+            for site in headwater_sites {
+                let Some(cell) = macro_map.biome(site) else {
+                    continue;
+                };
+                if matches!(
+                    cell.context.water_role,
+                    GraphBiomeWaterRole::ShallowOcean
+                        | GraphBiomeWaterRole::DeepOcean
+                        | GraphBiomeWaterRole::Lake
+                        | GraphBiomeWaterRole::Coast
+                        | GraphBiomeWaterRole::Wetland
+                ) {
+                    continue;
+                }
+
+                assert!(
+                    cell.context.hydration >= DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
+                    "source-adjacent land cell should not remain dry: site={site:?} cell={cell:?}"
+                );
+                assert!(
+                    !is_dry_headwater_biome(cell.biome),
+                    "source-adjacent land cell should not classify as a dry biome: site={site:?} cell={cell:?}"
+                );
+            }
+        }
+
+        assert!(
+            saw_headwater,
+            "bounded deterministic seed scan should include selected headwater segments"
+        );
+    }
+
     fn test_inputs(seed: u64) -> (VoronoiGraphPatch, GraphMacroMap) {
         let patch = generate_voronoi_graph_patch(VoronoiGraphPatchRequest::new(
             VoronoiGraphConfig {
@@ -2736,6 +2864,17 @@ mod tests {
         ));
         let macro_map = generate_macro_map(&patch, MacroMapConfig::new(seed, 3));
         (patch, macro_map)
+    }
+
+    fn is_dry_headwater_biome(biome: GraphBiomeKind) -> bool {
+        matches!(
+            biome,
+            GraphBiomeKind::Steppe
+                | GraphBiomeKind::SemiDesert
+                | GraphBiomeKind::Desert
+                | GraphBiomeKind::DryShrubland
+                | GraphBiomeKind::TemperateGrassland
+        )
     }
 
     fn seed_42_preview_inputs() -> (VoronoiGraphPatch, GraphMacroMap) {

@@ -16,7 +16,8 @@ use new_world::world::generation::{
     MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MacroFieldContourSet,
     MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint, extract_macro_field_contours,
+    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint,
+    apply_headwater_source_hydration_to_biomes, extract_macro_field_contours,
     generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
     generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
@@ -1087,7 +1088,7 @@ fn build_preview_world(
         return Err(cli_error("generated graph patch did not contain sites"));
     }
 
-    let macro_map = generate_macro_map(
+    let mut macro_map = generate_macro_map(
         &patch,
         MacroMapConfig {
             land_bias: config.land_bias,
@@ -1095,6 +1096,7 @@ fn build_preview_world(
         },
     );
     let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
     let boundary = generate_noisy_boundaries(
         &patch,
         &macro_map,

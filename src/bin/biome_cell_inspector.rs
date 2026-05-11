@@ -12,8 +12,9 @@ use new_world::world::generation::{
     GraphHydrologyGraph, GraphRegionArea, GraphRegionCoord, GraphRiverSegment, HydrologyConfig,
     MacroEdge, MacroLakeEdgeClass, MacroMapConfig, MacroSite, MacroSurfaceKind, VoronoiCornerId,
     VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId,
-    WorldPlanePoint, generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology,
+    WorldPlanePoint, apply_headwater_source_hydration_to_biomes, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology,
 };
 
 const DEFAULT_WIDTH: u32 = 1400;
@@ -304,8 +305,9 @@ fn build_inspector_graph(
     };
     let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
     let patch = generate_voronoi_graph_patch(request);
-    let macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
+    let mut macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
     let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
     let boundary = generate_noisy_boundaries(
         &patch,
         &macro_map,

@@ -11,9 +11,10 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphBiomeCell, GraphBiomeKind,
-    GraphRegionArea, GraphRegionCoord, MacroMapConfig, MacroSite, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint,
-    generate_macro_map, generate_voronoi_graph_patch, graph_region_for_world_block,
+    GraphRegionArea, GraphRegionCoord, HydrologyConfig, MacroMapConfig, MacroSite,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSiteId,
+    WorldPlanePoint, apply_headwater_source_hydration_to_biomes, generate_macro_map,
+    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
 
 mod common;
@@ -457,7 +458,9 @@ fn build_biome_map_for_preview(
         return Err(cli_error("generated graph patch did not contain sites"));
     }
 
-    let macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
+    let mut macro_map = generate_macro_map(&patch, macro_map_config_for_preview(meta, config));
+    let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
     if patch
         .sites
         .iter()

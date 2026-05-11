@@ -47,7 +47,9 @@
 
 1. Build a padded Voronoi graph patch through `generate_voronoi_graph_patch(...)`.
 2. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`.
-3. Read resolved biome cells from the macro map:
+3. Solve selected hydrology and apply the post-hydrology headwater hydration floor to
+   `GraphMacroMap.biomes`.
+4. Read resolved biome cells from the macro map:
 
 ```rust
 GraphMacroMap::biome(site_id)
@@ -56,8 +58,8 @@ GraphBiomeCell
 GraphBiomeKind
 ```
 
-The preview does not classify core biome policy itself. `macro_map` owns the graph biome context and
-calls `classify_graph_biome(...)`; this binary only colors the returned cells.
+The preview does not classify core biome policy itself. Core generation owns the graph biome context,
+classification, and selected-headwater hydration pass; this binary only colors the returned cells.
 The returned biome already reflects the final cell context that the core classifier exposes, including
 temperature, hydration, continentality, elevation, water role, coastness, mountainness, and ruggedness.
 Preview metadata intentionally records the resolved biome counts rather than intermediate classifier

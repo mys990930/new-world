@@ -37,7 +37,11 @@ continentality, coast exposure, mountain context, ruggedness, water role을 읽�
 5. `GraphBiomeWaterRole::Lake`는 climate, elevation, hydration으로 추론하지 않는다.
    `MacroSurfaceKind::LakeCandidate`가 lake cell의 source of truth이며, biome classifier는 이를
    `GraphBiomeKind::Lake`로 1:1 보존한다.
-6. legacy `RegionClassCell`이나 atlas archetype은 이 계약에 포함되지 않는다.
+6. selected hydrology가 확정된 뒤에는 `Headwater` river segment에 인접한 land/dry-basin cell의
+   final hydration을 최소 `0.46`으로 올린다. 이 post-hydrology 보정은 수원지 바로 옆 cell이
+   `Steppe`, `SemiDesert`, `Desert`, `DryShrubland`, `TemperateGrassland` 같은 건조 biome으로
+   남지 않게 하는 final context pass다.
+7. legacy `RegionClassCell`이나 atlas archetype은 이 계약에 포함되지 않는다.
 
 ## 관측된 입력 분포
 
@@ -85,6 +89,18 @@ continentality, coast exposure, mountain context, ruggedness, water role을 읽�
 - `water_role`: `Land`, `Coast`, `ShallowOcean`, `DeepOcean`, `Lake`, `Wetland`, `DryBasin`
 
 모든 입력은 `GraphBiomeContext::clamped`를 거쳐 판정된다.
+
+Hydrology 이후 final context 보정:
+
+- 수원지 근처 cell은 hydrology가 선택한 `GraphHydrologyRole::Headwater` segment의 Voronoi edge 양쪽
+  site로 정의한다.
+- 대상은 `GraphBiomeWaterRole::Land` 또는 `DryBasin`인 cell이다.
+- `hydration < 0.46`이면 `0.46`으로 올리고 biome을 다시 판정한다.
+- headwater가 `DryBasin` 위를 지나가는 경우 final biome context의 water role은 `Land`로 되돌린다.
+  이유는 selected river source가 이미 실제 물 흐름을 증명하므로, biome 관점에서는 폐쇄 건조분지보다
+  수원지 주변 land context가 우선하기 때문이다. macro surface kind 자체를 바꾸지는 않는다.
+- 이 pass는 hydrology의 selected river result를 source of truth로 쓰며, pre-hydrology river candidate나
+  임의 basinness를 쓰지 않는다.
 
 판정용 온도는 아래처럼 계산한다.
 
@@ -253,6 +269,17 @@ Non-alpine cold land:
 5. `Steppe`
    - 기준: `effective_temperature <= 0.46`, `hydration < 0.44`
    - 이유: 차갑고 건조하면 boreal forest보다 steppe가 맞다.
+
+분포 조정 메모:
+
+- `BorealForest`, `Tundra`, `Steppe`가 과다해 보일 때 가장 먼저 볼 조건은 cold branch의
+  `effective_temperature <= 0.46`, `Tundra <= 0.38`, dry branch의 `Steppe <= 0.56`이다.
+- 보수적인 축소 방향은 `BorealForest` gate를 `effective_temperature <= 0.44` 정도로 낮추고,
+  `Tundra` gate를 `<= 0.36`으로 낮추며, `Steppe`는 `hydration < 0.40` 또는
+  `continentality >= 0.24`를 추가로 요구하는 것이다.
+- 이번 변경에서는 selected headwater 주변 dry biome을 제거하는 것이 직접 목적이므로 cold/steppe
+  threshold는 코드에서 추가로 낮추지 않았다. threshold 변경은 preview 분포를 다시 본 뒤 별도 튜닝으로
+  적용한다.
 
 ## Tropical 판정
 

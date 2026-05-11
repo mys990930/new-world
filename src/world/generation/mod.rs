@@ -54,12 +54,13 @@ pub use heightfield::{
 };
 #[allow(unused_imports)]
 pub use hydrology::{
-    DEFAULT_HEADWATER_ELEVATION, DEFAULT_LAKE_DISCHARGE_CAP_FLOOR,
-    DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA, DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER,
-    DEFAULT_RIVER_FLOW_THRESHOLD, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
-    GraphHydrologyCorner, GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
-    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
-    WatershedId, solve_hydrology,
+    DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
+    DEFAULT_LAKE_DISCHARGE_CAP_FLOOR, DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
+    DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER, DEFAULT_RIVER_FLOW_THRESHOLD, GraphDrainageNode,
+    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner, GraphHydrologyGraph,
+    GraphHydrologyRole, GraphHydrologyTopologyStats, GraphLocalMinimumResolution,
+    GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig, WatershedId,
+    apply_headwater_source_hydration_to_biomes, solve_hydrology,
 };
 #[allow(unused_imports)]
 pub use macro_field::{

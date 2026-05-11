@@ -11,10 +11,11 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphBiomeCell, GraphBiomeKind,
-    GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphSiteSpacingStats, MacroMapConfig,
-    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSite, WorldPlanePoint,
-    generate_macro_map, generate_voronoi_graph_patch, graph_region_for_world_block,
-    graph_site_spacing_stats,
+    GraphMacroMap, GraphRegionArea, GraphRegionCoord, GraphSiteSpacingStats, HydrologyConfig,
+    MacroMapConfig, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, VoronoiSite,
+    WorldPlanePoint, apply_headwater_source_hydration_to_biomes, generate_macro_map,
+    generate_voronoi_graph_patch, graph_region_for_world_block, graph_site_spacing_stats,
+    solve_hydrology,
 };
 
 mod common;
@@ -767,10 +768,12 @@ fn build_graph_patch_for_preview(
     };
     let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
     let patch = generate_voronoi_graph_patch(request);
-    let macro_map = generate_macro_map(
+    let mut macro_map = generate_macro_map(
         &patch,
         MacroMapConfig::new(meta.seed, meta.generator_version),
     );
+    let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
     let biome_by_site_id = macro_map
         .biomes
         .iter()
