@@ -26,8 +26,8 @@ mod common;
 
 const DEFAULT_IMAGE_WIDTH: u32 = 1280;
 const DEFAULT_IMAGE_HEIGHT: u32 = 720;
-const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 8192;
-const DEFAULT_WINDOW_COLUMNS_X: u32 = 768;
+const DEFAULT_WORLD_SPAN_BLOCKS: i32 = MACRO_FIELD_TILE_EDGE_BLOCKS;
+const DEFAULT_WINDOW_COLUMNS_X: u32 = MACRO_FIELD_TILE_EDGE_BLOCKS as u32;
 const DEFAULT_COLUMNS_PER_CHUNK: u32 = 32;
 const WATER_ALPHA: f32 = 0.72;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
@@ -2551,6 +2551,217 @@ impl Error for CliError {}
 mod tests {
     use super::*;
 
+    #[derive(Debug, Clone, Copy, Default)]
+    struct GreenBandStepSummary {
+        pair_count: usize,
+        over_one_block_count: usize,
+        max_surface_delta: f32,
+        max_raw_delta: f32,
+        max_combined_delta: f32,
+        coast_or_river_pair_count: usize,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct GreenBandStepPair {
+        left_index: usize,
+        right_index: usize,
+        surface_delta: f32,
+        raw_delta: f32,
+        combined_delta: f32,
+        left: HeightfieldColumn,
+        right: HeightfieldColumn,
+    }
+
+    fn green_band_value(column: HeightfieldColumn) -> f32 {
+        ((column.combined_macro_height + 0.75) / 2.0).clamp(0.0, 1.0)
+    }
+
+    fn is_green_transition_land(column: HeightfieldColumn) -> bool {
+        matches!(column.terrain_kind, HeightfieldTerrainKind::Land)
+            && (0.38..=0.52).contains(&green_band_value(column))
+    }
+
+    fn green_band_step_summary(tile: &HeightfieldTile) -> GreenBandStepSummary {
+        green_band_step_scan(tile).0
+    }
+
+    fn green_band_step_scan(
+        tile: &HeightfieldTile,
+    ) -> (GreenBandStepSummary, Option<GreenBandStepPair>) {
+        let width = tile.width as usize;
+        let height = tile.height as usize;
+        let mut summary = GreenBandStepSummary::default();
+        let mut top_pair = None;
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                if x + 1 < width {
+                    record_green_band_pair(tile, index, index + 1, &mut summary, &mut top_pair);
+                }
+                if z + 1 < height {
+                    record_green_band_pair(tile, index, index + width, &mut summary, &mut top_pair);
+                }
+            }
+        }
+        (summary, top_pair)
+    }
+
+    fn record_green_band_pair(
+        tile: &HeightfieldTile,
+        left_index: usize,
+        right_index: usize,
+        summary: &mut GreenBandStepSummary,
+        top_pair: &mut Option<GreenBandStepPair>,
+    ) {
+        let left = tile.columns[left_index];
+        let right = tile.columns[right_index];
+        if !is_green_transition_land(left) && !is_green_transition_land(right) {
+            return;
+        }
+        summary.pair_count += 1;
+        if !matches!(left.terrain_kind, HeightfieldTerrainKind::Land)
+            || !matches!(right.terrain_kind, HeightfieldTerrainKind::Land)
+        {
+            summary.coast_or_river_pair_count += 1;
+        }
+        let surface_delta = (left.surface_height_blocks - right.surface_height_blocks).abs();
+        let raw_delta = (left.raw_surface_height_blocks - right.raw_surface_height_blocks).abs();
+        let combined_delta = (left.combined_macro_height - right.combined_macro_height).abs();
+        summary.max_surface_delta = summary.max_surface_delta.max(surface_delta);
+        summary.max_raw_delta = summary.max_raw_delta.max(raw_delta);
+        summary.max_combined_delta = summary.max_combined_delta.max(combined_delta);
+        if surface_delta > 1.0 {
+            summary.over_one_block_count += 1;
+        }
+        let pair = GreenBandStepPair {
+            left_index,
+            right_index,
+            surface_delta,
+            raw_delta,
+            combined_delta,
+            left,
+            right,
+        };
+        if top_pair
+            .as_ref()
+            .is_none_or(|current| pair.surface_delta > current.surface_delta)
+        {
+            *top_pair = Some(pair);
+        }
+    }
+
+    fn column_world_position(
+        window: PreviewWindow,
+        tile: &HeightfieldTile,
+        index: usize,
+    ) -> (f32, f32) {
+        let width = tile.width as usize;
+        let x = index % width;
+        let z = index / width;
+        let spacing = window.sample_spacing();
+        (
+            window.min_x() + (x as f32 + 0.5) * spacing,
+            window.min_z() + (z as f32 + 0.5) * spacing,
+        )
+    }
+
+    #[test]
+    #[ignore = "diagnostic helper for green transition heightfield geometry"]
+    fn diagnose_green_transition_height_steps() {
+        for seed in [7, 42, 91] {
+            let config = PreviewConfig {
+                seed,
+                center_x: 0,
+                center_z: 0,
+                center_is_world_blocks: false,
+                width: DEFAULT_IMAGE_WIDTH,
+                height: DEFAULT_IMAGE_HEIGHT,
+                world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+                region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+                site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
+                land_bias: 0.14,
+                quarter_turns: 0,
+                columns_x: Some(192),
+                columns_z: Some(192),
+                chunk_radius: None,
+                block_lines: DEFAULT_BLOCK_LINES,
+                output: None,
+            };
+            let meta = WorldMeta::new(seed);
+            let coarse_window = PreviewWindow {
+                center_x: 0.0,
+                center_z: 0.0,
+                world_span_x: 1536.0,
+                world_span_z: 1536.0,
+                columns_x: 32,
+                columns_z: 32,
+            };
+            let graph_area = coarse_window
+                .graph_area(config.region_size_blocks)
+                .expect("graph area");
+            let (patch, macro_map, hydrology, boundary) =
+                build_generation_inputs(&meta, &config, graph_area).expect("generation inputs");
+            let macro_tile =
+                build_macro_field_tile(coarse_window, &patch, &macro_map, &hydrology, &boundary);
+            let heightfield = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+            let (summary, top_pair) = green_band_step_scan(&heightfield);
+            eprintln!(
+                "seed={seed} coarse green_pairs={} over_one={} max_surface_delta={:.3} max_raw_delta={:.3} max_combined_delta={:.6} nonland_pairs={}",
+                summary.pair_count,
+                summary.over_one_block_count,
+                summary.max_surface_delta,
+                summary.max_raw_delta,
+                summary.max_combined_delta,
+                summary.coast_or_river_pair_count
+            );
+            if let Some(pair) = top_pair {
+                let (left_x, left_z) =
+                    column_world_position(coarse_window, &heightfield, pair.left_index);
+                let (right_x, right_z) =
+                    column_world_position(coarse_window, &heightfield, pair.right_index);
+                eprintln!(
+                    "seed={seed} coarse_top left=({left_x:.1},{left_z:.1}) right=({right_x:.1},{right_z:.1}) surface={:.3} raw={:.3} combined={:.6} left_t={:.3} right_t={:.3} left_kind={:?} right_kind={:?} river={:.3}->{:.3} coast={:.3}->{:.3}",
+                    pair.surface_delta,
+                    pair.raw_delta,
+                    pair.combined_delta,
+                    green_band_value(pair.left),
+                    green_band_value(pair.right),
+                    pair.left.terrain_kind,
+                    pair.right.terrain_kind,
+                    pair.left.river_valley_strength,
+                    pair.right.river_valley_strength,
+                    pair.left.coast_mask,
+                    pair.right.coast_mask
+                );
+
+                let center_x = (left_x + right_x) * 0.5;
+                let center_z = (left_z + right_z) * 0.5;
+                let dense_window = PreviewWindow {
+                    center_x,
+                    center_z,
+                    world_span_x: 96.0,
+                    world_span_z: 96.0,
+                    columns_x: 96,
+                    columns_z: 96,
+                };
+                let dense_macro =
+                    build_macro_field_tile(dense_window, &patch, &macro_map, &hydrology, &boundary);
+                let dense_heightfield =
+                    generate_heightfield_tile(&dense_macro, HeightfieldConfig::default());
+                let dense_summary = green_band_step_summary(&dense_heightfield);
+                eprintln!(
+                    "seed={seed} dense green_pairs={} over_one={} max_surface_delta={:.3} max_raw_delta={:.3} max_combined_delta={:.6} nonland_pairs={}",
+                    dense_summary.pair_count,
+                    dense_summary.over_one_block_count,
+                    dense_summary.max_surface_delta,
+                    dense_summary.max_raw_delta,
+                    dense_summary.max_combined_delta,
+                    dense_summary.coast_or_river_pair_count
+                );
+            }
+        }
+    }
+
     #[test]
     fn default_output_path_is_short() {
         let config = PreviewConfig {
@@ -2574,7 +2785,7 @@ mod tests {
 
         assert_eq!(
             config.output_path(),
-            PathBuf::from("target/heightfield-preview/s42_cx0_cz0_q0_r128x72.png")
+            PathBuf::from("target/heightfield-preview/s42_cx0_cz0_q0_r16x9.png")
         );
     }
 
@@ -2642,13 +2853,14 @@ mod tests {
         assert_eq!(PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, 256);
         assert_eq!(MACRO_FIELD_TILE_EDGE_BLOCKS, 1024);
         assert_eq!(window.columns_x, DEFAULT_WINDOW_COLUMNS_X);
-        assert_eq!(window.columns_z, 432);
+        assert_eq!(window.columns_z, 576);
         assert_eq!(
             window.sample_spacing(),
             DEFAULT_WORLD_SPAN_BLOCKS as f32 / DEFAULT_WINDOW_COLUMNS_X as f32
         );
-        assert_eq!(range, (-128, 128, -72, 72));
-        assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 2048);
+        assert_eq!(window.sample_spacing(), 1.0);
+        assert_eq!(range, (-16, 16, -9, 9));
+        assert_eq!(nice_scale_blocks(DEFAULT_WORLD_SPAN_BLOCKS), 512);
     }
 
     #[test]

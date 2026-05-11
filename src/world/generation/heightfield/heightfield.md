@@ -256,7 +256,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   preview에서 같은 Y 값을 다시 낮춰 그리면 중복 압축이다.
 - heightfield preview의 X/Z 밀도는 scale 계층이 아니라 column count로 직접 표현한다. chunk-radius
   preview의 기본값은 chunk 하나를 `32`개 column으로 샘플링하고, free window preview는 기본
-  `768`개 X column을 사용한다. 이 chunk-radius 기본은 cubic block
+  `1024` block footprint를 `1024`개 X column으로 샘플링한다. 이 기본값은 cubic block
   render와 큰 Y block-domain에서 1 world block당 1 column에 해당한다. `--columns-x`/`--columns-z`가
   지정되면 그것이 최종 column count다.
   sample spacing은 world footprint / column count에서 파생된다. preview는 산출 `y` height block,

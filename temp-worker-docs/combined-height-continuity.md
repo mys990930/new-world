@@ -315,3 +315,11 @@ delta가 이미 block scale에서 1 이상이라는 뜻이다.
 heightfield에서 아직 예외로 남는 부분은 ocean/lake visible water `y = 0`, shoreline standing-water
 ceiling, river water descent다. jump가 이 water/shoreline/river-water 예외와 겹치지 않는 일반 land
 구간이라면 macro_field/macro_map source continuity가 우선 의심 대상이다.
+
+## 6. Green Transition Geometry Correction
+
+- 색상 ramp 문제가 아니라 실제 heightfield geometry step으로 재분석했다.
+- seed42 green transition coarse scan(1536 block footprint, 32 columns, spacing 48)은 Land/Land, river/coast 없음에서도 `surface_delta=18`, `raw_delta=17.736`, `combined_delta=0.008660`을 만들었다.
+- 같은 top pair 주변을 1-block dense window로 재측정하면 `max_surface_delta=1`, `max_raw_delta=0.381`, `max_combined_delta=0.000186`, `over_one=0`이었다.
+- 결론: 측정된 green transition top은 macro source 불연속이 아니라 free-window coarse sample spacing이 연속 경사를 큰 column-to-column geometry step으로 보이게 만든 사례다.
+- 패치: heightfield preview free-window 기본을 1024 block footprint / 1024 X columns로 바꿔 기본 preview도 1 world block당 1 column density를 사용한다. 더 넓은 overview가 필요하면 `--world-span-blocks`/`--columns-x`를 명시한다.
