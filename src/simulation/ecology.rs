@@ -66,46 +66,67 @@ impl EcologySim {
         chunks.sort_by_key(|chunk| chunk.coord);
 
         for chunk in chunks {
-            let event =
-                ecology_event_for_chunk(input.world_seed, ecology_window, chunk.coord, chunk.biome);
-            result.events.push(SimEvent::EcologyEventObserved {
-                scope: SimSpatialScope::Chunk(chunk.coord),
-                biome: chunk.biome,
-                event,
-            });
+            let events = ecology_events_for_chunk(
+                input.world_seed,
+                ecology_window,
+                chunk.coord,
+                chunk.biome,
+            );
+            result.events.extend(
+                events
+                    .into_iter()
+                    .map(|event| SimEvent::EcologyEventObserved {
+                        scope: SimSpatialScope::Chunk(chunk.coord),
+                        biome: chunk.biome,
+                        event,
+                    }),
+            );
         }
 
         result
     }
 }
 
-fn ecology_event_for_chunk(
+fn ecology_events_for_chunk(
     world_seed: u64,
     ecology_window: u64,
     coord: ChunkCoord,
     biome: BiomeFamily,
-) -> SimEcologyEvent {
+) -> Vec<SimEcologyEvent> {
     let roll = hash_u64(world_seed, ecology_window, coord, 0xEC01_0001);
-    match roll % 5 {
-        0 => SimEcologyEvent::AnimalSpawned {
-            species: primary_herbivore_for_biome(biome),
-        },
-        1 => SimEcologyEvent::AnimalFight {
-            attacker: predator_for_biome(biome),
-            defender: primary_herbivore_for_biome(biome),
-        },
-        2 => SimEcologyEvent::CarcassCreated {
-            species: carcass_species_for_biome(biome),
-        },
-        3 => SimEcologyEvent::PlantGrazed {
-            plant: forage_for_biome(biome),
-            by: primary_herbivore_for_biome(biome),
-        },
-        _ => SimEcologyEvent::PlantGrowthAdvanced {
-            plant: forage_for_biome(biome),
-            stage: growth_stage_for_window(ecology_window, coord),
-        },
+    let event_count = 2 + (roll % 2) as usize;
+    let mut events = Vec::with_capacity(event_count);
+
+    for event_index in 0..event_count {
+        let event_roll = hash_u64(
+            world_seed,
+            ecology_window,
+            coord,
+            0xEC01_1000 + event_index as u64,
+        );
+        events.push(match event_roll % 5 {
+            0 => SimEcologyEvent::AnimalSpawned {
+                species: primary_herbivore_for_biome(biome),
+            },
+            1 => SimEcologyEvent::AnimalFight {
+                attacker: predator_for_biome(biome),
+                defender: primary_herbivore_for_biome(biome),
+            },
+            2 => SimEcologyEvent::CarcassCreated {
+                species: carcass_species_for_biome(biome),
+            },
+            3 => SimEcologyEvent::PlantGrazed {
+                plant: forage_for_biome(biome),
+                by: primary_herbivore_for_biome(biome),
+            },
+            _ => SimEcologyEvent::PlantGrowthAdvanced {
+                plant: forage_for_biome(biome),
+                stage: growth_stage_for_window(ecology_window, coord),
+            },
+        });
     }
+
+    events
 }
 
 fn primary_herbivore_for_biome(biome: BiomeFamily) -> SimSpecies {
@@ -263,6 +284,32 @@ mod tests {
                 } if *event_coord == coord && *event_biome == biome
             )
         }));
+    }
+
+    #[test]
+    fn ecology_step_can_emit_multiple_events_for_one_chunk() {
+        let sim = EcologySim::new(EcologySimConfig::default());
+        let coord = ChunkCoord(0, 0, 0);
+
+        let result = sim.step(input(vec![EcologySimChunkInput {
+            coord,
+            biome: BiomeFamily::TemperateGrassland,
+        }]));
+
+        let event_count = result
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    SimEvent::EcologyEventObserved {
+                        scope: SimSpatialScope::Chunk(event_coord),
+                        ..
+                    } if *event_coord == coord
+                )
+            })
+            .count();
+        assert!(event_count > 1);
     }
 
     #[test]

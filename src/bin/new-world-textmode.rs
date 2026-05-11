@@ -25,7 +25,8 @@ const DEFAULT_SEED: u64 = 42;
 const DEFAULT_TICKS_PER_SECOND: u32 = 20;
 const DAYS_PER_YEAR: u32 = 360;
 const DAYS_PER_MONTH: u32 = 30;
-const GRID_CELL_WIDTH: usize = 48;
+const GRID_CELL_WIDTH: usize = 56;
+const GRID_LABEL_WIDTH: usize = 8;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = TextModeConfig::parse(env::args().skip(1).collect())?;
@@ -433,14 +434,25 @@ fn format_chunk_cell(
     let world_updates = join_or_none(updates.records_for(coord).iter().cloned().collect());
 
     vec![
-        format!("chunk ({:+},{:+},{:+})", coord.0, coord.1, coord.2),
-        format!("atlas ({:+},{:+})", atlas.x, atlas.z),
-        format!("biome {}", format_biome(observation.cell_biome)),
-        format!("weather {}", format_weather(weather)),
-        format!("surface {}", format_surface(observation.condition)),
-        format!("ecology {}", ecology),
-        format!("updates {}", world_updates),
+        format_cell_line(
+            "chunk",
+            format!("({:+},{:+},{:+})", coord.0, coord.1, coord.2),
+        ),
+        format_cell_line("atlas", format!("({:+},{:+})", atlas.x, atlas.z)),
+        format_cell_line("biome", format_biome(observation.cell_biome)),
+        format_cell_line("weather", format_weather(weather)),
+        format_cell_line("surface", format_surface(observation.condition)),
+        format_cell_line("ecology", ecology),
+        format_cell_line("updates", world_updates),
     ]
+}
+
+fn format_cell_line(label: &str, value: impl AsRef<str>) -> String {
+    format!(
+        "{label:<GRID_LABEL_WIDTH$}: {}",
+        value.as_ref(),
+        GRID_LABEL_WIDTH = GRID_LABEL_WIDTH
+    )
 }
 
 fn grid_border(left: char, middle: char, right: char) -> String {
@@ -508,7 +520,7 @@ fn format_calendar(calendar: WorldCalendar) -> String {
     let month = calendar.day_of_year / DAYS_PER_MONTH + 1;
     let day = calendar.day_of_year % DAYS_PER_MONTH + 1;
     format!(
-        "{:02}:{:02}:{:02} {:02}:{:02} ({})",
+        "{:02}-{:02}-{:02} {:02}:{:02} ({})",
         year % 100,
         month,
         day,
@@ -682,7 +694,16 @@ mod tests {
             ..WorldCalendar::default()
         };
 
-        assert_eq!(format_calendar(calendar), "00:02:02 04:07 (spring)");
+        assert_eq!(format_calendar(calendar), "00-02-02 04:07 (spring)");
+    }
+
+    #[test]
+    fn default_config_runs_until_ctrl_c() {
+        let config = TextModeConfig::parse(Vec::new()).expect("default config parses");
+
+        assert_eq!(config.seconds, None);
+        assert!(config.should_run_second(0));
+        assert!(config.should_run_second(1_000_000));
     }
 
     #[test]
@@ -711,12 +732,12 @@ mod tests {
             &updates,
         );
 
-        assert!(summary.contains("time=00:01:01 11:00 (spring)"));
+        assert!(summary.contains("time=00-01-01 11:00 (spring)"));
         assert!(summary.contains("┌"));
-        assert!(summary.contains("biome "));
-        assert!(summary.contains("weather "));
-        assert!(summary.contains("surface "));
+        assert!(summary.contains("biome   : "));
+        assert!(summary.contains("weather : "));
+        assert!(summary.contains("surface : "));
         assert!(summary.contains("animal_spawn:small_herbivore"));
-        assert!(summary.contains("updates realized_empty_chunk"));
+        assert!(summary.contains("updates : realized_empty_chunk"));
     }
 }

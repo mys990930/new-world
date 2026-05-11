@@ -36,11 +36,11 @@
 
 - the first slice runs on `ticks_per_ecology_step`
 - the default cadence is one ecology step per fixed-rate second
-- each active chunk emits one deterministic observed/candidate event for the current ecology window
+- each active chunk emits two to three deterministic observed/candidate events for the current ecology window
 
 ## Determinism
 
-- event selection is a pure function of `world_seed`, ecology window, chunk coordinate, and biome-derived policy
+- event count and selection are pure functions of `world_seed`, ecology window, chunk coordinate, and biome-derived policy
 - input chunks are sorted by coordinate before event emission so equal sets produce stable result order
 - no runtime randomness, wall-clock time, app state, or textmode formatting affects rule output
 

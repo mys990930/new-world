@@ -8,14 +8,14 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 
 ## Required Output
 
-- Every real second, refresh the console until `Ctrl+C` and show current `YY:MM:DD HH:MM (season)`.
+- Every real second, refresh the console until `Ctrl+C` and show current `YY-MM-DD HH:MM (season)`.
 - Load or realize a temporary `3x3` chunk area around the current chunk.
 - Print each loaded chunk as a cell inside a visible `3x3` box-drawing grid each second.
 - Per chunk line, include:
   - cell biome
   - current weather
   - surface state: wet, snow-covered, half-thawed snow, etc.
-  - ecology events: animal spawn, animal fight, carcass created, plant grazed, plant growth stage
+  - multiple ecology events: animal spawn, animal fight, carcass created, plant grazed, plant growth stage
   - world update records, if any update was applied or requested
 
 ## Design Constraints
@@ -55,7 +55,7 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 
 6. Implement `src/bin/new-world-textmode.rs`.
    - Minimal context: run fixed ticks, apply structured results, and print one summary per real second.
-   - Format time as `YY:MM:DD HH:MM (season)` using `WorldCalendar`.
+   - Format time as `YY-MM-DD HH:MM (season)` using `WorldCalendar`.
    - Format the `3x3` chunks from structured weather/surface/ecology/world-update data.
    - References: `src/app/config.rs`, `src/app/fixed.rs`, `src/simulation/mod.rs`, `src/world/legacy/calendar.rs`.
 

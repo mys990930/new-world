@@ -296,6 +296,8 @@ cargo run --bin new-world-textmode -- --seconds 5
 - Notes:
   - Output formatting is a binary adapter. It reads ECS chunk scope, world observers, and structured simulation events.
   - The console is cleared and redrawn once per second with box-drawing grid borders.
+  - The default run has no second limit; use `Ctrl+C` to stop it. `--seconds` is only for smoke tests and demos.
+  - Chunk-cell labels use a fixed label width so values align line-by-line.
   - Temporary chunks are realized as empty in-memory chunks for this first slice.
   - See [new-world-textmode.md](./new-world-textmode.md).
 

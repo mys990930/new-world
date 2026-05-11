@@ -21,13 +21,13 @@ Optional center flags:
 ## Output
 
 - One refreshed console frame per real second.
-- Header time uses `YY:MM:DD HH:MM (season)`.
+- Header time uses `YY-MM-DD HH:MM (season)`.
 - Chunk cells are drawn inside a box-drawing grid using the ECS `ActiveChunkObserverScope` `3x3` window.
 - Each chunk cell includes:
   - cell biome from world observation
   - current weather from world runtime state
   - world-owned surface condition
-  - ecology events from structured `SimEvent`
+  - multiple ecology events from structured `SimEvent`
   - world update records observed while applying simulation results or realizing temporary chunks
 
 ## Boundaries
