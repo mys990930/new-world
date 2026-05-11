@@ -31,12 +31,12 @@
 
 ### `RenderEnvironment`
 
-- fixed time-of-day value
+- time-of-day value from the world calendar or fixed preset
 - sun direction, color, and intensity
 - ambient color and intensity
 - fog color, density, and height falloff
 - sky / horizon colors and overcast amount
-- weather and wetness blend values
+- weather strength and wetness blend values derived from chunk weather presentation
 - climate tint, humidity, and temperature bias
 - quarter-view readability boosts for top faces, side shadows, silhouettes, and saturation
 
@@ -47,4 +47,5 @@
 - `High` enables a larger hard-sun shadow map.
 - The current default quality preset is still `medium`, so the default app path now uses visible direct sun plus shadows.
 - The default fixed environment preset is a warm sunset quarter-view setup with stronger top/side readability and only a very light amount of atmosphere.
-- Time-of-day, weather, and climate fields already exist in `RenderEnvironment`, but the default app path still uses a fixed preset until gameplay systems call `Renderer::set_environment(...)`.
+- The app bridge drives live `RenderEnvironment` values from world calendar time-of-day plus player-focus chunk weather scalars. The default preset remains the fallback before app/gameplay sync.
+- Chunk `cloud` lowers direct light and raises fog, `rain` lowers saturation/contrast and raises wetness/weather strength, `temperature` shifts color temperature, `moisture` feeds haze/humidity tint, and `Storm` adds dark cool grading.

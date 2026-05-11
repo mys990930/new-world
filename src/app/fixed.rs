@@ -6,9 +6,9 @@ use crate::simulation::{
 };
 use crate::world::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, BiomeFamily,
-    CHUNK_EDGE_I32, ChunkCoord, ChunkWeatherState, CoastalContext, ElevationBand, HydrologyContext,
-    LocalWeatherState, MoistureBand, RegionClassSample, TemperatureBand, WorldCalendar, WorldCore,
-    atlas_coord_for_chunk,
+    CHUNK_EDGE_I32, ChunkCoord, ChunkWeatherKind, ChunkWeatherState, CoastalContext, ElevationBand,
+    HydrologyContext, LocalWeatherState, MoistureBand, RegionClassSample, TemperatureBand,
+    WorldCalendar, WorldCore, atlas_coord_for_chunk,
     generation::{GraphBiomeContext, GraphBiomeKind, GraphBiomeWaterRole},
 };
 
@@ -63,24 +63,28 @@ impl GameApp {
     }
 
     pub(crate) fn sync_renderer_environment_from_world(&mut self) {
-        let focus_atlas = self
+        let player_translation = self
             .ecs
             .local_player_transform()
-            .map(|transform| atlas_coord_for_translation(transform.translation))
+            .map(|transform| transform.translation);
+        let focus_atlas = player_translation
+            .map(atlas_coord_for_translation)
             .unwrap_or_else(|| self.ecs.active_sim_region().center_atlas);
-        let region = self
-            .world
-            .sample_cached_region_class_atlas(focus_atlas)
-            .unwrap_or_else(RegionClassSample::default);
+        let focus_chunk = player_translation
+            .map(chunk_coord_for_translation)
+            .unwrap_or_else(|| {
+                let atlas = self.ecs.active_sim_region().center_atlas;
+                ChunkCoord(
+                    atlas.x * ATLAS_CELL_SIZE_IN_CHUNKS as i32,
+                    0,
+                    atlas.z * ATLAS_CELL_SIZE_IN_CHUNKS as i32,
+                )
+            });
         let climate = self.world.climate_state(focus_atlas);
-        let weather = self.world.local_weather(focus_atlas).unwrap_or_else(|| {
-            LocalWeatherState::clear(
-                focus_atlas,
-                region.climate_regime,
-                self.world.calendar().absolute_tick,
-                self.world.calendar().absolute_tick,
-            )
-        });
+        let weather = self
+            .world
+            .chunk_weather(focus_chunk)
+            .unwrap_or_else(|| ChunkWeatherState::clear(self.world.calendar().absolute_tick));
         self.renderer.set_environment(render_environment_from_world(
             *self.world.calendar(),
             climate,
@@ -369,18 +373,55 @@ fn elevation_band_signal(band: ElevationBand) -> f32 {
 fn render_environment_from_world(
     calendar: WorldCalendar,
     climate: AtlasClimateRuntimeState,
-    weather: LocalWeatherState,
+    weather: ChunkWeatherState,
 ) -> RenderEnvironment {
     let hours = calendar.time_of_day_hours();
     let day_angle = ((hours - 6.0) / 24.0) * std::f32::consts::TAU;
     let solar = day_angle.sin().clamp(-1.0, 1.0);
     let daylight = ((solar + 0.12) / 1.12).clamp(0.0, 1.0);
     let twilight = (1.0 - ((hours - 18.0).abs() / 6.0)).clamp(0.0, 1.0);
-    let overcast = weather.overcast_factor();
-    let wetness = weather.wetness_factor();
-    let weather_strength = weather.weather_strength();
-    let temperature_bias = climate.temperature_offset.clamp(-1.0, 1.0);
-    let humidity = (0.46 + climate.humidity_offset + overcast * 0.18).clamp(0.0, 1.0);
+    let scalars = weather.clamped();
+    let storm = if matches!(scalars.kind, ChunkWeatherKind::Storm) {
+        1.0
+    } else {
+        0.0
+    };
+    let snow = if matches!(scalars.kind, ChunkWeatherKind::Snow) {
+        1.0
+    } else {
+        0.0
+    };
+    let overcast = (scalars.cloud.max(match scalars.kind {
+        ChunkWeatherKind::Clear => 0.06,
+        ChunkWeatherKind::Cloudy => 0.42,
+        ChunkWeatherKind::Rain => 0.62,
+        ChunkWeatherKind::Snow => 0.68,
+        ChunkWeatherKind::Storm => 0.90,
+    }) + storm * 0.08)
+        .clamp(0.0, 1.0);
+    let rain_strength = scalars.rain;
+    let weather_strength = match scalars.kind {
+        ChunkWeatherKind::Clear => scalars.cloud * 0.12,
+        ChunkWeatherKind::Cloudy => 0.14 + overcast * 0.18,
+        ChunkWeatherKind::Rain => 0.42 + rain_strength * 0.42,
+        ChunkWeatherKind::Snow => 0.34 + rain_strength * 0.34,
+        ChunkWeatherKind::Storm => 0.76 + rain_strength * 0.22,
+    }
+    .clamp(0.0, 1.0);
+    let wetness = match scalars.kind {
+        ChunkWeatherKind::Rain => 0.34 + rain_strength * 0.46 + scalars.moisture * 0.10,
+        ChunkWeatherKind::Snow => 0.16 + rain_strength * 0.24 + scalars.moisture * 0.08,
+        ChunkWeatherKind::Storm => 0.68 + rain_strength * 0.26,
+        _ => scalars.moisture * 0.10 + overcast * 0.08,
+    }
+    .clamp(0.0, 1.0);
+    let temperature_bias =
+        ((scalars.temperature - 0.5) * 2.0 + climate.temperature_offset * 0.35).clamp(-1.0, 1.0);
+    let humidity = (scalars.moisture * 0.72
+        + overcast * 0.16
+        + rain_strength * 0.18
+        + climate.humidity_offset * 0.25)
+        .clamp(0.0, 1.0);
 
     let sky_day = [0.42, 0.69, 0.98];
     let sky_dusk = [0.61, 0.44, 0.56];
@@ -399,33 +440,67 @@ fn render_environment_from_world(
     );
     sky_color = lerp3(sky_color, [0.55, 0.58, 0.64], overcast * 0.45);
     horizon_color = lerp3(horizon_color, [0.58, 0.61, 0.66], overcast * 0.38);
+    sky_color = lerp3(sky_color, [0.42, 0.46, 0.54], storm * 0.35);
+    horizon_color = lerp3(horizon_color, [0.44, 0.48, 0.56], storm * 0.30);
+    let temperature_tint = if temperature_bias >= 0.0 {
+        [
+            1.0 + temperature_bias * 0.10,
+            1.0,
+            1.0 - temperature_bias * 0.08,
+        ]
+    } else {
+        [
+            1.0 + temperature_bias * 0.06,
+            1.0 + temperature_bias.abs() * 0.02,
+            1.0 + temperature_bias.abs() * 0.10,
+        ]
+    };
+    let storm_cool_tint = [0.90, 0.94, 1.08];
+    let climate_tint = lerp3(temperature_tint, storm_cool_tint, storm * 0.45);
+    let ambient_color = lerp3(
+        lerp3([0.13, 0.15, 0.22], [0.56, 0.64, 0.74], daylight),
+        [0.48, 0.52, 0.58],
+        overcast * 0.18 + rain_strength * 0.08,
+    );
+    let ambient_intensity = (0.22 + daylight * 0.84 + overcast * 0.05 - storm * 0.18).max(0.04);
 
     RenderEnvironment {
         time_of_day_hours: hours,
         sun_direction: normalize3([0.42, 0.12 + daylight * 0.88, -0.24]),
         sun_color: lerp3(sun_color_dusk, sun_color_day, daylight),
-        sun_intensity: (0.10 + daylight * 1.18) * (1.0 - overcast * 0.28),
-        ambient_color: lerp3([0.13, 0.15, 0.22], [0.56, 0.64, 0.74], daylight),
-        ambient_intensity: 0.22 + daylight * 0.84,
+        sun_intensity: (0.10 + daylight * 1.18)
+            * (1.0 - overcast * 0.34 - rain_strength * 0.10 - storm * 0.18).clamp(0.22, 1.0),
+        ambient_color,
+        ambient_intensity,
         fog_color: lerp3(horizon_color, sky_color, 0.35),
-        fog_density: 0.0038 + overcast * 0.0042 + (1.0 - daylight) * 0.0032,
-        fog_height_falloff: 0.032 + overcast * 0.010,
+        fog_density: 0.0038
+            + overcast * 0.0038
+            + scalars.moisture * 0.0022
+            + rain_strength * 0.0028
+            + storm * 0.0030
+            + (1.0 - daylight) * 0.0032,
+        fog_height_falloff: 0.032 + overcast * 0.010 + scalars.moisture * 0.006,
         sky_color,
         horizon_color,
         overcast,
         weather_strength,
         wetness,
         climate_tint: [
-            (1.0 + temperature_bias * 0.10).clamp(0.82, 1.18),
-            (1.0 + humidity * 0.04).clamp(0.86, 1.14),
-            (1.0 - temperature_bias * 0.08).clamp(0.82, 1.18),
+            climate_tint[0].clamp(0.82, 1.18),
+            (climate_tint[1] + humidity * 0.03).clamp(0.86, 1.14),
+            climate_tint[2].clamp(0.82, 1.18),
         ],
         climate_humidity: humidity,
         climate_temperature_bias: temperature_bias,
         top_face_boost: 0.18 + daylight * 0.16,
-        side_shadow_strength: 0.28 + (1.0 - daylight) * 0.18 + overcast * 0.10,
-        silhouette_boost: 0.16 + (1.0 - daylight) * 0.14,
-        saturation_boost: 0.02 + daylight * 0.04 - overcast * 0.03,
+        side_shadow_strength: (0.28 + (1.0 - daylight) * 0.18 + overcast * 0.06
+            - rain_strength * 0.07)
+            .clamp(0.16, 0.62),
+        silhouette_boost: (0.16 + (1.0 - daylight) * 0.14 + storm * 0.06).clamp(0.12, 0.42),
+        saturation_boost: 0.02 + daylight * 0.04
+            - overcast * 0.03
+            - rain_strength * 0.08
+            - snow * 0.03,
     }
 }
 
@@ -434,6 +509,14 @@ fn atlas_coord_for_translation(translation: [f32; 3]) -> AtlasCoord {
     AtlasCoord::new(
         (translation[0].floor() as i32).div_euclid(atlas_span_blocks),
         (translation[2].floor() as i32).div_euclid(atlas_span_blocks),
+    )
+}
+
+fn chunk_coord_for_translation(translation: [f32; 3]) -> ChunkCoord {
+    ChunkCoord(
+        (translation[0].floor() as i32).div_euclid(CHUNK_EDGE_I32),
+        (translation[1].floor() as i32).div_euclid(CHUNK_EDGE_I32),
+        (translation[2].floor() as i32).div_euclid(CHUNK_EDGE_I32),
     )
 }
 
@@ -464,27 +547,118 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use crate::world::{
-        AtlasCoord, BlockRegistry, ChunkCoord, ClimateRegime, LocalWeatherState, WorldCalendar,
-        WorldMeta,
-    };
+    use crate::world::{BlockRegistry, ChunkCoord, WorldCalendar, WorldMeta};
 
     #[test]
     fn clear_default_evening_environment_keeps_atmosphere_subtle() {
         let environment = render_environment_from_world(
             WorldCalendar::default(),
             AtlasClimateRuntimeState::default(),
-            LocalWeatherState::clear(
-                AtlasCoord::new(0, 0),
-                ClimateRegime::TemperateSeasonal,
-                0,
-                0,
-            ),
+            ChunkWeatherState::clear(0),
         );
 
         assert!(environment.fog_density <= 0.008);
         assert!(environment.fog_height_falloff <= 0.04);
         assert!(environment.validate().is_ok());
+    }
+
+    #[test]
+    fn cloud_weather_lowers_direct_light_and_raises_fog() {
+        let clear = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState::clear(0),
+        );
+        let cloudy = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState {
+                temperature: 0.52,
+                moisture: 0.48,
+                cloud: 0.76,
+                rain: 0.08,
+                kind: ChunkWeatherKind::Cloudy,
+                updated_at_tick: 0,
+            },
+        );
+
+        assert!(cloudy.sun_intensity < clear.sun_intensity);
+        assert!(cloudy.fog_density > clear.fog_density);
+        assert!(cloudy.overcast > clear.overcast);
+        assert!(cloudy.validate().is_ok());
+    }
+
+    #[test]
+    fn rain_increases_wetness_and_reduces_saturation() {
+        let clear = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState::clear(0),
+        );
+        let rain = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState {
+                temperature: 0.50,
+                moisture: 0.72,
+                cloud: 0.70,
+                rain: 0.66,
+                kind: ChunkWeatherKind::Rain,
+                updated_at_tick: 0,
+            },
+        );
+
+        assert!(rain.wetness > clear.wetness);
+        assert!(rain.weather_strength > clear.weather_strength);
+        assert!(rain.saturation_boost < clear.saturation_boost);
+        assert!(rain.validate().is_ok());
+    }
+
+    #[test]
+    fn temperature_and_storm_shift_environment_tint() {
+        let cold = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState {
+                temperature: 0.12,
+                moisture: 0.40,
+                cloud: 0.30,
+                rain: 0.05,
+                kind: ChunkWeatherKind::Clear,
+                updated_at_tick: 0,
+            },
+        );
+        let warm = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState {
+                temperature: 0.88,
+                moisture: 0.40,
+                cloud: 0.30,
+                rain: 0.05,
+                kind: ChunkWeatherKind::Clear,
+                updated_at_tick: 0,
+            },
+        );
+        let storm = render_environment_from_world(
+            WorldCalendar::default(),
+            AtlasClimateRuntimeState::default(),
+            ChunkWeatherState {
+                temperature: 0.52,
+                moisture: 0.86,
+                cloud: 0.90,
+                rain: 0.82,
+                kind: ChunkWeatherKind::Storm,
+                updated_at_tick: 0,
+            },
+        );
+
+        assert!(warm.climate_tint[0] > cold.climate_tint[0]);
+        assert!(cold.climate_tint[2] > warm.climate_tint[2]);
+        assert!(storm.sun_intensity < warm.sun_intensity);
+        assert!(storm.climate_tint[2] > storm.climate_tint[0]);
+        assert!(storm.fog_density > warm.fog_density);
+        assert!(storm.validate().is_ok());
     }
 
     #[test]

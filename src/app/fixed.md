@@ -19,6 +19,7 @@
 - simulation 결과
 - world edit 반영 결과
 - world calendar/climate/weather 반영 결과
+- player-focus chunk weather scalar state
 - cached world region classification state
 
 ## 출력
@@ -40,7 +41,7 @@
 6. simulation이 결과를 계산한다
 7. world에 structured result를 반영한다
 8. structured events를 textmode/diagnostic adapter가 소비할 수 있도록 보존하거나 전달한다
-9. renderer environment를 world 시간/날씨 상태로 갱신한다
+9. renderer environment를 world calendar time-of-day와 player-focus chunk weather scalar state로 갱신한다
 10. 후속 jobs / renderer 연계용 dirty 신호를 만든다
 11. accumulator에서 fixed_dt를 차감한다
 
@@ -86,5 +87,6 @@
 - time/weather cell input은 game-minute 경계에서만 만들어지며, region classification cache가 준비되지 않은 경우 calendar advance만 진행하고 local climate/weather update는 다음 cached tick으로 미룬다
 - ecology input은 ECS가 선택한 `3x3` chunk scope를 사용한다. 현재 app runtime은 graph biome cache가 아직 없으므로 `WorldCore::observe_chunk_surface_condition(...)`의 legacy biome을 `GraphBiomeKind`로 compatibility mapping한다.
 - `new-world-textmode`는 diagnostic binary라서 app runtime mapping 대신 graph-first `GraphMacroMap.biomes`를 직접 샘플한다.
-- renderer environment sync는 시간/날씨 분위기를 유지하되 scene 전체가 뿌옇게 씻기지 않도록 낮은 fog density와 약한 height falloff를 사용한다
+- renderer environment sync는 legacy atlas `LocalWeatherState`가 아니라 world-owned `ChunkWeatherState`를 우선 사용한다. player-focus chunk의 `cloud`, `rain`, `temperature`, `moisture`, `kind`를 calendar time-of-day와 합쳐 `RenderEnvironment`로 변환한다.
+- chunk weather presentation은 scene 전체가 뿌옇게 씻기지 않도록 낮은 기본 fog density와 약한 height falloff에서 출발하되, cloud/moisture/rain/storm scalar가 fog, tint, wetness, saturation, direct light를 점진적으로 조정한다.
 - `new-world-textmode` should reuse this fixed orchestration shape, aggregate fixed-tick structured events once per real second, and print each `3x3` chunk line with cell biome, weather, surface condition, ecology events, and world update records.

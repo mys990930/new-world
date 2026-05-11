@@ -62,7 +62,7 @@
 - environment tuning
   - swap the current sunset / weather / climate values without changing app-facing DTO shape
 - live weather presentation
-  - read `temperature`, `moisture`, `cloud`, `rain`, and derived weather kind from app-provided render DTOs
+  - read world-owned chunk weather `temperature`, `moisture`, `cloud`, `rain`, and derived weather kind from app-provided render DTOs
   - combine weather modifiers with day/night lighting rather than deriving weather independently in shaders
 - frame render
   - accept `RenderFrameInput`, update scene uniforms when needed, draw the scene passes, draw the UI overlay pass, and present
@@ -127,8 +127,8 @@ NOT:
 - steady-state chunk unload is app-owned, but renderer already exposes `remove_chunk_mesh(...)` / `RemoveChunkMesh` as the render-side destruction path for chunks that leave the retain envelope.
 - Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping only a very light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
-- The renderer can already consume arbitrary time/weather/climate values through `RenderEnvironment`, but the main app loop is not yet driving a live day-night/weather simulation.
-- Future live weather should map chunk scalar values as follows: `cloud` lowers direct light and raises fog, `rain` lowers saturation/contrast and raises wetness/precipitation strength, `temperature` shifts color temperature, and `moisture` feeds haze/fog and vegetation tint.
+- The app bridge now resolves the player-focus chunk weather scalar state, combines it with world calendar time-of-day, and writes the result into `RenderEnvironment`; the renderer still only sees presentation-ready values.
+- Live weather maps chunk scalar values as follows: `cloud` lowers direct light, softens ambient, and raises fog; `rain` lowers saturation/contrast and raises wetness/precipitation strength; `temperature` shifts color temperature; `moisture` feeds haze/fog and vegetation tint; `Storm` darkens light and cools the tint.
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
 - Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.
 - For future animated voxel creatures, precreated data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.

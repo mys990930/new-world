@@ -44,6 +44,7 @@
 - inventory and quickbar presentation may read ECS inventory snapshots, but they must not own or mutate inventory state
 - current chunk presentation may derive a read-only chunk coordinate from the player transform, but it must not drive lifecycle policy
 - local environment status text may read ECS snapshots, but this layer must not query `WorldCore` or simulation directly
+- renderer environment weather presentation is handled by `fixed.rs`; this UI bridge only formats the ECS-local HUD snapshot and does not map chunk weather scalars into render lighting
 
 ## Related Modules
 
