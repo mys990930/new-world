@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Write};
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use new_world::ecs::{
@@ -20,11 +21,11 @@ use new_world::world::{
     WorldCalendar, WorldCore, WorldEdit, WorldMeta, atlas_coord_for_chunk,
 };
 
-const DEFAULT_SECONDS: u32 = 3;
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_TICKS_PER_SECOND: u32 = 20;
 const DAYS_PER_YEAR: u32 = 360;
 const DAYS_PER_MONTH: u32 = 30;
+const GRID_CELL_WIDTH: usize = 48;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = TextModeConfig::parse(env::args().skip(1).collect())?;
@@ -41,12 +42,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let simulation = SimulationCore::new(sim_config);
     let tick_delta = Duration::from_secs_f64(1.0 / f64::from(config.ticks_per_second.max(1)));
 
-    println!(
-        "new-world-textmode seed={} seconds={} ticks_per_second={}",
-        config.seed, config.seconds, config.ticks_per_second
-    );
+    println!("new-world-textmode: press Ctrl+C to exit");
 
-    for second in 0..config.seconds {
+    let mut second = 0;
+    while config.should_run_second(second) {
         let mut events = Vec::new();
         let mut world_updates = ChunkUpdateLog::default();
 
@@ -85,13 +84,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         let active_chunks = ecs.active_chunk_observer_scope();
         let summary = format_second_summary(
             second + 1,
+            config,
             world.calendar(),
             &world,
             &active_chunks.chunks,
             &events,
             &world_updates,
         );
-        println!("{summary}");
+        redraw_console(&summary);
+        second = second.saturating_add(1);
+        thread::sleep(Duration::from_secs(1));
     }
 
     Ok(())
@@ -100,16 +102,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TextModeConfig {
     seed: u64,
-    seconds: u32,
+    seconds: Option<u32>,
     ticks_per_second: u32,
     center_chunk: ChunkCoord,
 }
 
 impl TextModeConfig {
+    #[cfg(test)]
+    fn default_for_test() -> Self {
+        Self {
+            seed: DEFAULT_SEED,
+            seconds: Some(1),
+            ticks_per_second: DEFAULT_TICKS_PER_SECOND,
+            center_chunk: ChunkCoord(0, 0, 0),
+        }
+    }
+
     fn parse(mut args: Vec<String>) -> Result<Self, Box<dyn Error>> {
         let mut config = Self {
             seed: DEFAULT_SEED,
-            seconds: DEFAULT_SECONDS,
+            seconds: None,
             ticks_per_second: DEFAULT_TICKS_PER_SECOND,
             center_chunk: ChunkCoord(0, 0, 0),
         };
@@ -118,7 +130,7 @@ impl TextModeConfig {
             args.remove(0);
             match flag.as_str() {
                 "--seed" => config.seed = parse_required::<u64>(&mut args, "seed")?,
-                "--seconds" => config.seconds = parse_required::<u32>(&mut args, "seconds")?,
+                "--seconds" => config.seconds = Some(parse_required::<u32>(&mut args, "seconds")?),
                 "--ticks-per-second" => {
                     config.ticks_per_second =
                         parse_required::<u32>(&mut args, "ticks-per-second")?.max(1)
@@ -138,6 +150,12 @@ impl TextModeConfig {
         }
 
         Ok(config)
+    }
+
+    fn should_run_second(self, elapsed_seconds: u32) -> bool {
+        self.seconds
+            .map(|seconds| elapsed_seconds < seconds)
+            .unwrap_or(true)
     }
 }
 
@@ -338,41 +356,124 @@ fn record_scoped_update(updates: &mut ChunkUpdateLog, scope: SimSpatialScope, re
 
 fn format_second_summary(
     second: u32,
+    config: TextModeConfig,
     calendar: &WorldCalendar,
     world: &WorldCore,
     chunks: &[ChunkCoord],
     events: &[SimEvent],
     updates: &ChunkUpdateLog,
 ) -> String {
-    let mut lines = Vec::with_capacity(chunks.len() + 2);
+    let mut lines = Vec::new();
+    lines.push("new-world-textmode  |  Ctrl+C to exit".to_string());
     lines.push(format!(
-        "second={} time={}",
+        "seed={} tick_rate={} second={} time={}",
+        config.seed,
+        config.ticks_per_second,
         second,
         format_calendar(*calendar)
     ));
-    lines.push("chunks:".to_string());
-
-    for coord in chunks {
-        let observation = world.observe_chunk_surface_condition(*coord);
-        let atlas = atlas_coord_for_chunk(*coord);
-        let weather = weather_for_chunk(world, *coord);
-        let ecology = ecology_events_for_chunk(events, *coord);
-        lines.push(format!(
-            "  chunk=({:>2},{:>2},{:>2}) atlas=({:>2},{:>2}) biome={} weather={} surface={} ecology=[{}] world_updates=[{}]",
-            coord.0,
-            coord.1,
-            coord.2,
-            atlas.x,
-            atlas.z,
-            format_biome(observation.cell_biome),
-            format_weather(weather),
-            format_surface(observation.condition),
-            join_or_none(ecology),
-            join_or_none(updates.records_for(*coord).iter().cloned().collect()),
-        ));
-    }
-
+    lines.push(String::new());
+    lines.extend(format_chunk_grid(world, chunks, events, updates));
     lines.join("\n")
+}
+
+fn format_chunk_grid(
+    world: &WorldCore,
+    chunks: &[ChunkCoord],
+    events: &[SimEvent],
+    updates: &ChunkUpdateLog,
+) -> Vec<String> {
+    let rows: Vec<Vec<Vec<String>>> = chunks
+        .chunks(3)
+        .map(|row| {
+            let mut cells: Vec<Vec<String>> = row
+                .iter()
+                .copied()
+                .map(|coord| format_chunk_cell(world, coord, events, updates))
+                .collect();
+            while cells.len() < 3 {
+                cells.push(Vec::new());
+            }
+            cells
+        })
+        .collect();
+
+    let mut lines = Vec::new();
+    lines.push(grid_border('┌', '┬', '┐'));
+    for (row_index, row) in rows.iter().enumerate() {
+        let row_height = row.iter().map(Vec::len).max().unwrap_or(0);
+        for line_index in 0..row_height {
+            let mut line = String::from("│");
+            for cell in row {
+                let text = cell.get(line_index).map(String::as_str).unwrap_or("");
+                line.push_str(&pad_grid_text(text, GRID_CELL_WIDTH));
+                line.push('│');
+            }
+            lines.push(line);
+        }
+        if row_index + 1 == rows.len() {
+            lines.push(grid_border('└', '┴', '┘'));
+        } else {
+            lines.push(grid_border('├', '┼', '┤'));
+        }
+    }
+    lines
+}
+
+fn format_chunk_cell(
+    world: &WorldCore,
+    coord: ChunkCoord,
+    events: &[SimEvent],
+    updates: &ChunkUpdateLog,
+) -> Vec<String> {
+    let observation = world.observe_chunk_surface_condition(coord);
+    let atlas = atlas_coord_for_chunk(coord);
+    let weather = weather_for_chunk(world, coord);
+    let ecology = join_or_none(ecology_events_for_chunk(events, coord));
+    let world_updates = join_or_none(updates.records_for(coord).iter().cloned().collect());
+
+    vec![
+        format!("chunk ({:+},{:+},{:+})", coord.0, coord.1, coord.2),
+        format!("atlas ({:+},{:+})", atlas.x, atlas.z),
+        format!("biome {}", format_biome(observation.cell_biome)),
+        format!("weather {}", format_weather(weather)),
+        format!("surface {}", format_surface(observation.condition)),
+        format!("ecology {}", ecology),
+        format!("updates {}", world_updates),
+    ]
+}
+
+fn grid_border(left: char, middle: char, right: char) -> String {
+    let mut line = String::new();
+    line.push(left);
+    for cell_index in 0..3 {
+        line.push_str(&"─".repeat(GRID_CELL_WIDTH));
+        if cell_index == 2 {
+            line.push(right);
+        } else {
+            line.push(middle);
+        }
+    }
+    line
+}
+
+fn pad_grid_text(text: &str, width: usize) -> String {
+    let truncated = truncate_for_grid(text, width.saturating_sub(1));
+    let visible_len = truncated.chars().count();
+    let padding = width.saturating_sub(visible_len);
+    format!("{truncated}{}", " ".repeat(padding))
+}
+
+fn truncate_for_grid(text: &str, max_chars: usize) -> String {
+    let mut output = String::new();
+    for ch in text.chars().take(max_chars) {
+        output.push(ch);
+    }
+    if text.chars().count() > max_chars && max_chars > 0 {
+        output.pop();
+        output.push('…');
+    }
+    output
 }
 
 fn weather_for_chunk(world: &WorldCore, coord: ChunkCoord) -> LocalWeatherState {
@@ -538,6 +639,11 @@ fn join_or_none(values: Vec<String>) -> String {
     }
 }
 
+fn redraw_console(summary: &str) {
+    print!("\x1B[2J\x1B[H{summary}\n");
+    let _ = io::stdout().flush();
+}
+
 fn parse_required<T>(args: &mut Vec<String>, label: &str) -> Result<T, Box<dyn Error>>
 where
     T: std::str::FromStr,
@@ -595,14 +701,22 @@ mod tests {
         let mut updates = ChunkUpdateLog::default();
         updates.push(coord, "realized_empty_chunk");
 
-        let summary =
-            format_second_summary(1, world.calendar(), &world, &[coord], &events, &updates);
+        let summary = format_second_summary(
+            1,
+            TextModeConfig::default_for_test(),
+            world.calendar(),
+            &world,
+            &[coord],
+            &events,
+            &updates,
+        );
 
         assert!(summary.contains("time=00:01:01 11:00 (spring)"));
-        assert!(summary.contains("biome="));
-        assert!(summary.contains("weather="));
-        assert!(summary.contains("surface="));
+        assert!(summary.contains("┌"));
+        assert!(summary.contains("biome "));
+        assert!(summary.contains("weather "));
+        assert!(summary.contains("surface "));
         assert!(summary.contains("animal_spawn:small_herbivore"));
-        assert!(summary.contains("world_updates=[realized_empty_chunk]"));
+        assert!(summary.contains("updates realized_empty_chunk"));
     }
 }

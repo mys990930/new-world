@@ -8,9 +8,9 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 
 ## Required Output
 
-- Every real second, print current `YY:MM:DD HH:MM (season)`.
+- Every real second, refresh the console until `Ctrl+C` and show current `YY:MM:DD HH:MM (season)`.
 - Load or realize a temporary `3x3` chunk area around the current chunk.
-- Print each loaded chunk as a grid entry each second.
+- Print each loaded chunk as a cell inside a visible `3x3` box-drawing grid each second.
 - Per chunk line, include:
   - cell biome
   - current weather

@@ -23,7 +23,7 @@
 | `macro_field_preview` | Top-down graph-first macro field rasterization channel preview | Works |
 | `macro_map_preview` | Top-down graph-first macro map composite with ocean/land/elevation and selected guide overlays | Works |
 | `meso_preview` | Top-down isolated meso-feature preview over a flat baseline | Works for explicit seed / coordinate windows |
-| `new-world-textmode` | Finite console observer for fixed tick time/weather/surface/ecology events over the ECS `3x3` active chunk scope | Works as the first textmode simulation slice |
+| `new-world-textmode` | Continuously refreshed console grid for fixed tick time/weather/surface/ecology events over the ECS `3x3` active chunk scope | Works as the first textmode simulation slice |
 | `terrain_probe` | Per-chunk / per-column generation probe dump | Currently blocked by `probe_chunk(...)` and `probe_column(...)` TODO |
 | `tree_preview` | Quarter-view preview of five generated variants for one climate tree blueprint | Works |
 | `world_create` | Generate and persist a created-world dump | Currently blocked by `generate_chunk(...)` TODO |
@@ -275,15 +275,19 @@ cargo run --bin meso_preview -- 42 --center-x -57 --center-z 93 --radius 10 --fe
 
 ## new-world-textmode
 
-- Purpose: run fixed ticks and print one structured simulation/world summary per real second.
+- Purpose: run fixed ticks and redraw one structured simulation/world `3x3` chunk grid per real second.
 - Parameters:
   - optional: `--seed <u64>`, `--seconds <u32>`, `--ticks-per-second <u32>`, `--center-chunk-x <i32>`, `--center-chunk-y <i32>`, `--center-chunk-z <i32>`
 - Defaults:
   - `--seed 42`
-  - `--seconds 3`
+  - `--seconds` unset, so the binary runs until `Ctrl+C`
   - `--ticks-per-second 20`
   - center chunk `= (0, 0, 0)`
 - Example:
+
+```bash
+cargo run --bin new-world-textmode
+```
 
 ```bash
 cargo run --bin new-world-textmode -- --seconds 5
@@ -291,6 +295,7 @@ cargo run --bin new-world-textmode -- --seconds 5
 
 - Notes:
   - Output formatting is a binary adapter. It reads ECS chunk scope, world observers, and structured simulation events.
+  - The console is cleared and redrawn once per second with box-drawing grid borders.
   - Temporary chunks are realized as empty in-memory chunks for this first slice.
   - See [new-world-textmode.md](./new-world-textmode.md).
 

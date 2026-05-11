@@ -2,8 +2,9 @@
 
 ## Role
 
-- Run a finite fixed-tick text observer for simulation/world/ECS contracts.
+- Run a continuously refreshing fixed-tick text observer for simulation/world/ECS contracts.
 - Format structured state into console text without moving presentation strings into core modules.
+- Redraw a box-drawing `3x3` chunk grid once per real second until the user exits with `Ctrl+C`.
 
 ## Command
 
@@ -19,9 +20,10 @@ Optional center flags:
 
 ## Output
 
-- One summary per configured real second.
+- One refreshed console frame per real second.
 - Header time uses `YY:MM:DD HH:MM (season)`.
-- Chunk lines use the ECS `ActiveChunkObserverScope` `3x3` window and include:
+- Chunk cells are drawn inside a box-drawing grid using the ECS `ActiveChunkObserverScope` `3x3` window.
+- Each chunk cell includes:
   - cell biome from world observation
   - current weather from world runtime state
   - world-owned surface condition
@@ -34,3 +36,4 @@ Optional center flags:
 - Simulation rule meaning remains in `simulation`.
 - Source-of-truth state remains in `world`.
 - Chunk scope selection remains ECS-owned.
+- `--seconds` exists for smoke tests and demos; without it the binary runs until `Ctrl+C`.
