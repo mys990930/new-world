@@ -113,18 +113,17 @@ pub fn classify_graph_biome(context: GraphBiomeContext) -> GraphBiomeKind {
             GraphBiomeKind::Tundra
         };
     }
-    if effective_temperature <= 0.38 {
+    if effective_temperature <= 0.36 {
         return GraphBiomeKind::Tundra;
     }
-    if hydration < 0.42 {
+    if is_cold_steppe_context(context, effective_temperature) {
+        return GraphBiomeKind::Steppe;
+    }
+    if hydration < 0.40 {
         return classify_dry_arid(context, effective_temperature);
     }
-    if effective_temperature <= 0.46 {
-        return if hydration >= 0.44 {
-            GraphBiomeKind::BorealForest
-        } else {
-            GraphBiomeKind::Steppe
-        };
+    if is_boreal_forest_context(context, effective_temperature) {
+        return GraphBiomeKind::BorealForest;
     }
     if effective_temperature >= 0.62 {
         return if hydration >= 0.68 {
@@ -201,8 +200,8 @@ fn classify_wetland(context: GraphBiomeContext, effective_temperature: f32) -> G
 fn classify_alpine(context: GraphBiomeContext, effective_temperature: f32) -> GraphBiomeKind {
     if context.elevation >= 0.68 && effective_temperature <= 0.28 {
         GraphBiomeKind::PolarIce
-    } else if effective_temperature <= 0.34
-        || (context.ruggedness >= 0.24 && effective_temperature <= 0.44 && context.hydration < 0.44)
+    } else if effective_temperature <= 0.32
+        || (context.ruggedness >= 0.28 && effective_temperature <= 0.40 && context.hydration < 0.40)
     {
         if context.hydration < 0.36 {
             GraphBiomeKind::PolarBarrens
@@ -229,13 +228,13 @@ fn classify_dry_arid(context: GraphBiomeContext, effective_temperature: f32) -> 
     {
         return GraphBiomeKind::Desert;
     }
-    if context.ruggedness >= 0.12 && hydration < 0.42 && is_inland_dry_context(context, 0.10) {
+    if context.ruggedness >= 0.12 && hydration < 0.40 && is_inland_dry_context(context, 0.10) {
         return GraphBiomeKind::DryShrubland;
     }
     if hydration < 0.36 && effective_temperature >= 0.52 && is_inland_dry_context(context, 0.18) {
         return GraphBiomeKind::SemiDesert;
     }
-    if effective_temperature <= 0.56 && is_inland_dry_context(context, 0.18) {
+    if effective_temperature <= 0.54 && hydration < 0.40 && is_inland_dry_context(context, 0.24) {
         return GraphBiomeKind::Steppe;
     }
     if (0.50..=0.64).contains(&effective_temperature)
@@ -273,6 +272,21 @@ fn is_savanna_context(context: GraphBiomeContext, effective_temperature: f32) ->
         && context.continentality >= 0.24
         && context.coastness <= 0.35
         && context.ruggedness < 0.18
+}
+
+fn is_boreal_forest_context(context: GraphBiomeContext, effective_temperature: f32) -> bool {
+    effective_temperature <= 0.44
+        && context.hydration >= 0.48
+        && context.continentality >= 0.10
+        && context.mountainness < 0.34
+}
+
+fn is_cold_steppe_context(context: GraphBiomeContext, effective_temperature: f32) -> bool {
+    effective_temperature <= 0.44
+        && context.hydration < 0.40
+        && context.continentality >= 0.18
+        && context.coastness <= 0.45
+        && context.ruggedness < 0.12
 }
 
 fn is_inland_dry_context(context: GraphBiomeContext, minimum_continentality: f32) -> bool {
@@ -479,6 +493,97 @@ mod tests {
         meadow.mountainness = 0.38;
         meadow.ruggedness = 0.12;
         assert_eq!(classify_graph_biome(meadow), GraphBiomeKind::AlpineMeadow);
+    }
+
+    #[test]
+    fn boreal_requires_inland_cold_humid_low_mountain_context() {
+        let mut boreal = context(GraphBiomeWaterRole::Land, 0.44, 0.58, 0.08);
+        boreal.continentality = 0.18;
+        assert_eq!(classify_graph_biome(boreal), GraphBiomeKind::BorealForest);
+
+        let mut oceanic_edge = boreal;
+        oceanic_edge.continentality = 0.08;
+        assert_eq!(
+            classify_graph_biome(oceanic_edge),
+            GraphBiomeKind::TemperateMixedForest
+        );
+
+        let mut mountain_edge = boreal;
+        mountain_edge.temperature = 0.49;
+        mountain_edge.mountainness = 0.34;
+        assert_eq!(
+            classify_graph_biome(mountain_edge),
+            GraphBiomeKind::TemperateMixedForest
+        );
+    }
+
+    #[test]
+    fn cold_humid_edge_falls_back_to_temperate_instead_of_boreal() {
+        let mut warm_edge = context(GraphBiomeWaterRole::Land, 0.45, 0.50, 0.08);
+        warm_edge.continentality = 0.20;
+        assert_eq!(
+            classify_graph_biome(warm_edge),
+            GraphBiomeKind::TemperateBroadleafForest
+        );
+
+        let mut not_humid_enough = context(GraphBiomeWaterRole::Land, 0.44, 0.46, 0.08);
+        not_humid_enough.continentality = 0.20;
+        assert_eq!(
+            classify_graph_biome(not_humid_enough),
+            GraphBiomeKind::TemperateBroadleafForest
+        );
+    }
+
+    #[test]
+    fn steppe_requires_dry_and_inland_context() {
+        let mut cold_steppe = context(GraphBiomeWaterRole::Land, 0.44, 0.38, 0.08);
+        cold_steppe.continentality = 0.24;
+        cold_steppe.coastness = 0.35;
+        assert_eq!(classify_graph_biome(cold_steppe), GraphBiomeKind::Steppe);
+
+        let mut rugged_cold_dry = cold_steppe;
+        rugged_cold_dry.ruggedness = 0.12;
+        assert_eq!(
+            classify_graph_biome(rugged_cold_dry),
+            GraphBiomeKind::DryShrubland
+        );
+
+        let mut weakly_inland = cold_steppe;
+        weakly_inland.continentality = 0.12;
+        weakly_inland.coastness = 0.50;
+        assert_eq!(
+            classify_graph_biome(weakly_inland),
+            GraphBiomeKind::TemperateGrassland
+        );
+
+        let mut not_dry = cold_steppe;
+        not_dry.hydration = 0.40;
+        assert_eq!(
+            classify_graph_biome(not_dry),
+            GraphBiomeKind::TemperateGrassland
+        );
+    }
+
+    #[test]
+    fn alpine_tundra_is_strict_and_milder_mountains_fall_back() {
+        let mut harsh_alpine = context(GraphBiomeWaterRole::Land, 0.51, 0.39, 0.60);
+        harsh_alpine.mountainness = 0.38;
+        harsh_alpine.ruggedness = 0.28;
+        assert_eq!(classify_graph_biome(harsh_alpine), GraphBiomeKind::Tundra);
+
+        let mut milder_alpine = harsh_alpine;
+        milder_alpine.temperature = 0.52;
+        assert_eq!(
+            classify_graph_biome(milder_alpine),
+            GraphBiomeKind::AlpineMeadow
+        );
+
+        let mut humid_alpine = milder_alpine;
+        humid_alpine.hydration = 0.54;
+        assert_eq!(
+            classify_graph_biome(humid_alpine),
+            GraphBiomeKind::SubalpineWoodland
+        );
     }
 
     #[test]
