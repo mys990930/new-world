@@ -38,6 +38,13 @@ const DEFAULT_BLOCK_LINES: bool = true;
 const TOP_FACE_OUTLINE: [u8; 4] = [5, 9, 12, 96];
 const SIDE_FACE_OUTLINE: [u8; 4] = [2, 5, 7, 88];
 const SIDE_FACE_STEP_LINE: [u8; 4] = [8, 13, 15, 64];
+const PLAYER_CUBE_WIDTH_BLOCKS: f32 = 2.0;
+const PLAYER_CUBE_DEPTH_BLOCKS: f32 = 2.0;
+const PLAYER_CUBE_HEIGHT_BLOCKS: f32 = 4.0;
+const PLAYER_CUBE_TOP_COLOR: [u8; 4] = [96, 255, 68, 242];
+const PLAYER_CUBE_SIDE_A_COLOR: [u8; 4] = [38, 238, 112, 232];
+const PLAYER_CUBE_SIDE_B_COLOR: [u8; 4] = [18, 206, 236, 226];
+const PLAYER_CUBE_OUTLINE: [u8; 4] = [245, 255, 250, 190];
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -318,6 +325,11 @@ struct PreviewHeader {
     projected_height_span_px: f32,
     quarter_turns: u8,
     block_lines: bool,
+    player_cube_center_x: f32,
+    player_cube_center_z: f32,
+    player_cube_bottom_y: f32,
+    player_cube_top_y: f32,
+    player_cube_sampled_columns: usize,
     water_columns: usize,
     ocean_columns: usize,
     lake_columns: usize,
@@ -462,6 +474,18 @@ impl PreviewHeader {
             "height_snap=round_to_integer_block".to_string(),
             format!("block_lines={}", self.block_lines),
             "block_line_style=thin_face_edges_with_integer_side_steps".to_string(),
+            format!(
+                "player_diagnostic_cube=enabled,width:{:.1}b,depth:{:.1}b,height:{:.1}b,center_world:{:.2},{:.2},bottom_y:{:.2},top_y:{:.2},sampled_columns:{}",
+                PLAYER_CUBE_WIDTH_BLOCKS,
+                PLAYER_CUBE_DEPTH_BLOCKS,
+                PLAYER_CUBE_HEIGHT_BLOCKS,
+                self.player_cube_center_x,
+                self.player_cube_center_z,
+                self.player_cube_bottom_y,
+                self.player_cube_top_y,
+                self.player_cube_sampled_columns
+            ),
+            "player_diagnostic_cube_meaning=heightfield_preview_scale_diagnostic_not_gameplay_entity".to_string(),
             "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
             format!(
                 "height_mapping=signed_combined_macro_height_{:.2}_to_0_to_{:.2}_maps_{:.0}_to_0_to_{:.0}_blocks",
@@ -527,6 +551,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let heightfield_start = Instant::now();
     let heightfield = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
     let heightfield_ms = heightfield_start.elapsed().as_millis();
+    let player_cube = PlayerDiagnosticCube::for_tile(&heightfield, window)?;
 
     let mesh_start = Instant::now();
     let plan = IsoRenderPlan::new(
@@ -539,7 +564,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let render_start = Instant::now();
     let (mut image, iso_stats) =
-        render_heightfield_isometric(&heightfield, plan, config.block_lines)?;
+        render_heightfield_isometric(&heightfield, plan, config.block_lines, player_cube)?;
     let render_ms = render_start.elapsed().as_millis();
 
     let total_ms = total_start.elapsed().as_millis();
@@ -610,6 +635,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         projected_height_span_px: iso_stats.projected_height_span_px,
         quarter_turns: config.quarter_turns % 4,
         block_lines: config.block_lines,
+        player_cube_center_x: player_cube.center_world_x,
+        player_cube_center_z: player_cube.center_world_z,
+        player_cube_bottom_y: player_cube.bottom_y,
+        player_cube_top_y: player_cube.top_y(),
+        player_cube_sampled_columns: player_cube.sampled_columns,
         water_columns: heightfield.stats.water_column_count,
         ocean_columns: heightfield.stats.ocean_column_count,
         lake_columns: heightfield.stats.lake_column_count,
@@ -687,6 +717,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         config.quarter_turns % 4,
         iso_stats.vertical_px_per_block,
         iso_stats.projected_height_span_px
+    );
+    println!(
+        "player diagnostic cube: center world ({:.2}, {:.2}), size {:.0}x{:.0}x{:.0} blocks, bottom y {:.2}, top y {:.2}, sampled columns {}",
+        player_cube.center_world_x,
+        player_cube.center_world_z,
+        PLAYER_CUBE_WIDTH_BLOCKS,
+        PLAYER_CUBE_DEPTH_BLOCKS,
+        PLAYER_CUBE_HEIGHT_BLOCKS,
+        player_cube.bottom_y,
+        player_cube.top_y(),
+        player_cube.sampled_columns
     );
     println!(
         "surface height min/avg/max {:.2}/{:.2}/{:.2} blocks",
@@ -855,6 +896,94 @@ fn chunk_range_for_window(window: PreviewWindow) -> (i32, i32, i32, i32) {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PlayerDiagnosticCube {
+    center_world_x: f32,
+    center_world_z: f32,
+    min_grid_x: f32,
+    max_grid_x: f32,
+    min_grid_z: f32,
+    max_grid_z: f32,
+    bottom_y: f32,
+    height_blocks: f32,
+    sampled_columns: usize,
+}
+
+impl PlayerDiagnosticCube {
+    fn for_tile(tile: &HeightfieldTile, window: PreviewWindow) -> Result<Self, Box<dyn Error>> {
+        if tile.columns.is_empty() {
+            return Err(cli_error(
+                "player diagnostic cube needs a non-empty heightfield",
+            ));
+        }
+        let center_world_x = (window.min_x() + window.max_x()) * 0.5;
+        let center_world_z = (window.min_z() + window.max_z()) * 0.5;
+        let half_x = PLAYER_CUBE_WIDTH_BLOCKS * 0.5;
+        let half_z = PLAYER_CUBE_DEPTH_BLOCKS * 0.5;
+        let sample_spacing = window.sample_spacing().max(f32::EPSILON);
+        let min_grid_x = ((center_world_x - half_x - window.min_x()) / sample_spacing)
+            .clamp(0.0, tile.width as f32);
+        let max_grid_x = ((center_world_x + half_x - window.min_x()) / sample_spacing)
+            .clamp(0.0, tile.width as f32);
+        let min_grid_z = ((center_world_z - half_z - window.min_z()) / sample_spacing)
+            .clamp(0.0, tile.height as f32);
+        let max_grid_z = ((center_world_z + half_z - window.min_z()) / sample_spacing)
+            .clamp(0.0, tile.height as f32);
+        let mut sampled_columns = 0usize;
+        let mut bottom_y = f32::NEG_INFINITY;
+        for (index, column) in tile.columns.iter().enumerate() {
+            let x = index % tile.width as usize;
+            let z = index / tile.width as usize;
+            let column_center_world_x = window.min_x() + (x as f32 + 0.5) * sample_spacing;
+            let column_center_world_z = window.min_z() + (z as f32 + 0.5) * sample_spacing;
+            if column_center_world_x >= center_world_x - half_x
+                && column_center_world_x <= center_world_x + half_x
+                && column_center_world_z >= center_world_z - half_z
+                && column_center_world_z <= center_world_z + half_z
+            {
+                sampled_columns += 1;
+                bottom_y = bottom_y.max(column.surface_y as f32);
+            }
+        }
+        if sampled_columns == 0 {
+            let nearest_x = ((center_world_x - window.min_x()) / sample_spacing - 0.5)
+                .round()
+                .clamp(0.0, tile.width.saturating_sub(1) as f32)
+                as usize;
+            let nearest_z = ((center_world_z - window.min_z()) / sample_spacing - 0.5)
+                .round()
+                .clamp(0.0, tile.height.saturating_sub(1) as f32)
+                as usize;
+            bottom_y = tile.columns[nearest_z * tile.width as usize + nearest_x].surface_y as f32;
+            sampled_columns = 1;
+        }
+
+        Ok(Self {
+            center_world_x,
+            center_world_z,
+            min_grid_x,
+            max_grid_x,
+            min_grid_z,
+            max_grid_z,
+            bottom_y,
+            height_blocks: PLAYER_CUBE_HEIGHT_BLOCKS,
+            sampled_columns,
+        })
+    }
+
+    fn center_grid_x(self) -> f32 {
+        (self.min_grid_x + self.max_grid_x) * 0.5
+    }
+
+    fn center_grid_z(self) -> f32 {
+        (self.min_grid_z + self.max_grid_z) * 0.5
+    }
+
+    fn top_y(self) -> f32 {
+        self.bottom_y + self.height_blocks
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct IsoRenderPlan {
     width: u32,
@@ -965,7 +1094,11 @@ impl IsoRenderPlan {
         let mut max_y = f32::MIN;
         for x in [0.0, tile.width as f32] {
             for z in [0.0, tile.height as f32] {
-                for y in [self.min_surface_blocks, self.max_surface_blocks, 0.0] {
+                for y in [
+                    self.min_surface_blocks,
+                    self.max_surface_blocks + PLAYER_CUBE_HEIGHT_BLOCKS,
+                    0.0,
+                ] {
                     let p = self.untranslated_project_grid(x, z, y, tile);
                     min_x = min_x.min(p.x);
                     max_x = max_x.max(p.x);
@@ -1000,6 +1133,7 @@ fn render_heightfield_isometric(
     tile: &HeightfieldTile,
     plan: IsoRenderPlan,
     block_lines: bool,
+    player_cube: PlayerDiagnosticCube,
 ) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
     let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
     let width = tile.width as usize;
@@ -1008,40 +1142,80 @@ fn render_heightfield_isometric(
         .flat_map(|z| {
             (0..width).map(move |x| {
                 let depth = plan.horizontal_depth_key(x as f32 + 0.5, z as f32 + 0.5, tile);
-                (depth, x, z)
+                (depth, 0u8, IsoDrawItem::Column { x, z })
             })
         })
         .collect::<Vec<_>>();
+    draw_order.push((
+        plan.horizontal_depth_key(
+            player_cube.center_grid_x(),
+            player_cube.center_grid_z(),
+            tile,
+        ),
+        1u8,
+        IsoDrawItem::PlayerCube(player_cube),
+    ));
     draw_order.sort_by(|a, b| {
         a.0.total_cmp(&b.0)
-            .then_with(|| a.2.cmp(&b.2))
             .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.sort_z().cmp(&b.2.sort_z()))
+            .then_with(|| a.2.sort_x().cmp(&b.2.sort_x()))
     });
 
-    for (_, x, z) in draw_order {
-        let index = z * width + x;
-        draw_column_iso(
-            &mut image,
-            tile,
-            plan,
-            x,
-            z,
-            tile.columns[index],
-            block_lines,
-        );
+    for (_, _, item) in draw_order {
+        match item {
+            IsoDrawItem::Column { x, z } => {
+                let index = z * width + x;
+                draw_column_iso(
+                    &mut image,
+                    tile,
+                    plan,
+                    x,
+                    z,
+                    tile.columns[index],
+                    block_lines,
+                );
+            }
+            IsoDrawItem::PlayerCube(cube) => {
+                draw_player_diagnostic_cube(&mut image, tile, plan, cube, block_lines);
+            }
+        }
     }
     Ok((
         OffscreenRenderOutput {
             width: plan.width,
             height: plan.height,
             rgba: image.into_raw(),
-            draw_call_count: (tile.columns.len() * if block_lines { 7 } else { 3 }) as u32,
+            draw_call_count: (tile.columns.len() * if block_lines { 7 } else { 3 }) as u32
+                + if block_lines { 8 } else { 3 },
         },
         IsoRenderStats {
             vertical_px_per_block: plan.vertical_px_per_block,
             projected_height_span_px: plan.projected_height_span_px(),
         },
     ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IsoDrawItem {
+    Column { x: usize, z: usize },
+    PlayerCube(PlayerDiagnosticCube),
+}
+
+impl IsoDrawItem {
+    fn sort_x(self) -> usize {
+        match self {
+            Self::Column { x, .. } => x,
+            Self::PlayerCube(_) => usize::MAX,
+        }
+    }
+
+    fn sort_z(self) -> usize {
+        match self {
+            Self::Column { z, .. } => z,
+            Self::PlayerCube(_) => usize::MAX,
+        }
+    }
 }
 
 fn draw_column_iso(
@@ -1105,6 +1279,105 @@ fn draw_column_iso(
             );
         }
     }
+}
+
+fn draw_player_diagnostic_cube(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    cube: PlayerDiagnosticCube,
+    block_lines: bool,
+) {
+    let side_edges = [
+        (
+            VisibleSide {
+                dx: 1,
+                dz: 0,
+                shade: 0.86,
+            },
+            [
+                cube.max_grid_x,
+                cube.min_grid_z,
+                cube.max_grid_x,
+                cube.max_grid_z,
+            ],
+            PLAYER_CUBE_SIDE_A_COLOR,
+        ),
+        (
+            VisibleSide {
+                dx: -1,
+                dz: 0,
+                shade: 0.82,
+            },
+            [
+                cube.min_grid_x,
+                cube.min_grid_z,
+                cube.min_grid_x,
+                cube.max_grid_z,
+            ],
+            PLAYER_CUBE_SIDE_A_COLOR,
+        ),
+        (
+            VisibleSide {
+                dx: 0,
+                dz: 1,
+                shade: 0.78,
+            },
+            [
+                cube.min_grid_x,
+                cube.max_grid_z,
+                cube.max_grid_x,
+                cube.max_grid_z,
+            ],
+            PLAYER_CUBE_SIDE_B_COLOR,
+        ),
+        (
+            VisibleSide {
+                dx: 0,
+                dz: -1,
+                shade: 0.80,
+            },
+            [
+                cube.min_grid_x,
+                cube.min_grid_z,
+                cube.max_grid_x,
+                cube.min_grid_z,
+            ],
+            PLAYER_CUBE_SIDE_B_COLOR,
+        ),
+    ];
+    let visible = visible_side_directions(plan.quarter_turns);
+    for side in visible {
+        if let Some((_, edge, color)) = side_edges
+            .iter()
+            .find(|(candidate, _, _)| candidate.dx == side.dx && candidate.dz == side.dz)
+        {
+            draw_side_face(
+                image,
+                tile,
+                plan,
+                *edge,
+                cube.bottom_y,
+                cube.top_y(),
+                shade_rgba(*color, side.shade),
+                block_lines,
+            );
+        }
+    }
+    draw_rect_top_face(
+        image,
+        tile,
+        plan,
+        [
+            cube.min_grid_x,
+            cube.min_grid_z,
+            cube.max_grid_x,
+            cube.max_grid_z,
+        ],
+        cube.top_y(),
+        PLAYER_CUBE_TOP_COLOR,
+        block_lines,
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1196,6 +1469,27 @@ fn draw_top_face(
     fill_convex_polygon(image, &polygon, color);
     if block_lines {
         draw_polygon_outline(image, &polygon, TOP_FACE_OUTLINE, 1);
+    }
+}
+
+fn draw_rect_top_face(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    rect: [f32; 4],
+    y: f32,
+    color: [u8; 4],
+    block_lines: bool,
+) {
+    let polygon = [
+        plan.project_grid(rect[0], rect[1], y, tile),
+        plan.project_grid(rect[2], rect[1], y, tile),
+        plan.project_grid(rect[2], rect[3], y, tile),
+        plan.project_grid(rect[0], rect[3], y, tile),
+    ];
+    fill_convex_polygon(image, &polygon, color);
+    if block_lines {
+        draw_polygon_outline(image, &polygon, PLAYER_CUBE_OUTLINE, 1);
     }
 }
 
@@ -1700,6 +1994,21 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         layout.scale,
     );
     text_y += layout.line_step;
+    draw_text(
+        &mut rgba,
+        text_x,
+        text_y,
+        &format!(
+            "PLY {:.0}X{:.0}X{:.0} Y{:.0}",
+            PLAYER_CUBE_WIDTH_BLOCKS,
+            PLAYER_CUBE_DEPTH_BLOCKS,
+            PLAYER_CUBE_HEIGHT_BLOCKS,
+            header.player_cube_bottom_y
+        ),
+        [156, 255, 104, 255],
+        layout.scale,
+    );
+    text_y += layout.line_step;
     draw_legend_keys(&mut rgba, text_x, text_y, layout.scale);
     text_y += layout.line_step;
     draw_grid_legend_keys(&mut rgba, header, text_x, text_y, layout.scale);
@@ -1848,6 +2157,7 @@ fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
         ("LOW", [101, 130, 117, 255]),
         ("HI", [190, 190, 181, 255]),
         ("DRY", [118, 111, 119, 255]),
+        ("PLY", PLAYER_CUBE_TOP_COLOR),
     ];
     let mut cursor = x;
     for (label, color) in keys {
@@ -2576,8 +2886,9 @@ mod tests {
     fn cpu_iso_preview_is_nonblank() {
         let tile = two_by_two_heightfield_tile();
         let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
+        let cube = center_test_player_cube(&tile);
         let (image, stats) =
-            render_heightfield_isometric(&tile, plan, DEFAULT_BLOCK_LINES).expect("render");
+            render_heightfield_isometric(&tile, plan, DEFAULT_BLOCK_LINES, cube).expect("render");
         let first = image.rgba.chunks_exact(4).next().expect("pixel");
         let varied = image
             .rgba
@@ -2592,10 +2903,11 @@ mod tests {
     fn block_lines_add_face_edge_pixels() {
         let tile = two_by_two_heightfield_tile();
         let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
+        let cube = center_test_player_cube(&tile);
         let (without_lines, _) =
-            render_heightfield_isometric(&tile, plan, false).expect("render without lines");
+            render_heightfield_isometric(&tile, plan, false, cube).expect("render without lines");
         let (with_lines, _) =
-            render_heightfield_isometric(&tile, plan, true).expect("render with lines");
+            render_heightfield_isometric(&tile, plan, true, cube).expect("render with lines");
         let without_draws = without_lines.draw_call_count;
         let with_draws = with_lines.draw_call_count;
 
@@ -2665,8 +2977,9 @@ mod tests {
         let tile = two_by_two_heightfield_tile();
         for quarter in 0..4 {
             let plan = IsoRenderPlan::new(&tile, 320, 180, quarter).expect("iso render plan");
+            let cube = center_test_player_cube(&tile);
             let (image, _) =
-                render_heightfield_isometric(&tile, plan, true).expect("render quarter");
+                render_heightfield_isometric(&tile, plan, true, cube).expect("render quarter");
             let first = image.rgba.chunks_exact(4).next().expect("pixel");
             let varied = image
                 .rgba
@@ -2674,6 +2987,44 @@ mod tests {
                 .any(|pixel| pixel[0] != first[0] || pixel[1] != first[1] || pixel[2] != first[2]);
             assert!(varied, "quarter {quarter} should produce visible geometry");
         }
+    }
+
+    #[test]
+    fn player_cube_uses_two_by_two_by_four_block_dimensions() {
+        let tile = two_by_two_heightfield_tile();
+        let window = PreviewWindow {
+            center_x: 32.0,
+            center_z: 32.0,
+            columns_x: 2,
+            columns_z: 2,
+            world_span_x: 64.0,
+            world_span_z: 64.0,
+        };
+        let cube = PlayerDiagnosticCube::for_tile(&tile, window).expect("player cube");
+
+        assert_eq!(PLAYER_CUBE_WIDTH_BLOCKS, 2.0);
+        assert_eq!(PLAYER_CUBE_DEPTH_BLOCKS, 2.0);
+        assert_eq!(PLAYER_CUBE_HEIGHT_BLOCKS, 4.0);
+        assert!((cube.max_grid_x - cube.min_grid_x - 2.0 / 32.0).abs() < 0.001);
+        assert!((cube.max_grid_z - cube.min_grid_z - 2.0 / 32.0).abs() < 0.001);
+        assert_eq!(cube.top_y() - cube.bottom_y, 4.0);
+    }
+
+    #[test]
+    fn player_cube_bottom_sits_on_nearest_center_surface() {
+        let tile = two_by_two_heightfield_tile();
+        let window = PreviewWindow {
+            center_x: 32.0,
+            center_z: 32.0,
+            columns_x: 2,
+            columns_z: 2,
+            world_span_x: 64.0,
+            world_span_z: 64.0,
+        };
+        let cube = PlayerDiagnosticCube::for_tile(&tile, window).expect("player cube");
+
+        assert_eq!(cube.sampled_columns, 1);
+        assert_eq!(cube.bottom_y, 12.0);
     }
 
     fn two_by_two_heightfield_tile() -> HeightfieldTile {
@@ -2757,6 +3108,20 @@ mod tests {
             river_flow_hint: 0.0,
             meso_delta_blocks: 0.0,
             micro_relief_blocks: 0.0,
+        }
+    }
+
+    fn center_test_player_cube(tile: &HeightfieldTile) -> PlayerDiagnosticCube {
+        PlayerDiagnosticCube {
+            center_world_x: 32.0,
+            center_world_z: 32.0,
+            min_grid_x: tile.width as f32 * 0.5 - 0.5,
+            max_grid_x: tile.width as f32 * 0.5 + 0.5,
+            min_grid_z: tile.height as f32 * 0.5 - 0.5,
+            max_grid_z: tile.height as f32 * 0.5 + 0.5,
+            bottom_y: 12.0,
+            height_blocks: PLAYER_CUBE_HEIGHT_BLOCKS,
+            sampled_columns: 1,
         }
     }
 }

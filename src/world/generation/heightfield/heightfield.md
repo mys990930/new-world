@@ -260,6 +260,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
   전역 base plane까지 벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를
   보여주는 terraced relief를 우선한다. quarter view가 바뀌면 painter order와 visible side도 함께 바뀌어야 한다.
+- heightfield preview는 scale diagnostic으로 형광색 player cube를 footprint 중앙에 그린다. 이 큐브는
+  final gameplay entity가 아니며, world/block 기준 `2 x 2 x 4` block 크기만 확인하기 위한 preview
+  marker다. 바닥은 중앙 `2 x 2` block footprint와 가장 가까운 heightfield column들의 `surface_y`
+  최댓값에 맞춰 지형 블럭 위에 놓는다.
 - preview overlay는 실제 chunk/world-block 맥락을 함께 표시한다. legend/header는 positional
   `center-x/center-z`가 chunk coordinate임을 기본 계약으로 기록하고, 내부에서 변환한 center chunk,
   center world block, column resolution, sample spacing, chunk range/radius, world footprint, sea level,
@@ -284,8 +288,14 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   아주 얇은 horizontal guide를 그려, 작은 `--chunk-radius 1` preview에서도 개별 block 층을 읽을 수
   있어야 한다. 이 선은 final mesh edge가 아니라 preview 전용 scale guide이며 terrain/water 색보다
   약하게 보여야 한다.
+- 중앙 player diagnostic cube는 형광색 계열을 사용해 terrain diagnostic ramp와 명확히 구분한다.
+  `--quarter-turns`에 따른 painter order와 visible side face 선택을 terrain column과 같은 isometric
+  projection 규칙으로 따라야 하며, block outline이 켜져 있으면 큐브 face도 같은 scale guide와 함께
+  읽혀야 한다.
 - preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, minimum gap,
   smoothing disabled 값을 기록해야 한다.
+- preview metadata/stdout과 legend는 player diagnostic cube의 `2 x 2 x 4` block dimensions, 중앙 world
+  position, bottom/top `y`, sampled column count를 기록해야 한다.
 - meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
   의심한다.
 
