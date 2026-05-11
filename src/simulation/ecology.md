@@ -46,17 +46,14 @@
 
 ## Current Biome Policy
 
-- water/lake cells prefer `small_fish` and reed-style forage
-- wetland/coast cells prefer `wading_bird`, `reed`, or `mangrove_sapling`
-- grassland/steppe/savanna cells prefer `deer`, `wolf`, and grass forage
-- temperate/tropical forest cells prefer `boar`, `wolf` or `bear`, and tree forage
-- boreal/subalpine cells prefer `deer`, `bear`, and conifer forage
-- dry/desert cells prefer `hare`, `fox`, and shrub/cactus forage
-- tundra/polar cells prefer `hare`, `bear`, and moss forage
+- `ecology_table.md` is the source of truth for biome-specific vegetation and animal candidate pools.
+- Current code implements a smaller first slice of that table through deterministic observer events.
+- Table columns cover flowers, grasses, trees, small herbivore, large herbivore, small carnivore, predator, and rare apex predator candidates.
 
 ## Related Modules
 
 - `simulation.md`
+- `ecology_table.md`
 - `../ecs/ecs.md`
 - `../ecs/fixed.md`
 - `../world/world.md`

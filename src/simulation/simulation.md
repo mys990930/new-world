@@ -133,6 +133,7 @@ NOT:
 
 - `time.md`: calendar, season, climate-drift, and weather progression rules
 - `ecology.md`: deterministic chunk-scoped ecology observer/candidate events
+- `ecology_table.md`: biome-specific vegetation and animal candidate pools
 
 ### Notes
 
