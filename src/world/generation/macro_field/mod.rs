@@ -8,13 +8,14 @@ use super::hydrology::GraphHydrologyGraph;
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
+const MACRO_FIELD_LAND_ELEVATION_SAMPLE_RADIUS_BLOCKS: f32 = 1536.0;
 
 pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 160.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.0;
-pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.34;
+pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.02;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
@@ -1116,10 +1117,10 @@ impl<'a> MacroFieldRasterContext<'a> {
         let nearest = self.nearest_site(position);
         let Some(boundary) = self.nearest_boundary(position, config.boundary_blend_radius_blocks)
         else {
-            return OwnerSample::from_site(nearest);
+            return self.owner_sample_from_site(position, nearest);
         };
         if boundary.distance > config.boundary_blend_radius_blocks {
-            return OwnerSample::from_site(nearest);
+            return self.owner_sample_from_site(position, nearest);
         }
 
         let primary = boundary.primary_site();
@@ -1135,8 +1136,16 @@ impl<'a> MacroFieldRasterContext<'a> {
                 config.boundary_blend_radius_blocks,
             )
         } else {
-            primary.signed_macro_elevation * (1.0 - blend * 0.35)
-                + secondary.signed_macro_elevation * (blend * 0.35)
+            let primary_elevation = self.scalar_macro_elevation(position, primary);
+            let secondary_elevation = self.scalar_macro_elevation(position, secondary);
+            let weighted = distance_weighted_pair_elevation(
+                position,
+                primary,
+                primary_elevation,
+                secondary,
+                secondary_elevation,
+            );
+            primary_elevation * (1.0 - blend) + weighted * blend
         };
 
         OwnerSample {
@@ -1148,6 +1157,59 @@ impl<'a> MacroFieldRasterContext<'a> {
             macro_elevation: mixed_elevation,
             coast_boundary_blend: if is_coast_pair { blend } else { 0.0 },
             dry_basin_rim_blend: if is_dry_basin_pair { blend } else { 0.0 },
+        }
+    }
+
+    fn owner_sample_from_site(
+        &self,
+        position: WorldPlanePoint,
+        site: Option<&'a MacroSite>,
+    ) -> OwnerSample {
+        let Some(site) = site.copied() else {
+            return OwnerSample::default();
+        };
+        OwnerSample {
+            primary: Some(site),
+            macro_elevation: self.scalar_macro_elevation(position, site),
+            coast_boundary_blend: 0.0,
+            dry_basin_rim_blend: 0.0,
+        }
+    }
+
+    fn scalar_macro_elevation(&self, position: WorldPlanePoint, primary: MacroSite) -> f32 {
+        if !matches!(
+            primary.surface_kind,
+            MacroSurfaceKind::Continent | MacroSurfaceKind::Island
+        ) {
+            return primary.signed_macro_elevation;
+        }
+
+        let candidates = self
+            .site_grid
+            .candidate_indices_in_radius(position, MACRO_FIELD_LAND_ELEVATION_SAMPLE_RADIUS_BLOCKS);
+        let mut weighted_sum = 0.0;
+        let mut weight_sum = 0.0;
+        for index in candidates {
+            let Some(site) = self.sites.get(index).copied() else {
+                continue;
+            };
+            if site.surface_kind != primary.surface_kind || site.continent != primary.continent {
+                continue;
+            }
+            let distance = squared_distance(position, site.position).sqrt();
+            if distance > MACRO_FIELD_LAND_ELEVATION_SAMPLE_RADIUS_BLOCKS {
+                continue;
+            }
+            let taper = envelope(distance, MACRO_FIELD_LAND_ELEVATION_SAMPLE_RADIUS_BLOCKS);
+            let weight = taper / (distance + 192.0).powi(2);
+            weighted_sum += site.signed_macro_elevation * weight;
+            weight_sum += weight;
+        }
+
+        if weight_sum <= f32::EPSILON {
+            primary.signed_macro_elevation
+        } else {
+            weighted_sum / weight_sum
         }
     }
 
@@ -1277,13 +1339,11 @@ struct OwnerSample {
     dry_basin_rim_blend: f32,
 }
 
-impl OwnerSample {
-    fn from_site(site: Option<&MacroSite>) -> Self {
+impl Default for OwnerSample {
+    fn default() -> Self {
         Self {
-            primary: site.copied(),
-            macro_elevation: site
-                .map(|site| site.signed_macro_elevation)
-                .unwrap_or_default(),
+            primary: None,
+            macro_elevation: 0.0,
             coast_boundary_blend: 0.0,
             dry_basin_rim_blend: 0.0,
         }
@@ -1306,6 +1366,24 @@ fn coast_boundary_elevation_profile(
     } else {
         primary.signed_macro_elevation.max(0.0) * recovery
     }
+}
+
+fn distance_weighted_pair_elevation(
+    position: WorldPlanePoint,
+    primary: MacroSite,
+    primary_elevation: f32,
+    secondary: MacroSite,
+    secondary_elevation: f32,
+) -> f32 {
+    let primary_distance = squared_distance(position, primary.position).sqrt();
+    let secondary_distance = squared_distance(position, secondary.position).sqrt();
+    let primary_weight = 1.0 / (primary_distance + 1.0).powi(2);
+    let secondary_weight = 1.0 / (secondary_distance + 1.0).powi(2);
+    let total = primary_weight + secondary_weight;
+    if total <= f32::EPSILON {
+        return (primary_elevation + secondary_elevation) * 0.5;
+    }
+    (primary_elevation * primary_weight + secondary_elevation * secondary_weight) / total
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1339,11 +1417,33 @@ impl CurveIndexGrid {
 
     fn insert_curve(&mut self, index: usize, points: &[WorldPlanePoint]) {
         for point in points {
-            self.buckets
-                .entry(curve_bucket(*point))
-                .or_default()
-                .push(index);
+            self.insert_point(index, *point);
         }
+        for segment in points.windows(2) {
+            let start = segment[0];
+            let end = segment[1];
+            let distance = squared_distance(start, end).sqrt();
+            let steps = (distance / (MACRO_FIELD_CURVE_BUCKET_BLOCKS * 0.5))
+                .ceil()
+                .max(1.0) as usize;
+            for step in 0..=steps {
+                let t = step as f32 / steps as f32;
+                self.insert_point(
+                    index,
+                    WorldPlanePoint::new(
+                        start.x + (end.x - start.x) * t,
+                        start.z + (end.z - start.z) * t,
+                    ),
+                );
+            }
+        }
+    }
+
+    fn insert_point(&mut self, index: usize, point: WorldPlanePoint) {
+        self.buckets
+            .entry(curve_bucket(point))
+            .or_default()
+            .push(index);
     }
 
     fn candidate_indices(&self, position: WorldPlanePoint, radius: f32) -> Vec<usize> {
@@ -1403,6 +1503,24 @@ impl SiteIndexGrid {
             }
         }
         Vec::new()
+    }
+
+    fn candidate_indices_in_radius(&self, position: WorldPlanePoint, radius: f32) -> Vec<usize> {
+        let center = curve_bucket(position);
+        let search = (radius.max(MACRO_FIELD_CURVE_BUCKET_BLOCKS) / MACRO_FIELD_CURVE_BUCKET_BLOCKS)
+            .ceil() as i32
+            + 1;
+        let mut indices = Vec::new();
+        for z in center.1 - search..=center.1 + search {
+            for x in center.0 - search..=center.0 + search {
+                if let Some(bucket) = self.buckets.get(&(x, z)) {
+                    indices.extend(bucket.iter().copied());
+                }
+            }
+        }
+        indices.sort_unstable();
+        indices.dedup();
+        indices
     }
 }
 
@@ -1708,6 +1826,223 @@ mod tests {
     use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
     use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
 
+    #[derive(Debug, Clone, Copy, Default)]
+    struct NeighborDeltaSummary {
+        max_delta: f32,
+        p95_delta: f32,
+        pair_count: usize,
+        owner_switch_count: usize,
+        surface_kind_switch_count: usize,
+        hard_mask_switch_count: usize,
+        river_influence_count: usize,
+        coast_influence_count: usize,
+        dry_basin_profile_count: usize,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct NeighborDeltaPair {
+        delta: f32,
+        left_index: usize,
+        right_index: usize,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct DenseDeltaSummary {
+        center: WorldPlanePoint,
+        spacing: f32,
+        max_delta: f32,
+        p95_delta: f32,
+        over_one_block_count: usize,
+        pair_count: usize,
+    }
+
+    fn combined_neighbor_delta_summary(tile: &MacroFieldTile) -> NeighborDeltaSummary {
+        let width = tile.config.width as usize;
+        let height = tile.config.height as usize;
+        let mut deltas = Vec::new();
+        let mut top_pairs = Vec::new();
+        let mut summary = NeighborDeltaSummary::default();
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                if x + 1 < width {
+                    record_neighbor_delta(
+                        tile,
+                        index,
+                        index + 1,
+                        &mut deltas,
+                        &mut top_pairs,
+                        &mut summary,
+                    );
+                }
+                if z + 1 < height {
+                    record_neighbor_delta(
+                        tile,
+                        index,
+                        index + width,
+                        &mut deltas,
+                        &mut top_pairs,
+                        &mut summary,
+                    );
+                }
+            }
+        }
+        deltas.sort_by(f32::total_cmp);
+        summary.pair_count = deltas.len();
+        summary.max_delta = deltas.last().copied().unwrap_or_default();
+        if !deltas.is_empty() {
+            let p95_index = ((deltas.len() - 1) as f32 * 0.95).round() as usize;
+            summary.p95_delta = deltas[p95_index.min(deltas.len() - 1)];
+        }
+        summary
+    }
+
+    fn record_neighbor_delta(
+        tile: &MacroFieldTile,
+        a: usize,
+        b: usize,
+        deltas: &mut Vec<f32>,
+        top_pairs: &mut Vec<NeighborDeltaPair>,
+        summary: &mut NeighborDeltaSummary,
+    ) {
+        let left = tile.samples[a];
+        let right = tile.samples[b];
+        let delta = (left.combined_macro_height - right.combined_macro_height).abs();
+        deltas.push(delta);
+        top_pairs.push(NeighborDeltaPair {
+            delta,
+            left_index: a,
+            right_index: b,
+        });
+        top_pairs.sort_by(|left, right| right.delta.total_cmp(&left.delta));
+        top_pairs.truncate(5);
+        if left.nearest_site != right.nearest_site {
+            summary.owner_switch_count += 1;
+        }
+        if left.surface_kind != right.surface_kind {
+            summary.surface_kind_switch_count += 1;
+        }
+        if (left.ocean_mask - right.ocean_mask).abs() > f32::EPSILON
+            || (left.lake_mask - right.lake_mask).abs() > f32::EPSILON
+            || (left.dry_basin_mask - right.dry_basin_mask).abs() > f32::EPSILON
+        {
+            summary.hard_mask_switch_count += 1;
+        }
+        if left.river_valley_strength.max(right.river_valley_strength) > 0.05 {
+            summary.river_influence_count += 1;
+        }
+        if left.coast_mask.max(right.coast_mask) > 0.05 {
+            summary.coast_influence_count += 1;
+        }
+        if left.dry_basin_mask.max(right.dry_basin_mask) > 0.5 {
+            summary.dry_basin_profile_count += 1;
+        }
+    }
+
+    fn top_combined_neighbor_delta_pairs(tile: &MacroFieldTile) -> Vec<NeighborDeltaPair> {
+        let width = tile.config.width as usize;
+        let height = tile.config.height as usize;
+        let mut pairs = Vec::new();
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                if x + 1 < width {
+                    push_top_pair(tile, index, index + 1, &mut pairs);
+                }
+                if z + 1 < height {
+                    push_top_pair(tile, index, index + width, &mut pairs);
+                }
+            }
+        }
+        pairs
+    }
+
+    fn push_top_pair(
+        tile: &MacroFieldTile,
+        left_index: usize,
+        right_index: usize,
+        pairs: &mut Vec<NeighborDeltaPair>,
+    ) {
+        let delta = (tile.samples[left_index].combined_macro_height
+            - tile.samples[right_index].combined_macro_height)
+            .abs();
+        pairs.push(NeighborDeltaPair {
+            delta,
+            left_index,
+            right_index,
+        });
+        pairs.sort_by(|left, right| right.delta.total_cmp(&left.delta));
+        pairs.truncate(5);
+    }
+
+    fn dense_delta_summary_around_pair(
+        inputs: &TestInputs,
+        coarse_tile: &MacroFieldTile,
+        pair: NeighborDeltaPair,
+        spacing: f32,
+    ) -> DenseDeltaSummary {
+        let left = coarse_tile.samples[pair.left_index];
+        let right = coarse_tile.samples[pair.right_index];
+        let center = WorldPlanePoint::new(
+            (left.position.x + right.position.x) * 0.5,
+            (left.position.z + right.position.z) * 0.5,
+        );
+        let span = if spacing <= 1.0 { 64.0 } else { 96.0 };
+        let width = (span / spacing) as u32 + 1;
+        let height = width;
+        let config = MacroFieldTileConfig::new(
+            center.x - span * 0.5,
+            center.z - span * 0.5,
+            width,
+            height,
+            spacing,
+        );
+        let tile = generate_macro_field_tile(
+            &inputs.patch,
+            &inputs.macro_map,
+            &inputs.hydrology,
+            &inputs.boundary,
+            config,
+        );
+        let summary = combined_neighbor_delta_summary(&tile);
+        let one_block_delta = 1.0 / MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS;
+        let mut over_one_block_count = 0;
+        let tile_width = tile.config.width as usize;
+        let tile_height = tile.config.height as usize;
+        for z in 0..tile_height {
+            for x in 0..tile_width {
+                let index = z * tile_width + x;
+                if x + 1 < tile_width {
+                    let right = index + 1;
+                    let delta = (tile.samples[index].combined_macro_height
+                        - tile.samples[right].combined_macro_height)
+                        .abs();
+                    if delta > one_block_delta {
+                        over_one_block_count += 1;
+                    }
+                }
+                if z + 1 < tile_height {
+                    let below = index + tile_width;
+                    let delta = (tile.samples[index].combined_macro_height
+                        - tile.samples[below].combined_macro_height)
+                        .abs();
+                    if delta > one_block_delta {
+                        over_one_block_count += 1;
+                    }
+                }
+            }
+        }
+
+        DenseDeltaSummary {
+            center,
+            spacing,
+            max_delta: summary.max_delta,
+            p95_delta: summary.p95_delta,
+            over_one_block_count,
+            pair_count: summary.pair_count,
+        }
+    }
+
     #[test]
     fn macro_field_tile_generation_is_deterministic() {
         let inputs = test_inputs(42);
@@ -1767,6 +2102,73 @@ mod tests {
                 && (-2.0..=2.0).contains(&sample.combined_macro_height)
         }));
         assert!(tile.stats.min_combined_macro_height <= tile.stats.max_combined_macro_height);
+    }
+
+    #[test]
+    #[ignore = "diagnostic helper for combined_macro_height continuity tuning"]
+    fn diagnose_combined_macro_height_neighbor_deltas() {
+        for seed in [7, 42, 91] {
+            let inputs = test_inputs(seed);
+            let tile = generate_macro_field_tile(
+                &inputs.patch,
+                &inputs.macro_map,
+                &inputs.hydrology,
+                &inputs.boundary,
+                MacroFieldTileConfig::new(-768.0, -768.0, 32, 32, 48.0),
+            );
+            let summary = combined_neighbor_delta_summary(&tile);
+            eprintln!(
+                "seed={seed} max={:.6} p95={:.6} pairs={} owner={} kind={} mask={} coast={} river={} dry={}",
+                summary.max_delta,
+                summary.p95_delta,
+                summary.pair_count,
+                summary.owner_switch_count,
+                summary.surface_kind_switch_count,
+                summary.hard_mask_switch_count,
+                summary.coast_influence_count,
+                summary.river_influence_count,
+                summary.dry_basin_profile_count
+            );
+            for pair in top_combined_neighbor_delta_pairs(&tile).into_iter().take(3) {
+                let left = tile.samples[pair.left_index];
+                let right = tile.samples[pair.right_index];
+                eprintln!(
+                    "  top delta={:.6} left=({:.0},{:.0}) site={:?} kind={:?} macro={:.6} coast={:.3} river={:.3}/{:.3} combined={:.6} right=({:.0},{:.0}) site={:?} kind={:?} macro={:.6} coast={:.3} river={:.3}/{:.3} combined={:.6}",
+                    pair.delta,
+                    left.position.x,
+                    left.position.z,
+                    left.nearest_site,
+                    left.surface_kind,
+                    left.macro_elevation,
+                    left.coast_mask,
+                    left.river_valley_strength,
+                    left.river_flow_hint,
+                    left.combined_macro_height,
+                    right.position.x,
+                    right.position.z,
+                    right.nearest_site,
+                    right.surface_kind,
+                    right.macro_elevation,
+                    right.coast_mask,
+                    right.river_valley_strength,
+                    right.river_flow_hint,
+                    right.combined_macro_height
+                );
+            }
+            if let Some(pair) = top_combined_neighbor_delta_pairs(&tile).into_iter().next() {
+                let dense = dense_delta_summary_around_pair(&inputs, &tile, pair, 1.0);
+                eprintln!(
+                    "  dense spacing={:.1} center=({:.0},{:.0}) max={:.6} p95={:.6} over_1block={}/{}",
+                    dense.spacing,
+                    dense.center.x,
+                    dense.center.z,
+                    dense.max_delta,
+                    dense.p95_delta,
+                    dense.over_one_block_count,
+                    dense.pair_count
+                );
+            }
+        }
     }
 
     #[test]

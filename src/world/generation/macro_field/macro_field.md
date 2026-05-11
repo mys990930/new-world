@@ -155,8 +155,12 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
      `BoundaryCache`의 `NoisyBoundaryCurve`를 따라야 한다.
-   - macro elevation은 primary owner의 값을 기준으로 하되 boundary blend band 안에서는 반대편 site
-     elevation을 일부 섞어 계단형 단절을 줄인다.
+   - 일반 land/continent macro elevation scalar는 owner site 하나의 hard 값을 그대로 쓰지 않고,
+     가까운 같은 surface kind/continent site들의 signed elevation을 distance-weighted로 샘플링한다.
+     이 처리는 scalar height source만 연속화하며 `surface_kind`, ocean/lake/dry/coast mask ownership은
+     noisy-boundary owner 판정을 그대로 따른다.
+   - boundary blend band 안에서는 noisy curve 양쪽 site의 distance-weighted scalar elevation을 함께
+     읽어 계단형 단절을 줄인다.
    - explicit coast pair는 일반 boundary blend를 쓰지 않는다. coast curve land-side는 curve 위에서
      `0`에 붙고 blend radius 바깥으로 갈수록 land owner elevation을 회복하는 shoreline/foreshore
      profile을 사용한다. coast curve ocean-side는 해수면 위로 land elevation을 섞지 않고 얕은 음수
