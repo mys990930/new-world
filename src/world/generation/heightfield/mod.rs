@@ -14,8 +14,8 @@ pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
 pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
-pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
-pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 1.0;
+pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 0.0;
+pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -182,6 +182,12 @@ pub fn generate_heightfield_tile(
         macro_tile.config.width as usize,
         macro_tile.config.height as usize,
         macro_tile.config.sample_spacing_blocks,
+        config,
+    );
+    apply_neighbor_surface_step_continuity(
+        &mut columns,
+        macro_tile.config.width as usize,
+        macro_tile.config.height as usize,
         config,
     );
     apply_river_water_descent(
@@ -375,6 +381,48 @@ fn apply_neighbor_shoreline_continuity(
             if matches!(column.terrain_kind, HeightfieldTerrainKind::Land) {
                 column.terrain_kind = HeightfieldTerrainKind::Coast;
             }
+        }
+    }
+}
+
+fn apply_neighbor_surface_step_continuity(
+    columns: &mut [HeightfieldColumn],
+    width: usize,
+    height: usize,
+    config: HeightfieldConfig,
+) {
+    if columns.is_empty() || width == 0 || height == 0 {
+        return;
+    }
+    let max_step = config.contour.step_blocks.max(1.0);
+    for _ in 0..(width + height).max(1) {
+        let mut changed = false;
+        for index in 0..columns.len() {
+            if is_standing_water(columns[index]) {
+                continue;
+            }
+            let current = columns[index].surface_height_blocks;
+            let allowed = neighbor_indices(index, width, height)
+                .map(|neighbor| columns[neighbor].visible_surface_height_blocks() + max_step)
+                .fold(current, f32::min);
+            if allowed < current {
+                let snapped = snap_to_contour_step(allowed, config.contour);
+                let surface_y = snap_height_to_block(snapped);
+                columns[index].surface_y = surface_y;
+                columns[index].surface_height_blocks = surface_y as f32;
+                columns[index].constrained_surface_height_blocks =
+                    columns[index].surface_height_blocks;
+                if matches!(columns[index].terrain_kind, HeightfieldTerrainKind::River) {
+                    let water = columns[index].surface_y.saturating_add(1);
+                    columns[index].water_y = Some(water);
+                    columns[index].water_level_blocks = Some(water as f32);
+                    columns[index].river_water_height_blocks = Some(water as f32);
+                }
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
         }
     }
 }
@@ -615,7 +663,7 @@ fn update_distance_from_neighbor(
 }
 
 fn snap_height_to_block(value: f32) -> i32 {
-    value.round() as i32
+    value.floor() as i32
 }
 
 fn heightfield_stats(
@@ -937,8 +985,8 @@ mod tests {
         let contour = HeightfieldContourConfig::default();
 
         assert_eq!(contour.step_blocks, 1.0);
-        assert_eq!(contour.min_gap_blocks, 1.0);
-        assert_eq!(contour.river_min_gap_blocks, 1.0);
+        assert_eq!(contour.min_gap_blocks, 0.0);
+        assert_eq!(contour.river_min_gap_blocks, 0.0);
         assert_eq!(contour.band_smoothing, 0.0);
     }
 
@@ -961,24 +1009,36 @@ mod tests {
     }
 
     #[test]
-    fn general_land_contour_gap_uses_one_raw_block_before_next_terrace() {
+    fn default_contour_snap_preserves_raw_block_scale() {
         let config = HeightfieldConfig::default();
-        let just_below_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00095, 0.0, 0.0, 0.0, 0.0), config);
-        let after_next_stride =
-            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00110, 0.0, 0.0, 0.0, 0.0), config);
+        let below_one =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00048, 0.0, 0.0, 0.0, 0.0), config);
+        let at_one =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00049, 0.0, 0.0, 0.0, 0.0), config);
+        let below_two =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00096, 0.0, 0.0, 0.0, 0.0), config);
+        let at_two =
+            heightfield_column_from_sample(&sample(0.0, 0.0, 0.00098, 0.0, 0.0, 0.0, 0.0), config);
 
         assert!(
-            just_below_next_stride.raw_surface_height_blocks > 1.0,
-            "raw height should already cross the first one-block terrace"
+            below_one.raw_surface_height_blocks < 1.0,
+            "test input should sit just below the first block"
         );
         assert_eq!(
-            just_below_next_stride.surface_height_blocks, 0.0,
-            "default one-block land gap keeps the next integer terrace unused until raw height crosses two raw blocks"
+            below_one.surface_height_blocks, 0.0,
+            "raw 0.0..0.999 should remain visible y=0"
         );
         assert_eq!(
-            after_next_stride.surface_height_blocks, 1.0,
-            "after raw height crosses step+gap, the next integer terrace becomes available"
+            at_one.surface_height_blocks, 1.0,
+            "raw 1.0..1.999 should become visible y=1"
+        );
+        assert_eq!(
+            below_two.surface_height_blocks, 1.0,
+            "default contour snap must not halve raw block scale"
+        );
+        assert_eq!(
+            at_two.surface_height_blocks, 2.0,
+            "raw 2.0..2.999 should become visible y=2"
         );
     }
 
@@ -992,7 +1052,7 @@ mod tests {
 
         assert_eq!(
             config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
-            "default launch slice uses the same one-block gap for land and river corridors"
+            "default launch slice uses the same zero-block gap for land and river corridors"
         );
         assert_eq!(
             land.surface_height_blocks, river.surface_height_blocks,
@@ -1022,6 +1082,40 @@ mod tests {
         assert_eq!(
             river.surface_height_blocks, 1.0,
             "river corridors keep the smaller gap so water descent does not lose one-block steps"
+        );
+    }
+
+    #[test]
+    fn snapped_land_visible_steps_are_limited_to_one_block() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 1, 1.0);
+        let samples = vec![
+            sample(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            sample(1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            sample(2.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            sample(3.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+        ];
+        let macro_tile = MacroFieldTile {
+            config,
+            samples,
+            stats: MacroFieldTileStats::default(),
+        };
+        let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+        let heights = tile
+            .columns
+            .iter()
+            .map(|column| column.surface_height_blocks)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tile.column(1, 0)
+                .expect("steep land")
+                .raw_surface_height_blocks,
+            DEFAULT_HEIGHTFIELD_MAX_BLOCKS
+        );
+        assert_eq!(heights, vec![0.0, 1.0, 2.0, 3.0]);
+        assert!(
+            tile.stats.max_visible_neighbor_delta_blocks <= 1.0,
+            "visible terrain step should be capped without changing raw diagnostic heights"
         );
     }
 

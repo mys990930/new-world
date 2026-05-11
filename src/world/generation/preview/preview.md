@@ -431,14 +431,16 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
   macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
-  1 block이고 일반 land terrain의 기본 minimum gap도 1 block이다. `combined_macro_height`에서 얻은
-  raw block height를 직접 final surface로 쓰지 않고 해당 contour band의 lower level로 quantize한다.
-  다음 integer terrace로 올라가려면 raw height가 `step + min_gap`만큼 진행되어야 하므로 현재 기본값에서는
-  raw height가 2 block 진행될 때 visible terrain이 1 block 올라간다. river corridor 기본 minimum gap도
-  1 block이며, 이후 필요하면 별도 override로 다시 분리할 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
+  1 block이고 일반 land terrain의 기본 minimum gap은 0 block이다. `combined_macro_height`에서 얻은
+  raw block height를 해당 contour band의 lower integer level로 quantize한다. 현재 기본값에서는 raw
+  block height와 visible block height가 같은 scale을 유지한다. river corridor 기본 minimum gap도
+  0 block이며, 이후 필요하면 별도 override로 다시 분리할 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
   water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
   contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
+- 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snapped land/shoreline visible surface는
+  인접 column 사이에서 한 contour step보다 크게 뛰지 않도록 ceiling pass를 적용한다. raw diagnostic
+  height는 그대로 보존한다.
 - ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 grid-distance 기반
   contour ceiling으로 `0, 1, 2, ...` 계단을 따라 올라가야 한다. explicit cliff/meso feature가 없는
   launch slice에서 바다 옆 land가 즉시 높은 vertical cliff로 솟으면 회귀다.

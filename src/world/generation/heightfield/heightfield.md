@@ -168,18 +168,18 @@ launch 구현은 최종 surface/water output을 integer block height로 snap하�
 
 ```text
 contour.step_blocks = 1 block
-contour.min_gap_blocks = 1 block
-contour.river_min_gap_blocks = 1 block
+contour.min_gap_blocks = 0 blocks
+contour.river_min_gap_blocks = 0 blocks
 contour.band_smoothing = 0.0
 ```
 
 각 land column은 `raw_surface_height_blocks`가 속한 contour band의 lower level로 떨어진다. 기본
-launch 정책은 raw 1-block band를 그대로 surface로 쓰지 않고, 다음 terrace로 올라가려면 raw
-block-height가 `step_blocks + min_gap_blocks`, 즉 기본 2 blocks만큼 진행되어야 한다. 출력 높이는
-여전히 `0, 1, 2, ...` integer step이다.
+launch 정책은 raw block-height와 visible block-height가 같은 scale을 갖도록 `min_gap_blocks = 0`을
+사용한다. 즉 raw `0.0..0.999`는 `y = 0`, raw `1.0..1.999`는 `y = 1`처럼 integer lower band로
+snap된다.
 
-현재 기본값에서는 일반 land와 river corridor가 모두 1-block minimum gap을 사용한다. 다만
-`river_min_gap_blocks` 필드는 유지한다. 이후 일반 land gap을 다시 넓히더라도 river corridor와
+현재 기본값에서는 일반 land와 river corridor가 모두 0-block minimum gap을 사용한다. 다만
+`river_min_gap_blocks` 필드는 유지한다. 이후 일반 land gap을 넓히더라도 river corridor와
 river-adjacent carve 영역은 river_plan/macro_field가 제공한 selected river bed hint, valley strength,
 display flow hint를 읽어 더 작은 gap으로 override할 수 있어야 하기 때문이다. final river routing을
 heightfield에서 다시 풀지는 않는다.
@@ -196,6 +196,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   설정으로만 남는다. preview나 heightfield visible top에 bed depression을 섞으면 회귀다.
 - 일반 land column은 raw block height를 contour lower band로 양자화한 뒤 sea level 아래로 내려가지
   않는다. 즉 water가 아닌 terrain의 기본 floor는 `y = 0`이다.
+- 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snap 이후 일반 land/shoreline visible
+  surface는 인접 column 사이에서 한 번에 한 contour step보다 크게 뛰지 않아야 한다. 이 safety pass는
+  raw diagnostic height를 바꾸지 않고 final snapped visible surface만 낮추는 ceiling이며, 평균화나
+  전역 smoothing source가 아니다.
 - 바다/호수와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다. tile 생성 후
   standing water(ocean/lake) column으로부터 grid distance를 계산하고, 주변 land에 shoreline contour
   ceiling을 적용한다. 이 pass는 continuous smoothing이 아니라 `0, 1, 2, ...` 계단 ceiling이다.
@@ -323,8 +327,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
 13. contour gap 정책은 final height를 렌더링으로 속이는 값이 아니라 heightfield band resolve 계약이다.
-    현재 기본값은 `step_blocks = 1`, 일반 `min_gap_blocks = 1`, `river_min_gap_blocks = 1`이며,
-    raw height가 2 block 진행될 때마다 visible terrain은 1 integer step 올라간다. river corridor
+    현재 기본값은 `step_blocks = 1`, 일반 `min_gap_blocks = 0`, `river_min_gap_blocks = 0`이며,
+    raw block height와 visible terrain은 같은 block scale을 유지한다. river corridor
     override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`, shoreline ceiling,
     river descent는 이 snap 결과 위에서 유지되어야 한다.
 14. X/Z column density는 입력 macro field tile의 column count와 sample spacing이 직접 소유한다.

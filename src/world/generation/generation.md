@@ -233,12 +233,14 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      `combined_macro_height -0.25..0.75`는 `-512..1536 blocks`로 매핑하고, effective clamp는
      `-0.5..1.0 -> -1024..2048 blocks`다. 이 값은 `macro_field` contour와 `heightfield` band
      resolve가 공유한다.
-   - launch contour terrace는 smoothing 없이 integer step을 유지하되, raw 1-block band를 그대로
-     surface로 쓰지는 않고 `step + min_gap` stride로 visible terrace를 연다. 현재 기본 land
-     `min_gap = 1`이고 river corridor 기본 `river_min_gap = 1`도 같은 값이다. 즉 raw height가
-     2 block 진행될 때 visible terrain이 1 block 올라간다. river corridor override 구조는 남겨두어
-     이후 water descent 보존이 다시 필요해지면 별도 gap으로 분리할 수 있지만, 현재 launch 기본값은
-     land와 river가 같은 1-block minimum gap을 쓴다.
+   - launch contour terrace는 smoothing 없이 integer step을 유지하며, 기본 `min_gap = 0`으로 raw
+     block-height와 visible block-height가 같은 scale을 갖게 한다. 즉 raw `0.0..0.999`는 `y = 0`,
+     raw `1.0..1.999`는 `y = 1`처럼 lower integer band로 snap된다. river corridor override 구조는
+     남겨두어 이후 water descent 보존이 다시 필요해지면 별도 gap으로 분리할 수 있지만, 현재 launch
+     기본값은 land와 river가 같은 0-block minimum gap을 쓴다.
+   - 현재 vertical slice에는 explicit cliff/meso feature가 없으므로 snapped visible terrain은 인접
+     column 사이에서 한 contour step보다 크게 뛰지 않도록 final surface ceiling을 적용한다. 이 pass는
+     raw/macro diagnostic height를 바꾸지 않는다.
    - ocean/lake visible surface는 launch vertical slice에서 `y = 0`이다. bathymetry/bed depression은
      final preview terrain에 섞지 않고, standing water와 인접한 land는 `0, 1, 2, ...` contour step으로
      올라간다. river water hint도 integer step이며 인접 river/standing-water surface에서 큰 급락을
