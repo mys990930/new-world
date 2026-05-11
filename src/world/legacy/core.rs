@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -16,6 +16,9 @@ use super::edit::{EditError, EditResult, WorldEdit, remesh_targets_for_block};
 use super::meta::WorldMeta;
 use super::query::{NeighborChunks, Ray3, RaycastHit};
 use super::registry::BlockRegistry;
+use super::surface::{
+    SurfaceCondition, SurfaceConditionObservation, SurfaceConditionScope, atlas_coord_for_chunk,
+};
 
 pub struct WorldCore {
     meta: WorldMeta,
@@ -24,6 +27,7 @@ pub struct WorldCore {
     calendar: WorldCalendar,
     climate_runtime: HashMap<AtlasCoord, AtlasClimateRuntimeState>,
     local_weather: HashMap<AtlasCoord, LocalWeatherState>,
+    chunk_surface_conditions: HashMap<ChunkCoord, SurfaceCondition>,
     deferred_season_patches: Vec<DeferredSeasonPatch>,
     region_class_cache: RwLock<HashMap<AtlasCoord, RegionClassSample>>,
 }
@@ -37,6 +41,7 @@ impl WorldCore {
             calendar: WorldCalendar::default(),
             climate_runtime: HashMap::new(),
             local_weather: HashMap::new(),
+            chunk_surface_conditions: HashMap::new(),
             deferred_season_patches: Vec::new(),
             region_class_cache: RwLock::new(HashMap::new()),
         }
@@ -71,6 +76,34 @@ impl WorldCore {
 
     pub fn local_weather(&self, coord: AtlasCoord) -> Option<LocalWeatherState> {
         self.local_weather.get(&coord).copied()
+    }
+
+    pub fn chunk_surface_condition(&self, coord: ChunkCoord) -> SurfaceCondition {
+        self.chunk_surface_conditions
+            .get(&coord)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn set_chunk_surface_condition(
+        &mut self,
+        coord: ChunkCoord,
+        condition: SurfaceCondition,
+    ) -> Option<SurfaceCondition> {
+        self.chunk_surface_conditions.insert(coord, condition)
+    }
+
+    pub fn observe_chunk_surface_condition(
+        &self,
+        coord: ChunkCoord,
+    ) -> SurfaceConditionObservation {
+        let atlas_coord = atlas_coord_for_chunk(coord);
+        let cell_biome = self.sample_region_class_atlas(atlas_coord).biome_family;
+        SurfaceConditionObservation {
+            scope: SurfaceConditionScope::Chunk(coord),
+            cell_biome,
+            condition: self.chunk_surface_condition(coord),
+        }
     }
 
     pub fn deferred_season_patches(&self) -> &[DeferredSeasonPatch] {
@@ -519,6 +552,30 @@ mod tests {
         assert_eq!(result.weather_changed_cells, vec![coord]);
         assert_eq!(result.deferred_patch_count, 1);
         assert_eq!(world.deferred_season_patches().len(), 1);
+    }
+
+    #[test]
+    fn world_core_exposes_chunk_surface_condition_with_cell_biome() {
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
+        let coord = ChunkCoord(0, 0, 0);
+        let condition = SurfaceCondition::half_thawed_snow(0.7, 0.5);
+
+        assert_eq!(
+            world.chunk_surface_condition(coord),
+            SurfaceCondition::dry()
+        );
+        assert_eq!(world.set_chunk_surface_condition(coord, condition), None);
+
+        let observation = world.observe_chunk_surface_condition(coord);
+
+        assert_eq!(observation.scope, SurfaceConditionScope::Chunk(coord));
+        assert_eq!(observation.condition, condition);
+        assert_eq!(
+            observation.cell_biome,
+            world
+                .sample_region_class_atlas(atlas_coord_for_chunk(coord))
+                .biome_family
+        );
     }
 
     #[test]

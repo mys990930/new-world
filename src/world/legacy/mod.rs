@@ -114,10 +114,12 @@ pub use storage::{StorageError, load_chunk, save_chunk};
 pub use surface::{
     ChunkSurfacePlan, CoverOverrideRule, CoverPhase, MaterialPolicyDef, MaterialPolicyId,
     SeasonalBiomeStateDef, SeasonalBiomeStateId, SeasonalPhase, SurfaceColumnPlan,
-    SurfaceRuntimeContext, cover_override_rule, default_cover_override_rules,
-    default_material_policies, default_seasonal_biome_states, empty_chunk_surface_plan,
-    material_policy_def, resolve_chunk_surface_plan, resolve_chunk_surface_plan_with_runtime,
-    resolve_material_policy_for_archetype, seasonal_biome_state_def,
+    SurfaceCondition, SurfaceConditionKind, SurfaceConditionObservation, SurfaceConditionScope,
+    SurfaceRuntimeContext, atlas_coord_for_chunk, cover_override_rule,
+    default_cover_override_rules, default_material_policies, default_seasonal_biome_states,
+    empty_chunk_surface_plan, material_policy_def, resolve_chunk_surface_plan,
+    resolve_chunk_surface_plan_with_runtime, resolve_material_policy_for_archetype,
+    seasonal_biome_state_def,
 };
 #[allow(unused_imports)]
 pub use topdown::{

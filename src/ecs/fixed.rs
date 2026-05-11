@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::{Query, Res, ResMut, Resource, With};
 
 use crate::simulation::SimulationResult;
-use crate::world::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, CHUNK_EDGE_I32};
+use crate::world::{ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCoord, CHUNK_EDGE_I32, ChunkCoord};
 
 use super::player::{LocalPlayerEntity, Player, Transform};
 
@@ -22,6 +22,34 @@ impl Default for ActiveSimRegion {
             center_atlas: AtlasCoord::new(0, 0),
             area: AtlasArea::new(AtlasCoord::new(0, 0), 1, 1)
                 .expect("default active simulation area must be valid"),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+pub struct ActiveChunkObserverScope {
+    pub center_chunk: ChunkCoord,
+    pub chunks: Vec<ChunkCoord>,
+}
+
+impl Default for ActiveChunkObserverScope {
+    fn default() -> Self {
+        Self::new(ChunkCoord(0, 0, 0), 1)
+    }
+}
+
+impl ActiveChunkObserverScope {
+    pub fn new(center_chunk: ChunkCoord, radius: i32) -> Self {
+        let radius = radius.max(0);
+        let mut chunks = Vec::with_capacity(((radius * 2 + 1) * (radius * 2 + 1)) as usize);
+        for z in center_chunk.2 - radius..=center_chunk.2 + radius {
+            for x in center_chunk.0 - radius..=center_chunk.0 + radius {
+                chunks.push(ChunkCoord(x, center_chunk.1, z));
+            }
+        }
+        Self {
+            center_chunk,
+            chunks,
         }
     }
 }
@@ -53,6 +81,7 @@ pub(crate) fn update_active_sim_region_system(
     transforms: Query<&Transform, With<Player>>,
     control: Res<SimulationControlState>,
     mut active_region: ResMut<ActiveSimRegion>,
+    mut active_chunk_scope: ResMut<ActiveChunkObserverScope>,
 ) {
     let Some(entity) = local_player.0 else {
         return;
@@ -64,6 +93,8 @@ pub(crate) fn update_active_sim_region_system(
 
     *active_region =
         active_sim_region_for_translation(transform.translation, control.eager_atlas_radius);
+    *active_chunk_scope =
+        ActiveChunkObserverScope::new(chunk_coord_for_translation(transform.translation), 1);
 }
 
 fn atlas_coord_for_translation(translation: [f32; 3]) -> AtlasCoord {
@@ -71,6 +102,14 @@ fn atlas_coord_for_translation(translation: [f32; 3]) -> AtlasCoord {
     AtlasCoord::new(
         (translation[0].floor() as i32).div_euclid(atlas_span_blocks),
         (translation[2].floor() as i32).div_euclid(atlas_span_blocks),
+    )
+}
+
+fn chunk_coord_for_translation(translation: [f32; 3]) -> ChunkCoord {
+    ChunkCoord(
+        (translation[0].floor() as i32).div_euclid(CHUNK_EDGE_I32),
+        0,
+        (translation[2].floor() as i32).div_euclid(CHUNK_EDGE_I32),
     )
 }
 
@@ -97,5 +136,15 @@ mod tests {
         let active = active_sim_region_for_translation([600.0, 0.0, -12.0], 0);
         assert_eq!(active.center_atlas, AtlasCoord::new(2, -1));
         assert_eq!(active.area.origin(), AtlasCoord::new(2, -1));
+    }
+
+    #[test]
+    fn active_chunk_observer_scope_is_three_by_three() {
+        let scope = ActiveChunkObserverScope::new(ChunkCoord(3, 0, -2), 1);
+
+        assert_eq!(scope.center_chunk, ChunkCoord(3, 0, -2));
+        assert_eq!(scope.chunks.len(), 9);
+        assert!(scope.chunks.contains(&ChunkCoord(2, 0, -3)));
+        assert!(scope.chunks.contains(&ChunkCoord(4, 0, -1)));
     }
 }

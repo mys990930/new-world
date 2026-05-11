@@ -1,11 +1,16 @@
+mod ecology;
 mod time;
 
 use std::time::Duration;
 
 use crate::world::{
-    AtlasArea, AtlasCoord, CalendarAdvance, ChunkCoord, LocalWeatherKind, WorldEdit,
+    AtlasArea, AtlasCoord, BiomeFamily, CalendarAdvance, ChunkCoord, EditResult, LocalWeatherKind,
+    LocalWeatherState, SurfaceCondition, SurfaceConditionKind, WorldEdit,
 };
 
+pub use ecology::{
+    EcologySim, EcologySimBundleInput, EcologySimChunkInput, EcologySimConfig, EcologySimInput,
+};
 pub use time::{
     LocalClimateDisplay, LocalClimateState, TimeSim, TimeSimBundleInput, TimeSimCellInput,
     TimeSimConfig, TimeSimInput, display_local_climate, evaluate_local_climate,
@@ -27,6 +32,7 @@ impl Default for FixedStepConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimulationConfig {
     pub fixed: FixedStepConfig,
+    pub ecology: EcologySimConfig,
     pub time: TimeSimConfig,
 }
 
@@ -36,6 +42,7 @@ impl SimulationConfig {
             ticks_per_second: ticks_per_second.max(1),
         };
         Self {
+            ecology: EcologySimConfig::for_fixed_rate(fixed.ticks_per_second),
             time: TimeSimConfig::for_fixed_rate(fixed.ticks_per_second),
             fixed,
         }
@@ -72,11 +79,13 @@ pub struct SimRegion {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimInput {
+    Ecology(EcologySimInput),
     Time(TimeSimInput),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SimInputBundle {
+    pub ecology: Option<EcologySimBundleInput>,
     pub time: Option<TimeSimBundleInput>,
 }
 
@@ -120,9 +129,88 @@ pub enum SimEvent {
         coord: AtlasCoord,
         kind: LocalWeatherKind,
     },
+    WeatherStatusObserved {
+        coord: AtlasCoord,
+        biome: BiomeFamily,
+        state: LocalWeatherState,
+    },
+    SurfaceConditionObserved {
+        scope: SimSpatialScope,
+        biome: BiomeFamily,
+        condition: SimSurfaceCondition,
+    },
+    EcologyEventObserved {
+        scope: SimSpatialScope,
+        biome: BiomeFamily,
+        event: SimEcologyEvent,
+    },
+    WorldUpdateRequested {
+        scope: SimSpatialScope,
+        update: WorldEdit,
+    },
+    WorldUpdateApplied {
+        scope: SimSpatialScope,
+        update: WorldEdit,
+        result: EditResult,
+    },
     DeferredSeasonPatchesQueued {
         count: usize,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSpatialScope {
+    AtlasCell(AtlasCoord),
+    Chunk(ChunkCoord),
+}
+
+pub type SimSurfaceCondition = SurfaceCondition;
+pub type SimSurfaceConditionKind = SurfaceConditionKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimEcologyEvent {
+    AnimalSpawned {
+        species: SimSpecies,
+    },
+    AnimalFight {
+        attacker: SimSpecies,
+        defender: SimSpecies,
+    },
+    CarcassCreated {
+        species: SimSpecies,
+    },
+    PlantGrazed {
+        plant: SimPlantKind,
+        by: SimSpecies,
+    },
+    PlantGrowthAdvanced {
+        plant: SimPlantKind,
+        stage: SimPlantGrowthStage,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSpecies {
+    SmallHerbivore,
+    LargeHerbivore,
+    SmallPredator,
+    LargePredator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimPlantKind {
+    Grass,
+    Shrub,
+    Tree,
+    Crop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimPlantGrowthStage {
+    Seedling,
+    Growing,
+    Mature,
+    Dormant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,13 +220,19 @@ pub enum SimFollowupRequest {
 
 pub struct SimulationCore {
     config: SimulationConfig,
+    ecology: EcologySim,
     time: TimeSim,
 }
 
 impl SimulationCore {
     pub fn new(config: SimulationConfig) -> Self {
+        let ecology = EcologySim::new(config.ecology.clone());
         let time = TimeSim::new(config.time.clone());
-        Self { config, time }
+        Self {
+            config,
+            ecology,
+            time,
+        }
     }
 
     pub fn config(&self) -> &SimulationConfig {
@@ -147,6 +241,7 @@ impl SimulationCore {
 
     pub fn step(&self, subsystem: SubSystemId, input: SimInput) -> SimulationResult {
         match (subsystem, input) {
+            (SubSystemId::Ecology, SimInput::Ecology(input)) => self.ecology.step(input),
             (SubSystemId::Time, SimInput::Time(input)) => self.time.step(input),
             (expected, received) => panic!(
                 "simulation input/subsystem mismatch: expected {:?}, received {:?}",
@@ -162,6 +257,18 @@ impl SimulationCore {
         input: SimInputBundle,
     ) -> Vec<SimulationResult> {
         let mut results = Vec::new();
+
+        if let Some(ecology) = input.ecology {
+            results.push(self.step(
+                SubSystemId::Ecology,
+                SimInput::Ecology(EcologySimInput {
+                    tick,
+                    region,
+                    world_seed: ecology.world_seed,
+                    chunks: ecology.chunks,
+                }),
+            ));
+        }
 
         if let Some(time) = input.time {
             results.push(self.step(

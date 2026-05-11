@@ -1,9 +1,14 @@
+mod condition;
 mod cover;
 mod domain;
 mod material;
 mod resolve;
 mod seasonal;
 
+pub use condition::{
+    SurfaceCondition, SurfaceConditionKind, SurfaceConditionObservation, SurfaceConditionScope,
+    atlas_coord_for_chunk,
+};
 pub use cover::{CoverOverrideRule, CoverPhase, cover_override_rule, default_cover_override_rules};
 #[allow(unused_imports)]
 pub use domain::{

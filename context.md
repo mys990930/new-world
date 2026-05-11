@@ -146,3 +146,18 @@
 
 `platform → app → ecs → (simulation) → world/jobs → renderer`
 
+---
+
+## 7. Worker handoff docs
+
+큰 작업을 여러 worker에게 나눠 맡길 때는 `temp-worker-docs/` 아래에 짧은 md brief를 둔다.
+
+- brief는 단계별 작업, 최소 context, 참고할 정식 문서 링크만 담는다.
+- brief는 worker handoff용이며, 설계의 source of truth는 이 문서와 모듈별 `src/<module>/<module>.md`다.
+- worker는 brief를 읽은 뒤에도 이 문서와 대상 모듈 문서를 UTF-8로 다시 읽고 작업한다.
+- 구현 중 계약이나 책임이 바뀌면 정식 모듈 문서와 필요 시 brief를 함께 갱신한다.
+
+현재 handoff brief:
+
+- `temp-worker-docs/new-world-textmode-plan.md`: `new-world-textmode` binary, textmode simulation observer, 3x3 chunk status summary, weather/surface/ecology/world-update event pipeline.
+

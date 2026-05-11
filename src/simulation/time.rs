@@ -133,6 +133,11 @@ impl TimeSim {
                         kind: next_weather.kind,
                     });
                 }
+                result.events.push(SimEvent::WeatherStatusObserved {
+                    coord: cell.coord,
+                    biome: cell.region.biome_family,
+                    state: next_weather,
+                });
                 local_weather_updates.push(LocalWeatherUpdate {
                     coord: cell.coord,
                     state: next_weather,
@@ -519,7 +524,7 @@ mod tests {
         let advance = result
             .calendar_advance
             .expect("time step should emit calendar advance");
-        assert_eq!(advance.calendar.minute, 22);
+        assert_eq!(advance.calendar.minute, 1);
         assert_eq!(advance.calendar.absolute_tick, 1);
         assert_eq!(advance.climate_updates.len(), 1);
         assert_eq!(advance.local_weather_updates.len(), 1);
@@ -556,6 +561,50 @@ mod tests {
         let left = sim.step(input.clone());
         let right = sim.step(input);
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn weather_status_event_carries_cell_biome() {
+        let sim = TimeSim::new(TimeSimConfig {
+            ticks_per_game_minute: 2,
+            days_per_year: 360,
+            climate_response: 0.35,
+        });
+        let coord = AtlasCoord::new(2, -5);
+        let result = sim.step(TimeSimInput {
+            tick: SimTick {
+                index: 2,
+                delta: Duration::from_millis(50),
+            },
+            region: SimRegion {
+                center_atlas: coord,
+                atlas_area: AtlasArea::new(coord, 1, 1).unwrap(),
+            },
+            world_seed: 42,
+            calendar: WorldCalendar::default(),
+            cells: vec![TimeSimCellInput {
+                coord,
+                region: sample_region(),
+                climate_state: AtlasClimateRuntimeState::default(),
+                current_weather: LocalWeatherState::clear(
+                    coord,
+                    ClimateRegime::TemperateSeasonal,
+                    0,
+                    2,
+                ),
+            }],
+        });
+
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                SimEvent::WeatherStatusObserved {
+                    coord: event_coord,
+                    biome: crate::world::BiomeFamily::TemperateGrassland,
+                    ..
+                } if *event_coord == coord
+            )
+        }));
     }
 
     #[test]

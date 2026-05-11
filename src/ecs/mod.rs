@@ -28,7 +28,10 @@ pub use command::{MoveWorldIntent, PlayerCommand, PlayerCommandBuffer};
 #[allow(unused_imports)]
 pub use environment::{LocalEnvironmentSnapshot, LocalEnvironmentStatus};
 #[allow(unused_imports)]
-pub use fixed::{ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState};
+pub use fixed::{
+    ActiveChunkObserverScope, ActiveSimRegion, PendingSimulationResults, SimClock,
+    SimulationControlState,
+};
 pub use input::EcsInputSnapshot;
 #[allow(unused_imports)]
 pub use inventory::{

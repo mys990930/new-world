@@ -1,10 +1,11 @@
 use crate::renderer::RenderEnvironment;
 use crate::simulation::{
-    SimInputBundle, SimRegion, SimTick, SimulationResult, TimeSimBundleInput, TimeSimCellInput,
+    EcologySimBundleInput, EcologySimChunkInput, SimInputBundle, SimRegion, SimTick,
+    SimulationResult, TimeSimBundleInput, TimeSimCellInput,
 };
 use crate::world::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, CHUNK_EDGE_I32,
-    LocalWeatherState, RegionClassSample, WorldCalendar,
+    ChunkCoord, LocalWeatherState, RegionClassSample, WorldCalendar, WorldCore,
 };
 
 use super::GameApp;
@@ -22,6 +23,7 @@ impl GameApp {
         while self.timing.fixed_accumulator >= fixed_dt && executed_steps < max_steps {
             self.ecs.run_fixed_update();
             let active_region = self.ecs.active_sim_region();
+            let active_chunk_scope = self.ecs.active_chunk_observer_scope();
             let tick = SimTick {
                 index: self.ecs.sim_clock().tick_index,
                 delta: fixed_dt,
@@ -31,6 +33,7 @@ impl GameApp {
                 atlas_area: active_region.area,
             };
             let input = SimInputBundle {
+                ecology: Some(self.build_ecology_sim_input_bundle(&active_chunk_scope.chunks)),
                 time: Some(self.build_time_sim_input_bundle(
                     active_region.center_atlas,
                     active_region.area,
@@ -104,6 +107,16 @@ impl GameApp {
         }
     }
 
+    fn build_ecology_sim_input_bundle(
+        &self,
+        active_chunks: &[ChunkCoord],
+    ) -> EcologySimBundleInput {
+        EcologySimBundleInput {
+            world_seed: self.world.meta().seed,
+            chunks: ecology_chunk_inputs_from_world(&self.world, active_chunks),
+        }
+    }
+
     fn build_time_sim_input_bundle(
         &self,
         center_atlas: AtlasCoord,
@@ -169,6 +182,23 @@ impl GameApp {
 
         self.sync_renderer_environment_from_world();
     }
+}
+
+fn ecology_chunk_inputs_from_world(
+    world: &WorldCore,
+    active_chunks: &[ChunkCoord],
+) -> Vec<EcologySimChunkInput> {
+    active_chunks
+        .iter()
+        .copied()
+        .map(|coord| {
+            let observation = world.observe_chunk_surface_condition(coord);
+            EcologySimChunkInput {
+                coord,
+                biome: observation.cell_biome,
+            }
+        })
+        .collect()
 }
 
 fn render_environment_from_world(
@@ -267,7 +297,12 @@ fn lerp3(start: [f32; 3], end: [f32; 3], t: f32) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{AtlasCoord, ClimateRegime, LocalWeatherState, WorldCalendar};
+    use std::sync::Arc;
+
+    use crate::world::{
+        AtlasCoord, BlockRegistry, ChunkCoord, ClimateRegime, LocalWeatherState, WorldCalendar,
+        WorldMeta,
+    };
 
     #[test]
     fn clear_default_evening_environment_keeps_atmosphere_subtle() {
@@ -285,5 +320,27 @@ mod tests {
         assert!(environment.fog_density <= 0.008);
         assert!(environment.fog_height_falloff <= 0.04);
         assert!(environment.validate().is_ok());
+    }
+
+    #[test]
+    fn ecology_chunk_inputs_use_world_derived_cell_biome() {
+        let registry = Arc::new(BlockRegistry::load_default().expect("default registry loads"));
+        let world = WorldCore::new(WorldMeta::new(7), registry);
+        let chunks = vec![
+            ChunkCoord(-1, 0, -1),
+            ChunkCoord(0, 0, 0),
+            ChunkCoord(1, 0, 1),
+        ];
+
+        let inputs = ecology_chunk_inputs_from_world(&world, &chunks);
+
+        assert_eq!(inputs.len(), chunks.len());
+        for (input, coord) in inputs.iter().zip(chunks) {
+            assert_eq!(input.coord, coord);
+            assert_eq!(
+                input.biome,
+                world.observe_chunk_surface_condition(coord).cell_biome
+            );
+        }
     }
 }

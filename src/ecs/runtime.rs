@@ -10,8 +10,8 @@ use super::command::{
 };
 use super::environment::{LocalEnvironmentSnapshot, LocalEnvironmentStatus};
 use super::fixed::{
-    ActiveSimRegion, PendingSimulationResults, SimClock, SimulationControlState,
-    advance_sim_clock_system, update_active_sim_region_system,
+    ActiveChunkObserverScope, ActiveSimRegion, PendingSimulationResults, SimClock,
+    SimulationControlState, advance_sim_clock_system, update_active_sim_region_system,
 };
 use super::input::{EcsInputSnapshot, interpret_input_system};
 use super::inventory::{
@@ -51,6 +51,7 @@ impl EcsRuntime {
         world.insert_resource(LocalEnvironmentStatus::default());
         world.insert_resource(SimClock::default());
         world.insert_resource(ActiveSimRegion::default());
+        world.insert_resource(ActiveChunkObserverScope::default());
         world.insert_resource(SimulationControlState::default());
         world.insert_resource(PendingSimulationResults::default());
 
@@ -130,6 +131,10 @@ impl EcsRuntime {
 
     pub fn active_sim_region(&self) -> ActiveSimRegion {
         *self.world.resource::<ActiveSimRegion>()
+    }
+
+    pub fn active_chunk_observer_scope(&self) -> ActiveChunkObserverScope {
+        self.world.resource::<ActiveChunkObserverScope>().clone()
     }
 
     pub fn enqueue_simulation_results<I>(&mut self, results: I)

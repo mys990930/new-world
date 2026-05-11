@@ -16,8 +16,10 @@
 - camera state management
 - selection state management
 - active simulation region calculation for time/season/weather progression
+- active chunk-scope calculation for textmode and later entity/ecology simulation observers
 - gameplay consumption of world calendar, local weather, and seasonal state
 - player-local environment snapshot derivation for HUD / ambience bridges
+- gameplay/entity-facing consumption of structured simulation events
 - chunk meta-state management
 - jobs result interpretation
 - schedule ordering
@@ -109,10 +111,15 @@
 - time / season / weather consumption
   - ECS does not own the authoritative world calendar or season state
   - ECS fixed-phase logic selects the active simulation region around the player
+  - ECS fixed-phase logic may also expose a chunk-centered active scope such as the `3x3` chunk window used by `new-world-textmode`
   - ECS can request or consume local weather / seasonal state for gameplay, HUD, audio, and renderer bridge output
   - ECS also keeps one player-centered `LocalEnvironmentStatus` snapshot so app HUD code does not need to resample world state directly
   - local environment refresh reads cached region classification only; uncached atlas cells remain an app/jobs warmup concern
   - nearby changes may appear as immediate gameplay/environment feedback, while far-away seasonal changes may remain deferred until their chunks become interesting
+- simulation observer/event consumption
+  - `new-world-textmode` may read ECS-selected simulation scope and pending structured results to print diagnostics
+  - ECS should treat ecology events such as animal spawn, animal fight, carcass creation, grazing, and plant growth as gameplay-facing data that can later become real entity/component changes
+  - ECS must not require text output for those events; textmode formatting remains a binary/app adapter concern
 - moving entity render-facing state
   - gameplay-facing movement / yaw may stay continuous in ECS
   - render-facing direction for voxel creatures should quantize to 8 octants only when exporting render DTOs
@@ -144,6 +151,7 @@ EcsRuntime::run_post_update()
 EcsRuntime::run_fixed_update()
 EcsRuntime::sim_clock() -> SimClock
 EcsRuntime::active_sim_region() -> ActiveSimRegion
+EcsRuntime::active_chunk_observer_scope() -> ActiveChunkObserverScope
 EcsRuntime::enqueue_simulation_results(results)
 EcsRuntime::drain_pending_simulation_results() -> Vec<SimulationResult>
 
@@ -191,6 +199,7 @@ EcsRuntime::plan_chunk_lifecycle(
 8. inventory-open UI blocking affects gameplay interpretation inside ECS rather than changing renderer ownership
 9. ECS may decide which regions need eager environmental simulation, but world remains the source of truth for calendar and seasonal state
 10. app HUD code may read ECS-local environment snapshots, but those snapshots are derived views over world/simulation truth rather than a new owning layer
+11. textmode observer output must consume ECS/world/simulation state through structured boundaries rather than adding text-only gameplay state
 
 ### Submodules
 - mod.rs: public facade, re-export
@@ -217,6 +226,8 @@ EcsRuntime::plan_chunk_lifecycle(
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
 - interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
 - the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
+- fixed update now also derives a replaceable player-centered `3x3` `ActiveChunkObserverScope`; app uses it to build world-biome ecology inputs without making simulation own the accumulator or scope policy
 - time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries
 - the current frame slice now also refreshes one player-local environment snapshot after world-aware motion and job result application so minimap HUD status can read biome/terrain, date/time, weather, temperature, and humidity without giving `app` new world-query ownership
 - player-local environment refresh no longer forces region classification generation on the frame thread; it uses cached samples and waits for app-owned region resolve jobs to populate missing atlas cells
+- the planned `new-world-textmode` binary should reuse the same fixed-phase boundaries while printing one-second summaries for a `3x3` chunk window: cell biome, weather, surface state, ecology events, and world update records
