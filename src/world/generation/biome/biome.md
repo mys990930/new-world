@@ -186,18 +186,18 @@ Wetland는 macro/hydrology가 이미 습지성 role로 넘긴 cell이다. biome 
    - 이유: 실제 hot desert는 매우 건조하고 덥고 내륙성이 강하다. 관측 hydration p1이 약 `0.28`이므로
      `0.30`은 드문 극건조 조건이다.
 3. `DryShrubland`
-   - 기준: `ruggedness >= 0.10`, `hydration < 0.40`, `is_inland_dry_context(0.10)`
+   - 기준: `ruggedness >= 0.11`, `hydration < 0.40`, `is_inland_dry_context(0.10)`
    - 이유: 거칠고 건조한 구릉/사면은 연속 초원보다 관목지로 읽힌다. ruggedness는 전체 p95보다 높은
-     relief를 잡는다. 이번 steppe 축소에서는 `ruggedness >= 0.10`인 건조 cell을 열린 초원으로 두지 않고
-     관목지로 보낸다.
+     relief를 잡는다. 이번 중간 강도 조정에서는 `ruggedness >= 0.11`인 건조 cell을 열린 초원으로 두지
+     않고 관목지로 보낸다.
 4. `SemiDesert`
    - 기준: `hydration < 0.36`, `effective_temperature >= 0.52`, `is_inland_dry_context(0.18)`
    - 이유: desert보다는 덜 극단적이지만 여전히 건조하고 따뜻한 내륙/비해안 지형이다.
 5. `Steppe`
-   - 기준: `effective_temperature <= 0.52`, `hydration < 0.36`, `is_inland_dry_context(0.30)`,
-     `ruggedness < 0.10`
+   - 기준: `effective_temperature <= 0.53`, `hydration < 0.38`, `is_inland_dry_context(0.27)`,
+     `ruggedness < 0.11`
    - 이유: steppe는 비교적 서늘하거나 온난한 대륙성 건조 초원이다. 내륙성, 실제 건조도, 낮은 relief를
-     더 강하게 요구해 연안 또는 약건조 grassland가 steppe로 과다 분류되지 않게 한다.
+     중간 강도로 요구해 연안 또는 약건조 grassland가 steppe로 과다 분류되지 않게 한다.
 6. `MediterraneanShrubland`
    - 기준: `0.50 <= effective_temperature <= 0.64`, `0.36 <= hydration <= 0.48`,
      `coastness >= 0.18`, `continentality <= 0.30`, `ruggedness < 0.12`
@@ -246,8 +246,8 @@ Alpine branch:
    - 기준: `elevation >= 0.68`, `effective_temperature <= 0.28`
    - 이유: 매우 높고 충분히 차가운 산지는 빙설로 둔다.
 2. `PolarBarrens` 또는 `Tundra`
-   - 기준: `effective_temperature <= 0.30`, 또는
-     `ruggedness >= 0.32 && effective_temperature <= 0.38 && hydration < 0.38`
+   - 기준: `effective_temperature <= 0.31`, 또는
+     `ruggedness >= 0.30 && effective_temperature <= 0.39 && hydration < 0.39`
    - 세부: `hydration < 0.36`이면 `PolarBarrens`, 아니면 `Tundra`
    - 이유: 매우 차갑거나 바람에 깎인 거친 고산 건조지는 숲/초지가 아니라 한랭 황무지/툰드라다.
      다만 완화된 산지까지 tundra로 먹지 않도록, 덜 차갑거나 덜 거친 고산지는 `AlpineMeadow` 또는
@@ -268,18 +268,19 @@ Non-alpine cold land:
    - 기준: `effective_temperature <= 0.34`, `hydration < 0.36`
    - 이유: 차갑고 건조하면 숲이 아니라 한랭 황무지다.
 3. `Tundra`
-   - 기준: `effective_temperature <= 0.34`, 단 `hydration < 0.36`이면 `PolarBarrens`
-   - 이유: 숲이 성립하기 어려운 열린 한랭 지형이다. 별도의 `effective_temperature <= 0.36` fallback은
-     두지 않고 더 극단적인 저온 구간으로 통합해 약간 차가운 edge가 tundra로 넓어지지 않게 한다.
+   - 기준: `effective_temperature <= 0.34`에서는 `hydration < 0.36`이면 `PolarBarrens`, 아니면
+     `Tundra`; 추가로 `effective_temperature <= 0.35`는 `Tundra` fallback
+   - 이유: 숲이 성립하기 어려운 열린 한랭 지형이다. 이전 `<= 0.36` fallback보다는 좁지만 강한 축소안의
+     `<= 0.34` 통합보다는 완화해, `0.35` 안쪽의 한랭 습윤 edge는 tundra로 허용한다.
 4. `BorealForest`
-   - 기준: `effective_temperature <= 0.42`, `hydration >= 0.52`, `continentality >= 0.16`,
-     `mountainness < 0.30`, `coastness <= 0.55`
+   - 기준: `effective_temperature <= 0.43`, `hydration >= 0.50`, `continentality >= 0.13`,
+     `mountainness < 0.32`, `coastness <= 0.65`
    - 이유: 차갑고 습한 것만으로 모든 edge를 타이가로 만들지 않는다. boreal forest는 더 선명한
-     내륙 냉습 저산지에 가깝게 제한하고, 해양성 cold forest나 산악성이 큰 cell은 각각 temperate forest
-     또는 alpine/subalpine 쪽 판정에 맡긴다.
+     내륙 냉습 저산지에 가깝게 제한하되, 강한 축소안보다 완화된 coast 제한을 남겨 해양성 cold forest의
+     과다 흡수만 줄인다. 산악성이 큰 cell은 alpine/subalpine 쪽 판정에 맡긴다.
 5. `Steppe`
-   - 기준: `effective_temperature <= 0.42`, `hydration < 0.36`, `continentality >= 0.26`,
-     `coastness <= 0.35`, `ruggedness < 0.10`
+   - 기준: `effective_temperature <= 0.43`, `hydration < 0.38`, `continentality >= 0.22`,
+     `coastness <= 0.40`, `ruggedness < 0.11`
    - 이유: 차갑고 건조하더라도 대륙성의 열린 초원 조건이 있어야 steppe다. 건조도가 약하거나 해양성
      영향이 크면 `TemperateGrassland` 같은 온대 열린 지형으로 둔다. 같은 cold/dry/inland 조건이라도
      relief가 거칠면 열린 초원보다 건조 구릉/사면인 `DryShrubland`가 더 맞다.
@@ -287,12 +288,12 @@ Non-alpine cold land:
 분포 조정 메모:
 
 - `BorealForest`, `Tundra`, `Steppe`가 과다해 보일 때 가장 먼저 볼 조건은 cold branch의
-  `BorealForest <= 0.42`, `Tundra <= 0.34`, cold `Steppe <= 0.42`, dry branch의 `Steppe <= 0.52`와
-  `hydration < 0.36`, `is_inland_dry_context(0.30)`, `ruggedness < 0.10`이다.
-- 이번 조정은 세 biome의 적극 축소다. `BorealForest`는 inland/cold/humid/low-mountain에 더해 coast
-  영향을 낮게 요구하고, `Tundra`는 별도 `<= 0.36` 완충 fallback 없이 더 극단적인 저온 또는 거친 고산
-  건조지로 제한하며, `Steppe`는 dry + inland + smooth 조건이 강하게 확인된 열린 대륙성 초원으로만
-  남긴다.
+  `BorealForest <= 0.43`, `Tundra <= 0.35`, cold `Steppe <= 0.43`, dry branch의 `Steppe <= 0.53`와
+  `hydration < 0.38`, `is_inland_dry_context(0.27)`, `ruggedness < 0.11`이다.
+- 이번 조정은 직전 완화안과 강한 축소안 사이의 중간 강도 조정이다. `BorealForest`는
+  inland/cold/humid/low-mountain에 더해 느슨한 coast 제한을 남기고, `Tundra`는 `<= 0.35` fallback으로
+  일부 한랭 edge를 되돌리며, `Steppe`는 dry + inland + smooth 조건을 유지하되 강한 축소안보다 약간
+  넓힌다.
 - 빠진 경계 cell은 의도적으로 `TemperateMixedForest`, `TemperateBroadleafForest`,
   `TemperateGrassland`, `AlpineMeadow`, `SubalpineWoodland` 같은 완화된 fallback으로 흘러간다.
 
