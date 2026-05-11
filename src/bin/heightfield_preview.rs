@@ -38,8 +38,8 @@ const DEFAULT_BLOCK_LINES: bool = true;
 const TOP_FACE_OUTLINE: [u8; 4] = [5, 9, 12, 96];
 const SIDE_FACE_OUTLINE: [u8; 4] = [2, 5, 7, 88];
 const SIDE_FACE_STEP_LINE: [u8; 4] = [8, 13, 15, 64];
-const PLAYER_CUBE_WIDTH_BLOCKS: f32 = 2.0;
-const PLAYER_CUBE_DEPTH_BLOCKS: f32 = 2.0;
+const PLAYER_CUBE_WIDTH_BLOCKS: f32 = 1.0;
+const PLAYER_CUBE_DEPTH_BLOCKS: f32 = 1.0;
 const PLAYER_CUBE_HEIGHT_BLOCKS: f32 = 4.0;
 const PLAYER_CUBE_TOP_COLOR: [u8; 4] = [96, 255, 68, 242];
 const PLAYER_CUBE_SIDE_A_COLOR: [u8; 4] = [38, 238, 112, 232];
@@ -2990,7 +2990,7 @@ mod tests {
     }
 
     #[test]
-    fn player_cube_uses_two_by_two_by_four_block_dimensions() {
+    fn player_cube_uses_one_by_one_by_four_block_dimensions() {
         let tile = two_by_two_heightfield_tile();
         let window = PreviewWindow {
             center_x: 32.0,
@@ -3002,11 +3002,11 @@ mod tests {
         };
         let cube = PlayerDiagnosticCube::for_tile(&tile, window).expect("player cube");
 
-        assert_eq!(PLAYER_CUBE_WIDTH_BLOCKS, 2.0);
-        assert_eq!(PLAYER_CUBE_DEPTH_BLOCKS, 2.0);
+        assert_eq!(PLAYER_CUBE_WIDTH_BLOCKS, 1.0);
+        assert_eq!(PLAYER_CUBE_DEPTH_BLOCKS, 1.0);
         assert_eq!(PLAYER_CUBE_HEIGHT_BLOCKS, 4.0);
-        assert!((cube.max_grid_x - cube.min_grid_x - 2.0 / 32.0).abs() < 0.001);
-        assert!((cube.max_grid_z - cube.min_grid_z - 2.0 / 32.0).abs() < 0.001);
+        assert!((cube.max_grid_x - cube.min_grid_x - 1.0 / 32.0).abs() < 0.001);
+        assert!((cube.max_grid_z - cube.min_grid_z - 1.0 / 32.0).abs() < 0.001);
         assert_eq!(cube.top_y() - cube.bottom_y, 4.0);
     }
 

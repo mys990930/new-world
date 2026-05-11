@@ -410,7 +410,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   chunk-radius 모드의 columns-per-chunk도 함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
   line이 표시된다는 것을 기록해야 한다.
 - overlay와 metadata/stdout은 중앙 player diagnostic cube를 기록한다. 이 큐브는 final gameplay
-  entity가 아니라 heightfield preview scale marker이며, world/block 기준 `2 x 2 x 4` block 크기,
+  entity가 아니라 heightfield preview scale marker이며, world/block 기준 `1 x 1 x 4` block 크기,
   중앙 world position, bottom/top `y`, sampled column count를 표시해야 한다.
 - legend/metadata overlay는 출력 해상도에 비례해 커져야 하며, 기본 metadata panel은 화면 높이의 약
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
@@ -450,7 +450,7 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
 - player diagnostic cube는 terrain diagnostic ramp와 명확히 구분되는 형광색으로 그린다. 큐브 footprint는
-  preview footprint 중앙의 world/block 기준 `2 x 2` block이고 높이는 `4` block이다. 바닥은 해당
+  preview footprint 중앙의 world/block 기준 `1 x 1` block이고 높이는 `4` block이다. 바닥은 해당
   footprint와 가장 가까운 heightfield column/columns의 `surface_y` 최댓값에 맞춰 지형 블럭 위에
   놓이며, 지형 안에 묻히거나 공중에 떠 있으면 회귀다.
 - default renderer is a CPU 2D isometric column renderer, not a tunable 3D orthographic camera. It
