@@ -80,6 +80,7 @@
 - `WorldCalendar`
 - `AtlasClimateRuntimeState`
 - `LocalWeatherState`
+- `ChunkWeatherKind`, `ChunkWeatherState`, `ChunkWeatherUpdate`, `WeatherApplyResult`
 - `DeferredSeasonPatch`
 - `CreatedWorldManifest`, `CreatedWorldStackSummary`, `CreatedWorldSource`
 - `CreateWorldProgress`
@@ -138,6 +139,9 @@ WorldCore::loaded_chunk_bounds(&self) -> Option<(ChunkCoord, ChunkCoord)>
 WorldCore::calendar(&self) -> &WorldCalendar
 WorldCore::climate_state(coord: AtlasCoord) -> AtlasClimateRuntimeState
 WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::chunk_weather(coord: ChunkCoord) -> Option<ChunkWeatherState>
+WorldCore::set_chunk_weather(coord: ChunkCoord, state: ChunkWeatherState) -> WeatherApplyResult
+WorldCore::apply_chunk_weather_update(update: ChunkWeatherUpdate) -> WeatherApplyResult
 WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
 WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
 WorldCore::resolve_region_class_area(area: AtlasArea) -> RegionClassMap
@@ -255,6 +259,7 @@ NOT:
 - `surface/resolve.md`: chunk-column surface-plan resolve contract
 - `tree.md`: deterministic per-climate tree voxel blueprint contract
 - `calendar.md`: world-owned calendar, runtime climate, and deferred seasonal patch contract
+- `weather.md`: chunk weather scalar state contract and query/apply bridge
 - `storage.md`: raw chunk byte serialization contract
 - `created.md`: created-world manifest / created-world runtime load contract
 - `meshing.md`: snapshot-to-CPU-mesh contract
@@ -269,6 +274,7 @@ NOT:
 - exposed-water height and top-face terrace contour hints are now produced in world meshing so renderer readability effects stay anchored to world-owned geometry meaning
 - planned time/season ownership also stays world-owned: calendar, active climate drift state, and deferred far-region seasonal patches should remain world truth even when only a small active region is simulated eagerly
 - the first runtime slice now implements that ownership directly in `WorldCore`: calendar/climate/weather state is no longer spec-only, and simulation feeds it through `CalendarAdvance`
+- chunk-scoped weather is stored separately from old atlas `LocalWeatherState` and exposed through `WorldCore::chunk_weather(...)`, `WorldCore::set_chunk_weather(...)`, and `WorldCore::apply_chunk_weather_update(...)`
 - atlas terrain realization is now hybrid scalar + structure-aware: atlas/world emit region-owned mountain-chain and initial drainage guides, and generation consumes them before final chunk hydrology
 - atlas cells now use a denser `128m / 8 x 8 chunk / 1 region` footprint so terrain identity, climate, and region classification change more often during normal play
 - local readability and casual multi-chunk terrain identity still also come from the meso layer, which refines atlas-owned regional identity rather than replacing it

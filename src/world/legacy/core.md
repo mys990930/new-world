@@ -34,6 +34,7 @@
 - `calendar`
 - atlas climate runtime map keyed by `AtlasCoord`
 - local weather map keyed by `AtlasCoord`
+- chunk weather scalar map keyed by `ChunkCoord`
 - deferred seasonal patch queue
 
 ## Inputs
@@ -65,6 +66,9 @@ WorldCore::meta(&self) -> &WorldMeta
 WorldCore::calendar(&self) -> &WorldCalendar
 WorldCore::climate_state(coord: AtlasCoord) -> AtlasClimateRuntimeState
 WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::chunk_weather(coord: ChunkCoord) -> Option<ChunkWeatherState>
+WorldCore::set_chunk_weather(coord: ChunkCoord, state: ChunkWeatherState) -> WeatherApplyResult
+WorldCore::apply_chunk_weather_update(update: ChunkWeatherUpdate) -> WeatherApplyResult
 WorldCore::deferred_season_patches(&self) -> &[DeferredSeasonPatch]
 
 WorldCore::has_chunk(coord: ChunkCoord) -> bool
@@ -109,3 +113,4 @@ WorldCore::raycast_blocks(ray: Ray3, max_distance: f32) -> Option<RaycastHit>
 - `loaded_chunk_bounds()` exists specifically to support app/ECS helpers such as safe spawn placement without leaking the raw chunk map
 - created-world loading still inserts chunks through `WorldCore::insert_chunk(...)`; `world` owns the in-memory source of truth regardless of how a chunk was acquired
 - the first time/weather slice now also stores world-owned calendar, per-atlas climate drift, local weather windows, and deferred seasonal patch state directly in `WorldCore`
+- chunk-scoped weather now has its own world-owned map and query/apply API beside old atlas-cell `LocalWeatherState`

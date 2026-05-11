@@ -93,6 +93,7 @@ storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 WorldCore::sample_cached_region_class_atlas(coord: AtlasCoord) -> Option<RegionClassSample>
 WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
 WorldCore::chunk_weather(coord: ChunkCoord) -> Option<ChunkWeatherState>
+WorldCore::set_chunk_weather(coord: ChunkCoord, state: ChunkWeatherState) -> WeatherApplyResult
 WorldCore::apply_chunk_weather_update(update: ChunkWeatherUpdate) -> WeatherApplyResult
 WorldCore::chunk_surface_condition(coord: ChunkCoord) -> SurfaceCondition
 WorldCore::set_chunk_surface_condition(coord: ChunkCoord, condition: SurfaceCondition) -> Option<SurfaceCondition>
@@ -185,6 +186,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/preview/preview.md`: stage별 topdown preview binary 계약
 - `generation/pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
 - `legacy/legacy.md`: 이전 world 구현 보존과 compatibility bridge
+- `legacy/weather.md`: chunk weather scalar state compatibility contract
 - `legacy/surface/condition.md`: textmode/renderer/gameplay consumers가 읽는 surface condition 관찰 계약
 - `../simulation/weather.md`: chunk weather scalar state, biome ranges, seasonal coefficients, thresholds, and renderer contract
 

@@ -19,6 +19,7 @@ use super::registry::BlockRegistry;
 use super::surface::{
     SurfaceCondition, SurfaceConditionObservation, SurfaceConditionScope, atlas_coord_for_chunk,
 };
+use super::weather::{ChunkWeatherState, ChunkWeatherUpdate, WeatherApplyResult};
 
 pub struct WorldCore {
     meta: WorldMeta,
@@ -27,6 +28,7 @@ pub struct WorldCore {
     calendar: WorldCalendar,
     climate_runtime: HashMap<AtlasCoord, AtlasClimateRuntimeState>,
     local_weather: HashMap<AtlasCoord, LocalWeatherState>,
+    chunk_weather: HashMap<ChunkCoord, ChunkWeatherState>,
     chunk_surface_conditions: HashMap<ChunkCoord, SurfaceCondition>,
     deferred_season_patches: Vec<DeferredSeasonPatch>,
     region_class_cache: RwLock<HashMap<AtlasCoord, RegionClassSample>>,
@@ -41,6 +43,7 @@ impl WorldCore {
             calendar: WorldCalendar::default(),
             climate_runtime: HashMap::new(),
             local_weather: HashMap::new(),
+            chunk_weather: HashMap::new(),
             chunk_surface_conditions: HashMap::new(),
             deferred_season_patches: Vec::new(),
             region_class_cache: RwLock::new(HashMap::new()),
@@ -76,6 +79,30 @@ impl WorldCore {
 
     pub fn local_weather(&self, coord: AtlasCoord) -> Option<LocalWeatherState> {
         self.local_weather.get(&coord).copied()
+    }
+
+    pub fn chunk_weather(&self, coord: ChunkCoord) -> Option<ChunkWeatherState> {
+        self.chunk_weather.get(&coord).copied()
+    }
+
+    pub fn set_chunk_weather(
+        &mut self,
+        coord: ChunkCoord,
+        state: ChunkWeatherState,
+    ) -> WeatherApplyResult {
+        self.apply_chunk_weather_update(ChunkWeatherUpdate { coord, state })
+    }
+
+    pub fn apply_chunk_weather_update(&mut self, update: ChunkWeatherUpdate) -> WeatherApplyResult {
+        let current = update.state.clamped();
+        let previous = self.chunk_weather.insert(update.coord, current);
+
+        WeatherApplyResult {
+            coord: update.coord,
+            previous,
+            current,
+            changed: previous != Some(current),
+        }
     }
 
     pub fn chunk_surface_condition(&self, coord: ChunkCoord) -> SurfaceCondition {
@@ -552,6 +579,74 @@ mod tests {
         assert_eq!(result.weather_changed_cells, vec![coord]);
         assert_eq!(result.deferred_patch_count, 1);
         assert_eq!(world.deferred_season_patches().len(), 1);
+    }
+
+    #[test]
+    fn chunk_weather_update_is_world_owned_and_queryable_by_chunk() {
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
+        let coord = ChunkCoord(2, 0, -1);
+        let state = ChunkWeatherState {
+            temperature: 0.2,
+            moisture: 0.7,
+            cloud: 0.8,
+            rain: 0.45,
+            kind: super::super::weather::ChunkWeatherKind::Snow,
+            updated_at_tick: 120,
+        };
+
+        let result = world.apply_chunk_weather_update(ChunkWeatherUpdate { coord, state });
+
+        assert_eq!(result.coord, coord);
+        assert_eq!(result.previous, None);
+        assert!(result.changed);
+        assert_eq!(world.chunk_weather(coord), Some(state));
+    }
+
+    #[test]
+    fn chunk_weather_update_replaces_previous_state_and_reports_noop() {
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
+        let coord = ChunkCoord(0, 0, 0);
+        let state = ChunkWeatherState {
+            temperature: 0.8,
+            moisture: 0.2,
+            cloud: 0.3,
+            rain: 0.0,
+            kind: super::super::weather::ChunkWeatherKind::Clear,
+            updated_at_tick: 60,
+        };
+
+        let first = world.set_chunk_weather(coord, state);
+        let second = world.set_chunk_weather(coord, state);
+
+        assert!(first.changed);
+        assert!(!second.changed);
+        assert_eq!(second.previous, Some(state));
+        assert_eq!(second.current, state);
+        assert_eq!(world.chunk_weather(coord), Some(state));
+    }
+
+    #[test]
+    fn chunk_weather_scalars_are_clamped_on_apply() {
+        let mut world = WorldCore::new(WorldMeta::default(), test_registry());
+        let coord = ChunkCoord(-1, 0, 4);
+
+        let result = world.set_chunk_weather(
+            coord,
+            ChunkWeatherState {
+                temperature: -0.5,
+                moisture: 1.2,
+                cloud: 2.0,
+                rain: -1.0,
+                kind: super::super::weather::ChunkWeatherKind::Storm,
+                updated_at_tick: 10,
+            },
+        );
+
+        assert_eq!(result.current.temperature, 0.0);
+        assert_eq!(result.current.moisture, 1.0);
+        assert_eq!(result.current.cloud, 1.0);
+        assert_eq!(result.current.rain, 0.0);
+        assert_eq!(world.chunk_weather(coord), Some(result.current));
     }
 
     #[test]

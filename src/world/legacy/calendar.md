@@ -38,6 +38,7 @@
 - deterministic local weather outcome such as clear, rain, snow, storm
 - start/end window or current phase
 - source atlas cell / climate context
+- compatibility state for old atlas weather consumers until chunk-scoped weather replaces them
 
 ## Inputs
 
@@ -72,6 +73,7 @@ WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResu
 ## Related Modules
 
 - `world.md`
+- `weather.md`
 - `surface/seasonal.md`
 - `../simulation/time.md`
 
@@ -81,3 +83,4 @@ WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResu
 - nearby chunks may receive direct `WorldEdit` application, while distant chunks may receive deferred patches that are realized later
 - the current first slice stores runtime climate/weather state per atlas cell and appends deferred seasonal patches, but it does not yet mutate nearby realized blocks for seasonal visuals
 - the current default bootstrap calendar now starts at `11:00` on spring day `0` so daytime lighting and HUD state begin from a neutral midday-ish slice instead of early evening
+- chunk weather scalar state is documented in `weather.md`; calendar keeps only the old atlas weather bridge and date/season state

@@ -14,6 +14,7 @@ pub mod storage;
 pub mod surface;
 pub mod topdown;
 pub mod tree;
+pub mod weather;
 
 #[allow(unused_imports)]
 pub use atlas::{
@@ -133,3 +134,5 @@ pub use tree::{
     TreeBlockPalette, TreeBlueprint, TreeBounds, TreeGenRequest, TreeKind, TreePaletteError,
     TreePaletteKeys, TreeVoxel, TreeVoxelRole, default_palette_keys, generate_tree_blueprint,
 };
+#[allow(unused_imports)]
+pub use weather::{ChunkWeatherKind, ChunkWeatherState, ChunkWeatherUpdate, WeatherApplyResult};
