@@ -49,14 +49,14 @@
 - `SimulationResult`
 - `SimEvent`
 - `SimFollowupRequest`
-- ecology observer payloads are chunk-scoped structured events, not stored animal entities
+- ecology observer payloads are chunk-scoped structured events keyed by graph-first biome, not stored animal entities
 - surface observer payloads are aliases/references to `world::SurfaceCondition` rather than simulation-owned storage
 
 ### Use Cases
 
 - ecology step
   - compute growth, spread, and natural-state changes
-  - emit deterministic chunk-scoped ecology events such as animal spawn candidates, animal conflicts, carcass creation, grazing, and plant growth stage changes
+  - emit deterministic chunk-scoped ecology events such as biome-specific animal spawn candidates, animal conflicts, carcass creation, grazing, and plant growth stage changes
 - power step
   - compute power graph / signal propagation in active chunks
 - fluid step
@@ -147,6 +147,6 @@ NOT:
 - `SimulationResult` can now carry a world-owned `CalendarAdvance` contract plus generic `WorldEdit` / event / follow-up fields
 - `SimSurfaceCondition` is aligned to the world-owned `SurfaceCondition` contract so textmode output can later be replaced by renderer/gameplay consumers without changing rule meaning
 - the same `time` module now also exports read-only local climate interpretation helpers so ECS HUD can display biome-consistent Celsius / humidity values without inventing a separate app-only climate scale
-- ecology now has a first deterministic observer slice that emits chunk-scoped animal/plant events for active chunks, without storing final entities
+- ecology now has a deterministic observer slice that emits graph-biome-scoped animal/plant events for active chunks, without storing final entities
 - power, fluid, fire, and farming remain planned subsystem boundaries but are not implemented yet
 - the textmode observer slice should extend `SimEvent` first, then let app/binary-level code format one-second summaries from those structured events

@@ -24,6 +24,7 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 - `world` owns source-of-truth state and applies structured world updates.
 - `ecs` selects active simulation scope and receives gameplay/entity-facing events.
 - `new-world-textmode` formats structured state/events into text.
+- Cell biome output must use graph-first `GraphMacroMap.biomes`, matching `biome_cell_inspector`, not legacy `BiomeFamily`.
 - Keep all contracts replaceable by future non-text gameplay/rendering systems.
 
 ## Steps

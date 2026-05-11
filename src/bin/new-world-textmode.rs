@@ -16,9 +16,14 @@ use new_world::simulation::{
     SimulationConfig, SimulationCore, SimulationResult, TimeSimBundleInput, TimeSimCellInput,
 };
 use new_world::world::{
-    AtlasArea, AtlasCoord, BiomeFamily, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkData,
-    LocalWeatherKind, LocalWeatherState, SeasonalPhase, SurfaceCondition, SurfaceConditionKind,
-    WorldCalendar, WorldCore, WorldEdit, WorldMeta, atlas_coord_for_chunk,
+    AtlasArea, AtlasCoord, BlockRegistry, CHUNK_EDGE_I32, ChunkCoord, ChunkData, LocalWeatherKind,
+    LocalWeatherState, SeasonalPhase, SurfaceCondition, SurfaceConditionKind, WorldCalendar,
+    WorldCore, WorldEdit, WorldMeta, atlas_coord_for_chunk,
+    generation::{
+        GraphBiomeKind, HydrologyConfig, MacroMapConfig, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, WorldPlanePoint, apply_headwater_source_hydration_to_biomes,
+        generate_macro_map, generate_voronoi_graph_patch, solve_hydrology,
+    },
 };
 
 const DEFAULT_SEED: u64 = 42;
@@ -42,6 +47,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sim_config = SimulationConfig::with_fixed_ticks_per_second(config.ticks_per_second);
     let simulation = SimulationCore::new(sim_config);
     let tick_delta = Duration::from_secs_f64(1.0 / f64::from(config.ticks_per_second.max(1)));
+    let initial_chunks = ecs.active_chunk_observer_scope().chunks;
+    let graph_biomes = TextModeGraphBiomes::build(world.meta(), &initial_chunks);
 
     println!("new-world-textmode: press Ctrl+C to exit");
 
@@ -65,7 +72,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 atlas_area: active_region.area,
             };
             let input = SimInputBundle {
-                ecology: Some(build_ecology_input(&world, &active_chunks.chunks)),
+                ecology: Some(build_ecology_input(
+                    &world,
+                    &graph_biomes,
+                    &active_chunks.chunks,
+                )),
                 time: Some(build_time_input(
                     &world,
                     active_region.center_atlas,
@@ -88,6 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             config,
             world.calendar(),
             &world,
+            &graph_biomes,
             &active_chunks.chunks,
             &events,
             &world_updates,
@@ -175,6 +187,79 @@ impl ChunkUpdateLog {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextModeGraphBiomes {
+    chunks: HashMap<ChunkCoord, GraphBiomeKind>,
+}
+
+impl TextModeGraphBiomes {
+    fn build(meta: &WorldMeta, chunks: &[ChunkCoord]) -> Self {
+        let center = chunks
+            .get(chunks.len() / 2)
+            .copied()
+            .unwrap_or(ChunkCoord(0, 0, 0));
+        let center_point = chunk_center_point(center);
+        let graph_config = VoronoiGraphConfig::new(meta.seed, meta.generator_version);
+        let request = VoronoiGraphPatchRequest::new(
+            graph_config,
+            center_point.x.round() as i32,
+            center_point.z.round() as i32,
+        );
+        let patch = generate_voronoi_graph_patch(request);
+        let mut macro_map = generate_macro_map(
+            &patch,
+            MacroMapConfig::new(meta.seed, meta.generator_version),
+        );
+        let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+        apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
+
+        let chunks = chunks
+            .iter()
+            .copied()
+            .map(|coord| {
+                let point = chunk_center_point(coord);
+                let biome = macro_map
+                    .biomes
+                    .iter()
+                    .filter_map(|biome| {
+                        let site = patch.site(biome.site)?;
+                        Some((distance_squared(site.position, point), biome.biome))
+                    })
+                    .min_by(|left, right| {
+                        left.0
+                            .partial_cmp(&right.0)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(_, biome)| biome)
+                    .unwrap_or(GraphBiomeKind::TemperateGrassland);
+                (coord, biome)
+            })
+            .collect();
+
+        Self { chunks }
+    }
+
+    fn biome_for_chunk(&self, coord: ChunkCoord) -> GraphBiomeKind {
+        self.chunks
+            .get(&coord)
+            .copied()
+            .unwrap_or(GraphBiomeKind::TemperateGrassland)
+    }
+}
+
+fn chunk_center_point(coord: ChunkCoord) -> WorldPlanePoint {
+    WorldPlanePoint::new(
+        (coord.0 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2) as f32,
+        (coord.2 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2) as f32,
+    )
+}
+
+fn distance_squared(left: WorldPlanePoint, right: WorldPlanePoint) -> f32 {
+    let dx = left.x - right.x;
+    let dz = left.z - right.z;
+    dx * dx + dz * dz
+}
+
 fn spawn_textmode_player(ecs: &mut EcsRuntime, center_chunk: ChunkCoord) {
     let center_x = center_chunk.0 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2;
     let center_y = center_chunk.1 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2;
@@ -209,18 +294,19 @@ fn realize_active_chunks(
     }
 }
 
-fn build_ecology_input(world: &WorldCore, chunks: &[ChunkCoord]) -> EcologySimBundleInput {
+fn build_ecology_input(
+    world: &WorldCore,
+    graph_biomes: &TextModeGraphBiomes,
+    chunks: &[ChunkCoord],
+) -> EcologySimBundleInput {
     EcologySimBundleInput {
         world_seed: world.meta().seed,
         chunks: chunks
             .iter()
             .copied()
-            .map(|coord| {
-                let observation = world.observe_chunk_surface_condition(coord);
-                EcologySimChunkInput {
-                    coord,
-                    biome: observation.cell_biome,
-                }
+            .map(|coord| EcologySimChunkInput {
+                coord,
+                biome: graph_biomes.biome_for_chunk(coord),
             })
             .collect(),
     }
@@ -360,6 +446,7 @@ fn format_second_summary(
     config: TextModeConfig,
     calendar: &WorldCalendar,
     world: &WorldCore,
+    graph_biomes: &TextModeGraphBiomes,
     chunks: &[ChunkCoord],
     events: &[SimEvent],
     updates: &ChunkUpdateLog,
@@ -374,12 +461,19 @@ fn format_second_summary(
         format_calendar(*calendar)
     ));
     lines.push(String::new());
-    lines.extend(format_chunk_grid(world, chunks, events, updates));
+    lines.extend(format_chunk_grid(
+        world,
+        graph_biomes,
+        chunks,
+        events,
+        updates,
+    ));
     lines.join("\n")
 }
 
 fn format_chunk_grid(
     world: &WorldCore,
+    graph_biomes: &TextModeGraphBiomes,
     chunks: &[ChunkCoord],
     events: &[SimEvent],
     updates: &ChunkUpdateLog,
@@ -390,7 +484,7 @@ fn format_chunk_grid(
             let mut cells: Vec<Vec<String>> = row
                 .iter()
                 .copied()
-                .map(|coord| format_chunk_cell(world, coord, events, updates))
+                .map(|coord| format_chunk_cell(world, graph_biomes, coord, events, updates))
                 .collect();
             while cells.len() < 3 {
                 cells.push(Vec::new());
@@ -423,11 +517,13 @@ fn format_chunk_grid(
 
 fn format_chunk_cell(
     world: &WorldCore,
+    graph_biomes: &TextModeGraphBiomes,
     coord: ChunkCoord,
     events: &[SimEvent],
     updates: &ChunkUpdateLog,
 ) -> Vec<String> {
     let observation = world.observe_chunk_surface_condition(coord);
+    let biome = graph_biomes.biome_for_chunk(coord);
     let atlas = atlas_coord_for_chunk(coord);
     let weather = weather_for_chunk(world, coord);
     let ecology = join_or_none(ecology_events_for_chunk(events, coord));
@@ -439,7 +535,7 @@ fn format_chunk_cell(
             format!("({:+},{:+},{:+})", coord.0, coord.1, coord.2),
         ),
         format_cell_line("atlas", format!("({:+},{:+})", atlas.x, atlas.z)),
-        format_cell_line("biome", format_biome(observation.cell_biome)),
+        format_cell_line("biome", format_graph_biome(biome)),
         format_cell_line("weather", format_weather(weather)),
         format_cell_line("surface", format_surface(observation.condition)),
         format_cell_line("ecology", ecology),
@@ -542,7 +638,7 @@ fn format_season(season: SeasonalPhase) -> &'static str {
     }
 }
 
-fn format_biome(biome: BiomeFamily) -> String {
+fn format_graph_biome(biome: GraphBiomeKind) -> String {
     format!("{biome:?}")
 }
 
@@ -614,14 +710,28 @@ fn format_species(species: SimSpecies) -> &'static str {
         SimSpecies::LargeHerbivore => "large_herbivore",
         SimSpecies::SmallPredator => "small_predator",
         SimSpecies::LargePredator => "large_predator",
+        SimSpecies::Hare => "hare",
+        SimSpecies::Deer => "deer",
+        SimSpecies::Boar => "boar",
+        SimSpecies::Fox => "fox",
+        SimSpecies::Wolf => "wolf",
+        SimSpecies::Bear => "bear",
+        SimSpecies::WadingBird => "wading_bird",
+        SimSpecies::SmallFish => "small_fish",
     }
 }
 
 fn format_plant(plant: SimPlantKind) -> &'static str {
     match plant {
         SimPlantKind::Grass => "grass",
+        SimPlantKind::Reed => "reed",
         SimPlantKind::Shrub => "shrub",
+        SimPlantKind::BerryBush => "berry_bush",
         SimPlantKind::Tree => "tree",
+        SimPlantKind::Conifer => "conifer",
+        SimPlantKind::MangroveSapling => "mangrove_sapling",
+        SimPlantKind::Cactus => "cactus",
+        SimPlantKind::Moss => "moss",
         SimPlantKind::Crop => "crop",
     }
 }
@@ -714,19 +824,23 @@ mod tests {
         world.insert_chunk(coord, ChunkData::new_empty(coord));
         let events = vec![SimEvent::EcologyEventObserved {
             scope: SimSpatialScope::Chunk(coord),
-            biome: BiomeFamily::TemperateGrassland,
+            biome: GraphBiomeKind::TemperateGrassland,
             event: SimEcologyEvent::AnimalSpawned {
                 species: SimSpecies::SmallHerbivore,
             },
         }];
         let mut updates = ChunkUpdateLog::default();
         updates.push(coord, "realized_empty_chunk");
+        let graph_biomes = TextModeGraphBiomes {
+            chunks: HashMap::from([(coord, GraphBiomeKind::TemperateGrassland)]),
+        };
 
         let summary = format_second_summary(
             1,
             TextModeConfig::default_for_test(),
             world.calendar(),
             &world,
+            &graph_biomes,
             &[coord],
             &events,
             &updates,

@@ -24,7 +24,7 @@ Optional center flags:
 - Header time uses `YY-MM-DD HH:MM (season)`.
 - Chunk cells are drawn inside a box-drawing grid using the ECS `ActiveChunkObserverScope` `3x3` window.
 - Each chunk cell includes:
-  - cell biome from world observation
+  - cell biome sampled from graph-first `GraphMacroMap.biomes`, matching `biome_cell_inspector`
   - current weather from world runtime state
   - world-owned surface condition
   - multiple ecology events from structured `SimEvent`

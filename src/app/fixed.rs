@@ -4,8 +4,9 @@ use crate::simulation::{
     SimulationResult, TimeSimBundleInput, TimeSimCellInput,
 };
 use crate::world::{
-    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, CHUNK_EDGE_I32,
-    ChunkCoord, LocalWeatherState, RegionClassSample, WorldCalendar, WorldCore,
+    ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasClimateRuntimeState, AtlasCoord, BiomeFamily,
+    CHUNK_EDGE_I32, ChunkCoord, LocalWeatherState, RegionClassSample, WorldCalendar, WorldCore,
+    generation::GraphBiomeKind,
 };
 
 use super::GameApp;
@@ -195,10 +196,43 @@ fn ecology_chunk_inputs_from_world(
             let observation = world.observe_chunk_surface_condition(coord);
             EcologySimChunkInput {
                 coord,
-                biome: observation.cell_biome,
+                biome: graph_biome_for_runtime_compat(observation.cell_biome),
             }
         })
         .collect()
+}
+
+fn graph_biome_for_runtime_compat(biome: BiomeFamily) -> GraphBiomeKind {
+    match biome {
+        BiomeFamily::Oceanic => GraphBiomeKind::ShallowOcean,
+        BiomeFamily::Mangrove => GraphBiomeKind::Mangrove,
+        BiomeFamily::EstuarineCoast => GraphBiomeKind::EstuarineCoast,
+        BiomeFamily::LagoonCoast => GraphBiomeKind::LagoonCoast,
+        BiomeFamily::RockyCoast => GraphBiomeKind::RockyCoast,
+        BiomeFamily::SandyCoast => GraphBiomeKind::SandyCoast,
+        BiomeFamily::Marsh => GraphBiomeKind::Marsh,
+        BiomeFamily::Swamp => GraphBiomeKind::Swamp,
+        BiomeFamily::FloodedForest => GraphBiomeKind::FloodedForest,
+        BiomeFamily::Desert => GraphBiomeKind::Desert,
+        BiomeFamily::SemiDesert => GraphBiomeKind::SemiDesert,
+        BiomeFamily::Steppe => GraphBiomeKind::Steppe,
+        BiomeFamily::DryShrubland => GraphBiomeKind::DryShrubland,
+        BiomeFamily::MediterraneanShrubland => GraphBiomeKind::MediterraneanShrubland,
+        BiomeFamily::PolarIce => GraphBiomeKind::PolarIce,
+        BiomeFamily::PolarBarrens => GraphBiomeKind::PolarBarrens,
+        BiomeFamily::Tundra => GraphBiomeKind::Tundra,
+        BiomeFamily::SubalpineWoodland => GraphBiomeKind::SubalpineWoodland,
+        BiomeFamily::AlpineMeadow => GraphBiomeKind::AlpineMeadow,
+        BiomeFamily::BorealForest => GraphBiomeKind::BorealForest,
+        BiomeFamily::TropicalRainforest => GraphBiomeKind::TropicalRainforest,
+        BiomeFamily::MonsoonForest => GraphBiomeKind::MonsoonForest,
+        BiomeFamily::TropicalDryForest => GraphBiomeKind::TropicalDryForest,
+        BiomeFamily::Savanna => GraphBiomeKind::Savanna,
+        BiomeFamily::TemperateRainforest => GraphBiomeKind::TemperateRainforest,
+        BiomeFamily::TemperateMixedForest => GraphBiomeKind::TemperateMixedForest,
+        BiomeFamily::TemperateBroadleafForest => GraphBiomeKind::TemperateBroadleafForest,
+        BiomeFamily::TemperateGrassland => GraphBiomeKind::TemperateGrassland,
+    }
 }
 
 fn render_environment_from_world(
@@ -323,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn ecology_chunk_inputs_use_world_derived_cell_biome() {
+    fn ecology_chunk_inputs_use_runtime_compat_graph_biome() {
         let registry = Arc::new(BlockRegistry::load_default().expect("default registry loads"));
         let world = WorldCore::new(WorldMeta::new(7), registry);
         let chunks = vec![
@@ -339,7 +373,9 @@ mod tests {
             assert_eq!(input.coord, coord);
             assert_eq!(
                 input.biome,
-                world.observe_chunk_surface_condition(coord).cell_biome
+                graph_biome_for_runtime_compat(
+                    world.observe_chunk_surface_condition(coord).cell_biome
+                )
             );
         }
     }

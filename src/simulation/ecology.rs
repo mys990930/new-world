@@ -1,4 +1,4 @@
-use crate::world::{BiomeFamily, ChunkCoord};
+use crate::world::{ChunkCoord, generation::GraphBiomeKind};
 
 use super::{
     SimEcologyEvent, SimEvent, SimPlantGrowthStage, SimPlantKind, SimRegion, SimSpatialScope,
@@ -27,7 +27,7 @@ impl Default for EcologySimConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EcologySimChunkInput {
     pub coord: ChunkCoord,
-    pub biome: BiomeFamily,
+    pub biome: GraphBiomeKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +91,7 @@ fn ecology_events_for_chunk(
     world_seed: u64,
     ecology_window: u64,
     coord: ChunkCoord,
-    biome: BiomeFamily,
+    biome: GraphBiomeKind,
 ) -> Vec<SimEcologyEvent> {
     let roll = hash_u64(world_seed, ecology_window, coord, 0xEC01_0001);
     let event_count = 2 + (roll % 2) as usize;
@@ -129,65 +129,91 @@ fn ecology_events_for_chunk(
     events
 }
 
-fn primary_herbivore_for_biome(biome: BiomeFamily) -> SimSpecies {
+fn primary_herbivore_for_biome(biome: GraphBiomeKind) -> SimSpecies {
     match biome {
-        BiomeFamily::Savanna
-        | BiomeFamily::Steppe
-        | BiomeFamily::TemperateGrassland
-        | BiomeFamily::AlpineMeadow => SimSpecies::LargeHerbivore,
-        BiomeFamily::Desert
-        | BiomeFamily::SemiDesert
-        | BiomeFamily::DryShrubland
-        | BiomeFamily::MediterraneanShrubland
-        | BiomeFamily::Tundra
-        | BiomeFamily::PolarBarrens
-        | BiomeFamily::PolarIce
-        | BiomeFamily::Oceanic => SimSpecies::SmallHerbivore,
-        _ => SimSpecies::SmallHerbivore,
+        GraphBiomeKind::ShallowOcean | GraphBiomeKind::DeepOcean | GraphBiomeKind::Lake => {
+            SimSpecies::SmallFish
+        }
+        GraphBiomeKind::Marsh
+        | GraphBiomeKind::Swamp
+        | GraphBiomeKind::FloodedForest
+        | GraphBiomeKind::EstuarineCoast
+        | GraphBiomeKind::LagoonCoast
+        | GraphBiomeKind::Mangrove => SimSpecies::WadingBird,
+        GraphBiomeKind::Savanna | GraphBiomeKind::Steppe | GraphBiomeKind::TemperateGrassland => {
+            SimSpecies::Deer
+        }
+        GraphBiomeKind::AlpineMeadow | GraphBiomeKind::Tundra | GraphBiomeKind::PolarBarrens => {
+            SimSpecies::Hare
+        }
+        GraphBiomeKind::TemperateBroadleafForest
+        | GraphBiomeKind::TemperateMixedForest
+        | GraphBiomeKind::TemperateRainforest
+        | GraphBiomeKind::TropicalDryForest
+        | GraphBiomeKind::TropicalRainforest
+        | GraphBiomeKind::MonsoonForest => SimSpecies::Boar,
+        GraphBiomeKind::Desert
+        | GraphBiomeKind::SemiDesert
+        | GraphBiomeKind::DryShrubland
+        | GraphBiomeKind::MediterraneanShrubland
+        | GraphBiomeKind::SandyCoast
+        | GraphBiomeKind::RockyCoast
+        | GraphBiomeKind::PolarIce => SimSpecies::Hare,
+        GraphBiomeKind::BorealForest | GraphBiomeKind::SubalpineWoodland => SimSpecies::Deer,
     }
 }
 
-fn predator_for_biome(biome: BiomeFamily) -> SimSpecies {
+fn predator_for_biome(biome: GraphBiomeKind) -> SimSpecies {
     match biome {
-        BiomeFamily::Savanna
-        | BiomeFamily::Steppe
-        | BiomeFamily::TemperateGrassland
-        | BiomeFamily::BorealForest
-        | BiomeFamily::TemperateMixedForest
-        | BiomeFamily::TemperateRainforest
-        | BiomeFamily::TropicalRainforest
-        | BiomeFamily::MonsoonForest
-        | BiomeFamily::TropicalDryForest => SimSpecies::LargePredator,
-        _ => SimSpecies::SmallPredator,
+        GraphBiomeKind::ShallowOcean | GraphBiomeKind::DeepOcean | GraphBiomeKind::Lake => {
+            SimSpecies::SmallFish
+        }
+        GraphBiomeKind::Tundra
+        | GraphBiomeKind::PolarBarrens
+        | GraphBiomeKind::PolarIce
+        | GraphBiomeKind::BorealForest
+        | GraphBiomeKind::SubalpineWoodland => SimSpecies::Bear,
+        GraphBiomeKind::Savanna
+        | GraphBiomeKind::Steppe
+        | GraphBiomeKind::TemperateGrassland
+        | GraphBiomeKind::TemperateMixedForest
+        | GraphBiomeKind::TemperateRainforest
+        | GraphBiomeKind::TropicalDryForest => SimSpecies::Wolf,
+        GraphBiomeKind::TropicalRainforest | GraphBiomeKind::MonsoonForest => SimSpecies::Bear,
+        _ => SimSpecies::Fox,
     }
 }
 
-fn carcass_species_for_biome(biome: BiomeFamily) -> SimSpecies {
-    if matches!(
-        biome,
-        BiomeFamily::Savanna | BiomeFamily::Steppe | BiomeFamily::TemperateGrassland
-    ) {
-        SimSpecies::LargeHerbivore
-    } else {
-        SimSpecies::SmallHerbivore
-    }
+fn carcass_species_for_biome(biome: GraphBiomeKind) -> SimSpecies {
+    primary_herbivore_for_biome(biome)
 }
 
-fn forage_for_biome(biome: BiomeFamily) -> SimPlantKind {
+fn forage_for_biome(biome: GraphBiomeKind) -> SimPlantKind {
     match biome {
-        BiomeFamily::TemperateBroadleafForest
-        | BiomeFamily::TemperateMixedForest
-        | BiomeFamily::TemperateRainforest
-        | BiomeFamily::BorealForest
-        | BiomeFamily::TropicalDryForest
-        | BiomeFamily::TropicalRainforest
-        | BiomeFamily::MonsoonForest
-        | BiomeFamily::FloodedForest => SimPlantKind::Tree,
-        BiomeFamily::Desert
-        | BiomeFamily::SemiDesert
-        | BiomeFamily::DryShrubland
-        | BiomeFamily::MediterraneanShrubland
-        | BiomeFamily::Mangrove => SimPlantKind::Shrub,
+        GraphBiomeKind::ShallowOcean | GraphBiomeKind::DeepOcean | GraphBiomeKind::Lake => {
+            SimPlantKind::Reed
+        }
+        GraphBiomeKind::Marsh | GraphBiomeKind::Swamp | GraphBiomeKind::EstuarineCoast => {
+            SimPlantKind::Reed
+        }
+        GraphBiomeKind::Mangrove | GraphBiomeKind::LagoonCoast => SimPlantKind::MangroveSapling,
+        GraphBiomeKind::TemperateBroadleafForest
+        | GraphBiomeKind::TemperateMixedForest
+        | GraphBiomeKind::TemperateRainforest
+        | GraphBiomeKind::TropicalDryForest
+        | GraphBiomeKind::TropicalRainforest
+        | GraphBiomeKind::MonsoonForest
+        | GraphBiomeKind::FloodedForest => SimPlantKind::Tree,
+        GraphBiomeKind::BorealForest | GraphBiomeKind::SubalpineWoodland => SimPlantKind::Conifer,
+        GraphBiomeKind::Desert | GraphBiomeKind::SemiDesert => SimPlantKind::Cactus,
+        GraphBiomeKind::DryShrubland | GraphBiomeKind::MediterraneanShrubland => {
+            SimPlantKind::Shrub
+        }
+        GraphBiomeKind::Tundra | GraphBiomeKind::PolarBarrens | GraphBiomeKind::PolarIce => {
+            SimPlantKind::Moss
+        }
+        GraphBiomeKind::RockyCoast | GraphBiomeKind::SandyCoast => SimPlantKind::Shrub,
+        GraphBiomeKind::AlpineMeadow => SimPlantKind::BerryBush,
         _ => SimPlantKind::Grass,
     }
 }
@@ -248,15 +274,15 @@ mod tests {
         let chunks = vec![
             EcologySimChunkInput {
                 coord: ChunkCoord(0, 0, 0),
-                biome: BiomeFamily::TemperateGrassland,
+                biome: GraphBiomeKind::TemperateGrassland,
             },
             EcologySimChunkInput {
                 coord: ChunkCoord(1, 0, 0),
-                biome: BiomeFamily::TemperateMixedForest,
+                biome: GraphBiomeKind::TemperateMixedForest,
             },
             EcologySimChunkInput {
                 coord: ChunkCoord(0, 0, 1),
-                biome: BiomeFamily::Marsh,
+                biome: GraphBiomeKind::Swamp,
             },
         ];
 
@@ -270,7 +296,7 @@ mod tests {
     fn ecology_event_carries_chunk_scope_and_cell_biome() {
         let sim = EcologySim::new(EcologySimConfig::default());
         let coord = ChunkCoord(2, 0, -3);
-        let biome = BiomeFamily::TemperateGrassland;
+        let biome = GraphBiomeKind::TemperateGrassland;
 
         let result = sim.step(input(vec![EcologySimChunkInput { coord, biome }]));
 
@@ -293,7 +319,7 @@ mod tests {
 
         let result = sim.step(input(vec![EcologySimChunkInput {
             coord,
-            biome: BiomeFamily::TemperateGrassland,
+            biome: GraphBiomeKind::TemperateGrassland,
         }]));
 
         let event_count = result
@@ -319,7 +345,7 @@ mod tests {
             .flat_map(|z| {
                 (-2..=2).map(move |x| EcologySimChunkInput {
                     coord: ChunkCoord(x, 0, z),
-                    biome: BiomeFamily::TemperateGrassland,
+                    biome: GraphBiomeKind::TemperateGrassland,
                 })
             })
             .collect::<Vec<_>>();

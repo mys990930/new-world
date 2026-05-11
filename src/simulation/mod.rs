@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::world::{
     AtlasArea, AtlasCoord, BiomeFamily, CalendarAdvance, ChunkCoord, EditResult, LocalWeatherKind,
     LocalWeatherState, SurfaceCondition, SurfaceConditionKind, WorldEdit,
+    generation::GraphBiomeKind,
 };
 
 pub use ecology::{
@@ -141,7 +142,7 @@ pub enum SimEvent {
     },
     EcologyEventObserved {
         scope: SimSpatialScope,
-        biome: BiomeFamily,
+        biome: GraphBiomeKind,
         event: SimEcologyEvent,
     },
     WorldUpdateRequested {
@@ -195,13 +196,27 @@ pub enum SimSpecies {
     LargeHerbivore,
     SmallPredator,
     LargePredator,
+    Hare,
+    Deer,
+    Boar,
+    Fox,
+    Wolf,
+    Bear,
+    WadingBird,
+    SmallFish,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimPlantKind {
     Grass,
+    Reed,
     Shrub,
+    BerryBush,
     Tree,
+    Conifer,
+    MangroveSapling,
+    Cactus,
+    Moss,
     Crop,
 }
 

@@ -84,6 +84,7 @@
 - later에는 subsystem별 fixed rate 분리도 가능하다
 - 현재 구현은 fixed tick마다 ECS `SimClock`/`ActiveSimRegion`/`ActiveChunkObserverScope`를 갱신하고, `SimulationCore::step_all(...)`로 time simulation과 ecology observer simulation을 실행한다
 - time/weather cell input은 game-minute 경계에서만 만들어지며, region classification cache가 준비되지 않은 경우 calendar advance만 진행하고 local climate/weather update는 다음 cached tick으로 미룬다
-- ecology input은 ECS가 선택한 `3x3` chunk scope를 사용하되, 각 chunk의 `cell_biome`은 app-only label이 아니라 `WorldCore::observe_chunk_surface_condition(...)`에서 가져온 world-derived 값이다
+- ecology input은 ECS가 선택한 `3x3` chunk scope를 사용한다. 현재 app runtime은 graph biome cache가 아직 없으므로 `WorldCore::observe_chunk_surface_condition(...)`의 legacy biome을 `GraphBiomeKind`로 compatibility mapping한다.
+- `new-world-textmode`는 diagnostic binary라서 app runtime mapping 대신 graph-first `GraphMacroMap.biomes`를 직접 샘플한다.
 - renderer environment sync는 시간/날씨 분위기를 유지하되 scene 전체가 뿌옇게 씻기지 않도록 낮은 fog density와 약한 height falloff를 사용한다
 - `new-world-textmode` should reuse this fixed orchestration shape, aggregate fixed-tick structured events once per real second, and print each `3x3` chunk line with cell biome, weather, surface condition, ecology events, and world update records.
