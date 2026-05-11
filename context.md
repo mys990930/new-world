@@ -160,4 +160,5 @@
 현재 handoff brief:
 
 - `temp-worker-docs/new-world-textmode-plan.md`: `new-world-textmode` binary, textmode simulation observer, 3x3 chunk status summary, weather/surface/ecology/world-update event pipeline.
+- `temp-worker-docs/chunk-weather-plan.md`: chunk-scoped weather scalar state, biome/season/weather thresholds, textmode adapter, renderer bridge.
 

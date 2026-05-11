@@ -13,7 +13,7 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 - Print each loaded chunk as a cell inside a visible `3x3` box-drawing grid each second.
 - Per chunk line, include:
   - cell biome
-  - current weather
+  - current weather scalar state and derived kind, e.g. `weather : Cloudy temp=0.62 moist=0.44 cloud=0.71 rain=0.18`
   - surface state: wet, snow-covered, half-thawed snow, etc.
   - multiple ecology events: animal spawn, animal fight, carcass created, plant grazed, plant growth stage
   - world update records, if any update was applied or requested
@@ -57,8 +57,8 @@ The text output is an adapter only. Do not put presentation strings inside `simu
 6. Implement `src/bin/new-world-textmode.rs`.
    - Minimal context: run fixed ticks, apply structured results, and print one summary per real second.
    - Format time as `YY-MM-DD HH:MM (season)` using `WorldCalendar`.
-   - Format the `3x3` chunks from structured weather/surface/ecology/world-update data.
-   - References: `src/app/config.rs`, `src/app/fixed.rs`, `src/simulation/mod.rs`, `src/world/legacy/calendar.rs`.
+   - Format the `3x3` chunks from structured chunk weather scalar/surface/ecology/world-update data.
+   - References: `src/app/config.rs`, `src/app/fixed.rs`, `src/simulation/mod.rs`, `src/simulation/weather.md`, `src/world/legacy/calendar.rs`.
 
 7. Verify.
    - Run `cargo fmt`.

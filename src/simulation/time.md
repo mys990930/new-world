@@ -2,14 +2,15 @@
 
 ## Role
 
-- define fixed-tick time, calendar, season, climate-drift, and local-weather progression rules
+- define fixed-tick time, calendar, season, and climate boundary progression rules
+- provide hour/day boundaries used by chunk weather simulation
 
 ## Responsibilities
 
 - advance world calendar state on fixed tick boundaries
 - handle minute / hour / day rollover deterministically
 - update runtime atlas-cell temperature and humidity drift for active regions
-- derive deterministic or seeded-probabilistic local weather outcomes from calendar plus climate state
+- provide calendar, season, and hour-boundary inputs for chunk-scoped weather rules in `weather.md`
 - expose read-only helpers that interpret the same local climate signals into HUD-friendly Celsius and relative-humidity displays
 - derive seasonal/ecology progression such as bloom progress, leaf-color shift, snow accumulation, thaw, or bare-branch transition
 - decide whether effects become immediate nearby `WorldEdit`s or deferred seasonal patches for distant regions
@@ -20,6 +21,7 @@
 - raw input interpretation
 - chunk loading policy
 - renderer environment presentation
+- owning chunk weather scalar policy
 
 ## Inputs
 
@@ -32,7 +34,7 @@
 ## Outputs
 
 - calendar/climate advancement result
-- local weather state updates
+- hour-boundary signals and climate context consumed by weather simulation
 - direct `WorldEdit`s for nearby realized regions
 - deferred seasonal patch records for far-away regions
 - dirty chunk / remesh hints when visual surface state changes
@@ -65,10 +67,12 @@
 2. eager whole-world updates are not required; active simulation plus lazy catch-up is valid
 3. distant environmental changes may be stored as deferred patches instead of immediate chunk mutation
 4. weather and seasonal state should derive from world calendar plus climate context rather than from ad-hoc renderer-only logic
+5. chunk weather scalar policy is specified in `weather.md`; time only supplies deterministic temporal inputs
 
 ## Related Modules
 
 - `simulation.md`
+- `weather.md`
 - `../world/calendar.md`
 - `../world/surface/seasonal.md`
 - `../ecs/fixed.md`
@@ -76,7 +80,8 @@
 ## Current Implementation Notes
 
 - the current step advances `WorldCalendar.absolute_tick` every fixed tick
-- the current minute boundary updates per-atlas-cell climate drift and local weather windows
+- the current minute boundary updates per-atlas-cell climate drift and legacy local weather windows
+- future chunk weather should update on in-game hour boundaries using `weather.md`
 - the current season-change path emits deferred `SetSeasonalState(...)` patches rather than direct block edits
 - the current implementation is deterministic and tested, but it intentionally keeps nearby `WorldEdit` emission for later slices
 - HUD-facing temperature / humidity now deliberately reuse the same local climate signal that weather derivation reads:

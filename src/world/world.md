@@ -24,7 +24,7 @@
 - topdown column sampling과 진단용 preview 입력 제공
 - `WorldMeta` seed, world version, generator version, save format version 계약
 - deterministic procedural generation result를 `ChunkData`로 표현하는 계약
-- cell biome, runtime weather, surface condition, and world update observation data for diagnostics and later renderer/gameplay consumers
+- cell biome, chunk-scoped weather scalar state, surface condition, and world update observation data for diagnostics and later renderer/gameplay consumers
 - graph-first generator가 참조하는 world-owned data contract 유지
 - 기존 `world` 구현을 `legacy` 아래 보존하고, 새 generator가 대체될 때까지 runtime compatibility bridge 유지
 
@@ -59,6 +59,7 @@
 - `WorldEdit`, `EditResult`
 - `CreatedWorldManifest`, `CreatedWorldSource`, `CreateWorldConfig`
 - `WorldCalendar`, runtime climate/weather state
+- chunk weather scalar state: temperature, moisture, cloud, rain, derived weather kind, and update tick
 - cell biome / region classification cache used by HUD, minimap, and textmode observers
 - chunk or cell surface condition state such as wet, snow-covered, and half-thawed snow
 - structured world update records when simulation/apply paths request or apply changes
@@ -91,6 +92,8 @@ storage::load_chunk(bytes: &[u8]) -> Result<ChunkData, StorageError>
 storage::save_chunk(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, StorageError>
 WorldCore::sample_cached_region_class_atlas(coord: AtlasCoord) -> Option<RegionClassSample>
 WorldCore::local_weather(coord: AtlasCoord) -> Option<LocalWeatherState>
+WorldCore::chunk_weather(coord: ChunkCoord) -> Option<ChunkWeatherState>
+WorldCore::apply_chunk_weather_update(update: ChunkWeatherUpdate) -> WeatherApplyResult
 WorldCore::chunk_surface_condition(coord: ChunkCoord) -> SurfaceCondition
 WorldCore::set_chunk_surface_condition(coord: ChunkCoord, condition: SurfaceCondition) -> Option<SurfaceCondition>
 WorldCore::observe_chunk_surface_condition(coord: ChunkCoord) -> SurfaceConditionObservation
@@ -159,6 +162,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
    generation cache를 읽어야 한다.
 10. textmode observer data must be world-readable structured state, not console-only strings.
 11. cell biome labels used by diagnostics must derive from world-owned region/biome classification, not from app-side ad-hoc names.
+12. chunk weather scalar state is world-owned storage; simulation computes updates and renderer/textmode consume the same values.
 
 ---
 
@@ -182,6 +186,7 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
 - `generation/pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
 - `legacy/legacy.md`: 이전 world 구현 보존과 compatibility bridge
 - `legacy/surface/condition.md`: textmode/renderer/gameplay consumers가 읽는 surface condition 관찰 계약
+- `../simulation/weather.md`: chunk weather scalar state, biome ranges, seasonal coefficients, thresholds, and renderer contract
 
 ---
 
@@ -206,4 +211,5 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   slice를 제공한다. meso feature와 Perlin micro relief는 아직 `0` stub이다.
 - 아직 구현되지 않은 것: Perlin micro relief 실제 합성, final surface/material resolve, voxel fill 연결.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.
-- planned `new-world-textmode` support should expose a structured per-chunk observer view containing cell biome, weather, surface condition, ecology events, and world update records while keeping console formatting outside `world`.
+- planned `new-world-textmode` support should expose a structured per-chunk observer view containing cell biome, chunk weather scalar state, surface condition, ecology events, and world update records while keeping console formatting outside `world`.
+- old atlas `LocalWeatherState` remains a migration bridge until chunk-scoped weather state replaces weather consumers.
