@@ -1802,8 +1802,7 @@ fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
         HeightfieldTerrainKind::Coast => rgb8([138, 148, 118]),
         HeightfieldTerrainKind::Land => combined_terrain_ramp(t),
     };
-    let altitude =
-        (column.raw_surface_height_blocks / DEFAULT_HEIGHTFIELD_MAX_BLOCKS).clamp(-0.2, 0.6);
+    let altitude = (column.surface_height_blocks / DEFAULT_HEIGHTFIELD_MAX_BLOCKS).clamp(-0.2, 0.6);
     for channel in color.iter_mut().take(3) {
         *channel = (*channel * (0.86 + altitude * 0.20)).clamp(0.0, 1.0);
     }
@@ -1822,7 +1821,7 @@ fn water_color_raw(column: HeightfieldColumn) -> [f32; 4] {
 }
 
 fn combined_terrain_ramp(value: f32) -> [f32; 4] {
-    gradient_color_raw(
+    let c = gradient_color(
         value,
         &[
             (0.00, [45, 78, 102]),
@@ -1833,10 +1832,11 @@ fn combined_terrain_ramp(value: f32) -> [f32; 4] {
             (0.84, [168, 166, 151]),
             (1.00, [226, 228, 218]),
         ],
-    )
+    );
+    rgb8(c)
 }
 
-fn gradient_color_raw(value: f32, stops: &[(f32, [u8; 3])]) -> [f32; 4] {
+fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
     let value = value.clamp(0.0, 1.0);
     for pair in stops.windows(2) {
         let (left_t, left_color) = pair[0];
@@ -1848,20 +1848,19 @@ fn gradient_color_raw(value: f32, stops: &[(f32, [u8; 3])]) -> [f32; 4] {
                 (value - left_t) / (right_t - left_t)
             };
             return [
-                lerp_color_channel(left_color[0], right_color[0], local),
-                lerp_color_channel(left_color[1], right_color[1], local),
-                lerp_color_channel(left_color[2], right_color[2], local),
-                1.0,
+                lerp_channel(left_color[0], right_color[0], local),
+                lerp_channel(left_color[1], right_color[1], local),
+                lerp_channel(left_color[2], right_color[2], local),
             ];
         }
     }
-    stops
-        .last()
-        .map_or([0.0, 0.0, 0.0, 1.0], |(_, color)| rgb8(*color))
+    stops.last().map_or([0, 0, 0], |(_, color)| *color)
 }
 
-fn lerp_color_channel(a: u8, b: u8, t: f32) -> f32 {
-    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)) / 255.0
+fn lerp_channel(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0))
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 fn rgb8(color: [u8; 3]) -> [f32; 4] {
@@ -2614,22 +2613,6 @@ mod tests {
         assert_ne!(low, high);
         assert!(low[2] > low[0]);
         assert!(high[0] > low[0]);
-    }
-
-    #[test]
-    fn land_color_tint_does_not_follow_snapped_surface_steps() {
-        let mut lower = height_column(0.0, 0.0, 0.0, HeightfieldTerrainKind::Land);
-        lower.raw_surface_height_blocks = 64.25;
-        lower.combined_macro_height = 64.25 / DEFAULT_HEIGHTFIELD_MAX_BLOCKS;
-        let mut higher = lower;
-        higher.surface_height_blocks = 65.0;
-        higher.surface_y = 65;
-
-        assert_eq!(
-            terrain_color_rgba(lower),
-            terrain_color_rgba(higher),
-            "diagnostic land color should use continuous raw/combined height, not snapped surface_y"
-        );
     }
 
     #[test]

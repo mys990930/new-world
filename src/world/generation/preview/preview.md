@@ -448,10 +448,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   parameter를 반영하고, narrow bed hint는 water/surface/voxel 단계가 읽을 별도 정보로 보존한다.
   다만 river hint column에는 preliminary integer river water height를 만들고, 인접 river/standing-water
   surface와 한 block 이하의 step으로 천천히 내려오도록 clamping한다.
-- block color는 final material이 아니라 diagnostic terrain ramp다. land color는 snapped
-  `surface_y`가 아니라 continuous raw/combined height를 기준으로 tint해서 integer block step이
-  과한 green banding으로 읽히지 않게 한다. water/ocean은 muted blue, low land는 green-gray,
-  high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
+- block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
+  green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
 - player diagnostic cube는 terrain diagnostic ramp와 명확히 구분되는 형광색으로 그린다. 큐브 footprint는
   preview footprint 중앙의 world/block 기준 `1 x 1` block이고 높이는 `4` block이다. 바닥은 해당
   footprint와 가장 가까운 heightfield column/columns의 `surface_y` 최댓값에 맞춰 지형 블럭 위에

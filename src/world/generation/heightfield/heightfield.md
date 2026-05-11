@@ -238,9 +238,8 @@ macro field tile cache
 
 - 실제 `ChunkData` final fill이 아니다.
 - block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
-- land tint는 snapped `surface_y`가 아니라 continuous raw/combined height를 기준으로 하여 integer
-  geometry step이 연초록/진초록 색상 banding으로 과장되지 않게 한다. water/ocean은 muted blue,
-  low land는 green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열로 표시한다.
+- water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
+  gray/mauve 계열로 표시한다.
 - 기본 preview는 offscreen 3D camera가 아니라 2D isometric projection을 직접 사용한다.
 
 ```text
