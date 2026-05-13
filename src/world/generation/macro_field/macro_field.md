@@ -232,6 +232,9 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      Q/bed width/broad valley width에 따라 flow-smoothed visible realization curve를 사용한다. 큰 flow는
      전체 곡률이 완만해지고 넓고 깊은 bed hint를 만들며, 작은 flow는 canonical noisy wiggle과 좁고
      거친 bank noise를 더 강하게 보존한다.
+     `river_valley_strength`는 downstream water/river mask가 읽는 0..1 공간 profile이며, broad-valley
+     depth를 곱해 작은 값으로 압축하면 heightfield river bed carve가 threshold를 넘지 못해 사라지는
+     회귀다. 깊이 정보는 `river_bed_depth_hint`와 river plan morphology field로 따로 전달한다.
    - lower/trunk river의 sea-facing mouth endpoint는 inland segment join과 반대로 둥글고 넓게 퍼지는
      terminal fan을 가질 수 있다. 이 fan은 selected river topology를 바꾸지 않고 macro-field raster
      표현에서만 river valley와 bed hint를 부드럽게 확장한다.

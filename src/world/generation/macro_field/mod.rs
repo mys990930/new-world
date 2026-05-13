@@ -2370,25 +2370,18 @@ fn river_valley_strength_for_distance(
 ) -> f32 {
     let width = plan_broad_valley_radius_blocks(plan, configured_radius_blocks);
     let bed_radius = plan_flat_bed_radius_blocks(plan);
-    let depth = river_effective_valley_depth(plan);
     if !distance_blocks.is_finite() || distance_blocks >= width {
         return 0.0;
     }
     if distance_blocks <= bed_radius {
         let bed_t = (distance_blocks / bed_radius.max(f32::EPSILON)).clamp(0.0, 1.0);
-        return depth * river_bed_cross_section_factor(bed_t, plan);
+        return river_bed_cross_section_factor(bed_t, plan);
     }
     let shoulder_t =
         ((distance_blocks - bed_radius) / (width - bed_radius).max(f32::EPSILON)).clamp(0.0, 1.0);
     let shoulder = 1.0 - smoothstep01(shoulder_t);
     let shoulder_power = lerp(0.78, 0.46, smoothstep01(flow_hint_from_plan(plan)));
-    depth * river_bed_edge_factor(plan) * shoulder.powf(shoulder_power)
-}
-
-fn river_effective_valley_depth(plan: &RiverSegmentPlan) -> f32 {
-    let flow_t = smoothstep01(flow_hint_from_plan(plan));
-    let low_flow_scale = lerp(0.46, 1.0, flow_t);
-    ((plan.broad_valley_depth_blocks / 110.0) * low_flow_scale).clamp(0.01, 1.0)
+    river_bed_edge_factor(plan) * shoulder.powf(shoulder_power)
 }
 
 fn river_bed_cross_section_factor(bed_t: f32, plan: &RiverSegmentPlan) -> f32 {
