@@ -15,11 +15,12 @@ use new_world::world::generation::{
     DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
     DEFAULT_HEIGHTFIELD_NORMALIZED_MAX, DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
     DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
-    GraphRegionCoord, HeightfieldColumn, HeightfieldConfig, HeightfieldTerrainKind,
-    HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_heightfield_tile,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
-    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
+    GraphRegionCoord, HeightfieldColumn, HeightfieldConfig, HeightfieldPerlinConfig,
+    HeightfieldTerrainKind, HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, build_river_plan,
+    generate_heightfield_tile, generate_macro_field_tile, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology,
 };
 
 mod common;
@@ -29,7 +30,7 @@ const DEFAULT_IMAGE_HEIGHT: u32 = 720;
 const DEFAULT_WORLD_SPAN_BLOCKS: i32 = MACRO_FIELD_TILE_EDGE_BLOCKS;
 const DEFAULT_WINDOW_COLUMNS_X: u32 = MACRO_FIELD_TILE_EDGE_BLOCKS as u32;
 const DEFAULT_COLUMNS_PER_CHUNK: u32 = 32;
-const WATER_ALPHA: f32 = 0.72;
+const WATER_ALPHA: f32 = 0.42;
 const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
@@ -63,6 +64,7 @@ struct PreviewConfig {
     chunk_radius: Option<i32>,
     quarter_turns: u8,
     block_lines: bool,
+    perlin: bool,
     output: Option<PathBuf>,
 }
 
@@ -336,6 +338,9 @@ struct PreviewHeader {
     river_columns: usize,
     dry_basin_columns: usize,
     ridge_columns: usize,
+    perlin_enabled: bool,
+    perlin_amplitude_blocks: f32,
+    perlin_max_abs_blocks: f32,
     build_ms: u128,
     macro_field_ms: u128,
     heightfield_ms: u128,
@@ -464,7 +469,14 @@ impl PreviewHeader {
                 self.ridge_columns
             ),
             "meso_delta_blocks=0".to_string(),
-            "micro_relief_blocks=0".to_string(),
+            if self.perlin_enabled {
+                format!(
+                    "micro_relief_blocks=perlin_enabled_amplitude:{:.2}_max_abs:{:.2}",
+                    self.perlin_amplitude_blocks, self.perlin_max_abs_blocks
+                )
+            } else {
+                "micro_relief_blocks=0_perlin_disabled".to_string()
+            },
             contour_gap_metadata(
                 self.contour_step_blocks,
                 self.contour_min_gap_blocks,
@@ -486,7 +498,7 @@ impl PreviewHeader {
                 self.player_cube_sampled_columns
             ),
             "player_diagnostic_cube_meaning=heightfield_preview_scale_diagnostic_not_gameplay_entity".to_string(),
-            "water_policy=ocean_lake_visible_surface_y0_no_preview_bathymetry_river_integer_descent".to_string(),
+            "water_policy=terrain_bed_rendered_first_translucent_water_overlay_reveals_bathymetry".to_string(),
             format!(
                 "height_mapping=signed_combined_macro_height_{:.2}_to_0_to_{:.2}_maps_{:.0}_to_0_to_{:.0}_blocks",
                 DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
@@ -549,7 +561,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let macro_field_ms = macro_start.elapsed().as_millis();
 
     let heightfield_start = Instant::now();
-    let heightfield = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+    let heightfield_config = HeightfieldConfig {
+        perlin: if config.perlin {
+            HeightfieldPerlinConfig::preview_enabled(meta.seed, meta.generator_version)
+        } else {
+            HeightfieldPerlinConfig::disabled(meta.seed, meta.generator_version)
+        },
+        ..HeightfieldConfig::default()
+    };
+    let heightfield = generate_heightfield_tile(&macro_tile, heightfield_config);
     let heightfield_ms = heightfield_start.elapsed().as_millis();
     let player_cube = PlayerDiagnosticCube::for_tile(&heightfield, window)?;
 
@@ -646,6 +666,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         river_columns: heightfield.stats.river_hint_column_count,
         dry_basin_columns: heightfield.stats.dry_basin_column_count,
         ridge_columns: heightfield.stats.ridge_column_count,
+        perlin_enabled: heightfield.config.perlin.enabled,
+        perlin_amplitude_blocks: heightfield.config.perlin.amplitude_blocks,
+        perlin_max_abs_blocks: heightfield.config.perlin.max_abs_blocks,
         build_ms,
         macro_field_ms,
         heightfield_ms,
@@ -685,6 +708,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "block lines: {}",
         if config.block_lines { "on" } else { "off" }
+    );
+    println!(
+        "perlin micro relief: {}",
+        if heightfield.config.perlin.enabled {
+            "on"
+        } else {
+            "off"
+        }
     );
     if let Some(radius) = config.chunk_radius {
         println!(
@@ -880,7 +911,8 @@ fn build_macro_field_tile(
         sample_spacing,
     );
 
-    generate_macro_field_tile(patch, macro_map, hydrology, boundary, config)
+    let river_plan = build_river_plan(patch, macro_map, hydrology, Default::default());
+    generate_macro_field_tile(patch, macro_map, &river_plan, boundary, config)
 }
 
 fn chunk_range_for_window(window: PreviewWindow) -> (i32, i32, i32, i32) {
@@ -969,14 +1001,6 @@ impl PlayerDiagnosticCube {
             height_blocks: PLAYER_CUBE_HEIGHT_BLOCKS,
             sampled_columns,
         })
-    }
-
-    fn center_grid_x(self) -> f32 {
-        (self.min_grid_x + self.max_grid_x) * 0.5
-    }
-
-    fn center_grid_z(self) -> f32 {
-        (self.min_grid_z + self.max_grid_z) * 0.5
     }
 
     fn top_y(self) -> f32 {
@@ -1137,57 +1161,42 @@ fn render_heightfield_isometric(
 ) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
     let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
     let width = tile.width as usize;
-    let height = tile.height as usize;
-    let mut draw_order = (0..height)
-        .flat_map(|z| {
-            (0..width).map(move |x| {
-                let depth = plan.horizontal_depth_key(x as f32 + 0.5, z as f32 + 0.5, tile);
-                (depth, 0u8, IsoDrawItem::Column { x, z })
-            })
-        })
-        .collect::<Vec<_>>();
-    draw_order.push((
-        plan.horizontal_depth_key(
-            player_cube.center_grid_x(),
-            player_cube.center_grid_z(),
+    let mut terrain_order = sorted_column_draw_order(tile, plan);
+    for (_, x, z) in terrain_order.drain(..) {
+        let index = z * width + x;
+        draw_column_terrain_iso(
+            &mut image,
             tile,
-        ),
-        1u8,
-        IsoDrawItem::PlayerCube(player_cube),
-    ));
-    draw_order.sort_by(|a, b| {
-        a.0.total_cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.sort_z().cmp(&b.2.sort_z()))
-            .then_with(|| a.2.sort_x().cmp(&b.2.sort_x()))
-    });
-
-    for (_, _, item) in draw_order {
-        match item {
-            IsoDrawItem::Column { x, z } => {
-                let index = z * width + x;
-                draw_column_iso(
-                    &mut image,
-                    tile,
-                    plan,
-                    x,
-                    z,
-                    tile.columns[index],
-                    block_lines,
-                );
-            }
-            IsoDrawItem::PlayerCube(cube) => {
-                draw_player_diagnostic_cube(&mut image, tile, plan, cube, block_lines);
-            }
-        }
+            plan,
+            x,
+            z,
+            tile.columns[index],
+            block_lines,
+        );
     }
+
+    let water_order = sorted_column_draw_order(tile, plan);
+    for (_, x, z) in water_order {
+        let index = z * width + x;
+        draw_column_water_iso(
+            &mut image,
+            tile,
+            plan,
+            x,
+            z,
+            tile.columns[index],
+            block_lines,
+        );
+    }
+
+    draw_player_diagnostic_cube(&mut image, tile, plan, player_cube, block_lines);
+
     Ok((
         OffscreenRenderOutput {
             width: plan.width,
             height: plan.height,
             rgba: image.into_raw(),
-            draw_call_count: (tile.columns.len() * if block_lines { 7 } else { 3 }) as u32
-                + if block_lines { 8 } else { 3 },
+            draw_call_count: render_draw_call_count(tile, block_lines),
         },
         IsoRenderStats {
             vertical_px_per_block: plan.vertical_px_per_block,
@@ -1196,29 +1205,42 @@ fn render_heightfield_isometric(
     ))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum IsoDrawItem {
-    Column { x: usize, z: usize },
-    PlayerCube(PlayerDiagnosticCube),
+fn sorted_column_draw_order(
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+) -> Vec<(f32, usize, usize)> {
+    let width = tile.width as usize;
+    let height = tile.height as usize;
+    let mut draw_order = (0..height)
+        .flat_map(|z| {
+            (0..width).map(move |x| {
+                let depth = plan.horizontal_depth_key(x as f32 + 0.5, z as f32 + 0.5, tile);
+                (depth, x, z)
+            })
+        })
+        .collect::<Vec<_>>();
+    draw_order.sort_by(|a, b| {
+        a.0.total_cmp(&b.0)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    draw_order
 }
 
-impl IsoDrawItem {
-    fn sort_x(self) -> usize {
-        match self {
-            Self::Column { x, .. } => x,
-            Self::PlayerCube(_) => usize::MAX,
-        }
-    }
-
-    fn sort_z(self) -> usize {
-        match self {
-            Self::Column { z, .. } => z,
-            Self::PlayerCube(_) => usize::MAX,
-        }
-    }
+fn render_draw_call_count(tile: &HeightfieldTile, block_lines: bool) -> u32 {
+    let terrain_calls_per_column = if block_lines { 7 } else { 3 };
+    let water_calls_per_column = if block_lines { 5 } else { 3 };
+    let water_columns = tile
+        .columns
+        .iter()
+        .filter(|column| water_overlay_height(**column).is_some())
+        .count();
+    (tile.columns.len() * terrain_calls_per_column
+        + water_columns * water_calls_per_column
+        + if block_lines { 8 } else { 3 }) as u32
 }
 
-fn draw_column_iso(
+fn draw_column_terrain_iso(
     image: &mut RgbaImage,
     tile: &HeightfieldTile,
     plan: IsoRenderPlan,
@@ -1228,57 +1250,67 @@ fn draw_column_iso(
     block_lines: bool,
 ) {
     let surface = column.surface_height_blocks;
-    let visible_surface = visible_surface_height(column);
     let color = terrain_color_rgba(column);
     for side in visible_side_directions(plan.quarter_turns) {
-        let neighbor_height = neighbor_visible_surface(tile, x, z, side.dx, side.dz)
-            .unwrap_or(visible_surface - 12.0);
-        if visible_surface > neighbor_height + 0.75 {
+        let neighbor_height =
+            neighbor_terrain_surface(tile, x, z, side.dx, side.dz).unwrap_or(surface - 12.0);
+        if surface > neighbor_height + 0.75 {
             draw_side_face(
                 image,
                 tile,
                 plan,
                 side_edge(x, z, side.dx, side.dz),
                 neighbor_height,
-                visible_surface,
+                surface,
                 shade_rgba(color, side.shade),
                 block_lines,
             );
         }
     }
-    let top_surface = if matches!(
-        column.terrain_kind,
-        HeightfieldTerrainKind::Ocean | HeightfieldTerrainKind::Lake
-    ) {
-        visible_surface
-    } else {
-        surface
-    };
     draw_top_face(
         image,
         tile,
         plan,
         x,
         z,
-        top_surface,
+        surface,
         shade_rgba(color, 1.05),
         block_lines,
     );
+}
 
-    if let Some(water) = column.water_level_blocks {
-        if water >= surface {
-            draw_top_face(
+fn draw_column_water_iso(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    x: usize,
+    z: usize,
+    column: HeightfieldColumn,
+    block_lines: bool,
+) {
+    let Some(water) = water_overlay_height(column) else {
+        return;
+    };
+    let color = water_color_rgba(column);
+    for side in visible_side_directions(plan.quarter_turns) {
+        let neighbor_water = neighbor_water_surface(tile, x, z, side.dx, side.dz);
+        let lower_y = neighbor_water
+            .unwrap_or(column.surface_height_blocks)
+            .max(column.surface_height_blocks);
+        if water > lower_y + 0.01 {
+            draw_side_face(
                 image,
                 tile,
                 plan,
-                x,
-                z,
-                water + 0.10,
-                water_color_rgba(column),
+                side_edge(x, z, side.dx, side.dz),
+                lower_y,
+                water,
+                shade_rgba(color, side.shade),
                 block_lines,
             );
         }
     }
+    draw_top_face(image, tile, plan, x, z, water + 0.10, color, block_lines);
 }
 
 fn draw_player_diagnostic_cube(
@@ -1419,7 +1451,7 @@ fn visible_side_directions(quarter_turns: u8) -> [VisibleSide; 2] {
     [sides[0], sides[1]]
 }
 
-fn neighbor_visible_surface(
+fn neighbor_terrain_surface(
     tile: &HeightfieldTile,
     x: usize,
     z: usize,
@@ -1431,9 +1463,22 @@ fn neighbor_visible_surface(
     if nx >= tile.width as usize || nz >= tile.height as usize {
         return None;
     }
-    Some(visible_surface_height(
-        tile.columns[nz * tile.width as usize + nx],
-    ))
+    Some(tile.columns[nz * tile.width as usize + nx].surface_height_blocks)
+}
+
+fn neighbor_water_surface(
+    tile: &HeightfieldTile,
+    x: usize,
+    z: usize,
+    dx: isize,
+    dz: isize,
+) -> Option<f32> {
+    let nx = x.checked_add_signed(dx)?;
+    let nz = z.checked_add_signed(dz)?;
+    if nx >= tile.width as usize || nz >= tile.height as usize {
+        return None;
+    }
+    water_overlay_height(tile.columns[nz * tile.width as usize + nx])
 }
 
 fn side_edge(x: usize, z: usize, dx: isize, dz: isize) -> [f32; 4] {
@@ -1446,8 +1491,10 @@ fn side_edge(x: usize, z: usize, dx: isize, dz: isize) -> [f32; 4] {
     }
 }
 
-fn visible_surface_height(column: HeightfieldColumn) -> f32 {
-    column.visible_surface_height_blocks()
+fn water_overlay_height(column: HeightfieldColumn) -> Option<f32> {
+    column
+        .water_level_blocks
+        .filter(|water| *water >= column.surface_height_blocks)
 }
 
 fn draw_top_face(
@@ -2448,6 +2495,7 @@ where
         chunk_radius: None,
         quarter_turns: 0,
         block_lines: DEFAULT_BLOCK_LINES,
+        perlin: false,
         output: None,
     };
 
@@ -2487,6 +2535,9 @@ where
             }
             "--no-block-lines" => {
                 config.block_lines = false;
+            }
+            "--perlin" => {
+                config.perlin = true;
             }
             "--output" => {
                 config.output = Some(PathBuf::from(parse_required::<String>(
@@ -2529,7 +2580,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--perlin] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2685,6 +2736,7 @@ mod tests {
                 columns_z: Some(192),
                 chunk_radius: None,
                 block_lines: DEFAULT_BLOCK_LINES,
+                perlin: false,
                 output: None,
             };
             let meta = WorldMeta::new(seed);
@@ -2780,6 +2832,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         };
 
@@ -2807,6 +2860,7 @@ mod tests {
             chunk_radius: Some(4),
             quarter_turns: 2,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         };
 
@@ -2844,6 +2898,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         };
         let window = config.window();
@@ -2964,6 +3019,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_perlin_flag_defaults_off_and_can_enable_micro_relief() {
+        let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
+        let enabled = parse_args_from(["42", "0", "0", "--perlin"]).expect("parse args");
+
+        assert!(!default_config.perlin);
+        assert!(enabled.perlin);
+    }
+
+    #[test]
     fn explicit_column_count_sets_sample_spacing_without_scale_layer() {
         let config = PreviewConfig {
             seed: 42,
@@ -2981,6 +3045,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         }
         .window();
@@ -3016,6 +3081,7 @@ mod tests {
             chunk_radius: Some(2),
             quarter_turns: 0,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         };
         let window = config.window();
@@ -3058,6 +3124,7 @@ mod tests {
             chunk_radius: Some(1),
             quarter_turns: 0,
             block_lines: DEFAULT_BLOCK_LINES,
+            perlin: false,
             output: None,
         };
         let window = config.window();
@@ -3149,6 +3216,37 @@ mod tests {
         assert!(
             with_draws > without_draws,
             "block outline mode should be represented in render diagnostics"
+        );
+    }
+
+    #[test]
+    fn water_preview_uses_translucent_overlay_over_bed() {
+        let mut water_tile = two_by_two_heightfield_tile();
+        water_tile.columns[0].surface_height_blocks = -4.0;
+        water_tile.columns[0].surface_y = -4;
+        water_tile.columns[0].terrain_kind = HeightfieldTerrainKind::Ocean;
+        water_tile.columns[0].water_level_blocks = Some(0.0);
+        water_tile.columns[0].water_y = Some(0);
+
+        let mut dry_tile = water_tile.clone();
+        dry_tile.columns[0].water_level_blocks = None;
+        dry_tile.columns[0].water_y = None;
+
+        let plan = IsoRenderPlan::new(&water_tile, 320, 180, 0).expect("iso render plan");
+        let cube = center_test_player_cube(&water_tile);
+        let (water_image, _) =
+            render_heightfield_isometric(&water_tile, plan, false, cube).expect("render water");
+        let (dry_image, _) =
+            render_heightfield_isometric(&dry_tile, plan, false, cube).expect("render dry");
+
+        assert!(water_color_rgba(water_tile.columns[0])[3] < 255);
+        assert!(
+            water_image.draw_call_count > dry_image.draw_call_count,
+            "water columns should add a separate translucent overlay pass"
+        );
+        assert_ne!(
+            water_image.rgba, dry_image.rgba,
+            "water overlay should change pixels without replacing the terrain bed pass"
         );
     }
 
@@ -3334,12 +3432,17 @@ mod tests {
             } else {
                 0.0
             },
+            terrain_ruggedness: 0.0,
             river_valley_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
                 1.0
             } else {
                 0.0
             },
             river_flow_hint: 0.0,
+            river_bed_depth_blocks: 0.0,
+            river_bank_roughness_hint: 0.0,
+            river_gravel_hint: 0.0,
+            river_cutbank_hint: 0.0,
             meso_delta_blocks: 0.0,
             micro_relief_blocks: 0.0,
         }
