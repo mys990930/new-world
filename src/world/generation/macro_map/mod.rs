@@ -762,12 +762,9 @@ fn macro_field_sample_from_context(
     let distance_to_coast_blocks =
         raw_distance_to_coast_blocks.min(config.coast_width_blocks * 4.0);
     let coastness = (1.0 - distance_to_coast_blocks / config.coast_width_blocks).clamp(0.0, 1.0);
-    let inlandness = (distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
     let elevation_seed = fields.elevation_seed;
-    let highland_signal = elevation_seed * 0.50
-        + continentality.max(0.0) * 0.24
-        + inlandness * 0.14
-        + context.ruggedness * 0.12;
+    let highland_signal =
+        elevation_seed * 0.50 + continentality.max(0.0) * 0.24 + context.ruggedness * 0.12;
     let mountainness = if effective_land_owned {
         smoothstep(0.18, 0.78, highland_signal)
     } else {
@@ -785,18 +782,18 @@ fn macro_field_sample_from_context(
     let basinness = if effective_land_owned {
         clamp_unit(
             (1.0 - mountainness) * 0.34
-                + (1.0 - inlandness) * 0.22
                 + fields.hydration * 0.25
                 + (1.0 - elevation_seed.max(0.0)) * 0.19,
         )
     } else {
+        let inlandness =
+            (distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
         clamp_unit((-continentality).max(0.0) * 0.70 + inlandness * 0.30)
     };
     let raw_signed_macro_elevation = if effective_land_owned {
         0.035
             + ((elevation_seed + 1.0) * 0.5) * 0.62
             + continentality.max(0.0) * 0.14
-            + inlandness * 0.06
             + mountainness * 0.08
             + ridgeness * 0.04
             - basinness * 0.06
@@ -804,11 +801,12 @@ fn macro_field_sample_from_context(
         (-0.035 + continentality.min(0.0) * 0.32 + elevation_seed * 0.36 - basinness * 0.16)
             .min(-0.01)
     };
-    let signed_macro_elevation = if effective_land_owned {
-        coastal_land_elevation_ramp(
-            raw_signed_macro_elevation.max(0.01),
-            distance_to_coast_blocks,
-            config.coast_width_blocks,
+    let signed_macro_elevation = if effective_land_owned && coastness >= 0.55 {
+        coast_adjacent_land_elevation(
+            raw_signed_macro_elevation.max(0.0005),
+            context.ruggedness,
+            mountainness,
+            ridgeness,
         )
     } else {
         raw_signed_macro_elevation
@@ -895,16 +893,16 @@ fn graph_biome_water_role(
     }
 }
 
-fn coastal_land_elevation_ramp(
+fn coast_adjacent_land_elevation(
     raw_elevation: f32,
-    distance_to_coast_blocks: f32,
-    coast_width_blocks: f32,
+    ruggedness: f32,
+    mountainness: f32,
+    ridgeness: f32,
 ) -> f32 {
-    let recovery_distance = (coast_width_blocks * 4.0).max(f32::EPSILON);
-    let recovery = smoothstep(0.0, 1.0, distance_to_coast_blocks / recovery_distance);
-    let coastal_floor = 0.006;
+    let rocky_relief = clamp_unit(ruggedness * 0.55 + mountainness * 0.30 + ridgeness * 0.15);
+    let ceiling = 0.0005 + rocky_relief * 0.00075;
 
-    coastal_floor * (1.0 - recovery) + raw_elevation * recovery
+    raw_elevation.min(ceiling).max(0.0005)
 }
 
 fn corner_site_neighbors(
@@ -1578,7 +1576,7 @@ mod tests {
     }
 
     #[test]
-    fn coastal_land_elevation_starts_near_sea_level_and_recovers_inland() {
+    fn land_macro_elevation_does_not_apply_coast_distance_recovery_profile() {
         let config = test_macro_config(404);
         let base = SiteContext {
             base_fields: GraphBaseFields::new(0.82, 0.45, 0.20, 0.92),
@@ -1603,16 +1601,106 @@ mod tests {
         );
 
         assert!(
-            coast.signed_macro_elevation <= 0.02,
-            "coast-adjacent land should start near sea level, got {}",
+            coast.signed_macro_elevation <= 0.0015,
+            "coast-adjacent land owner should be waterline-compatible before macro_field blending, got {}",
             coast.signed_macro_elevation
         );
         assert!(
-            inland.signed_macro_elevation > 0.45,
-            "same highland context should recover inland elevation, got {}",
+            inland.signed_macro_elevation > coast.signed_macro_elevation,
+            "inland owner can keep high graph elevation without requiring a coast-distance recovery curve: coast={} inland={}",
+            coast.signed_macro_elevation,
             inland.signed_macro_elevation
         );
-        assert!(inland.signed_macro_elevation > coast.signed_macro_elevation);
+    }
+
+    #[test]
+    fn rugged_coast_owner_can_be_higher_than_plain_coast_without_full_highland_jump() {
+        let raw_elevation = 0.80;
+        let plain = coast_adjacent_land_elevation(raw_elevation, 0.05, 0.05, 0.05);
+        let rugged = coast_adjacent_land_elevation(raw_elevation, 0.95, 0.90, 0.90);
+
+        assert!(plain < rugged);
+        assert!(
+            rugged < raw_elevation * 0.25,
+            "coast owner should not jump straight to highland elevation: rugged={rugged} raw={raw_elevation}"
+        );
+        assert!(
+            rugged <= 0.0015,
+            "coast owner ceiling should stay near the waterline in normalized height: {rugged}"
+        );
+    }
+
+    #[test]
+    fn positive_land_elevation_is_not_long_range_coast_distance_curve() {
+        let config = test_macro_config(405);
+        let base = SiteContext {
+            base_fields: GraphBaseFields::new(0.70, 0.42, 0.24, 0.64),
+            ruggedness: 0.44,
+            feature_hash: 2,
+            is_land_owned: true,
+            is_island_owned: false,
+            is_tiny_local_minima_lake: false,
+            is_inland_water: false,
+            inland_water_surface: None,
+            component_id: 11,
+            graph_distance_to_coast: 0,
+            spacing_blocks: DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS,
+        };
+        let recovered = macro_field_sample_from_context(
+            SiteContext {
+                graph_distance_to_coast: 4,
+                ..base
+            },
+            config,
+        );
+        let far_inland = macro_field_sample_from_context(
+            SiteContext {
+                graph_distance_to_coast: 8,
+                ..base
+            },
+            config,
+        );
+
+        assert!(
+            (recovered.signed_macro_elevation - far_inland.signed_macro_elevation).abs()
+                <= 0.000_001,
+            "identical positive land context must not keep climbing with coast distance: recovered={} far={}",
+            recovered.signed_macro_elevation,
+            far_inland.signed_macro_elevation
+        );
+    }
+
+    #[test]
+    fn inland_lowland_can_be_lower_than_nearer_highland() {
+        let config = test_macro_config(406);
+        let highland = SiteContext {
+            base_fields: GraphBaseFields::new(0.70, 0.34, 0.34, 0.82),
+            ruggedness: 0.70,
+            feature_hash: 3,
+            is_land_owned: true,
+            is_island_owned: false,
+            is_tiny_local_minima_lake: false,
+            is_inland_water: false,
+            inland_water_surface: None,
+            component_id: 12,
+            graph_distance_to_coast: 2,
+            spacing_blocks: DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS,
+        };
+        let lowland = SiteContext {
+            base_fields: GraphBaseFields::new(0.70, 0.58, 0.30, -0.58),
+            ruggedness: 0.10,
+            graph_distance_to_coast: 8,
+            ..highland
+        };
+        let near_highland = macro_field_sample_from_context(highland, config);
+        let far_lowland = macro_field_sample_from_context(lowland, config);
+
+        assert!(
+            far_lowland.signed_macro_elevation < near_highland.signed_macro_elevation,
+            "coast distance must not force inland lowlands above nearer highlands: lowland={} highland={}",
+            far_lowland.signed_macro_elevation,
+            near_highland.signed_macro_elevation
+        );
     }
 
     #[test]
