@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeKind};
 use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
-use super::hydrology::GraphHydrologyGraph;
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
+use super::river_plan::RiverPlan;
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 256.0;
 const MACRO_FIELD_LAND_ELEVATION_SAMPLE_RADIUS_BLOCKS: f32 = 1536.0;
@@ -19,6 +19,8 @@ pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.02;
 pub const DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH: f32 = 0.82;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
+pub const DEFAULT_MACRO_FIELD_BOUNDARY_ROUGHNESS_BLOCKS: f32 =
+    DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MIN: f32 = -0.5;
 pub const MACRO_FIELD_CONTOUR_NORMALIZED_MAX: f32 = 1.0;
 pub const MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS: f32 = -1024.0;
@@ -108,6 +110,10 @@ pub struct MacroFieldSample {
     pub river_valley_strength: f32,
     pub river_distance_blocks: f32,
     pub river_flow_hint: f32,
+    pub river_bed_depth_hint: f32,
+    pub river_bank_roughness_hint: f32,
+    pub river_gravel_hint: f32,
+    pub river_cutbank_hint: f32,
     pub combined_macro_height: f32,
 }
 
@@ -274,7 +280,7 @@ pub fn extract_macro_field_contours(
 pub fn generate_macro_field_tile(
     patch: &VoronoiGraphPatch,
     macro_map: &GraphMacroMap,
-    hydrology: &GraphHydrologyGraph,
+    river_plan: &RiverPlan,
     boundary: &BoundaryCache,
     config: MacroFieldTileConfig,
 ) -> MacroFieldTile {
@@ -284,7 +290,7 @@ pub fn generate_macro_field_tile(
         "macro field requires complete canonical boundary coverage"
     );
 
-    let context = MacroFieldRasterContext::new(patch, macro_map, hydrology, boundary);
+    let context = MacroFieldRasterContext::new(patch, macro_map, river_plan, boundary);
     let influence_fields = rasterize_influence_fields(&context, config);
     let samples = (0..config.sample_count())
         .into_par_iter()
@@ -425,6 +431,7 @@ pub fn sample_macro_field_point(
         .fold(0.0, f32::max);
     let (river_distance_blocks, river_flow_hint, river_valley_strength) =
         context.river_valley(position, config);
+    let river_hints = river_hints_from_strength(river_valley_strength, river_flow_hint);
     let combined_macro_height = combine_macro_height(
         macro_elevation,
         ocean_mask,
@@ -453,6 +460,10 @@ pub fn sample_macro_field_point(
         river_valley_strength,
         river_distance_blocks,
         river_flow_hint,
+        river_bed_depth_hint: river_hints.bed_depth,
+        river_bank_roughness_hint: river_hints.bank_roughness,
+        river_gravel_hint: river_hints.gravel,
+        river_cutbank_hint: river_hints.cutbank,
         combined_macro_height,
     }
 }
@@ -490,6 +501,7 @@ fn sample_macro_field_point_with_influence(
     let river_distance_blocks = influence.river_distance_blocks;
     let river_flow_hint = influence.river_flow_hint;
     let river_valley_strength = influence.river_valley_strength;
+    let river_hints = river_hints_from_strength(river_valley_strength, river_flow_hint);
     let combined_macro_height = combine_macro_height(
         macro_elevation,
         ocean_mask,
@@ -518,6 +530,10 @@ fn sample_macro_field_point_with_influence(
         river_valley_strength,
         river_distance_blocks,
         river_flow_hint,
+        river_bed_depth_hint: river_hints.bed_depth,
+        river_bank_roughness_hint: river_hints.bank_roughness,
+        river_gravel_hint: river_hints.gravel,
+        river_cutbank_hint: river_hints.cutbank,
         combined_macro_height,
     }
 }
@@ -987,7 +1003,7 @@ impl<'a> MacroFieldRasterContext<'a> {
     pub fn new(
         _patch: &'a VoronoiGraphPatch,
         macro_map: &'a GraphMacroMap,
-        hydrology: &'a GraphHydrologyGraph,
+        river_plan: &'a RiverPlan,
         boundary: &'a BoundaryCache,
     ) -> Self {
         let macro_edges = macro_map
@@ -1012,11 +1028,11 @@ impl<'a> MacroFieldRasterContext<'a> {
             .collect::<HashMap<_, _>>();
         let site_grid = SiteIndexGrid::from_sites(&macro_map.sites);
         let mut river_flow_by_edge = HashMap::<VoronoiEdgeId, f32>::new();
-        for segment in &hydrology.segments {
+        for segment in &river_plan.segments {
             river_flow_by_edge
                 .entry(segment.edge)
-                .and_modify(|flow| *flow = flow.max(segment.flow_accumulation))
-                .or_insert(segment.flow_accumulation);
+                .and_modify(|flow| *flow = flow.max(segment.display_flow))
+                .or_insert(segment.display_flow);
         }
 
         let coast_curves = macro_map
@@ -1703,6 +1719,25 @@ fn flow_hint(flow_accumulation: f32) -> f32 {
     (flow_accumulation.max(0.0).sqrt() / 32.0).clamp(0.0, 1.0)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct RiverSampleHints {
+    bed_depth: f32,
+    bank_roughness: f32,
+    gravel: f32,
+    cutbank: f32,
+}
+
+fn river_hints_from_strength(valley_strength: f32, flow_hint: f32) -> RiverSampleHints {
+    let valley = valley_strength.clamp(0.0, 1.0);
+    let flow = flow_hint.clamp(0.0, 1.0);
+    RiverSampleHints {
+        bed_depth: (valley * (0.25 + flow * 0.75)).clamp(0.0, 1.0),
+        bank_roughness: ((1.0 - flow * 0.7) * valley).clamp(0.0, 1.0),
+        gravel: ((0.65 - flow * 0.25) * valley).clamp(0.0, 1.0),
+        cutbank: (flow * valley).clamp(0.0, 1.0),
+    }
+}
+
 fn river_width_blocks(flow_hint: f32, configured_radius_blocks: f32) -> f32 {
     let t = flow_hint.clamp(0.0, 1.0).powf(1.35);
     let width = RIVER_MIN_WIDTH_BLOCKS + (RIVER_MAX_WIDTH_BLOCKS - RIVER_MIN_WIDTH_BLOCKS) * t;
@@ -1818,13 +1853,16 @@ fn usable_side(preferred: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::generation::boundary::{BoundaryConfig, generate_noisy_boundaries};
+    use crate::world::generation::boundary::{generate_noisy_boundaries, BoundaryConfig};
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     };
-    use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
-    use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
+    use crate::world::generation::hydrology::{
+        solve_hydrology, GraphHydrologyGraph, HydrologyConfig,
+    };
+    use crate::world::generation::macro_map::{generate_macro_map, MacroMapConfig};
+    use crate::world::generation::river_plan::{build_river_plan, RiverPlan};
 
     #[derive(Debug, Clone, Copy, Default)]
     struct NeighborDeltaSummary {
@@ -2000,7 +2038,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             config,
         );
@@ -2051,14 +2089,14 @@ mod tests {
         let first = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             config,
         );
         let second = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             config,
         );
@@ -2074,7 +2112,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             config,
         );
@@ -2091,7 +2129,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             test_tile_config(),
         );
@@ -2112,7 +2150,7 @@ mod tests {
             let tile = generate_macro_field_tile(
                 &inputs.patch,
                 &inputs.macro_map,
-                &inputs.hydrology,
+                &inputs.river_plan,
                 &inputs.boundary,
                 MacroFieldTileConfig::new(-768.0, -768.0, 32, 32, 48.0),
             );
@@ -2218,7 +2256,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
         );
         let config = test_tile_config();
@@ -2253,7 +2291,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             centered_test_tile_config(near),
         );
@@ -2313,7 +2351,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
         );
         let config = test_tile_config();
@@ -2351,7 +2389,7 @@ mod tests {
         let tile = generate_macro_field_tile(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
             centered_test_tile_config(near),
         );
@@ -2685,7 +2723,6 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
-        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2754,8 +2791,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let hydrology = GraphHydrologyGraph::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let river_plan = RiverPlan::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2776,7 +2813,6 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
-        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2845,8 +2881,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let hydrology = GraphHydrologyGraph::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let river_plan = RiverPlan::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2880,7 +2916,6 @@ mod tests {
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
-        use crate::world::generation::hydrology::GraphHydrologyGraph;
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
         };
@@ -2949,8 +2984,8 @@ mod tests {
             stats: Default::default(),
         };
         let patch = Default::default();
-        let hydrology = GraphHydrologyGraph::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &hydrology, &boundary);
+        let river_plan = RiverPlan::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 24.0;
 
@@ -2969,7 +3004,7 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
             &inputs.boundary,
         );
         let site = inputs
@@ -3002,23 +3037,26 @@ mod tests {
         let context = MacroFieldRasterContext::new(
             &inputs.patch,
             &inputs.macro_map,
-            &inputs.hydrology,
+            &inputs.river_plan,
+            &inputs.boundary,
+        );
+        let no_river_plan = RiverPlan::default();
+        let no_river_context = MacroFieldRasterContext::new(
+            &inputs.patch,
+            &inputs.macro_map,
+            &no_river_plan,
             &inputs.boundary,
         );
         let config = test_tile_config();
         let near = curve.points[curve.points.len() / 2];
-        let far = WorldPlanePoint::new(
-            near.x + config.river_radius_blocks * 2.4,
-            near.z + config.river_radius_blocks * 2.4,
-        );
         let near_sample = sample_macro_field_point(&context, config, near);
-        let far_sample = sample_macro_field_point(&context, config, far);
+        let without_river = sample_macro_field_point(&no_river_context, config, near);
 
         assert!(
-            near_sample.combined_macro_height < far_sample.combined_macro_height,
-            "river carve should be visible in combined macro height: near={} far={}",
+            near_sample.combined_macro_height < without_river.combined_macro_height,
+            "river carve should be visible in combined macro height at the same sample: with_river={} without_river={}",
             near_sample.combined_macro_height,
-            far_sample.combined_macro_height
+            without_river.combined_macro_height
         );
     }
 
@@ -3114,6 +3152,7 @@ mod tests {
         patch: super::super::graph::VoronoiGraphPatch,
         macro_map: GraphMacroMap,
         hydrology: GraphHydrologyGraph,
+        river_plan: RiverPlan,
         boundary: BoundaryCache,
     }
 
@@ -3131,12 +3170,14 @@ mod tests {
         ));
         let macro_map = generate_macro_map(&patch, MacroMapConfig::new(seed, 11));
         let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+        let river_plan = build_river_plan(&patch, &macro_map, &hydrology, Default::default());
         let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(seed, 11));
 
         TestInputs {
             patch,
             macro_map,
             hydrology,
+            river_plan,
             boundary,
         }
     }
@@ -3171,6 +3212,10 @@ mod tests {
                     river_valley_strength: 0.0,
                     river_distance_blocks: f32::INFINITY,
                     river_flow_hint: 0.0,
+                    river_bed_depth_hint: 0.0,
+                    river_bank_roughness_hint: 0.0,
+                    river_gravel_hint: 0.0,
+                    river_cutbank_hint: 0.0,
                     combined_macro_height,
                 }
             })

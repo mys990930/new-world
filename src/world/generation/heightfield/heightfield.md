@@ -99,8 +99,13 @@ HeightfieldColumn {
     dry_basin_mask,
     coast_mask,
     ridge_influence,
+    terrain_ruggedness,
     river_valley_strength,
     river_flow_hint,
+    river_bed_depth_blocks,
+    river_bank_roughness_hint,
+    river_gravel_hint,
+    river_cutbank_hint,
     meso_delta_blocks,
     micro_relief_blocks,
 }

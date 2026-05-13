@@ -72,7 +72,9 @@ RiverReach {
 }
 ```
 
-초기 구현은 실제 struct 이름을 다르게 둘 수 있지만, 위 의미를 보존해야 한다.
+현재 compile bridge 구현은 위 이름을 공개 API로 제공한다. 이 구현은 rollback 이후 downstream
+stage가 기대하는 계약을 복구하기 위한 얇은 realization layer이며, 복잡한 meander/cusp 보정이나
+full chain smoothing은 다시 넣지 않는다.
 
 ---
 
@@ -205,8 +207,16 @@ diagnostic overlay로 볼 수 있어야 한다.
 
 ## 현재 구현 상태
 
-- 아직 구현되지 않은 문서 전용 단계다.
-- 현재 river morphology 일부는 `macro_field` 내부에서 selected river segment와 flow를 직접 읽어
-  계산하고 있다.
-- 다음 구현 단계에서는 이 책임을 `river_plan`으로 옮기고, `macro_field`는 broad valley guide를
-  소비하는 쪽으로 단순화한다.
+- `src/world/generation/river_plan/mod.rs`가 `RiverPlanConfig`, `RiverPlan`, `RiverChain`,
+  `RiverReach`, `RiverSegmentPlan`, `RiverPlanStats`, `build_river_plan`을 제공한다.
+- 현재 구현은 hydrology selected segment를 보존하고, 각 segment를 하나의 lightweight chain/reach로
+  노출한다. topology 선택의 source of truth는 여전히 `GraphHydrologyGraph.segments`다.
+- `build_river_plan(&VoronoiGraphPatch, &GraphMacroMap, &GraphHydrologyGraph, RiverPlanConfig)`는
+  selected segment의 edge, display/raw flow, downstream progress, local slope를 읽어 reach type과
+  broad valley / bed / bank hint 값을 만든다.
+- 이 구현은 `af41834` rollback 이후 compile contract를 복구하기 위한 최소 bridge다. 기존의
+  aggressive morphology smoothing, mouth fan, cusp 보정, per-chain hydraulic post-pass는 되살리지
+  않았다.
+- `macro_field`는 다시 `RiverPlan`을 입력으로 받아 selected edge의 canonical noisy boundary curve와
+  plan의 display flow를 rasterize한다. narrow bed hint는 downstream heightfield가 읽을 diagnostic
+  hint로 보존한다.

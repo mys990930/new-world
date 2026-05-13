@@ -93,6 +93,10 @@ MacroFieldSample {
     river_valley_strength,
     river_distance_blocks,
     river_flow_hint,
+    river_bed_depth_hint,
+    river_bank_roughness_hint,
+    river_gravel_hint,
+    river_cutbank_hint,
     combined_macro_height,
 }
 
@@ -390,10 +394,12 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
-  뒤 chamfer distance field로 만든다. river influence는 아직 구현상 selected edge id가 참조하는
+  뒤 chamfer distance field로 만든다. river influence는 `RiverPlan`의 selected edge id가 참조하는
   canonical noisy curve를 anti-aliased thick polyline corridor로 굽고, subpixel coverage 기반 valley
-  strength와 nearest-segment distance, blended flow hint를 함께 저장한다. 다음 구현 단계에서는 이 책임을
-  `river_plan`의 broad valley / narrow bed parameter 소비로 옮겨, combined height가 좁은 river bed
-  외곽을 직접 강하게 새기지 않도록 단순화한다.
+  strength와 nearest-segment distance, blended display-flow hint를 함께 저장한다. rollback bridge
+  구현에서는 bed/roughness/gravel/cutbank hint를 valley strength와 flow hint에서 파생해 downstream
+  heightfield contract를 유지한다. 다음 구현 단계에서는 이 값을 `river_plan`의 broad valley / narrow
+  bed parameter 소비로 더 직접 연결해, combined height가 좁은 river bed 외곽을 직접 강하게 새기지
+  않도록 단순화한다.
 - signed polygon containment와 더 정교한 multi-edge blend는 후속 단계에서 확장할 수 있지만,
   visible macro field boundary가 straight nearest-site raster로 되돌아가면 회귀다.

@@ -8,19 +8,19 @@ use std::time::Instant;
 
 use image::RgbaImage;
 use new_world::renderer::OffscreenRenderOutput;
-use new_world::world::CHUNK_EDGE_I32;
-use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
-    DEFAULT_HEIGHTFIELD_NORMALIZED_MAX, DEFAULT_HEIGHTFIELD_NORMALIZED_MIN,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
-    GraphRegionCoord, HeightfieldColumn, HeightfieldConfig, HeightfieldTerrainKind,
-    HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, generate_heightfield_tile,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
-    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
+    build_river_plan, generate_heightfield_tile, generate_macro_field_tile, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology, BoundaryCache, BoundaryConfig, GraphHydrologyGraph, GraphMacroMap,
+    GraphRegionArea, GraphRegionCoord, HeightfieldColumn, HeightfieldConfig,
+    HeightfieldTerrainKind, HeightfieldTile, MacroFieldTile, MacroFieldTileConfig, MacroMapConfig,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
+    DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
+    DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
+    DEFAULT_HEIGHTFIELD_NORMALIZED_MIN, DEFAULT_SITE_SPACING_BLOCKS,
 };
+use new_world::world::WorldMeta;
+use new_world::world::CHUNK_EDGE_I32;
 
 mod common;
 
@@ -880,7 +880,8 @@ fn build_macro_field_tile(
         sample_spacing,
     );
 
-    generate_macro_field_tile(patch, macro_map, hydrology, boundary, config)
+    let river_plan = build_river_plan(patch, macro_map, hydrology, Default::default());
+    generate_macro_field_tile(patch, macro_map, &river_plan, boundary, config)
 }
 
 fn chunk_range_for_window(window: PreviewWindow) -> (i32, i32, i32, i32) {
@@ -2944,11 +2945,9 @@ mod tests {
             .expect_err("horizontal-subdivisions should be rejected");
 
         assert!(xz.to_string().contains("unknown argument '--xz-scale'"));
-        assert!(
-            horizontal
-                .to_string()
-                .contains("unknown argument '--horizontal-subdivisions'")
-        );
+        assert!(horizontal
+            .to_string()
+            .contains("unknown argument '--horizontal-subdivisions'"));
     }
 
     #[test]
