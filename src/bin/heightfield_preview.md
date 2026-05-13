@@ -29,7 +29,10 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
-  - `--perlin`: enable optional heightfield Perlin micro relief. Default is off.
+  - `--block-lines` / `--no-block-lines`: enable or disable very thin diagnostic outlines around
+    each rendered column top/visible side. The default is on. Visible side faces also receive
+    one-pixel integer `y` step guides so individual block layers remain readable in
+    `--chunk-radius 1` previews.
   - `--output <path>`
 
 ## Flow
@@ -43,23 +46,18 @@
    hidden X/Z scale layer; the `MacroFieldTile` column count and `sample_spacing_blocks` directly
    define the horizontal density while Y block height is resolved in the shared block-domain before
    rendering.
-7. If `--perlin` is present, add bounded heightfield-owned Perlin micro relief before contour-band
-   resolve, then snap/clamp the perturbed band result. Without `--perlin`,
-   `micro_relief_blocks` remains `0`.
-8. Snap heightfield surface/water output to integer block heights. Terrain and bed faces are kept
-   as the first render pass even when a water surface exists above them.
-9. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
-   a translucent overlay instead of replacing the terrain/bed top.
-10. Draw terrain visible side faces and top faces first, then translucent water top/side faces, then
-   the primary 1024-block macro-field tile grid, secondary/faint 256-block chunk-group references,
-   very faint 32-block chunk boundaries, scale bar, metadata legend, and compass overlay in painter
-   order.
+7. Snap heightfield surface/water output to integer block heights. Ocean/lake visible surface is
+   fixed at `y = 0`; this vertical slice does not render ocean bathymetry.
+8. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
+   their visible top for neighbor-delta side faces.
+9. Draw visible side faces, top faces, water tops, the primary 1024-block macro-field tile grid,
+   secondary/faint 256-block chunk-group references, very faint 32-block chunk boundaries, scale
+   bar, metadata legend, and compass overlay in painter order.
 
 ## Interpretation
 
 - This binary is not final voxel fill.
-- Meso features are currently stubbed as zero. Perlin micro relief is available only with
-  `--perlin` and is disabled by default.
+- Meso features and Perlin micro relief are currently stubbed as zero in `heightfield`.
 - The default view is a CPU-rendered isometric column view, not a 3D orthographic camera. Projection
   is explicit:
 
@@ -92,22 +90,22 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   side-view wall chart instead of a macro terrain surface.
 - Columns are depth-sorted by projected horizontal depth after applying `--quarter-turns`. A fixed
   `x+z` painter order is a regression because it only works for one quarter view.
-- Per-block face outlines and integer side-step guide lines are not rendered. The preview keeps
-  filled top/visible side faces, the player diagnostic cube, and separate world/grid reference
-  overlays.
+- Very thin block lines are drawn on top/visible side polygons by default to make the block scale
+  readable at dense column counts. Top faces get a subtle face-edge outline, visible side faces
+  get a subtle face-edge outline plus one-pixel horizontal guides at integer `y` block steps. They
+  are diagnostic overlay lines, not final mesh edges.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
   - muted blue water/ocean
   - subdued green-gray low land
   - pale gray high/ridge
   - muted gray/mauve dry basin
-- Water boxes come from heightfield water hints, not final fluid simulation. They are rendered as
-  translucent top and visible side faces over the already drawn terrain/bed.
-- Sea level is fixed at `y = 0` for ocean water. Lake water uses the heightfield lake water hint.
-  Because the water pass is translucent, ocean/lake/river beds below the waterline remain visible
-  enough to inspect bathymetry and riverbed carving near mouths.
-- Coast-adjacent land no longer uses a heightfield shoreline contour ceiling. Ocean/lake contact
-  keeps standing water at `y = 0`, while adjacent land preserves the macro/pixelize source contour
-  band so coast jumps can be diagnosed upstream.
+- Water boxes come from heightfield water hints, not final fluid simulation.
+- Sea level is fixed at `y = 0`. Ocean/lake columns render their visible surface at `y = 0`; the
+  current vertical slice hides bathymetry so the sea side does not read as carved terrain.
+- Coast-adjacent land uses a shoreline contour ceiling before integer snapping so ordinary
+  ocean/lake contact does not render as an immediate vertical wall. In pure contour-step mode, the
+  first land ring next to standing water starts at `y = 0`, then rises inward by one-block contour
+  steps.
 - Heightfield columns are resolved to contour bands before water/shore constraints. The raw block
   height from `combined_macro_height` remains stored for diagnostics, but final land surface does
   not directly use the continuous scalar. Default contour step is `1` block, and both general land
@@ -116,16 +114,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `step + min_gap` stride, raw height advances by 2 blocks per visible 1-block terrace. This is not
   contour-line reconstruction; it is scalar-to-band quantization in the same block-height domain as
   the contour preview.
-- `--perlin` uses heightfield-owned deterministic world-space fBM micro relief before contour-band
-  resolve, then snaps the perturbed source to integer block height. The preview-enabled default is
-  noticeable but bounded, around `8` blocks amplitude with a `10` block clamp. Ocean/lake columns
-  keep `0` micro relief, and river columns currently keep `0` to preserve continuity.
 - River columns receive an integer preliminary water height. Before preview, neighboring river or
   standing-water surfaces clamp river water so adjacent river-water steps descend by at most one
   block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.
-- Ocean/lake terrain `surface_height_blocks` is drawn as bed terrain first. The translucent water
-  overlay then uses `water_level_blocks`, while diagnostics can still compare adjacent columns by
-  visible top height, `max(surface_height_blocks, water_level_blocks)`.
+- Ocean/lake terrain `surface_height_blocks` is the visible waterline surface in this slice, not
+  bed height. The preview still compares adjacent columns by visible top height,
+  `max(surface_height_blocks, water_level_blocks)`.
 - Grid overlay has three diagnostic layers, but the primary readable scale is the same
   `1024`-block macro-field tile grid used by `macro_field_preview`. The runtime chunk edge is
   currently `32` blocks and remains as a very faint reference. The `256`-block grid is a secondary
@@ -140,8 +134,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - The legend/header records input center, input unit, center chunk, center world block, world
   footprint, column count/spacing, chunk x/z range, columns-per-chunk or explicit column override,
   chunk radius, height range, contour step/smoothing-disabled value, sea
-  level, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint
-  `chunk 32 blk`, translucent water overlay policy, and a block scale bar.
+  level, block outline state, primary `macro tile 1024 blk`, secondary `major 256 blk`, faint
+  `chunk 32 blk`, and a block scale bar.
 - The legend scales from the output image dimensions. Its metadata panel targets about one fifth of
   the image height, and text, spacing, swatches, and scale bar grow proportionally with resolution.
 - The compass overlay follows the isometric projection after `--quarter-turns`. It does not stay
@@ -156,12 +150,6 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 72
 
 ```bash
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r8.png
-```
-
-Optional Perlin micro relief:
-
-```bash
-cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --perlin --output target/heightfield-preview/heightfield-r8-perlin.png
 ```
 
 Quarter-view smoke set:

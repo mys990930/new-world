@@ -2,30 +2,25 @@
 
 ## 역할
 
-`heightfield`는 graph-first generator의 12단계인 heightfield / voxel-column realization rewrite 계약을 소유한다.
+`heightfield`는 graph-first generator의 13단계인 heightfield / water surface 합성 계약을 소유한다.
 
-새 stage contract에서 first chunk-aligned pixel/column resolve는 stage 11 `pixelize`가 소유한다.
-`heightfield`는 `PixelizedChunkArea` / `PixelizedColumn`을 downstream input으로 소비하며,
-`MacroFieldTile`을 직접 resample해 world-space column을 처음 만드는 책임을 갖지 않는다.
-
-현재 구현은 compatibility vertical slice다. 아직 stage 10 `macro_field`가 만든 `MacroFieldTile`을
-직접 읽어 column-oriented heightfield cache로 바꾸지만, 이 path는 pixelize module이 들어오기 전까지의
-임시 wrapper다. rewrite 후에는 같은 height/water policy를 pixelized columns 위에 적용한다.
+현재 구현은 vertical slice다. stage 10 `macro_field`가 만든 `MacroFieldTile`을 읽어 column-oriented
+heightfield cache로 바꾸며, stage 11 meso feature와 stage 12 Perlin micro relief는 아직 값을 더하지
+않는 stub으로 둔다.
 
 ```text
 MacroFieldTile
--> PixelizedChunkArea / PixelizedColumn
 -> meso_delta = 0
--> optional Perlin micro_relief
--> HeightfieldTile / HeightfieldColumn / voxel-column realization
+-> micro_relief = 0
+-> HeightfieldTile / HeightfieldColumn
 ```
 
 이 단계는 아직 final surface material이나 `ChunkData` voxel fill을 결정하지 않는다. 다만 이후 voxel
 fill이 읽을 수 있는 surface height, water level, terrain kind hint, macro mask를 column 단위로 제공한다.
 
-heightfield는 contour segment를 새로운 terrain source로 재구성하지 않는다. source of truth는
-`PixelizedColumn`이 보존한 source `combined_macro_height`와 integer column resolve다. 현재 vertical
-slice의 final land surface는 이 연속 scalar를 직접 쓰지 않는다. raw scalar는 diagnostic field로 보존하고, surface는
+heightfield는 contour segment를 새로운 terrain source로 재구성하지 않는다. source of truth는 여전히
+`MacroFieldTile.samples[].combined_macro_height`지만, 현재 experimental vertical slice의 final land
+surface는 이 연속 scalar를 직접 쓰지 않는다. raw scalar는 diagnostic field로 보존하고, surface는
 heightfield 직전 block-height domain에서 순수 contour band로 resolve한다. 즉 "등고선을 따라 생성"한다는
 의미는 Marching Squares 선분을 다시 raster source로 쓰는 것이 아니라, column이 자신이 속한 contour
 level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻이다.
@@ -34,19 +29,11 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 
 ## 책임
 
-- `PixelizedColumn`을 downstream heightfield / voxel-column cache로 변환한다.
-- pixelize가 보존한 `combined_macro_height`와 integer `surface_y`를 block-space surface policy로 연결한다.
+- `MacroFieldTile` sample을 world-space column으로 변환한다.
+- `combined_macro_height`를 block-space surface height로 매핑한다.
 - ocean/lake mask에서 water level과 water column hint를 만든다.
-- connected ocean과 맞닿은 land column에 짧은 shoreline bevel을 적용해 sea level에서 바로 수직 단면으로
-  솟는 coastal wall을 줄인다. bevel slope는 인접 ocean/land biome context의 ruggedness를 반영해,
-  낮은 ruggedness에서는 완만한 램프가 되고 높은 ruggedness에서는 더 급하지만 완전 수직은 아닌 rocky
-  coast가 된다. 같은 shoreline band 내부에서도 deterministic low-frequency variation을 적용하되,
-  variation 하한/상한 폭은 ruggedness에 비례한다.
 - river valley, river bed hint, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
-- raw `coast_mask`는 column data로 보존하지만, coast mask만으로 별도 heightfield terrain kind나 height
-  postprocess를 만들지 않는다.
-- meso 값이 0임을 데이터와 문서에 명시한다.
-- Perlin micro relief는 `HeightfieldPerlinConfig.enabled`일 때만 적용하며 기본값은 비활성화다.
+- meso/perlin stub 값이 0임을 데이터와 문서에 명시한다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
 ---
@@ -54,12 +41,11 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 ## 비책임
 
 - meso feature 생성
-- macro-scale Perlin/fBM terrain ownership
+- Perlin/fBM micro relief 생성
 - biome/material resolve
 - vegetation placement
 - final `ChunkData` fill
 - renderer/GPU 리소스 생성
-- first chunk-aligned `1 world block = 1 pixel = 1 voxel column` resolve
 
 ---
 
@@ -67,13 +53,6 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 
 ```rust
 HeightfieldConfig::default()
-generate_heightfield_tile_from_pixelized_area(&PixelizedChunkArea, HeightfieldConfig) -> HeightfieldTile
-heightfield_column_from_pixelized_column(&PixelizedColumn, HeightfieldConfig) -> HeightfieldColumn
-```
-
-Compatibility wrapper until the pixelize module lands:
-
-```rust
 generate_heightfield_tile(&MacroFieldTile, HeightfieldConfig) -> HeightfieldTile
 heightfield_column_from_sample(&MacroFieldSample, HeightfieldConfig) -> HeightfieldColumn
 ```
@@ -90,20 +69,9 @@ HeightfieldConfig {
     river_water_threshold,
     ocean_bed_blocks,
     lake_bed_blocks,
+    shore_ramp_blocks,
+    shore_min_land_blocks,
     contour,
-    perlin,
-}
-
-HeightfieldPerlinConfig {
-    enabled,
-    seed,
-    generator_version,
-    amplitude_blocks,
-    base_scale_blocks,
-    octaves,
-    persistence,
-    lacunarity,
-    max_abs_blocks,
 }
 
 HeightfieldContourConfig {
@@ -115,8 +83,6 @@ HeightfieldContourConfig {
 
 HeightfieldColumn {
     position,
-    chunk,
-    local,
     raw_surface_height_blocks,
     contour_guided_surface_height_blocks,
     constrained_surface_height_blocks,
@@ -133,29 +99,25 @@ HeightfieldColumn {
     dry_basin_mask,
     coast_mask,
     ridge_influence,
-    terrain_ruggedness,
     river_valley_strength,
     river_flow_hint,
-    river_bed_depth_blocks,
-    river_bank_roughness_hint,
-    river_gravel_hint,
-    river_cutbank_hint,
     meso_delta_blocks,
     micro_relief_blocks,
 }
 ```
 
-Heightfield는 별도 수평 scale 값을 소유하지 않는다. X/Z 방향 해상도와 chunk/local layout은 입력
-`PixelizedChunkArea`가 직접 정의한다. stage 11의 handoff density는
-`1 world block = 1 pixel = 1 voxel column`이며, heightfield가 이 density를 다시 해석하거나
-resample하면 안 된다. 같은 `PixelizedColumn`과 config는 같은 integer `surface_y`/`water_y`를 가져야 한다.
+Heightfield는 별도 수평 scale 값을 소유하지 않는다. X/Z 방향 해상도는 입력 `MacroFieldTile`의
+`width`, `height`, `sample_spacing_blocks`가 직접 정의한다. preview나 runtime cache가 같은 world
+footprint를 더 촘촘히 보고 싶으면 더 많은 column을 가진 `MacroFieldTile`을 만들고 그에 맞는
+`sample_spacing_blocks`를 넘긴다. 같은 world-space sample과 같은 scalar는 column grid 밀도와 무관하게
+같은 integer `surface_y`/`water_y`를 가져야 한다.
 
 ---
 
 ## Height Mapping
 
-현재 height mapping은 macro field, pixelize, heightfield, pixel/column preview가 공유하는 block-space 계약이다.
-generator version이 의도적으로 바뀌지 않는 한 sea level은 world-space `y = 0`을 유지한다.
+현재 launch preview scale은 block-space 진단용 매핑이다. 실제 meter 단위 terrain scale은 final
+generator version에서 조정될 수 있지만, sea level은 pipeline 계약대로 world-space `y = 0`을 유지한다.
 
 ```text
 combined_macro_height -0.50 -> -1024 blocks
@@ -165,25 +127,25 @@ combined_macro_height  1.00 -> 2048 blocks
 
 이 매핑은 단일 선형 remap이 아니라 signed sea-level을 기준으로 한 piecewise remap이다. 음수
 macro height는 `-0.5..0.0` 범위에서 `-1024..0` block으로, 양수 macro height는 `0.0..1.0`
-범위에서 `0..2048` block으로 변환한다. 현재 관심 구간 `-0.25..0.75`는 같은 기울기에서
+범위에서 `0..2048` block으로 변환한다. 현재 실험 관심 구간 `-0.25..0.75`는 같은 기울기에서
 `-512..1536 blocks`로 매핑된다. 따라서 macro map의 coast-adjacent land가 `0` 근처의 signed height를
 가지면 해수면 `y = 0`에서 시작하며, 단순히 normalized range 중간값이라는 이유로 높은 terrace로
 튀어서는 안 된다. effective range 바깥 값은 block conversion에서 `-1024` 또는 `2048` block으로
 포화된다.
 
-이 scale은 preview 렌더링에서만 세로 비율을 속이는 값이 아니라, macro field contour 추출,
-pixelize integer column resolve, heightfield band resolve가 공유하는 block-height domain이다.
+이 launch scale은 현재 분포를 크게 확대해 보는 실험용 block-domain 계약이다. preview 렌더링에서만
+세로 비율을 속이는 것이 아니라, macro field contour 추출과 heightfield band resolve가 같은
+block-height domain을 공유한다.
 
-`combined_macro_height`는 이미 macro elevation, ridge raise, broad river valley, lake flatten을
-합친 pre-Perlin 값이다. 따라서 pixelize/heightfield stage는 river channel carve를 다시 강하게 중복 적용하지 않는다.
+`combined_macro_height`는 이미 macro elevation, ridge raise, broad river valley, coast/lake flatten을
+합친 pre-Perlin 값이다. 따라서 heightfield stage는 river channel carve를 다시 강하게 중복 적용하지 않는다.
 river plan에서 온 narrow river bed 정보는 water hint와 terrain kind hint로 보존하고, 실제
 channel carve/water body 폭은 후속 surface/voxel 단계에서 확정한다.
 
-입력 `PixelizedColumn`은 stage 10 `MacroFieldTile`에서 온 source macro scalar를 보존해야 한다.
-connected ocean coast의 land-side scalar가 낮은 양수에서 시작한다면 그 source는 `macro_map`의 coastal
-elevation ramp와 ordinary boundary blend다. heightfield는 이 원천 scalar를 우회적으로 clamp해서 해안
-단차를 숨기는 계층이 아니라, pixelize가 이미 정렬한 column output을 downstream contour/voxel-column
-policy로 옮기는 계층이다.
+입력 `MacroFieldTile`은 sea-level aligned coastal ramp를 제공해야 한다. 즉 connected ocean coast의
+land-side scalar는 `0` 근처에서 시작하고 내륙으로 갈수록 회복되어야 한다. heightfield는 이 원천
+scalar를 우회적으로 clamp해서 해안 단차를 숨기는 계층이 아니라, 이미 정렬된 macro scalar를 contour
+step/integer block domain으로 옮기는 계층이다.
 
 heightfield column은 값을 세 단계로 보존한다.
 
@@ -193,7 +155,7 @@ raw_surface_height_blocks
 contour_guided_surface_height_blocks
   = raw height가 속한 contour step의 lower band 높이
 constrained_surface_height_blocks
-  = sea-level water surface policy와 min/max clamp를 적용한 snap 전 높이
+  = sea-level water surface / shoreline contour ceiling / clamp를 적용한 snap 전 높이
 surface_height_blocks
   = voxel fill이 바로 읽을 수 있게 contour step / integer block에 snap한 최종 높이
 ```
@@ -228,35 +190,27 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 
 ## Water Policy
 
-- `ocean_mask > 0.5`이면 water level은 `sea_level_blocks`다.
-- `lake_mask > 0.5`이면 water level은 절대 `y = 0` 고정값이 아니라 lake source macro elevation보다
-  몇 block 낮은 shoreline-compatible level로 둔다. lake bed가 충분히 깎이지 않은 edge column에서는
-  terrain이 수면보다 높게 남을 수 있으며, heightfield가 모든 lake column을 수면 아래로 강제 평탄화하지
-  않는다.
-- ocean column의 final visible surface는 water surface와 같은 `y = 0`이다. 일반 lake column은 water
-  surface와 terrain bed를 분리하며, macro_field가 제공한
-  U자형 lake bed height를 terrain surface로 보존한다. lake bed는 source raw bed를 따르되
-  수면에서 과도하게 깊어지지 않도록 depth cap만 적용하고, 수면 바로 아래 완전 flat plane으로 덮어쓰면 안 된다. selected
-  river corridor가 standing-water mask와 겹치는 하구/유출부 column은 terrain kind가 ocean/lake로 남더라도
-  물 표면을 유지하면서 terrain bed를 river bed depth만큼 깎아 자연스럽게 연결할 수 있다.
+- `ocean_mask > 0.5` 또는 `lake_mask > 0.5`이면 water level은 `sea_level_blocks`다.
+- ocean/lake column의 final visible surface는 water surface와 같은 `y = 0`이다. 이 vertical slice는
+  ocean bathymetry를 만들지 않으며, `ocean_bed_blocks`와 `lake_bed_blocks`는 후속/debug bathymetry용
+  설정으로만 남는다. preview나 heightfield visible top에 bed depression을 섞으면 회귀다.
 - 일반 land column은 raw block height를 contour lower band로 양자화한 뒤 sea level 아래로 내려가지
   않는다. 즉 water가 아닌 terrain의 기본 floor는 `y = 0`이다.
-- 일반 land에는 인접 column 기준 final surface ceiling을 적용하지 않는다. 다만 connected ocean과 가까운
-  짧은 shoreline band는 예외로, sea level에서 land가 바로 수직 단면으로 솟지 않도록 거리 기반 bevel
-  ceiling을 적용한다. 이 bevel은 lake/wetland나 river water solve가 아니라 ocean shoreline 표현을 위한
-  heightfield vertical-slice 안전 장치다. slope는 가장 가까운 ocean source와 land column의 ruggedness를
-  평균해 정하므로 smooth coast는 낮고 긴 사면이 되고 rugged coast는 더 절벽에 가까운 사면이 된다.
-  같은 cell 내부에서도 world-space low-frequency value noise로 slope factor를 흔들며, smooth coast는
-  좁은 범위, rugged coast는 넓은 범위를 사용한다.
-- 바다와 맞닿은 land column은 shoreline bevel로 낮아질 수 있다. 호수와 맞닿은 land column은 이 ocean
-  bevel 대상이 아니며, lake bed/water 정책은 lake mask 내부에서만 처리한다.
-- river water hint를 shoreline ocean/lake ramp 기준으로 사용하지 않는다.
-- `river_valley_strength >= river_water_threshold`이거나 river bed hint가 충분한 column은 `River` hint가 될 수 있다.
-  river column은 macro_field의 bed-depth hint를 읽어 terrain bed를 water surface와 분리한다. ocean/lake
-  visible surface는 여전히 `y = 0`이지만, river bed는 하구에서도 sea level 아래로 패일 수 있다.
-  integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
-  이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
-  hydrology water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.
+- 일반 land에는 인접 column 기준 final surface ceiling을 적용하지 않는다. raw block height를 floor
+  integer snap한 값이 visible `surface_y`의 기본 source이며, raw source가 크게 뛰면 visible surface도
+  같은 block scale로 뛰어야 한다. 이 차이는 smoothing 대상이 아니라 macro/raw source 경로를 진단하는
+  신호다.
+- 바다/호수와 맞닿은 land column이 즉시 높은 vertical cliff가 되면 안 된다. tile 생성 후
+  standing water(ocean/lake) column으로부터 grid distance를 계산하고, 주변 land에 shoreline contour
+  ceiling을 적용한다. 이 pass는 continuous smoothing이 아니라 `0, 1, 2, ...` 계단 ceiling이다.
+  water와 맞닿은 첫 land ring은 `y = 0`, 다음 ring은 `y = 1`, 그 다음은 `y = 2`처럼 contour step
+  단위로만 올라간다.
+- water-adjacent safety pass는 ocean/lake 같은 standing water만 기준으로 삼는다. river water hint를
+  shoreline ocean/lake ramp 기준으로 사용하지 않는다.
+- `river_valley_strength >= river_water_threshold`이거나 river bed hint가 충분한 column은 `River` hint가 될 수 있다. river column은
+  integer river water height를 갖고, 인접 river/standing-water surface와 비교해 한 column 이웃 사이에서
+  한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full hydrology
+  water surface solve가 아니라 stage 13 vertical slice용 안전 장치다.
 - dry basin은 water가 아니다. `dry_basin_mask`는 `DryBasin` hint로 보존되지만 water level을 만들지 않는다.
 
 ---
@@ -267,15 +221,13 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 
 ```text
 macro field tile cache
--> pixelized chunk area cache
 -> heightfield cache
 -> chunk generation samples column/window data
 -> voxel fill writes ChunkData
 ```
 
-초기 compatibility 구현에서는 preview binary가 하나의 macro field tile과 heightfield tile을 직접 생성할
-수 있다. 런타임 연결 시에는 stage 11 pixelized chunk area cache를 worker cache miss로 준비하고,
-heightfield는 그 column output을 소비해야 한다. chunk fill은 graph/macro/hydrology/river-plan/final-cell-context/boundary를
+초기 구현에서는 preview binary가 하나의 macro field tile과 heightfield tile을 직접 생성한다. 런타임
+연결 시에는 같은 계약을 worker cache miss로 옮겨야 하며, chunk fill은 graph/macro/hydrology/river-plan/final-cell-context/boundary를
 반복 query하지 않는다.
 
 ---
@@ -288,8 +240,6 @@ heightfield는 그 column output을 소비해야 한다. chunk fill은 graph/mac
 - block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
 - water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
   gray/mauve 계열로 표시한다.
-- water/ocean/lake/river water는 지형/bed face를 먼저 그린 뒤 반투명 top/side overlay로 렌더한다.
-  따라서 `y < 0` riverbed, lake bed, ocean bathymetry가 수면 아래에서도 진단 가능해야 한다.
 - 기본 preview는 offscreen 3D camera가 아니라 2D isometric projection을 직접 사용한다.
 
 ```text
@@ -300,8 +250,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - `vertical_px_per_block`은 preview 렌더링 전용 투영 값이지만, XZ density에 맞춰 따로 눌러지는 보정
   계수가 아니다. `heightfield_preview`는 block primitive가 화면에서 정육면체에 가깝게 읽히도록
   `vertical_px_per_block == tile_h_px`인 cubic scale로 그린다.
-- macro relief는 preview 렌더링이 아니라 `macro_field`/`pixelize`/`heightfield`가 공유하는 block-height 변환이
-  소유한다. 현재 shared height mapping은 effective
+- macro relief는 preview 렌더링이 아니라 `macro_field`/`heightfield`가 공유하는 block-height 변환이
+  소유한다. 현재 실험 launch scale은 effective
   `-0.5..0.0..1.0 -> -1024..0..2048 blocks`이며, 관심 구간 `-0.25..0.75`는 `-512..1536 blocks`다.
   preview에서 같은 Y 값을 다시 낮춰 그리면 중복 압축이다.
 - heightfield preview의 X/Z 밀도는 scale 계층이 아니라 column count로 직접 표현한다. chunk-radius
@@ -314,9 +264,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - column은 top diamond와 현재 `--quarter-turns` projection에서 보이는 side face만 그린다. 모든 column을
   전역 base plane까지 벽으로 내리면 side view처럼 보이기 때문에, 기본 preview는 neighbor height 차이를
   보여주는 terraced relief를 우선한다. quarter view가 바뀌면 painter order와 visible side도 함께 바뀌어야 한다.
-- water overlay는 terrain/bed pass 뒤에 별도 deterministic painter order로 그린다. water side face는
-  water surface와 bed 또는 인접 water surface 사이만 반투명으로 채워야 하며, opaque water top으로
-  bed top을 대체하면 안 된다.
 - heightfield preview는 scale diagnostic으로 형광색 player cube를 footprint 중앙에 그린다. 이 큐브는
   final gameplay entity가 아니며, world/block 기준 `1 x 1 x 4` block 크기만 확인하기 위한 preview
   marker다. 바닥은 중앙 `1 x 1` block footprint와 가장 가까운 heightfield column들의 `surface_y`
@@ -340,63 +287,53 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   유지하지만, `heightfield_preview`의 compass는 isometric `--quarter-turns` projection 이후의
   screen-space 방향을 따른다. 따라서 N/E/S/W label은 현재 quarter view에서 실제 world cardinal
   방향이 화면에 놓이는 방향을 가리킨다.
-- heightfield preview는 per-block face outline이나 side face의 정수 `y` guide line을 렌더하지 않는다.
-  block scale 확인은 filled column faces, player diagnostic cube, world/grid reference overlay가 맡는다.
+- `--block-lines`는 각 column top/visible side polygon에 매우 얇은 diagnostic outline을 더한다.
+  기본 preview에서는 켜져 있으며, terrain 색을 압도하면 `--no-block-lines`로 끌 수 있다.
+  outline은 top face 외곽선과 visible side face 외곽선뿐 아니라 side face의 정수 `y` step마다
+  아주 얇은 horizontal guide를 그려, 작은 `--chunk-radius 1` preview에서도 개별 block 층을 읽을 수
+  있어야 한다. 이 선은 final mesh edge가 아니라 preview 전용 scale guide이며 terrain/water 색보다
+  약하게 보여야 한다.
 - 중앙 player diagnostic cube는 형광색 계열을 사용해 terrain diagnostic ramp와 명확히 구분한다.
   `--quarter-turns`에 따른 painter order와 visible side face 선택을 terrain column과 같은 isometric
-  projection 규칙으로 따라야 한다.
+  projection 규칙으로 따라야 하며, block outline이 켜져 있으면 큐브 face도 같은 scale guide와 함께
+  읽혀야 한다.
 - preview metadata/stdout과 legend는 contour-band heightfield mode, contour step, minimum gap,
   smoothing disabled 값을 기록해야 한다.
-- preview metadata/stdout과 legend는 stage 11 pixelize handoff 여부와 source column count를 기록해야 한다.
 - preview metadata/stdout과 legend는 player diagnostic cube의 `1 x 1 x 4` block dimensions, 중앙 world
   position, bottom/top `y`, sampled column count를 기록해야 한다.
-- Perlin micro relief는 `--perlin` preview flag 또는 명시적으로 enabled config를 전달한 경우에만 보인다.
-  기본 preview와 기본 `HeightfieldConfig`에서는 `micro_relief_blocks = 0`이다.
+- meso/perlin stub이므로 fine grain이 보이면 macro field 또는 preview lighting/mesh artifact를 먼저
+  의심한다.
 
 ---
 
 ## 불변식
 
-1. 같은 `PixelizedChunkArea`와 `HeightfieldConfig`는 같은 `HeightfieldTile`을 만든다.
-2. column count는 pixelized column count와 일치한다.
+1. 같은 `MacroFieldTile`과 `HeightfieldConfig`는 같은 `HeightfieldTile`을 만든다.
+2. column count는 macro field sample count와 일치한다.
 3. 모든 height와 mask 값은 finite여야 한다.
 4. water mask가 있는 column은 water level hint를 가져야 한다.
-5. meso 값은 현재 항상 0이고, Perlin micro relief는 config가 disabled이면 항상 0이다.
-6. heightfield는 `pixelize` output을 source로 읽으며 graph/macro/hydrology/river-plan/final-cell-context/boundary를 직접 재해석하지 않는다.
+5. meso/perlin stub 값은 현재 항상 0이다.
+6. heightfield는 `macro_field`를 source로 읽으며 graph/macro/hydrology/river-plan/final-cell-context/boundary를 직접 재해석하지 않는다.
 7. final column surface/water height는 integer block height로 snap되어야 한다.
-8. connected ocean과 가까운 coast-adjacent land에는 짧은 heightfield shoreline bevel을 적용할 수 있다.
-   이 pass는 source macro scalar를 바꾸지 않고 final visible column surface만 낮춰 sea level 옆 수직
-   단면을 줄인다. bevel slope는 인접 ocean/land ruggedness에 비례하지만 상한을 가져 완전한 수직벽이
-   되면 안 된다. same-cell shoreline variation도 ruggedness에 비례한 bounded range 안에서만 움직여야
-   하며 salt-and-pepper noise처럼 보이면 회귀다. lake/wetland와 맞닿은 land에는 이 ocean bevel을 적용하지 않는다.
+8. coast-adjacent land는 explicit cliff feature가 없는 한 sea level에서 완만히 올라가야 하며, ocean
+   water surface 바로 옆에 높은 vertical land wall을 만들면 안 된다.
 9. heightfield contour band resolve는 raw macro scalar를 diagnostic으로 보존하되 final land terrain
-   surface에는 직접 쓰지 않는다. land column은 자신이 속한 contour band의 lower height가 되어야 하며,
-   smoothing/interpolation을 적용하면 안 된다.
-10. water-adjacent visible top은 bed가 아니라 해당 water surface와 비교해야 한다. ocean은 `y = 0`이고
-    lake는 lake source elevation에서 derive한 water level이다. 순수
-    contour-step mode에서도 ocean shoreline bevel은 distance-based ramp여야 하며, land ring 전체를
-    무조건 `y = 0`으로 clamp하지 않는다.
-11. ocean visible surface는 항상 `y = 0`이다. lake visible surface는 lake source elevation에서 derive한
-    water level이며, 일반 lake bed는 그 아래의 U자형 terrain bed로 분리된다. lake water를 항상 `y = 0`에
-    고정하거나 lake bed를 완전 flat plane으로 만들면 회귀다.
+   surface에는 직접 쓰지 않는다. water/shoreline constraint 전의 land column은 자신이 속한 contour
+   band의 lower height가 되어야 하며, smoothing/interpolation을 적용하면 안 된다.
+10. water-adjacent visible top은 bed가 아니라 water surface `y = 0`과 비교해야 한다. 순수
+    contour-step mode에서 water와 맞닿은 land ring은 `y = 0`부터 시작하고, shoreline ramp 안쪽으로
+    갈수록 contour step 단위로만 올라가야 한다.
+11. ocean/lake visible surface는 항상 `y = 0`이며, preview vertical slice에서 ocean side가 깊게
+    파인 지형처럼 보이면 회귀다.
 12. river water hint는 integer block height이며, 인접 river/standing-water pair에서 큰 급락을 만들지
     않아야 한다. 현재 구현은 neighbor delta를 한 block 이하로 제한하는 preliminary descent pass다.
 13. contour gap 정책은 final height를 렌더링으로 속이는 값이 아니라 heightfield band resolve 계약이다.
     현재 기본값은 `step_blocks = 1`, 일반 `min_gap_blocks = 0`, `river_min_gap_blocks = 0`이며,
     raw block height와 visible terrain은 같은 block scale을 유지한다. river corridor
-    override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`와 river descent는 이 snap
-    결과 위에서 유지되어야 한다.
-14. X/Z column density는 입력 `PixelizedChunkArea`의 column count와 chunk/local layout이 직접 소유한다.
+    override 구조는 남기지만 기본값은 land와 river가 같다. sea level `y=0`, shoreline ceiling,
+    river descent는 이 snap 결과 위에서 유지되어야 한다.
+14. X/Z column density는 입력 macro field tile의 column count와 sample spacing이 직접 소유한다.
     별도 fixed scale이나 horizontal subdivision 값으로 heightfield Y를 해석하면 안 된다. launch relief는
     shared block-height domain의 `-1024..2048` 기본 범위가 소유한다. preview 렌더러는 산출된
     `surface_y`와 water hint를 cubic block scale로 그려야 하며, column density로 같은 Y 값을 다시
     낮춰 보이면 중복 압축이다.
-15. 새 path에서 first chunk-aligned `1 world block = 1 pixel = 1 voxel column` resolve는 `pixelize`가
-    소유한다. heightfield가 `MacroFieldTile`을 직접 resample해 이 resolve를 반복하면 회귀다.
-16. Perlin micro relief는 기본적으로 꺼져 있다. preview용 enabled config는 현재
-    `raw + micro -> contour -> snap/clamp` 순서를 사용해 contour stair-step이 지나치게 직접 보이는
-    문제를 줄인다.
-17. Perlin micro relief는 seed, generator version, world-space x/z로만 결정되어야 하며 chunk-local
-    random state나 병렬 실행 순서에 의존하면 안 된다.
-18. Ocean/lake micro relief는 항상 0이고, river column micro relief는 river continuity 보호를 위해
-    현재 0이다.
