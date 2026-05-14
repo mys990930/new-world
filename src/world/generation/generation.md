@@ -114,6 +114,8 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
    - local minimum은 lake, sink, outlet carve, dry/closed basin 의미로 분리되어야 하며, local
      minimum이라는 이유만으로 모두 물로 채우지 않는다.
    - selected river chain은 lake/sink/outlet 정책 없이 끊기지 않아야 하며, 최종적으로 ocean outlet 또는 명시적인 lake/sink resolution에 연결되어야 한다.
+   - selected ordinary river fragment가 downstream selected path와 valid terminal을 잃으면 hydrology가
+     selected geometry에서 제거한다. downstream raw flow ledger는 보존한다.
    - lake로 끝나는 chain과 lake/wetland candidate component로 처음 들어가는 inlet chain은 ocean outlet
      chain과 같은 크기로 취급하지 않는다. raw accumulation은 보존하되, lake 면적/capacity에 비례해
      lake별 top-N incoming chain, inlet raw-flow threshold, 표시/폭 계산용 discharge를 제한한다.

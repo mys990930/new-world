@@ -2,11 +2,11 @@ use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
-use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
+use super::biome::{classify_graph_biome, GraphBiomeWaterRole};
 use super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroCorner, MacroEdge, MacroSurfaceKind};
 
-pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 30.0;
+pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 48.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
 const DEFAULT_HEADWATER_SOURCE_HYDRATION: f32 = 0.34;
 const DEFAULT_HEADWATER_SOURCE_SCORE: f32 = 0.40;
@@ -143,6 +143,7 @@ pub struct GraphHydrologyTopologyStats {
     pub ambiguous_shared_corner_count: usize,
     pub duplicate_trunk_pruned_count: usize,
     pub repeated_lake_contact_pruned_count: usize,
+    pub disconnected_river_fragment_pruned_count: usize,
     pub unclassified_lake_connected_flow_count: usize,
 }
 
@@ -311,6 +312,7 @@ pub fn solve_hydrology(
         &node_kinds,
         selected_rivers.duplicate_trunk_pruned_count,
         selected_rivers.repeated_lake_contact_pruned_count,
+        selected_rivers.disconnected_river_fragment_pruned_count,
     );
     let nodes = build_nodes(patch, &watersheds, &node_kinds);
     let segments = build_segments(
@@ -428,6 +430,7 @@ struct SelectedRiverPaths {
     selected: Vec<bool>,
     duplicate_trunk_pruned_count: usize,
     repeated_lake_contact_pruned_count: usize,
+    disconnected_river_fragment_pruned_count: usize,
 }
 
 fn validate_hydrology_config(config: HydrologyConfig) {
@@ -1342,11 +1345,20 @@ fn select_river_paths(
     );
     duplicate_trunk_pruned_count +=
         prune_multi_incoming_selected_branches(&mut selected, downstream, flow);
+    let disconnected_river_fragment_pruned_count = prune_disconnected_selected_fragments(
+        &mut selected,
+        downstream,
+        terminals,
+        lake_candidates,
+        resolutions,
+        lake_topology,
+    );
 
     SelectedRiverPaths {
         selected,
         duplicate_trunk_pruned_count,
         repeated_lake_contact_pruned_count,
+        disconnected_river_fragment_pruned_count,
     }
 }
 
@@ -1800,6 +1812,131 @@ fn remove_repeated_lake_contact_chains(
     pruned
 }
 
+fn prune_disconnected_selected_fragments(
+    selected: &mut [bool],
+    downstream: &[Option<usize>],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    resolutions: &[GraphLocalMinimumResolution],
+    lake_topology: &LakeContactTopology,
+) -> usize {
+    let mut keep = vec![false; selected.len()];
+
+    for index in 0..selected.len() {
+        if !selected[index] {
+            continue;
+        }
+        keep[index] = selected_path_reaches_valid_terminal(
+            index,
+            selected,
+            downstream,
+            terminals,
+            lake_candidates,
+            resolutions,
+            lake_topology,
+        );
+    }
+
+    let mut pruned = 0;
+    for (index, selected) in selected.iter_mut().enumerate() {
+        if *selected && !keep[index] {
+            *selected = false;
+            pruned += 1;
+        }
+    }
+
+    pruned
+}
+
+fn selected_path_reaches_valid_terminal(
+    start: usize,
+    selected: &[bool],
+    downstream: &[Option<usize>],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    resolutions: &[GraphLocalMinimumResolution],
+    lake_topology: &LakeContactTopology,
+) -> bool {
+    let mut current = start;
+    let mut guard = 0;
+
+    while selected.get(current).copied().unwrap_or(false) {
+        let Some(target) = downstream[current] else {
+            return selected_terminal_is_valid(current, terminals, lake_topology, resolutions);
+        };
+        if selected_terminal_is_valid(target, terminals, lake_topology, resolutions)
+            || selected_lake_inlet_terminal_is_valid(
+                target,
+                downstream,
+                lake_candidates,
+                lake_topology,
+            )
+        {
+            return true;
+        }
+        if !selected.get(target).copied().unwrap_or(false) {
+            return false;
+        }
+
+        current = target;
+        guard += 1;
+        if guard > selected.len() {
+            return false;
+        }
+    }
+
+    false
+}
+
+fn selected_terminal_is_valid(
+    index: usize,
+    terminals: &[bool],
+    lake_topology: &LakeContactTopology,
+    resolutions: &[GraphLocalMinimumResolution],
+) -> bool {
+    terminals.get(index).copied().unwrap_or(false)
+        || lake_topology
+            .outlet_land_vertices
+            .get(index)
+            .copied()
+            .unwrap_or(false)
+        || matches!(
+            resolutions.get(index).copied(),
+            Some(
+                GraphLocalMinimumResolution::OceanOutlet
+                    | GraphLocalMinimumResolution::OutletCarve
+                    | GraphLocalMinimumResolution::Lake
+                    | GraphLocalMinimumResolution::Sink
+            )
+        )
+}
+
+fn selected_lake_inlet_terminal_is_valid(
+    index: usize,
+    downstream: &[Option<usize>],
+    lake_candidates: &[bool],
+    lake_topology: &LakeContactTopology,
+) -> bool {
+    lake_topology
+        .inlet_land_vertices
+        .get(index)
+        .copied()
+        .unwrap_or(false)
+        && downstream
+            .get(index)
+            .copied()
+            .flatten()
+            .is_some_and(|lake| {
+                lake_candidates.get(lake).copied().unwrap_or(false)
+                    || lake_topology
+                        .component_by_corner
+                        .get(lake)
+                        .copied()
+                        .flatten()
+                        .is_some()
+            })
+}
+
 fn resolve_selected_flow_accumulation(
     raw_flow: &[f32],
     downstream: &[Option<usize>],
@@ -1914,10 +2051,12 @@ fn resolve_topology_stats(
     node_kinds: &[GraphDrainageNodeKind],
     duplicate_trunk_pruned_count: usize,
     repeated_lake_contact_pruned_count: usize,
+    disconnected_river_fragment_pruned_count: usize,
 ) -> GraphHydrologyTopologyStats {
     let mut stats = GraphHydrologyTopologyStats::default();
     stats.duplicate_trunk_pruned_count = duplicate_trunk_pruned_count;
     stats.repeated_lake_contact_pruned_count = repeated_lake_contact_pruned_count;
+    stats.disconnected_river_fragment_pruned_count = disconnected_river_fragment_pruned_count;
     let mut incoming = vec![0_u32; selected.len()];
     let mut outgoing = vec![0_u32; selected.len()];
 
@@ -2116,11 +2255,11 @@ mod tests {
     use super::*;
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     };
     use crate::world::generation::macro_map::{
-        MacroCorner, MacroMapConfig, MacroSurfaceKind, generate_macro_map,
+        generate_macro_map, MacroCorner, MacroMapConfig, MacroSurfaceKind,
     };
     use std::collections::HashMap;
 
@@ -2359,6 +2498,7 @@ mod tests {
             &node_kinds,
             selected_rivers.duplicate_trunk_pruned_count,
             selected_rivers.repeated_lake_contact_pruned_count,
+            selected_rivers.disconnected_river_fragment_pruned_count,
         );
 
         assert_eq!(node_kinds[2], GraphDrainageNodeKind::Source);
@@ -2369,7 +2509,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_incoming_prune_keeps_upstream_tributary_axis() {
+    fn multi_incoming_prune_removes_disconnected_upstream_fragment() {
         let downstream = vec![Some(2), Some(3), Some(3), Some(4), None];
         let downstream_edges = vec![
             Some(VoronoiEdgeId(50)),
@@ -2458,10 +2598,11 @@ mod tests {
 
         assert_eq!(
             selected_rivers.selected,
-            vec![true, true, false, true, false],
-            "the weaker merge edge should be removed while its upstream tributary axis remains visible"
+            vec![false, true, false, true, false],
+            "the weaker merge edge and its now-disconnected upstream fragment should be removed"
         );
         assert_eq!(selected_rivers.duplicate_trunk_pruned_count, 1);
+        assert_eq!(selected_rivers.disconnected_river_fragment_pruned_count, 1);
 
         let mut incoming = vec![0_u32; downstream.len()];
         for (index, is_selected) in selected_rivers.selected.iter().copied().enumerate() {
@@ -2551,8 +2692,8 @@ mod tests {
         );
 
         assert_eq!(
-            DEFAULT_RIVER_FLOW_THRESHOLD, 30.0,
-            "launch default intentionally raises the selected-headwater threshold"
+            DEFAULT_RIVER_FLOW_THRESHOLD, 48.0,
+            "launch default intentionally keeps marginal tributaries out of the selected graph"
         );
         assert_eq!(
             selected_rivers.selected,
@@ -2624,7 +2765,7 @@ mod tests {
             Some(VoronoiEdgeId(52)),
             None,
         ];
-        let flow = vec![3.0, 12.0, 32.0, 32.0];
+        let flow = vec![3.0, 12.0, 56.0, 56.0];
         let elevations = vec![0.62, 0.28, 0.22, 0.0];
         let source_hydration = vec![0.55, 0.0, 0.0, 0.0];
         let terminals = vec![false, false, false, true];
@@ -2678,7 +2819,7 @@ mod tests {
             Some(VoronoiEdgeId(52)),
             None,
         ];
-        let flow = vec![4.0, 28.0, 32.0, 32.0];
+        let flow = vec![4.0, 44.0, 56.0, 56.0];
         let elevations = vec![0.16, 0.14, 0.12, 0.0];
         let source_hydration = vec![0.10, 0.10, 0.10, 0.0];
         let terminals = vec![false, false, false, true];

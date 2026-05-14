@@ -98,6 +98,7 @@ GraphHydrologyTopologyStats {
     ambiguous_shared_corner_count,
     duplicate_trunk_pruned_count,
     repeated_lake_contact_pruned_count,
+    disconnected_river_fragment_pruned_count,
 }
 ```
 
@@ -148,8 +149,9 @@ hydrology result를 biome context에 반영하는 얇은 final pass다.
    - preview-visible selected geometry에서는 같은 vertex에 둘 이상의 selected incoming segment를 허용하지
      않는다.
    - 여러 selected upstream branch가 같은 vertex로 들어오면 raw upstream flow가 가장 강한 incoming
-     edge 하나만 merge edge로 남기고, 나머지는 충돌 vertex로 들어가는 마지막 selected edge만 제거한다.
-     upstream selected 축 전체를 지우지 않아 지류 centerline은 충돌 직전 endpoint까지 남을 수 있다.
+     edge 하나만 merge edge로 남기고, 나머지는 충돌 vertex로 들어가는 selected edge를 제거한다.
+     이 제거로 downstream selected path와 terminal이 끊긴 ordinary upstream fragment는 selected geometry에서
+     함께 제거한다.
    - 이 pruning은 selected geometry만 줄이며, downstream corner raw flow accumulation은 보존한다. 따라서
      `river_plan`은 unselected drainage가 합류한 뒤의 downstream raw Q를 계속 읽을 수 있다.
    - pruning 뒤에도 여러 incoming이 남으면 명시 lake/sink/coast terminal로 설명되는 경우를 제외하고
@@ -173,14 +175,14 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - spill path가 없으면 explicit sink로 남긴다. selected river는 explicit sink를 제외하고 중간에서 끊기면 안 된다.
 - flow accumulation은 land corner rainfall contribution을 downstream으로 누적한다.
 - selected river는 terrain source 후보에서 시작한 ocean-connected chain을 mainstem으로 먼저 보존한다.
-  launch 기본 selected-headwater threshold는 `DEFAULT_RIVER_FLOW_THRESHOLD = 30.0`이며, 이 값은 source
+  launch 기본 selected-headwater threshold는 `DEFAULT_RIVER_FLOW_THRESHOLD = 48.0`이며, 이 값은 source
   local flow가 아니라 downstream path discharge potential 판정에 쓰인다. source 후보는
   `headwater_elevation`, graph local maximum 또는 near-maximum/ridge/highland context, corner hydration/source score,
   non-lake selected edge 조건을 만족해야 한다. 이후 threshold/source 조건을 만족하고 lake
   internal/boundary/adjacent edge를 쓰지 않는 upstream chain은 downstream path로 selected될 수 있지만,
   같은 vertex에 여러 selected incoming branch가 모이면 가장 강한 merge edge 하나만 남기고 다른 branch는
-  충돌 직전 endpoint까지만 selected geometry로 유지한다.
-  이 threshold는 지류 과밀을 줄이기 위해 직전 22.0 기준보다 한 번 더 올린 값이며, source 후보 조건은
+  downstream selected 연결이 유지되는 경우에만 selected geometry로 유지한다.
+  이 threshold는 지류 과밀을 줄이기 위해 직전 30.0 기준보다 한 번 더 올린 값이며, source 후보 조건은
   arbitrary border/threshold crossing을 막되 hydrated near-peak와 ridge/highland tributary source가
   모두 사라지지 않도록 유지한다.
 - selected river는 source 후보에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
@@ -235,9 +237,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - selected river occupancy는 `one selected outgoing per corner`인 downhill graph 위에서
   `one selected incoming per corner`도 요구한다. 같은 vertex의 여러 incoming selected branches는
   downstream outgoing segment가 있더라도 selected geometry에서는 보존하지 않고 strongest merge edge
-  하나로 prune한다. weaker branch의 upstream selected 축은 충돌 직전까지만 유지할 수 있으며, raw flow
-  accumulation은 그대로 남기므로 `river_plan`은 그 직후 downstream segment에서 unselected drainage까지
-  포함한 raw Q를 morphology floor로 사용할 수 있다.
+  하나로 prune한다. weaker branch가 selected downstream path와 valid terminal을 잃으면 selected geometry에서
+  제거한다. raw flow accumulation은 그대로 남기므로 `river_plan`은 그 직후 downstream segment에서
+  unselected drainage까지 포함한 raw Q를 morphology floor로 사용할 수 있다.
 
 최종 river morphology는 hydrology가 직접 만들지 않는다.
 
@@ -337,11 +339,15 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     않는다. 정상 solve의 `ambiguous_shared_corner_count`는 0이어야 하며,
     `duplicate_trunk_pruned_count`는 multi-incoming vertex에서 제거한 weaker merge edge segment 수를
     나타낸다.
-13. 같은 selected chain은 lake contact를 최대 한 번만 가져야 한다. 이 정책으로 제거된 selected segment는
+13. selected ordinary river segment는 downstream selected path를 따라 ocean/coast outlet, explicit
+    sink/outlet carve, lake inlet/outlet policy endpoint, 또는 documented downstream terminal에 닿아야 한다.
+    이 연결을 잃은 fragment는 selected geometry에서 제거하고
+    `disconnected_river_fragment_pruned_count`에 기록한다.
+14. 같은 selected chain은 lake contact를 최대 한 번만 가져야 한다. 이 정책으로 제거된 selected segment는
     `repeated_lake_contact_pruned_count`에 기록한다.
-14. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
+15. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
     `selected_lake_edge_segment_count`는 정상 hydrology solve에서 0이어야 한다.
-15. `unclassified_lake_connected_flow_count`는 정상 hydrology solve에서 0이어야 한다.
+16. `unclassified_lake_connected_flow_count`는 정상 hydrology solve에서 0이어야 한다.
 
 ---
 
@@ -366,8 +372,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   lake-edge river segment, invalid lake contact/intersection count와 ambiguous shared corner count가
   0인지 확인한다. disconnected count는 실제 selected segment incoming/outgoing map에서 marker endpoint를
   검사해 계산한다. multi-incoming confluence는 selected geometry에서 strongest merge edge 하나로
-  prune하고 weaker branch centerline은 충돌 직전까지 남길 수 있으며, downstream raw accumulation은
-  `river_plan`의 Q floor 입력으로 보존한다.
+  prune하고, 이로 인해 valid downstream selected terminal을 잃은 weaker branch fragment는 selected
+  geometry에서 제거한다. downstream raw accumulation은 `river_plan`의 Q floor 입력으로 보존한다.
 - `GraphDrainageNodeKind::Lake`는 selected river가 닿는 표시용 endpoint가 아니라, graph-stage local
   minimum이 lake resolution으로 남았음을 나타내는 내부 drainage/debug node다. 기본 preview에서는 이
   node를 그리지 않고, lake fill과 `LakeInlet`/`LakeOutlet` endpoint만 사용자가 보는 lake hydrology
