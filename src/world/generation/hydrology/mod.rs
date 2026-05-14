@@ -29,11 +29,13 @@ pub use types::{
     DEFAULT_LAKE_DISCHARGE_RANGE_PER_AREA, DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS,
     DEFAULT_LAKE_MAX_INCOMING_CHAINS, DEFAULT_LAKE_MAX_OUTLETS_PER_COMPONENT,
     DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER, DEFAULT_RIVER_FLOW_THRESHOLD,
-    DEFAULT_TRIBUTARY_MAX_PATH_EDGES, DEFAULT_TRIBUTARY_SOURCE_HYDRATION,
-    DEFAULT_TRIBUTARY_SOURCE_THRESHOLD, GraphDrainageNode, GraphDrainageNodeId,
-    GraphDrainageNodeKind, GraphHydrologyCorner, GraphHydrologyGraph, GraphHydrologyRole,
-    GraphHydrologyTopologyStats, GraphLocalMinimumResolution, GraphRiverSegment,
-    GraphRiverSegmentId, HydrologyConfig, WatershedId,
+    DEFAULT_TRIBUTARY_MAX_PATH_EDGES, DEFAULT_TRIBUTARY_PARALLEL_PATH_COMPARE_EDGES,
+    DEFAULT_TRIBUTARY_PARALLEL_PATH_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_HYDRATION,
+    DEFAULT_TRIBUTARY_SOURCE_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_THRESHOLD,
+    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner,
+    GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
+    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
+    WatershedId,
 };
 
 pub fn solve_hydrology(
@@ -124,12 +126,18 @@ pub fn solve_hydrology(
         .iter()
         .map(|corner| corner.base_fields.hydration)
         .collect::<Vec<_>>();
+    let corner_positions = patch
+        .corners
+        .iter()
+        .map(|corner| corner.position)
+        .collect::<Vec<_>>();
     let selected_rivers = select_river_paths(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
         &elevations,
         &source_hydration,
+        Some(&corner_positions),
         &terminals,
         &lake_candidates,
         &resolutions,
@@ -293,7 +301,8 @@ mod tests {
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
         DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiEdgeId,
-        VoronoiGraphConfig, VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
+        generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
         MacroCorner, MacroMapConfig, MacroSurfaceKind, generate_macro_map,
@@ -565,6 +574,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -694,6 +704,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -855,7 +866,7 @@ mod tests {
             Some(VoronoiEdgeId(42)),
             None,
         ];
-        let flow = vec![14.0, 26.0, 48.0, 48.0];
+        let flow = vec![2.0, 3.0, 4.0, 4.0];
         let elevations = vec![0.65, 0.70, 0.40, 0.0];
         let terminals = vec![false, false, false, true];
         let lake_candidates = vec![false; 4];
@@ -901,6 +912,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -922,13 +934,13 @@ mod tests {
         );
 
         assert_eq!(
-            DEFAULT_RIVER_FLOW_THRESHOLD, 100.0,
-            "launch default intentionally keeps marginal tributaries out of the selected graph"
+            DEFAULT_RIVER_FLOW_THRESHOLD, 30.0,
+            "launch default keeps sub-threshold marginal tributaries out of the selected graph"
         );
         assert_eq!(
             selected_rivers.selected,
             vec![false; 4],
-            "the higher main river threshold should not be lowered to create more tributary starts"
+            "the main river threshold should not be bypassed to create sub-threshold tributary starts"
         );
     }
 
@@ -958,6 +970,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1015,6 +1028,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1060,6 +1074,14 @@ mod tests {
         let flow = vec![18.0, 16.0, 15.0, 140.0, 190.0, 190.0];
         let elevations = vec![0.74, 0.73, 0.72, 0.50, 0.30, 0.0];
         let source_hydration = vec![0.58, 0.57, 0.56, 1.0, 0.0, 0.0];
+        let corner_positions = vec![
+            WorldPlanePoint::new(-1600.0, -512.0),
+            WorldPlanePoint::new(1600.0, 512.0),
+            WorldPlanePoint::new(0.0, 1600.0),
+            WorldPlanePoint::new(-512.0, 0.0),
+            WorldPlanePoint::new(512.0, 0.0),
+            WorldPlanePoint::new(1024.0, 0.0),
+        ];
         let terminals = vec![false, false, false, false, false, true];
         let lake_candidates = vec![false; 6];
         let resolutions = vec![
@@ -1130,6 +1152,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            Some(&corner_positions),
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1153,6 +1176,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            Some(&corner_positions),
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1185,6 +1209,126 @@ mod tests {
             strict[3..],
             dense[3..],
             "tributary density must not work by lengthening the mainstem path"
+        );
+    }
+
+    #[test]
+    fn clustered_high_hydration_tributaries_keep_best_spaced_source() {
+        let downstream = vec![Some(3), Some(4), Some(3), Some(4), Some(5), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(90)),
+            Some(VoronoiEdgeId(91)),
+            Some(VoronoiEdgeId(92)),
+            Some(VoronoiEdgeId(93)),
+            Some(VoronoiEdgeId(94)),
+            None,
+        ];
+        let flow = vec![18.0, 17.0, 140.0, 180.0, 220.0, 220.0];
+        let elevations = vec![0.74, 0.73, 0.70, 0.50, 0.30, 0.0];
+        let source_hydration = vec![0.58, 0.57, 1.0, 0.0, 0.0, 0.0];
+        let corner_positions = vec![
+            WorldPlanePoint::new(0.0, 0.0),
+            WorldPlanePoint::new(96.0, 0.0),
+            WorldPlanePoint::new(-640.0, 0.0),
+            WorldPlanePoint::new(512.0, 0.0),
+            WorldPlanePoint::new(512.0, 320.0),
+            WorldPlanePoint::new(512.0, 640.0),
+        ];
+        let terminals = vec![false, false, false, false, false, true];
+        let lake_candidates = vec![false; 6];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(90),
+            }],
+            vec![CornerNeighbor {
+                index: 4,
+                edge: VoronoiEdgeId(91),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(92),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(90),
+                },
+                CornerNeighbor {
+                    index: 2,
+                    edge: VoronoiEdgeId(92),
+                },
+                CornerNeighbor {
+                    index: 4,
+                    edge: VoronoiEdgeId(93),
+                },
+            ],
+            vec![
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(91),
+                },
+                CornerNeighbor {
+                    index: 3,
+                    edge: VoronoiEdgeId(93),
+                },
+                CornerNeighbor {
+                    index: 5,
+                    edge: VoronoiEdgeId(94),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 4,
+                edge: VoronoiEdgeId(94),
+            }],
+        ];
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            Some(&corner_positions),
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 6],
+            &[None; 6],
+            &[None; 6],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 6],
+                contact_component_by_land_corner: vec![None; 6],
+                inlet_vertices: vec![false; 6],
+                outlet_vertices: vec![false; 6],
+                inlet_land_vertices: vec![false; 6],
+                outlet_land_vertices: vec![false; 6],
+            },
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig {
+                river_flow_threshold: 100.0,
+                tributary_source_threshold: 0.50,
+                tributary_source_min_spacing_blocks: 256.0,
+                tributary_parallel_path_min_spacing_blocks: 192.0,
+                ..HydrologyConfig::default()
+            },
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![true, false, true, true, true, false],
+            "clustered hydrated tributary candidates should keep the best source and suppress adjacent parallel starts"
         );
     }
 
@@ -1290,6 +1434,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1348,6 +1493,7 @@ mod tests {
             &flow,
             &elevations,
             &source_hydration,
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1834,6 +1980,7 @@ mod tests {
             &flow,
             &elevations,
             &[0.55, 0.55, 0.55, 0.0, 0.0, 0.0, 0.0],
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,
@@ -1960,6 +2107,7 @@ mod tests {
             &flow,
             &elevations,
             &[0.55, 0.0, 0.0, 0.0],
+            None,
             &terminals,
             &lake_candidates,
             &resolutions,

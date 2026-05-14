@@ -18,6 +18,8 @@
 - mainstem 선택 뒤 별도 tributary source threshold/density 정책으로 side source 후보를 평가한다.
 - tributary source 후보가 already-selected main river에 bounded downhill path로 합류하는지 확인한다.
 - tributary끼리 먼저 만나거나 같은 unselected path를 공유하는 후보는 deterministic score 순서로 하나만 남긴다.
+- explicit tributary 후보가 hydration coherence 때문에 매우 가까운 source/초기 path/merge neighborhood로
+  몰리면, score 순서로 가장 좋은 후보를 먼저 수락하고 이후 후보를 world-block spacing 기준으로 억제한다.
 - 선택된 source에서 downstream path를 따라 selected segment 후보를 만든다.
 - lake edge, lake boundary edge, lake-adjacent edge를 selected river로 선택하지 않는다.
 
@@ -56,11 +58,15 @@
    selected main river에 붙는 tributary source 수가 늘어날 수 있다.
 4. explicit tributary는 downstream path를 따라 이미 선택된 main river에 닿아야 하며, 다른 tributary와
    먼저 교차하거나 path를 공유하면 안 된다.
-5. 선택된 river는 downstream path를 따라 terminal, lake policy endpoint, 또는 mainstem merge point까지
+5. explicit tributary source는 `tributary_source_min_spacing_blocks`보다 가까운 이미 수락된 tributary
+   source와 같이 남으면 안 된다. 초기 downstream path가 여러 edge 동안
+   `tributary_parallel_path_min_spacing_blocks` 안에서 나란히 흐르거나 같은 local merge target
+   neighborhood에 붙는 경우도 후순위 후보를 억제한다.
+6. 선택된 river는 downstream path를 따라 terminal, lake policy endpoint, 또는 mainstem merge point까지
    이어져야 한다.
-6. selection은 raw flow 원장을 수정하지 않는다.
-7. lake 관련 edge는 selected river edge가 될 수 없다.
-8. 너무 작은 lake feeder는 marker/selected river로 승격되지 않을 수 있지만, raw flow 원장에는 남아야 한다.
+7. selection은 raw flow 원장을 수정하지 않는다.
+8. lake 관련 edge는 selected river edge가 될 수 없다.
+9. 너무 작은 lake feeder는 marker/selected river로 승격되지 않을 수 있지만, raw flow 원장에는 남아야 한다.
 
 ---
 
@@ -72,4 +78,5 @@
 - `headwater_source_candidate`
 - explicit tributary candidate/path helpers
 - source scoring helpers
+- accepted tributary source/path spacing suppression helpers
 - lake terminal/inlet selection threshold helpers

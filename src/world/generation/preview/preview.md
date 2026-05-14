@@ -352,6 +352,12 @@ renderer/GPU 계약을 만들지 않는다.
   rasterization 결과가 아니라 강 중심 줄기를 확인하기 위한 reference line이다. 상류/지류와 본류가
   모두 표시되어야 하며, metadata/stdout은 selected centerline segment 수, 화면에 그려진 clipped
   polyline segment 수, 본류/지류 segment 수를 기록한다.
+- `macro_field_preview`는 river centerline 위에 selected source marker를 기본으로 표시한다.
+  outgoing selected segment를 가진 `GraphDrainageNodeKind::Source` node가 marker 대상이며, downstream
+  selected path가 confluence에 먼저 닿으면 tributary source amber/yellow ring, coast/lake terminal에
+  먼저 닿으면 mainstem source bright cyan/white ring으로 그린다. marker는 legend, scale bar, compass
+  아래 layer에 있어야 하며 metadata/stdout은 mainstem source marker 수, tributary source marker 수,
+  실제 viewport 안에 그려진 marker 수를 기록한다.
 - `lit` channel은 broad hillshade가 우선 읽혀야 하므로 다른 channel보다 더 희미한 Voronoi edge
   overlay를 사용한다. lit에서 edge가 조명/고저차보다 먼저 보이면 회귀다.
 - `macro`, `combined`, `lit` channel은 sampled macro field에서 ocean/lake water와 terrain이 맞닿는
@@ -516,9 +522,16 @@ heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 v
   primary 1024-block macro-field tile boundary key, secondary 256-block chunk-group key, chunk footprint
   outline key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
+  Voronoi cell edge 진단 overlay는 stage 9 `BoundaryCache`의 canonical noisy boundary curve를
+  cyan line으로 그린다. 이 overlay는 raw corner-to-corner graph edge나 nearest-owner raster boundary로
+  대체하지 않으며, terrain을 가리지 않도록 반투명으로 legend/compass 전 단계에 렌더한다.
+  boundary point는 고정된 높은 평면이 아니라 heightfield local visible top에 drape한다. water column은
+  terrain bed 대신 visible water surface를 쓰고, dry terrain은 `surface_y`를 쓰며, z-fighting 방지용
+  작은 lift만 더한다. metadata/stdout은
+  `boundary_overlay=cyan_boundary_cache_noisy_curves_draped_visible_surface` 의미를 기록해야 한다.
   column resolution은 실제 샘플링된 column count를 뜻하며, legend에는 sample spacing과
   chunk-radius 모드의 columns-per-chunk도 함께 표시한다. per-block face outline과 정수 side-step
-  line은 렌더하지 않는다.
+  line은 렌더하지 않으며, 별도 toggle 옵션도 제공하지 않는다.
 - overlay와 metadata/stdout은 중앙 player diagnostic cube를 기록한다. 이 큐브는 final gameplay
   entity가 아니라 heightfield preview scale marker이며, world/block 기준 `1 x 1 x 4` block 크기,
   중앙 world position, bottom/top `y`, sampled column count를 표시해야 한다.
@@ -580,7 +593,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   normalization을 적용하지 않는다. 높이는 macro/heightfield block-domain에서 이미 산출되며,
   preview는 그 `surface_y`를 cubic block scale로 그린다. X/Z 픽셀 스케일도 별도 옵션이 아니라
   column count, footprint, image size에서 파생된다.
-- The preview draws top diamonds and only visible neighbor-difference side faces. The visible side
+- The preview draws top diamonds and only visible neighbor-difference side faces without per-block
+  face outlines or integer side-step lines. The visible side
   set and painter order are derived from the current `--quarter-turns` projection, not from fixed
   east/south faces. It must show top surfaces and macro relief together; a side-wall chart, a flat
   topdown plane, and quarter-specific missing back/side faces are regressions.

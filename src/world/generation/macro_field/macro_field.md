@@ -189,10 +189,10 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      U자형 bed carve를 적용한다. lake/non-lake boundary 자체에서는 carve를 0으로 시작하고 lake 내부로
      들어갈수록 깊어져야 하며, land side를 함께 깎아 테두리 cusp나 주변 land 단차를 만들면 안 된다.
    - noisy boundary owner resolve가 raster sample grid에서 아주 작은 disconnected ocean-owned 파편을
-     만들 수 있다. macro_field는 tile edge에 닿은 ocean component, 가장 큰 ocean component, 큰 detached
-     ocean component는 보존하되, 작은 고립 ocean fragment는 water mask로 확정하지 않고 land/coast sample로
-     되돌린다. fragment 한계는 sample 수가 아니라 block 면적으로 해석한다. 이 후처리는 source graph나
-     lake/wetland mask를 바꾸지 않는 raster cache 정합성 guard다.
+     만들 수 있다. macro_field는 tile edge에 닿은 ocean component와 큰 detached ocean component는
+     보존하되, 작은 고립 ocean fragment는 타일 안에서 가장 큰 ocean component여도 water mask로 확정하지
+     않고 land/coast sample로 되돌린다. fragment 한계는 sample 수가 아니라 block 면적으로 해석한다. 이
+     후처리는 source graph나 lake/wetland mask를 바꾸지 않는 raster cache 정합성 guard다.
 5. coast guide edge의 rasterized distance field로 coast mask를 보강한다. 이 source는 `macro_map`의
    explicit coast guide만 사용하며, 모든 Voronoi boundary edge를 coast처럼 splat하면 회귀다.
    coast distance는 source guide를 바꾸지 않는 world-space roughness offset을 거쳐 mask로
@@ -362,6 +362,12 @@ macro field preview는 selected river centerline도 `RiverPlan` segment와 `Boun
 curve를 기준으로 표시해야 한다. 이 선은 river valley field의 폭을 대체하지 않는 진단용 중심선이며,
 본류성 reach는 지류보다 조금 더 두껍게 그려도 된다. preview metadata/stdout은 선택된 river-plan
 segment 수와 실제 clipping 후 그려진 centerline polyline segment 수를 기록해야 한다.
+centerline 위에는 selected hydrology의 `GraphDrainageNodeKind::Source` 중 outgoing selected segment가
+있는 node를 circular source marker로 표시한다. downstream selected path가 confluence에 먼저 닿는
+source는 tributary marker(amber/yellow ring), terminal/coast/lake endpoint에 먼저 닿는 source는
+mainstem marker(bright cyan/white ring)로 구분한다. marker는 river centerline보다 위, legend/scale
+bar/compass보다 아래에 그려야 하며 metadata/stdout에는 mainstem source marker 수, tributary source
+marker 수, 실제 viewport 안에 그려진 marker 수를 기록한다.
 
 모든 macro field preview output은 방향 compass overlay를 포함한다. 기준은 world topdown 좌표계이며
 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은 남(S), 왼쪽은 서(W)다. compass는 legend와 scale bar를
@@ -442,8 +448,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - sample fill 뒤에는 작은 disconnected ocean-owned raster component를 water mask에서 제거한다. 이 guard는
   noisy owner side query가 해안 land 안쪽에 만든 1~수백 sample 규모의 고립 `CoastOcean`/`OceanBasin`
   파편을 downstream water로 확정하지 않기 위한 최소 후처리이며, threshold는 sample spacing에 맞춘 block
-  area 기준으로 계산한다. tile edge ocean, 가장 큰 ocean component, 큰 detached ocean component,
-  lake/wetland mask는 보존한다.
+  area 기준으로 계산한다. tile edge ocean, 큰 detached ocean component, lake/wetland mask는 보존한다.
+  타일 안의 유일하거나 가장 큰 ocean component라도 이 면적 기준보다 작고 tile edge에 닿지 않으면 제거한다.
 - `biome_context`와 `biome`은 macro_map이 resolve한 nearest site `GraphBiomeCell`을 전달한다. 이
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.

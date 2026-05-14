@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::super::graph::VoronoiEdgeId;
+use super::super::graph::{VoronoiEdgeId, WorldPlanePoint};
 use super::super::macro_map::MacroEdge;
 use super::routing::CornerNeighbor;
 use super::topology::{
@@ -148,6 +148,7 @@ pub(super) fn select_river_paths(
     flow: &[f32],
     elevations: &[f32],
     source_hydration: &[f32],
+    corner_positions: Option<&[WorldPlanePoint]>,
     terminals: &[bool],
     lake_candidates: &[bool],
     resolutions: &[GraphLocalMinimumResolution],
@@ -261,6 +262,7 @@ pub(super) fn select_river_paths(
             .then_with(|| left.source.index.cmp(&right.source.index))
     });
 
+    let mut accepted_tributaries = Vec::new();
     for candidate in tributary_candidates {
         if !tributary_path_can_merge(
             &candidate,
@@ -273,12 +275,17 @@ pub(super) fn select_river_paths(
         ) {
             continue;
         }
+        if accepted_tributary_conflicts(&candidate, &accepted_tributaries, corner_positions, config)
+        {
+            continue;
+        }
         for index in &candidate.path {
             selected[*index] = true;
             if let Some(target) = downstream[*index] {
                 incoming_selected[target] = incoming_selected[target].saturating_add(1);
             }
         }
+        accepted_tributaries.push(candidate);
     }
 
     enforce_lake_contact_topology(
@@ -331,6 +338,90 @@ pub(super) fn select_river_paths(
         repeated_lake_contact_pruned_count,
         disconnected_river_fragment_pruned_count,
     }
+}
+
+fn accepted_tributary_conflicts(
+    candidate: &TributarySourceCandidate,
+    accepted: &[TributarySourceCandidate],
+    corner_positions: Option<&[WorldPlanePoint]>,
+    config: HydrologyConfig,
+) -> bool {
+    if accepted.is_empty() {
+        return false;
+    }
+    let Some(positions) = corner_positions else {
+        return false;
+    };
+
+    accepted.iter().any(|other| {
+        candidate.merge_index == other.merge_index
+            || source_spacing_conflicts(candidate, other, positions, config)
+            || early_parallel_path_conflicts(candidate, other, positions, config)
+            || merge_neighborhood_conflicts(candidate, other, positions, config)
+    })
+}
+
+fn source_spacing_conflicts(
+    candidate: &TributarySourceCandidate,
+    other: &TributarySourceCandidate,
+    positions: &[WorldPlanePoint],
+    config: HydrologyConfig,
+) -> bool {
+    let min_spacing = config.tributary_source_min_spacing_blocks;
+    min_spacing > 0.0
+        && squared_corner_distance(candidate.source.index, other.source.index, positions)
+            .is_some_and(|distance| distance < min_spacing * min_spacing)
+}
+
+fn early_parallel_path_conflicts(
+    candidate: &TributarySourceCandidate,
+    other: &TributarySourceCandidate,
+    positions: &[WorldPlanePoint],
+    config: HydrologyConfig,
+) -> bool {
+    let min_spacing = config.tributary_parallel_path_min_spacing_blocks;
+    if min_spacing <= 0.0 {
+        return false;
+    }
+
+    let compare_edges = config.tributary_parallel_path_compare_edges as usize;
+    let close_pairs = candidate
+        .path
+        .iter()
+        .take(compare_edges)
+        .filter(|&&left| {
+            other.path.iter().take(compare_edges).any(|&right| {
+                squared_corner_distance(left, right, positions)
+                    .is_some_and(|distance| distance < min_spacing * min_spacing)
+            })
+        })
+        .count();
+
+    close_pairs >= 2
+}
+
+fn merge_neighborhood_conflicts(
+    candidate: &TributarySourceCandidate,
+    other: &TributarySourceCandidate,
+    positions: &[WorldPlanePoint],
+    config: HydrologyConfig,
+) -> bool {
+    let min_spacing = config.tributary_parallel_path_min_spacing_blocks;
+    min_spacing > 0.0
+        && squared_corner_distance(candidate.merge_index, other.merge_index, positions)
+            .is_some_and(|distance| distance < min_spacing * min_spacing)
+}
+
+fn squared_corner_distance(
+    left: usize,
+    right: usize,
+    positions: &[WorldPlanePoint],
+) -> Option<f32> {
+    let left = positions.get(left).copied()?;
+    let right = positions.get(right).copied()?;
+    let dx = left.x - right.x;
+    let dz = left.z - right.z;
+    Some(dx * dx + dz * dz)
 }
 
 fn sort_headwater_candidates(candidates: &mut [HeadwaterSourceCandidate]) {

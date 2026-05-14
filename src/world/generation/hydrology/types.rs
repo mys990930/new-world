@@ -1,10 +1,13 @@
 use super::super::graph::{VoronoiCornerId, VoronoiEdgeId, WorldPlanePoint};
 
-pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 100.0;
+pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 30.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
 pub const DEFAULT_TRIBUTARY_SOURCE_THRESHOLD: f32 = 0.52;
 pub const DEFAULT_TRIBUTARY_SOURCE_HYDRATION: f32 = 0.46;
 pub const DEFAULT_TRIBUTARY_MAX_PATH_EDGES: u32 = 18;
+pub const DEFAULT_TRIBUTARY_SOURCE_MIN_SPACING_BLOCKS: f32 = 768.0;
+pub const DEFAULT_TRIBUTARY_PARALLEL_PATH_MIN_SPACING_BLOCKS: f32 = 256.0;
+pub const DEFAULT_TRIBUTARY_PARALLEL_PATH_COMPARE_EDGES: u32 = 4;
 pub(super) const DEFAULT_HEADWATER_SOURCE_HYDRATION: f32 = 0.34;
 pub(super) const DEFAULT_HEADWATER_SOURCE_SCORE: f32 = 0.40;
 pub(super) const LAKE_INLET_RIVER_THRESHOLD_CAP: f32 = 22.0;
@@ -26,6 +29,9 @@ pub struct HydrologyConfig {
     pub tributary_source_threshold: f32,
     pub tributary_source_hydration: f32,
     pub tributary_max_path_edges: u32,
+    pub tributary_source_min_spacing_blocks: f32,
+    pub tributary_parallel_path_min_spacing_blocks: f32,
+    pub tributary_parallel_path_compare_edges: u32,
     pub lake_river_flow_threshold_multiplier: f32,
     pub lake_discharge_cap_per_area: f32,
     pub lake_discharge_cap_floor: f32,
@@ -45,6 +51,10 @@ impl Default for HydrologyConfig {
             tributary_source_threshold: DEFAULT_TRIBUTARY_SOURCE_THRESHOLD,
             tributary_source_hydration: DEFAULT_TRIBUTARY_SOURCE_HYDRATION,
             tributary_max_path_edges: DEFAULT_TRIBUTARY_MAX_PATH_EDGES,
+            tributary_source_min_spacing_blocks: DEFAULT_TRIBUTARY_SOURCE_MIN_SPACING_BLOCKS,
+            tributary_parallel_path_min_spacing_blocks:
+                DEFAULT_TRIBUTARY_PARALLEL_PATH_MIN_SPACING_BLOCKS,
+            tributary_parallel_path_compare_edges: DEFAULT_TRIBUTARY_PARALLEL_PATH_COMPARE_EDGES,
             lake_river_flow_threshold_multiplier: DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER,
             lake_discharge_cap_per_area: DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
             lake_discharge_cap_floor: DEFAULT_LAKE_DISCHARGE_CAP_FLOOR,
@@ -218,6 +228,22 @@ pub(super) fn validate_hydrology_config(config: HydrologyConfig) {
     assert!(
         config.tributary_max_path_edges > 0,
         "tributary_max_path_edges must be > 0"
+    );
+    assert!(
+        config.tributary_source_min_spacing_blocks.is_finite()
+            && config.tributary_source_min_spacing_blocks >= 0.0,
+        "tributary_source_min_spacing_blocks must be finite and >= 0"
+    );
+    assert!(
+        config
+            .tributary_parallel_path_min_spacing_blocks
+            .is_finite()
+            && config.tributary_parallel_path_min_spacing_blocks >= 0.0,
+        "tributary_parallel_path_min_spacing_blocks must be finite and >= 0"
+    );
+    assert!(
+        config.tributary_parallel_path_compare_edges > 0,
+        "tributary_parallel_path_compare_edges must be > 0"
     );
     assert!(
         config.lake_river_flow_threshold_multiplier.is_finite()
