@@ -13,7 +13,8 @@
 
 - selected river가 lake internal/boundary/adjacent edge를 쓰지 않도록 강제한다.
 - `LakeInlet`과 `LakeOutlet` marker가 land-side endpoint에만 생기도록 정리한다.
-- selected graph의 multi-incoming/shared-corner 충돌을 정리한다.
+- selected graph의 multi-incoming/shared-corner 충돌을 정리하되, 두 incoming이 하나의 outgoing으로
+  합류하는 정상 confluence는 보존한다.
 - repeated lake contact chain을 제거한다.
 - selected fragment가 valid terminal이나 documented lake endpoint를 잃으면 제거한다.
 - topology validation stats를 계산한다.
@@ -52,8 +53,10 @@
 1. preview-visible selected river graph는 unexplained shared-corner intersection을 남기면 안 된다.
 2. selected river segment는 lake internal/boundary/adjacent edge를 쓰면 안 된다.
 3. lake contact는 selected segment endpoint의 `LakeInlet`/`LakeOutlet` marker로만 표현한다.
-4. ordinary selected fragment는 valid downstream selected path를 잃으면 제거한다.
-5. topology pass는 raw flow accumulation을 보존한다.
+4. selected river confluence는 최대 두 incoming segment와 정확히 하나의 outgoing selected segment로만
+   표현한다. 세 개 이상의 incoming branch나 tributary끼리 먼저 만나는 shared path는 제거한다.
+5. ordinary selected fragment는 valid downstream selected path를 잃으면 제거한다.
+6. topology pass는 raw flow accumulation을 보존한다.
 
 ---
 
@@ -68,4 +71,3 @@
 - `prune_disconnected_selected_fragments`
 - `resolve_node_kinds`
 - `resolve_topology_stats`
-

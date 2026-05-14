@@ -411,29 +411,18 @@ pub(super) fn prune_multi_incoming_selected_branches(
             }
         }
 
-        let Some((_, sources)) = incoming
+        let Some((corner, sources)) = incoming
             .iter()
             .enumerate()
-            .find(|(_, sources)| sources.len() > 1)
+            .find(|(corner, sources)| sources.len() > selected_incoming_limit(*corner, selected))
         else {
             break;
         };
-        let keep = sources
-            .iter()
-            .copied()
-            .max_by(|&left, &right| {
-                flow[left]
-                    .total_cmp(&flow[right])
-                    .then_with(|| right.cmp(&left))
-            })
-            .expect("multi-incoming vertex should have a strongest selected source");
-        let remove = sources
-            .iter()
-            .copied()
-            .filter(|&source| source != keep)
-            .collect::<Vec<_>>();
-
-        for source in remove {
+        let keep = strongest_sources(sources, selected_incoming_limit(corner, selected), flow);
+        for source in sources.iter().copied() {
+            if keep.contains(&source) {
+                continue;
+            }
             if selected[source] {
                 selected[source] = false;
                 pruned += 1;
@@ -442,6 +431,25 @@ pub(super) fn prune_multi_incoming_selected_branches(
     }
 
     pruned
+}
+
+fn selected_incoming_limit(corner: usize, selected: &[bool]) -> usize {
+    if selected.get(corner).copied().unwrap_or(false) {
+        2
+    } else {
+        1
+    }
+}
+
+fn strongest_sources(sources: &[usize], limit: usize, flow: &[f32]) -> Vec<usize> {
+    let mut ordered = sources.to_vec();
+    ordered.sort_by(|&left, &right| {
+        flow[right]
+            .total_cmp(&flow[left])
+            .then_with(|| left.cmp(&right))
+    });
+    ordered.truncate(limit.max(1));
+    ordered
 }
 
 pub(super) fn remove_repeated_lake_contact_chains(
@@ -738,7 +746,20 @@ pub(super) fn resolve_topology_stats(
     }
 
     for index in 0..selected.len() {
-        if incoming[index] <= 1 {
+        let incoming_limit = if outgoing[index] > 0 {
+            2
+        } else if matches!(
+            resolutions[index],
+            GraphLocalMinimumResolution::OceanOutlet
+                | GraphLocalMinimumResolution::OutletCarve
+                | GraphLocalMinimumResolution::Lake
+                | GraphLocalMinimumResolution::Sink
+        ) {
+            2
+        } else {
+            1
+        };
+        if incoming[index] <= incoming_limit {
             continue;
         }
         let is_explicit_terminal = matches!(
@@ -748,14 +769,17 @@ pub(super) fn resolve_topology_stats(
                 | GraphLocalMinimumResolution::Lake
                 | GraphLocalMinimumResolution::Sink
         );
-        if !is_explicit_terminal {
-            stats.invalid_river_intersection_count += incoming[index].saturating_sub(1) as usize;
+        if !is_explicit_terminal || incoming[index] > 2 {
+            stats.invalid_river_intersection_count +=
+                incoming[index].saturating_sub(incoming_limit) as usize;
         }
         if lake_candidates[index] && incoming[index] > 1 {
-            stats.invalid_river_intersection_count += incoming[index].saturating_sub(1) as usize;
+            stats.invalid_river_intersection_count +=
+                incoming[index].saturating_sub(incoming_limit) as usize;
         }
         if !is_explicit_terminal {
-            stats.ambiguous_shared_corner_count += incoming[index].saturating_sub(1) as usize;
+            stats.ambiguous_shared_corner_count +=
+                incoming[index].saturating_sub(incoming_limit) as usize;
         }
     }
 

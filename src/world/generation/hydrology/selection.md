@@ -15,6 +15,9 @@
 - terrain-like headwater source 후보를 찾는다.
 - source 후보의 downstream path potential, source hydration, highland/ridge/local-maximum context를 평가한다.
 - 일반 river threshold와 lake inlet/terminal threshold를 적용한다.
+- mainstem 선택 뒤 별도 tributary source threshold/density 정책으로 side source 후보를 평가한다.
+- tributary source 후보가 already-selected main river에 bounded downhill path로 합류하는지 확인한다.
+- tributary끼리 먼저 만나거나 같은 unselected path를 공유하는 후보는 deterministic score 순서로 하나만 남긴다.
 - 선택된 source에서 downstream path를 따라 selected segment 후보를 만든다.
 - lake edge, lake boundary edge, lake-adjacent edge를 selected river로 선택하지 않는다.
 
@@ -47,10 +50,17 @@
 ## 불변식
 
 1. selected river start는 단순 threshold crossing이나 임의 border가 아니라 terrain source 후보여야 한다.
-2. 선택된 river는 downstream path를 따라 terminal 또는 lake policy endpoint까지 이어져야 한다.
-3. selection은 raw flow 원장을 수정하지 않는다.
-4. lake 관련 edge는 selected river edge가 될 수 없다.
-5. 너무 작은 lake feeder는 marker/selected river로 승격되지 않을 수 있지만, raw flow 원장에는 남아야 한다.
+2. `river_flow_threshold`는 mainstem downstream discharge potential을 고르는 기준이며 tributary 개수 조절
+   수단이 아니다.
+3. `tributary_source_threshold` / `tributary_source_hydration`을 낮추면 mainstem 길이를 늘리지 않고
+   selected main river에 붙는 tributary source 수가 늘어날 수 있다.
+4. explicit tributary는 downstream path를 따라 이미 선택된 main river에 닿아야 하며, 다른 tributary와
+   먼저 교차하거나 path를 공유하면 안 된다.
+5. 선택된 river는 downstream path를 따라 terminal, lake policy endpoint, 또는 mainstem merge point까지
+   이어져야 한다.
+6. selection은 raw flow 원장을 수정하지 않는다.
+7. lake 관련 edge는 selected river edge가 될 수 없다.
+8. 너무 작은 lake feeder는 marker/selected river로 승격되지 않을 수 있지만, raw flow 원장에는 남아야 한다.
 
 ---
 
@@ -60,6 +70,6 @@
 
 - `select_river_paths`
 - `headwater_source_candidate`
+- explicit tributary candidate/path helpers
 - source scoring helpers
 - lake terminal/inlet selection threshold helpers
-
