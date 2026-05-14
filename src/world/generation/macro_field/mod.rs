@@ -629,6 +629,7 @@ fn rasterize_influence_fields(
             flow_hint: river.flow_hint,
             valley_width_blocks: river.valley_width_blocks,
             bed_depth_blocks: river.bed_depth_blocks,
+            component_id: 0,
         })
         .collect::<Vec<_>>();
 
@@ -681,6 +682,71 @@ struct RiverRasterSource<'a> {
     flow_hint: f32,
     valley_width_blocks: f32,
     bed_depth_blocks: f32,
+    component_id: usize,
+}
+
+fn assign_river_raster_components(sources: &mut [RiverRasterSource<'_>]) {
+    let mut parent = (0..sources.len()).collect::<Vec<_>>();
+    for left in 0..sources.len() {
+        for right in left + 1..sources.len() {
+            if river_sources_touch(sources[left], sources[right]) {
+                union_component(&mut parent, left, right);
+            }
+        }
+    }
+
+    let mut component_by_root = HashMap::new();
+    let mut next_component = 0;
+    for index in 0..sources.len() {
+        let root = find_component(&mut parent, index);
+        let component = *component_by_root.entry(root).or_insert_with(|| {
+            let component = next_component;
+            next_component += 1;
+            component
+        });
+        sources[index].component_id = component;
+    }
+}
+
+fn river_sources_touch(left: RiverRasterSource<'_>, right: RiverRasterSource<'_>) -> bool {
+    let Some(left_start) = left.points.first() else {
+        return false;
+    };
+    let Some(left_end) = left.points.last() else {
+        return false;
+    };
+    let Some(right_start) = right.points.first() else {
+        return false;
+    };
+    let Some(right_end) = right.points.last() else {
+        return false;
+    };
+    const ENDPOINT_EPSILON_BLOCKS: f32 = 0.01;
+    let threshold = ENDPOINT_EPSILON_BLOCKS * ENDPOINT_EPSILON_BLOCKS;
+    [
+        (*left_start, *right_start),
+        (*left_start, *right_end),
+        (*left_end, *right_start),
+        (*left_end, *right_end),
+    ]
+    .into_iter()
+    .any(|(a, b)| squared_distance(a, b) <= threshold)
+}
+
+fn union_component(parent: &mut [usize], left: usize, right: usize) {
+    let left_root = find_component(parent, left);
+    let right_root = find_component(parent, right);
+    if left_root != right_root {
+        parent[right_root] = left_root;
+    }
+}
+
+fn find_component(parent: &mut [usize], index: usize) -> usize {
+    if parent[index] != index {
+        let parent_index = parent[index];
+        parent[index] = find_component(parent, parent_index);
+    }
+    parent[index]
 }
 
 fn rasterize_curve_distance_field(
@@ -780,10 +846,14 @@ fn rasterize_curve_anti_aliased_polyline_field(
         };
     }
 
+    let mut sources = sources.to_vec();
+    assign_river_raster_components(&mut sources);
+
     let width = config.width as usize;
     let height = config.height as usize;
     let mut distance_blocks = vec![f32::INFINITY; sample_count];
     let mut river_valley_strength = vec![0.0; sample_count];
+    let mut river_owner_component = vec![usize::MAX; sample_count];
     let mut flow_weighted_sum = vec![0.0; sample_count];
     let mut flow_weight_sum = vec![0.0; sample_count];
     let mut river_bed_depth_hint = vec![0.0; sample_count];
@@ -791,11 +861,12 @@ fn rasterize_curve_anti_aliased_polyline_field(
     let mut river_gravel_hint = vec![0.0; sample_count];
     let mut river_cutbank_hint = vec![0.0; sample_count];
 
-    for source in sources {
+    for source in &sources {
         for segment in source.points.windows(2) {
             rasterize_segment_anti_aliased_stroke(
                 &mut distance_blocks,
                 &mut river_valley_strength,
+                &mut river_owner_component,
                 &mut flow_weighted_sum,
                 &mut flow_weight_sum,
                 &mut river_bed_depth_hint,
@@ -845,6 +916,7 @@ fn rasterize_curve_anti_aliased_polyline_field(
 fn rasterize_segment_anti_aliased_stroke(
     distance_blocks: &mut [f32],
     river_valley_strength: &mut [f32],
+    river_owner_component: &mut [usize],
     flow_weighted_sum: &mut [f32],
     flow_weight_sum: &mut [f32],
     river_bed_depth_hint: &mut [f32],
@@ -935,18 +1007,12 @@ fn rasterize_segment_anti_aliased_stroke(
             let cutbank_hint = (cutbank_sum / subpixel_count).clamp(0.0, 1.0);
             let current_distance = distance_blocks[global_index];
             let same_thalweg_band = spacing * 0.35;
-            if closest_subpixel_distance + same_thalweg_band < current_distance {
-                distance_blocks[global_index] = closest_subpixel_distance;
-                river_valley_strength[global_index] = anti_aliased_strength;
-                river_bed_depth_hint[global_index] = bed_hint;
-                river_bank_roughness_hint[global_index] = rough_hint;
-                river_gravel_hint[global_index] = gravel_hint;
-                river_cutbank_hint[global_index] = cutbank_hint;
-                flow_weighted_sum[global_index] = strength * anti_aliased_strength;
-                flow_weight_sum[global_index] = anti_aliased_strength;
-            } else if (closest_subpixel_distance - current_distance).abs() <= same_thalweg_band {
+            let current_component = river_owner_component[global_index];
+            if current_component == source.component_id && current_distance.is_finite() {
+                distance_blocks[global_index] =
+                    distance_blocks[global_index].min(closest_subpixel_distance);
                 river_valley_strength[global_index] =
-                    river_valley_strength[global_index].max(anti_aliased_strength);
+                    soft_union_strength(river_valley_strength[global_index], anti_aliased_strength);
                 river_bed_depth_hint[global_index] =
                     river_bed_depth_hint[global_index].max(bed_hint);
                 river_bank_roughness_hint[global_index] =
@@ -956,9 +1022,25 @@ fn rasterize_segment_anti_aliased_stroke(
                     river_cutbank_hint[global_index].max(cutbank_hint);
                 flow_weighted_sum[global_index] += strength * anti_aliased_strength;
                 flow_weight_sum[global_index] += anti_aliased_strength;
+            } else if closest_subpixel_distance + same_thalweg_band < current_distance {
+                distance_blocks[global_index] = closest_subpixel_distance;
+                river_valley_strength[global_index] = anti_aliased_strength;
+                river_owner_component[global_index] = source.component_id;
+                river_bed_depth_hint[global_index] = bed_hint;
+                river_bank_roughness_hint[global_index] = rough_hint;
+                river_gravel_hint[global_index] = gravel_hint;
+                river_cutbank_hint[global_index] = cutbank_hint;
+                flow_weighted_sum[global_index] = strength * anti_aliased_strength;
+                flow_weight_sum[global_index] = anti_aliased_strength;
             }
         }
     }
+}
+
+fn soft_union_strength(existing: f32, incoming: f32) -> f32 {
+    let existing = existing.clamp(0.0, 1.0);
+    let incoming = incoming.clamp(0.0, 1.0);
+    (1.0 - (1.0 - existing) * (1.0 - incoming)).clamp(0.0, 1.0)
 }
 
 fn rasterize_curve_sources(
@@ -2267,10 +2349,13 @@ fn usable_side(preferred: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::generation::boundary::{BoundaryConfig, generate_noisy_boundaries};
+    use crate::world::generation::boundary::{
+        BoundaryAnchors, BoundaryConfig, BoundaryGuard, BoundaryProfile, generate_noisy_boundaries,
+    };
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
+        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, VoronoiSiteId,
+        generate_voronoi_graph_patch,
     };
     use crate::world::generation::hydrology::{
         GraphHydrologyGraph, HydrologyConfig, solve_hydrology,
@@ -3172,6 +3257,79 @@ mod tests {
     }
 
     #[test]
+    fn river_connected_broad_stroke_overlap_uses_soft_union_without_cusp() {
+        let left = test_noisy_curve(
+            301,
+            vec![
+                WorldPlanePoint::new(16.0, 64.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            ],
+        );
+        let right = test_noisy_curve(
+            302,
+            vec![
+                WorldPlanePoint::new(64.0, 64.0),
+                WorldPlanePoint::new(64.0, 112.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 9, 16.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(
+            &[
+                test_river_source(&left, 0.70),
+                test_river_source(&right, 0.70),
+            ],
+            config,
+            64.0,
+        );
+        let overlap_inside = 5 * 9 + 3;
+        let horizontal_shoulder = 4 * 9 + 3;
+        let vertical_shoulder = 5 * 9 + 4;
+        let weakest_shoulder = field.river_valley_strength[horizontal_shoulder]
+            .min(field.river_valley_strength[vertical_shoulder]);
+
+        assert!(
+            field.river_valley_strength[overlap_inside] >= weakest_shoulder * 0.95,
+            "connected broad stroke overlap should not leave a pointed weak cusp: overlap={} shoulder_h={} shoulder_v={}",
+            field.river_valley_strength[overlap_inside],
+            field.river_valley_strength[horizontal_shoulder],
+            field.river_valley_strength[vertical_shoulder]
+        );
+    }
+
+    #[test]
+    fn river_straight_segment_shoulder_is_not_a_chain_of_point_blobs() {
+        let curve = test_noisy_curve(
+            311,
+            vec![
+                WorldPlanePoint::new(16.0, 32.0),
+                WorldPlanePoint::new(144.0, 32.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 11, 5, 16.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(
+            &[test_river_source(&curve, 0.65)],
+            config,
+            64.0,
+        );
+        let shoulder_strengths = (2..=8)
+            .map(|x| field.river_valley_strength[3 * 11 + x])
+            .collect::<Vec<_>>();
+        let min = shoulder_strengths
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let max = shoulder_strengths
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(
+            max - min <= 0.08,
+            "straight segment shoulder should be strip-continuous rather than point-splat blobs: min={min} max={max}"
+        );
+    }
+
+    #[test]
     fn river_anti_aliased_polyline_prefers_nearest_segment_for_overlaps() {
         use crate::world::generation::boundary::{
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
@@ -3241,6 +3399,48 @@ mod tests {
         assert!(
             field.river_valley_strength[weak_center] > 0.0,
             "nearest segment priority should still keep the local small river visible"
+        );
+    }
+
+    #[test]
+    fn river_parallel_independent_corridors_do_not_soft_union_into_one_owner() {
+        let weak = test_noisy_curve(
+            321,
+            vec![
+                WorldPlanePoint::new(0.0, 32.0),
+                WorldPlanePoint::new(128.0, 32.0),
+            ],
+        );
+        let strong = test_noisy_curve(
+            322,
+            vec![
+                WorldPlanePoint::new(0.0, 64.0),
+                WorldPlanePoint::new(128.0, 64.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 7, 16.0);
+        let field = rasterize_curve_anti_aliased_polyline_field(
+            &[
+                test_river_source(&weak, 0.25),
+                test_river_source(&strong, 0.90),
+            ],
+            config,
+            64.0,
+        );
+        let midpoint = 3 * 9 + 4;
+        let weak_center = 2 * 9 + 4;
+        let strong_center = 4 * 9 + 4;
+
+        assert!(
+            field.flow_hint[midpoint] < 0.45,
+            "equal-distance parallel corridors should keep deterministic local ownership instead of blending separate rivers: {}",
+            field.flow_hint[midpoint]
+        );
+        assert!(
+            field.river_valley_strength[midpoint]
+                <= field.river_valley_strength[weak_center]
+                    .max(field.river_valley_strength[strong_center]),
+            "parallel independent rivers should not union into a wider single corridor"
         );
     }
 
@@ -4460,6 +4660,47 @@ mod tests {
         MacroFieldTileConfig::new(-512.0, -512.0, 24, 24, 64.0)
     }
 
+    fn test_noisy_curve(edge: u32, points: Vec<WorldPlanePoint>) -> NoisyBoundaryCurve {
+        let start = points
+            .first()
+            .copied()
+            .unwrap_or_else(|| WorldPlanePoint::new(0.0, 0.0));
+        let end = points.last().copied().unwrap_or(start);
+        let (mut min_x, mut max_x) = (start.x, start.x);
+        let (mut min_z, mut max_z) = (start.z, start.z);
+        for point in &points {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_z = min_z.min(point.z);
+            max_z = max_z.max(point.z);
+        }
+        NoisyBoundaryCurve {
+            edge: VoronoiEdgeId(edge as u64),
+            profile: BoundaryProfile::Ordinary,
+            anchors: BoundaryAnchors {
+                corners: [
+                    VoronoiCornerId(edge as u64 * 2),
+                    VoronoiCornerId(edge as u64 * 2 + 1),
+                ],
+                sites: [
+                    VoronoiSiteId(edge as u64 * 2),
+                    VoronoiSiteId(edge as u64 * 2 + 1),
+                ],
+                start,
+                end,
+            },
+            points,
+            amplitude: 0.0,
+            seed: edge as u64,
+            guard: BoundaryGuard {
+                min_x: min_x - 64.0,
+                max_x: max_x + 64.0,
+                min_z: min_z - 64.0,
+                max_z: max_z + 64.0,
+            },
+        }
+    }
+
     fn test_river_source<'a>(
         curve: &'a NoisyBoundaryCurve,
         flow_hint: f32,
@@ -4470,6 +4711,7 @@ mod tests {
             flow_hint,
             valley_width_blocks: lerp(4.0, 180.0, flow_hint.clamp(0.0, 1.0)),
             bed_depth_blocks: lerp(1.5, 18.0, flow_hint.clamp(0.0, 1.0)),
+            component_id: 0,
         }
     }
 
