@@ -23,8 +23,8 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
   쓰지 않도록 강제
 - ordinary selected river graph가 최종적으로 connected ocean/coast terminal에 닿도록 검증하고,
   명시 `LakeInlet` 정책으로 분류되지 않은 sink/lake-local/disconnected fragment를 selected geometry에서 제거
-- selected ordinary downstream path의 display/morphology discharge가 하류 방향으로 감소하지 않도록
-  raw accumulation ledger와 별도로 selected/display discharge를 보정
+- selected river-system의 canonical display/morphology discharge가 하류 방향으로 감소하지 않도록
+  raw accumulation ledger와 별도로 보정하고, lake inlet/outlet transition에서도 같은 Q ledger를 유지
 
 ---
 
@@ -110,12 +110,13 @@ GraphHydrologyTopologyStats {
 heightfield는 이 segment만 강으로 해석해야 한다. macro_map의 ridge/fault/coast guide는 이 단계의
 입력일 뿐이며, pre-hydrology river candidate와 혼동하면 안 된다.
 corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation이며, river segment는
-`raw_flow_accumulation`과 정책 적용 후의 `flow_accumulation`을 함께 가진다. preview의 강 두께와
-초기 river width는 segment의 정책 적용 후 `flow_accumulation`을 사용한다.
-최종 selected ordinary path에서는 이 정책 적용 후 `flow_accumulation`이 downstream으로 감소하지 않는다.
-hydrology는 raw accumulation을 그대로 `raw_flow_accumulation`에 보존하고, selected/display discharge만
-하류 방향 monotone invariant에 맞게 전파한다. 명시 `LakeInlet`은 lake capacity cap을 적용받는 별도
-terminal로 남으며, 일반 ocean outlet trunk와 같은 크기로 승격하지 않는다.
+`raw_flow_accumulation`과 canonical river-system display Q인 `flow_accumulation`을 함께 가진다.
+preview의 강 두께와 downstream morphology Q는 segment의 `flow_accumulation`을 사용한다.
+최종 selected river-system에서는 이 `flow_accumulation`이 downstream으로 감소하지 않는다.
+hydrology는 raw accumulation을 그대로 `raw_flow_accumulation`에 보존하고, canonical display Q만
+하류 방향 monotone invariant에 맞게 전파한다. 명시 `LakeInlet`과 `LakeOutlet`은 lake capacity가
+river selection, marker 승격, local shape constraint에 영향을 주는 transition endpoint이며, canonical
+river-system Q를 cap하거나 reset하지 않는다.
 `GraphRiverSegment.local_slope`는 selected segment 양 끝 corner의 elevation drop을 segment 길이로
 나눈 topology-local hint다. hydrology가 final morphology를 직접 결정하지는 않지만, macro_field가
 작은 급류 구간을 더 거칠고 큰 하류 구간을 더 완만하게 rasterize할 수 있도록 slope 정보를 보존한다.
@@ -170,8 +171,9 @@ hydrology result를 biome context에 반영하는 얇은 final pass다.
     있으면 selected geometry에서 제거한다.
 11. `river_plan`이 reach morphology를 만들 수 있도록 selected river segment, flow, downstream
     progress, lake/sink/outlet terminal role을 제공한다.
-12. selected/display discharge를 selected ordinary downstream path에서 monotone 하게 전파한다. raw
-    accumulation은 diagnostic/source ledger로 유지한다.
+12. selected/display discharge를 selected river-system downstream path에서 monotone 하게 전파한다. raw
+    accumulation은 diagnostic/source ledger로 유지하며, lake inlet/outlet transition은 canonical Q를
+    끊거나 작은 outflow Q로 reset하지 않는다.
 
 launch 구현은 아래의 보수적인 정책을 사용한다.
 
@@ -201,15 +203,17 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - selected river는 source 후보에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
 - selected headwater edge 양쪽 land/dry-basin site는 final biome context에서 건조지대로 남으면 안 된다.
   launch 기본 floor는 `DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR = 0.46`이다.
-- ocean outlet으로 이어지는 river는 raw/selected display flow accumulation을 기준으로 넓어질 수 있다.
+- ocean outlet으로 이어지는 river는 raw flow와 canonical selected display Q를 기준으로 넓어질 수 있다.
   이후 macro_field/heightfield 단계에서 이 값은 width와 depth를 함께 키운다. 상류는 좁고 얕고,
   하류 trunk는 넓고 깊어야 하며, launch preview에서 모든 selected river가 같은 폭으로 보이면 회귀다.
-- lake로 끝나는 river와 lake/wetland component로 처음 들어가는 inlet river는 raw flow accumulation을
-  보존하되 lake 면적에서 파생한 capacity를 기준으로 selected incoming chain 수, visible inlet segment
-  수, 표시/폭 계산용 discharge를 제한한다. 기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,
+- lake로 끝나는 river와 lake/wetland component로 처음 들어가는 inlet river는 raw flow accumulation과
+  canonical river-system display Q를 보존하되 lake 면적에서 파생한 capacity를 기준으로 selected incoming
+  chain 수, visible inlet marker 수, inlet raw-flow threshold, local inlet/outlet shape bounds를 제한한다.
+  lake capacity cap은 local morphology constraint이며 canonical system Q ledger를 덮어쓰지 않는다.
+  기본 정책은 lake/wetland candidate corner 수를 `area_units`로 보고,
   `max_lake_terminal_chains = min(3, 1 + floor(area_units / 24))`를 적용한다. 작은 lake는 1개
   이하의 feeder chain만 보이고, 큰 lake도 ocean outlet river network처럼 많은 지류를 먹지 않는다.
-- lake terminal/inlet chain은 lake area와 display cap에서 파생한 raw flow threshold를 넘어야 선택된다.
+- lake terminal/inlet chain은 lake area와 local shape cap에서 파생한 raw flow threshold를 넘어야 선택된다.
   작은 lake는 작은 feeder를 허용하되 너무 자잘한 흐름은 marker로 승격하지 않고, 큰 lake는 더 큰
   raw feeder를 요구한다. 선택된 lake-bound chain은 더 이상 호수 직전 몇 segment로 잘리지 않는다.
   lake edge 자체는 계속 금지하지만, 기준을 통과한 기존 upstream trunk는 lake boundary 직전
@@ -222,12 +226,11 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   flow가 없더라도 lake footprint 자체를 유지한다. selected flow가 연결되면 lake boundary edge를 쓰지
   않는 land-side endpoint에서 `LakeInlet` 또는 `LakeOutlet`으로 분류되어야 하며, 연결된 selected
   flow가 marker 없이 남으면 `unclassified_lake_connected_flow_count` 회귀로 잡힌다.
-- lake terminal/inlet display discharge는 lake 면적에 따라 범위가 함께 올라간다. launch 기본 cap은
-  `min(32, 4 + area_units * 0.35)`이고, display floor는 `min(32 * 0.55, 4 * 0.55 + area_units * 0.18)`이다.
-  raw accumulation은 `raw_flow_accumulation`에 보존하지만, preview width/opacity와 초기 river width는
-  이 lake-area display band를 통과한 `flow_accumulation`을 사용한다. 따라서 lake terminal river는
-  일반 ocean outlet trunk보다 확연히 얇고 적되, lake 크기가 커질수록 inlet/outlet discharge range도
-  같이 커진다.
+- lake terminal/inlet local shape cap은 lake 면적에 따라 범위가 함께 올라간다. launch 기본 cap은
+  `min(32, 4 + area_units * 0.35)`이고, local floor는 `min(32 * 0.55, 4 * 0.55 + area_units * 0.18)`이다.
+  raw accumulation은 `raw_flow_accumulation`에 보존하고, canonical river-system Q는 segment
+  `flow_accumulation`에 보존한다. downstream preview/morphology continuity는 canonical Q를 읽고,
+  lake inlet/outlet의 conservative shape는 `river_plan`의 lake reach bounds가 적용한다.
 - lake 유입/유출 topology는 visual artifact 방지를 위해 selected graph 단계에서 고정된다. lake로 들어가는
   흐름은 `MacroLakeEdgeClass`가 lake 관련 edge로 분류한 edge를 selected segment로 쓰지 않는다.
   `LakeInlet`은 lake boundary 바로 바깥의
@@ -256,9 +259,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - selected topology pruning의 마지막에는 ocean/coast reachability를 다시 계산한다. ordinary selected river는
   arbitrary sink, lake-local endpoint, disconnected open endpoint를 valid terminal로 취급하지 않는다.
   lake-bound feeder는 `LakeInlet` marker로 분류된 경우에만 명시 terminal로 유지된다.
-- selected/display discharge는 ordinary selected path에서 downstream으로 줄어들지 않는다. 중간 segment의
-  raw Q가 크거나 lake/sink 정책 전환 때문에 display Q가 튀어도, downstream selected ordinary segment는
-  최소 직전 selected/display Q를 이어받는다. raw Q는 별도 ledger로 보존한다.
+- selected/display discharge는 selected river-system path에서 downstream으로 줄어들지 않는다. 중간 segment의
+  raw Q가 크거나 lake transition 때문에 local shape policy가 바뀌어도, downstream selected segment는
+  최소 직전 canonical system Q를 이어받는다. raw Q는 별도 ledger로 보존한다.
 
 최종 river morphology는 hydrology가 직접 만들지 않는다.
 
@@ -267,9 +270,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `headwater`, `upper`, `middle`, `lower`, `trunk`, `lake inlet/outlet` 같은 reach type을 정한다.
 - river width, broad valley, bed depth, bank/floodplain parameter는 `river_plan`이 flow와 local
   role에 따라 결정한다.
-- lake terminal/inlet river의 morphology는 raw accumulation이 아니라 lake capacity가 적용된 selected
-  discharge와 lake terminal role을 우선 사용한다. raw flow는 hydrology ledger와 inlet threshold 판정에
-  남고, display flow는 lake area에 비례한 cap을 통과한 값이다.
+- lake terminal/inlet river의 route와 marker 승격은 raw accumulation과 lake capacity policy를 함께
+  사용한다. morphology의 primary Q는 canonical system `flow_accumulation`이며, lake capacity는
+  `LakeInlet`/`LakeOutlet` reach type을 통해 local shape bounds로만 적용된다.
 - confluence smoothing이나 visible river axis 조정은 hydrology가 아니라 `river_plan` 또는 downstream
   field/heightfield stage의 책임이다.
 
@@ -346,8 +349,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
 8. final river morphology는 raw straight edge를 직접 terrain carve로 쓰지 않고, `river_plan`의
    reach morphology를 거쳐야 한다.
 9. lake terminal/inlet river는 lake 면적/capacity에 비례해서 선택되어야 한다. 큰 lake는 더 큰
-   raw inlet feeder를 요구하고 더 큰 selected/display discharge를 허용하지만, raw accumulation이 커도
-   selected/display discharge는 ocean outlet river보다 보수적인 상한을 가져야 한다.
+   raw inlet feeder를 요구하고 더 큰 local inlet/outlet shape range를 허용하지만, canonical
+   selected/display discharge는 lake cap으로 줄이거나 reset하지 않는다.
 10. selected river는 lake 내부 edge를 관통하거나 lake boundary edge를 따라 스치지 않는다.
     lake와의 접촉은 land-side `LakeInlet`/`LakeOutlet` endpoint marker와 lake component pairing으로만
     표현하며, selected segment 자체는 lake corner를 endpoint로 삼지 않는다. selected segment가 쓰는
@@ -381,8 +384,9 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   이어지도록 선택된다.
 - selected river selection은 ocean outlet chain과 lake terminal/inlet chain을 구분한다. lake
   terminal/inlet chain은 lake candidate footprint에서 산정한 capacity에 따라 lake별 top-N incoming
-  chain, area-scaled inlet threshold, selected/display discharge cap을 적용한다. raw corner
-  accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록한다. 기준을 통과한 lake-bound
+  chain, area-scaled inlet threshold, local inlet/outlet shape cap을 적용한다. raw corner
+  accumulation은 보존하고 segment의 `raw_flow_accumulation`에 기록하며 canonical system Q는
+  segment의 `flow_accumulation`에 유지한다. 기준을 통과한 lake-bound
   chain은 호수 직전 몇 edge로 truncate하지 않고, lake boundary 직전 land-side endpoint까지 이어질 수
   있다.
 - selected river topology는 lake contact와 shared-corner intersection을 후처리로 검증한다. 결과 graph는
@@ -395,9 +399,10 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   geometry에서 제거한다. 최종 reachability pass는 ordinary selected fragment가 connected ocean/coast terminal
   또는 명시 `LakeInlet` endpoint에 닿는지 다시 계산하고, sink/lake-local/open fragment를 제거한다.
   downstream raw accumulation은 `river_plan`의 Q floor 입력으로 보존한다.
-- selected/display discharge는 final selected graph 위에서 ordinary downstream 방향으로 monotone 하게
+- selected/display discharge는 final selected graph 위에서 river-system downstream 방향으로 monotone 하게
   전파된다. raw `flow_accumulation` 원장은 corner와 segment의 `raw_flow_accumulation`에 남고, preview와
-  downstream morphology가 읽는 segment `flow_accumulation`만 보정된다.
+  downstream morphology가 읽는 segment `flow_accumulation`만 보정된다. lake inlet/outlet transition은
+  selected chain boundary일 수 있지만 canonical system Q boundary는 아니다.
 - `GraphDrainageNodeKind::Lake`는 selected river가 닿는 표시용 endpoint가 아니라, graph-stage local
   minimum이 lake resolution으로 남았음을 나타내는 내부 drainage/debug node다. 기본 preview에서는 이
   node를 그리지 않고, lake fill과 `LakeInlet`/`LakeOutlet` endpoint만 사용자가 보는 lake hydrology

@@ -626,7 +626,10 @@ fn reach_type_for_segment(
     {
         return RiverReachType::LakeOutlet;
     }
-    if segment.role == GraphHydrologyRole::Trunk {
+    if matches!(
+        segment.role,
+        GraphHydrologyRole::Trunk | GraphHydrologyRole::Floodplain
+    ) {
         return RiverReachType::Trunk;
     }
 
@@ -887,25 +890,50 @@ mod tests {
         let headwater = plan.segment(GraphRiverSegmentId(1)).expect("headwater");
         let upper = plan.segment(GraphRiverSegmentId(2)).expect("upper");
         let middle = plan.segment(GraphRiverSegmentId(3)).expect("middle");
-        let lower = plan.segment(GraphRiverSegmentId(4)).expect("lower");
+        let floodplain = plan.segment(GraphRiverSegmentId(4)).expect("floodplain");
         let trunk = plan.segment(GraphRiverSegmentId(5)).expect("trunk");
 
         assert_eq!(headwater.reach_type, RiverReachType::Headwater);
         assert_eq!(upper.reach_type, RiverReachType::Upper);
         assert_eq!(middle.reach_type, RiverReachType::Middle);
-        assert_eq!(lower.reach_type, RiverReachType::Lower);
+        assert_eq!(floodplain.reach_type, RiverReachType::Trunk);
         assert_eq!(trunk.reach_type, RiverReachType::Trunk);
         assert!(headwater.bed_width_blocks < upper.bed_width_blocks);
         assert!(upper.bed_width_blocks < middle.bed_width_blocks);
-        assert!(middle.bed_width_blocks < lower.bed_width_blocks);
-        assert!(lower.bed_width_blocks < trunk.bed_width_blocks);
+        assert!(middle.bed_width_blocks < floodplain.bed_width_blocks);
+        assert!(floodplain.bed_width_blocks <= trunk.bed_width_blocks);
     }
 
     #[test]
-    fn lake_inlet_uses_display_cap_for_conservative_morphology() {
+    fn floodplain_role_cannot_shrink_below_lower_q_trunk() {
         let (patch, macro_map, hydrology) = synthetic_inputs(
             &[
-                segment_with_raw(1, 0, 1, 24.0, 900.0, GraphHydrologyRole::Floodplain),
+                segment(1, 0, 1, 120.0, GraphHydrologyRole::Trunk),
+                segment(2, 2, 3, 500.0, GraphHydrologyRole::Floodplain),
+            ],
+            &[
+                (1, GraphDrainageNodeKind::CoastOutlet),
+                (3, GraphDrainageNodeKind::CoastOutlet),
+            ],
+            &[],
+        );
+
+        let plan = build_river_plan(&patch, &macro_map, &hydrology, RiverPlanConfig::default());
+        let trunk = plan.segment(GraphRiverSegmentId(1)).expect("trunk");
+        let floodplain = plan.segment(GraphRiverSegmentId(2)).expect("floodplain");
+
+        assert_eq!(trunk.reach_type, RiverReachType::Trunk);
+        assert_eq!(floodplain.reach_type, RiverReachType::Trunk);
+        assert!(floodplain.discharge_q >= trunk.discharge_q);
+        assert!(floodplain.bed_width_blocks >= trunk.bed_width_blocks);
+        assert!(floodplain.broad_valley_width_blocks >= trunk.broad_valley_width_blocks);
+    }
+
+    #[test]
+    fn lake_inlet_keeps_system_q_with_conservative_morphology() {
+        let (patch, macro_map, hydrology) = synthetic_inputs(
+            &[
+                segment_with_raw(1, 0, 1, 900.0, 900.0, GraphHydrologyRole::Floodplain),
                 segment(2, 2, 3, 900.0, GraphHydrologyRole::Trunk),
             ],
             &[
@@ -921,10 +949,37 @@ mod tests {
 
         assert_eq!(inlet.reach_type, RiverReachType::LakeInlet);
         assert_eq!(inlet.raw_flow, 900.0);
-        assert_eq!(inlet.display_flow, 24.0);
-        assert!(inlet.tributary_flow > 0.0);
+        assert_eq!(inlet.display_flow, 900.0);
+        assert_eq!(inlet.discharge_q, 900.0);
         assert!(inlet.bed_width_blocks < trunk.bed_width_blocks);
         assert!(inlet.broad_valley_width_blocks < trunk.broad_valley_width_blocks);
+    }
+
+    #[test]
+    fn system_q_does_not_decrease_across_lake_chain_boundary() {
+        let (patch, macro_map, hydrology) = synthetic_inputs(
+            &[
+                segment(1, 0, 1, 180.0, GraphHydrologyRole::Floodplain),
+                segment(2, 2, 3, 180.0, GraphHydrologyRole::Floodplain),
+                segment(3, 3, 4, 220.0, GraphHydrologyRole::Floodplain),
+            ],
+            &[
+                (1, GraphDrainageNodeKind::LakeInlet),
+                (2, GraphDrainageNodeKind::LakeOutlet),
+                (4, GraphDrainageNodeKind::CoastOutlet),
+            ],
+            &[],
+        );
+
+        let plan = build_river_plan(&patch, &macro_map, &hydrology, RiverPlanConfig::default());
+        let inlet = plan.segment(GraphRiverSegmentId(1)).expect("lake inlet");
+        let outlet = plan.segment(GraphRiverSegmentId(2)).expect("lake outlet");
+        let downstream = plan.segment(GraphRiverSegmentId(3)).expect("downstream");
+
+        assert_eq!(inlet.reach_type, RiverReachType::LakeInlet);
+        assert_eq!(outlet.reach_type, RiverReachType::LakeOutlet);
+        assert!(outlet.discharge_q >= inlet.discharge_q);
+        assert!(downstream.discharge_q >= outlet.discharge_q);
     }
 
     fn segment(

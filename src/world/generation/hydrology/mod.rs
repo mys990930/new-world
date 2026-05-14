@@ -295,13 +295,8 @@ pub fn solve_hydrology(
         &flow_accumulation,
         &selected,
         &downstream,
-        &terminal_indices,
-        &first_downstream_lakes,
-        &lake_policies,
-        &lake_inlet_policies,
         &lake_topology,
         &node_kinds,
-        config,
     );
     let topology_stats = resolve_topology_stats(
         &selected,
@@ -1900,51 +1895,70 @@ fn resolve_selected_flow_accumulation(
     raw_flow: &[f32],
     selected: &[bool],
     downstream: &[Option<usize>],
-    terminal_indices: &[usize],
-    first_downstream_lakes: &[Option<usize>],
-    lake_policies: &[Option<LakeTerminalPolicy>],
-    lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     lake_topology: &LakeContactTopology,
     node_kinds: &[GraphDrainageNodeKind],
-    config: HydrologyConfig,
 ) -> Vec<f32> {
-    let mut selected_flow = raw_flow
-        .par_iter()
-        .enumerate()
-        .map(|(index, &flow)| {
-            let terminal = terminal_indices[index];
-            let lake_policy = lake_policies[terminal]
-                .or_else(|| {
-                    first_downstream_lakes[index].and_then(|lake| lake_inlet_policies[lake])
-                })
-                .or_else(|| {
-                    downstream[index]
-                        .filter(|&target| lake_topology.inlet_land_vertices[target])
-                        .and_then(|target| downstream[target])
-                        .and_then(|lake| lake_inlet_policies[lake])
-                });
-
-            if let Some(policy) = lake_policy {
-                if flow >= policy.selection_threshold {
-                    flow.min(policy.discharge_cap).max(policy.discharge_floor)
-                } else {
-                    flow.min(policy.discharge_cap)
-                }
-            } else if downstream[index].is_some_and(|target| {
-                node_kinds
-                    .get(target)
-                    .copied()
-                    .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeInlet)
-            }) {
-                flow.min(config.lake_discharge_cap_ceiling)
-            } else {
-                flow
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut selected_flow = raw_flow.to_vec();
 
     enforce_monotone_selected_display_flow(&mut selected_flow, selected, downstream, node_kinds);
+    propagate_lake_system_display_flow(
+        &mut selected_flow,
+        selected,
+        downstream,
+        lake_topology,
+        node_kinds,
+    );
+    enforce_monotone_selected_display_flow(&mut selected_flow, selected, downstream, node_kinds);
     selected_flow
+}
+
+fn propagate_lake_system_display_flow(
+    selected_flow: &mut [f32],
+    selected: &[bool],
+    downstream: &[Option<usize>],
+    lake_topology: &LakeContactTopology,
+    node_kinds: &[GraphDrainageNodeKind],
+) {
+    let mut component_inlet_flow = vec![0.0_f32; selected.len()];
+
+    for (source, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected {
+            continue;
+        }
+        let Some(target) = downstream[source] else {
+            continue;
+        };
+        if node_kinds
+            .get(target)
+            .copied()
+            .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeInlet)
+        {
+            let Some(lake_corner) = downstream[target] else {
+                continue;
+            };
+            if let Some(component) = lake_topology.component_by_corner[lake_corner] {
+                component_inlet_flow[component] =
+                    component_inlet_flow[component].max(selected_flow[source]);
+            }
+        }
+    }
+
+    for (source, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected {
+            continue;
+        }
+        if !node_kinds
+            .get(source)
+            .copied()
+            .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeOutlet)
+        {
+            continue;
+        }
+        let Some(component) = lake_topology.contact_component_by_land_corner[source] else {
+            continue;
+        };
+        selected_flow[source] = selected_flow[source].max(component_inlet_flow[component]);
+    }
 }
 
 fn enforce_monotone_selected_display_flow(
@@ -2774,10 +2788,6 @@ mod tests {
             &raw_flow,
             &selected,
             &downstream,
-            &[3, 3, 3, 3],
-            &[None; 4],
-            &[None; 4],
-            &[None; 4],
             &LakeContactTopology {
                 component_by_corner: vec![None; 4],
                 contact_component_by_land_corner: vec![None; 4],
@@ -2792,7 +2802,6 @@ mod tests {
                 GraphDrainageNodeKind::Source,
                 GraphDrainageNodeKind::CoastOutlet,
             ],
-            HydrologyConfig::default(),
         );
 
         assert_eq!(
@@ -2803,6 +2812,50 @@ mod tests {
         assert_eq!(
             raw_flow[2], 24.0,
             "raw flow remains the diagnostic/source ledger"
+        );
+    }
+
+    #[test]
+    fn selected_display_flow_propagates_through_lake_system_transition() {
+        let raw_flow = vec![120.0, 0.0, 0.0, 12.0, 18.0, 18.0];
+        let selected = vec![true, false, false, true, true, false];
+        let downstream = vec![Some(1), Some(2), Some(3), Some(4), Some(5), None];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None, None, Some(0), None, None, None],
+            contact_component_by_land_corner: vec![None, Some(0), None, Some(0), None, None],
+            inlet_vertices: vec![false, false, true, false, false, false],
+            outlet_vertices: vec![false, false, true, false, false, false],
+            inlet_land_vertices: vec![false, true, false, false, false, false],
+            outlet_land_vertices: vec![false, false, false, true, false, false],
+        };
+        let node_kinds = vec![
+            GraphDrainageNodeKind::Source,
+            GraphDrainageNodeKind::LakeInlet,
+            GraphDrainageNodeKind::Lake,
+            GraphDrainageNodeKind::LakeOutlet,
+            GraphDrainageNodeKind::Source,
+            GraphDrainageNodeKind::CoastOutlet,
+        ];
+
+        let selected_flow = resolve_selected_flow_accumulation(
+            &raw_flow,
+            &selected,
+            &downstream,
+            &lake_topology,
+            &node_kinds,
+        );
+
+        assert_eq!(
+            selected_flow[0], 120.0,
+            "the upstream lake inlet segment should keep canonical river-system Q"
+        );
+        assert_eq!(
+            selected_flow[3], 120.0,
+            "lake outlet should inherit upstream lake-inlet river-system Q instead of restarting small"
+        );
+        assert_eq!(
+            selected_flow[4], 120.0,
+            "ordinary downstream segments after the lake outlet should keep the inherited system Q"
         );
     }
 
@@ -3068,10 +3121,10 @@ mod tests {
             .iter()
             .filter(|node| node.kind == GraphDrainageNodeKind::Lake)
             .count();
-        let lake_capped_segments = hydro
+        let lake_system_segments = hydro
             .segments
             .iter()
-            .filter(|segment| segment.raw_flow_accumulation > segment.flow_accumulation + 0.001)
+            .filter(|segment| segment.flow_accumulation + 0.001 >= segment.raw_flow_accumulation)
             .count();
 
         assert!(
@@ -3080,8 +3133,8 @@ mod tests {
         );
         assert_eq!(lake_nodes, lake_resolutions);
         assert!(
-            lake_capped_segments > 0,
-            "lake-bound selected rivers should use lake capacity caps"
+            lake_system_segments > 0,
+            "selected rivers should expose canonical river-system Q instead of lake-capped display Q"
         );
     }
 
@@ -3663,7 +3716,7 @@ mod tests {
     }
 
     #[test]
-    fn lake_terminal_policy_caps_selected_flow_but_keeps_raw_accumulation() {
+    fn lake_terminal_policy_does_not_cap_canonical_system_q() {
         let raw_flow = vec![75.0, 120.0, 220.0, 300.0];
         let terminal_indices = vec![3, 3, 3, 3];
         let lake_candidates = vec![true, false, true, true];
@@ -3681,8 +3734,6 @@ mod tests {
             config,
         );
 
-        let first_downstream_lakes = vec![None; 4];
-        let lake_inlet_policies = vec![None; 4];
         let lake_topology = LakeContactTopology {
             component_by_corner: vec![None; 4],
             contact_component_by_land_corner: vec![None; 4],
@@ -3695,22 +3746,20 @@ mod tests {
             &raw_flow,
             &[false; 4],
             &[None; 4],
-            &terminal_indices,
-            &first_downstream_lakes,
-            &lake_policies,
-            &lake_inlet_policies,
             &lake_topology,
             &[GraphDrainageNodeKind::Source; 4],
-            config,
         );
         let policy = lake_policies[3].expect("lake terminal should have policy");
 
         assert!(policy.discharge_cap < raw_flow[2]);
         assert!(
             policy.discharge_cap <= DEFAULT_LAKE_DISCHARGE_CAP_CEILING,
-            "lake display discharge should stay under the strong lake cap"
+            "lake local shape policy should still expose a conservative cap"
         );
-        assert_eq!(selected_flow[2], policy.discharge_cap);
+        assert_eq!(
+            selected_flow[2], raw_flow[2],
+            "canonical river-system Q should not be overwritten by the lake local shape cap"
+        );
         assert_eq!(
             raw_flow[2], 220.0,
             "raw hydrology ledger should remain unchanged"
@@ -3718,15 +3767,11 @@ mod tests {
     }
 
     #[test]
-    fn lake_inlet_endpoint_segment_uses_display_cap() {
+    fn lake_inlet_endpoint_segment_keeps_canonical_system_q() {
         let raw_flow = vec![180.0, 180.0, 0.0];
         let downstream = vec![Some(1), Some(2), None];
-        let terminal_indices = vec![2, 2, 2];
-        let first_downstream_lakes = vec![None; 3];
-        let lake_policies = vec![None; 3];
         let config = HydrologyConfig::default();
         let lake_policy = lake_policy_for_area(24, 2, config);
-        let lake_inlet_policies = vec![None, None, Some(lake_policy)];
         let lake_topology = LakeContactTopology {
             component_by_corner: vec![None, None, Some(0)],
             contact_component_by_land_corner: vec![None, Some(0), None],
@@ -3745,24 +3790,20 @@ mod tests {
             &raw_flow,
             &[true, false, false],
             &downstream,
-            &terminal_indices,
-            &first_downstream_lakes,
-            &lake_policies,
-            &lake_inlet_policies,
             &lake_topology,
             &node_kinds,
-            config,
         );
 
+        assert!(lake_policy.discharge_cap < raw_flow[0]);
         assert_eq!(
-            selected_flow[0], lake_policy.discharge_cap,
-            "the segment ending at a LakeInlet marker should use lake-area display discharge"
+            selected_flow[0], raw_flow[0],
+            "the segment ending at a LakeInlet marker should keep canonical system Q"
         );
         assert_eq!(raw_flow[0], 180.0);
     }
 
     #[test]
-    fn lake_terminal_display_flow_cap_is_well_below_ocean_terminal_flow() {
+    fn lake_terminal_canonical_q_can_match_ocean_terminal_flow() {
         let raw_flow = vec![12.0, 160.0, 260.0, 400.0, 400.0];
         let terminal_indices = vec![3, 3, 3, 3, 4];
         let lake_candidates = vec![true, true, true, true, false];
@@ -3781,8 +3822,6 @@ mod tests {
             config,
         );
 
-        let first_downstream_lakes = vec![None; 5];
-        let lake_inlet_policies = vec![None; 5];
         let lake_topology = LakeContactTopology {
             component_by_corner: vec![None; 5],
             contact_component_by_land_corner: vec![None; 5],
@@ -3795,22 +3834,19 @@ mod tests {
             &raw_flow,
             &[false; 5],
             &[None; 5],
-            &terminal_indices,
-            &first_downstream_lakes,
-            &lake_policies,
-            &lake_inlet_policies,
             &lake_topology,
             &[GraphDrainageNodeKind::Source; 5],
-            config,
         );
+        let lake_policy = lake_policies[3].expect("lake terminal should have local shape policy");
 
         assert_eq!(
             selected_flow[4], raw_flow[4],
-            "ocean terminal flow should not use the lake display cap"
+            "ocean terminal flow should use canonical raw/system Q"
         );
+        assert!(lake_policy.discharge_cap < raw_flow[2]);
         assert!(
-            selected_flow[2] <= raw_flow[4] * 0.05,
-            "lake terminal display flow should be visibly below ocean terminal flow"
+            selected_flow[2] > lake_policy.discharge_cap,
+            "lake local cap should not overwrite canonical river-system Q"
         );
     }
 
