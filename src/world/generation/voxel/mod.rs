@@ -421,6 +421,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn voxel_column_plan_preserves_negative_ocean_bed_under_sea_level_water() {
+        let mut column = synthetic_pixelized_area().columns[1];
+        column.surface_y = -8;
+        column.water_y = Some(0);
+
+        let plan = graph_first_voxel_column_from_pixelized_column(column);
+
+        assert_eq!(plan.terrain_top_y, -8);
+        assert_eq!(plan.water_top_y, Some(0));
+        assert_eq!(plan.top_non_air_y(), 0);
+    }
+
     fn synthetic_pixelized_area() -> PixelizedChunkArea {
         let columns = (0..CHUNK_EDGE)
             .flat_map(|z| {

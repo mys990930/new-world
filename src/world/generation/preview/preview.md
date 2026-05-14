@@ -565,7 +565,8 @@ heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 v
   아니다.
 - 일반 terrain에는 인접 column 기준 ceiling pass를 적용하지 않는다. raw/macro source가 크게 뛰면
   integer snap 뒤 visible surface도 같은 block scale로 뛰며, 그 점프는 source field 진단 대상으로 남긴다.
-- ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 heightfield post-pass에서
+- ocean/lake water surface는 `y = 0`이며, preview renderer도 water top face를 이 수면 높이 그대로
+  그려야 한다. standing water와 인접한 land는 heightfield post-pass에서
   grid-distance 기반 contour ceiling을 받지 않는다. launch slice에서 바다 옆 land가 즉시 높은 vertical
   cliff로 솟으면 macro/pixelize source scalar 또는 coast profile을 먼저 진단한다.
 - broad river valley는 이미 `combined_macro_height`에 반영되어 있으므로 heightfield stage에서

@@ -7,7 +7,7 @@ mod types;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use super::biome::{classify_graph_biome, GraphBiomeWaterRole};
+use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::VoronoiGraphPatch;
 use super::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use discharge::{build_nodes, build_segments, resolve_selected_flow_accumulation};
@@ -23,10 +23,7 @@ use topology::{
 use types::validate_hydrology_config;
 
 pub use types::{
-    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner,
-    GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
-    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
-    WatershedId, DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
+    DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
     DEFAULT_LAKE_AREA_UNITS_PER_CHAIN, DEFAULT_LAKE_DISCHARGE_CAP_CEILING,
     DEFAULT_LAKE_DISCHARGE_CAP_FLOOR, DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
     DEFAULT_LAKE_DISCHARGE_RANGE_PER_AREA, DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS,
@@ -35,6 +32,10 @@ pub use types::{
     DEFAULT_TRIBUTARY_MAX_PATH_EDGES, DEFAULT_TRIBUTARY_PARALLEL_PATH_COMPARE_EDGES,
     DEFAULT_TRIBUTARY_PARALLEL_PATH_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_HYDRATION,
     DEFAULT_TRIBUTARY_SOURCE_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_THRESHOLD,
+    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner,
+    GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
+    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
+    WatershedId,
 };
 
 pub fn solve_hydrology(
@@ -309,7 +310,7 @@ fn headwater_adjacent_sites(
 #[cfg(test)]
 mod tests {
     use super::discharge::resolve_selected_flow_accumulation;
-    use super::routing::{resolve_terminal_indices, CornerNeighbor};
+    use super::routing::{CornerNeighbor, resolve_terminal_indices};
     use super::selection::{
         lake_policy_for_area, resolve_lake_terminal_policies, select_river_paths,
     };
@@ -321,12 +322,12 @@ mod tests {
     use super::*;
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-        DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
+        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
+        generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
-        generate_macro_map, MacroCorner, MacroMapConfig, MacroSurfaceKind,
+        MacroCorner, MacroMapConfig, MacroSurfaceKind, generate_macro_map,
     };
     use std::collections::HashMap;
 

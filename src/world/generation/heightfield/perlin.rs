@@ -103,6 +103,82 @@ pub fn micro_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinC
     (normalized * config.amplitude_blocks).clamp(-config.max_abs_blocks, config.max_abs_blocks)
 }
 
+pub fn river_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
+    if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
+        return 0.0;
+    }
+    if sample.ocean_mask > 0.5 || sample.lake_mask > 0.5 {
+        return 0.0;
+    }
+    if sample.river_valley_strength <= 0.5 || sample.river_flow_hint <= 0.0 {
+        return 0.0;
+    }
+
+    let river_t = sample.river_valley_strength.clamp(0.0, 1.0);
+    let bed_t = sample.river_bed_depth_hint.clamp(0.0, 1.0);
+    let rough_t = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
+    let amplitude = (config.amplitude_blocks * (0.72 + rough_t * 0.58 + bed_t * 0.48))
+        .min(config.max_abs_blocks * 1.35)
+        .max(0.0)
+        * river_t;
+    if amplitude <= f32::EPSILON {
+        return 0.0;
+    }
+
+    octave_noise_2d(sample.position.x, sample.position.z, config, 0.62, 0x71) * amplitude
+}
+
+pub fn river_bank_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
+    if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
+        return 0.0;
+    }
+    if sample.ocean_mask > 0.5 || sample.lake_mask > 0.5 {
+        return 0.0;
+    }
+    if sample.river_flow_hint <= 0.0 || sample.river_valley_strength <= 0.12 {
+        return 0.0;
+    }
+
+    let valley_t = sample.river_valley_strength.clamp(0.0, 1.0);
+    let bank_t = (1.0 - valley_t).clamp(0.0, 1.0);
+    let rough_t = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
+    let gravel_t = sample.river_gravel_hint.clamp(0.0, 1.0);
+    let shoulder_t = (bank_t * 1.55).clamp(0.0, 1.0);
+    let amplitude = (config.amplitude_blocks * (0.55 + rough_t * 0.45 + gravel_t * 0.35))
+        .min(config.max_abs_blocks * 1.15)
+        .max(0.0)
+        * shoulder_t;
+    if amplitude <= f32::EPSILON {
+        return 0.0;
+    }
+
+    octave_noise_2d(sample.position.x, sample.position.z, config, 0.48, 0xB4) * amplitude
+}
+
+pub fn ocean_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
+    if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
+        return 0.0;
+    }
+    if sample.ocean_mask <= 0.5 || sample.lake_mask > 0.5 {
+        return 0.0;
+    }
+    if sample.river_valley_strength > 0.5 && sample.river_flow_hint > 0.0 {
+        return 0.0;
+    }
+
+    let depth_t = (-sample.combined_macro_height).max(0.0).clamp(0.0, 1.0);
+    let coast_fade = smoothstep01((depth_t / 0.08).clamp(0.0, 1.0));
+    let amplitude = (config.amplitude_blocks * (0.25 + depth_t * 0.35))
+        .min(config.max_abs_blocks * 0.65)
+        .max(0.0)
+        * coast_fade;
+    if amplitude <= f32::EPSILON {
+        return 0.0;
+    }
+
+    octave_noise_2d(sample.position.x, sample.position.z, config, 1.15, 0xD3) * amplitude
+}
+
 pub(super) fn octave_noise_2d(
     x_blocks: f32,
     z_blocks: f32,
@@ -197,6 +273,11 @@ fn lattice_hash(grid_x: i32, grid_z: i32, seed: u64, generator_version: u32, oct
 
 fn fade(value: f32) -> f32 {
     value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
+}
+
+fn smoothstep01(value: f32) -> f32 {
+    let t = value.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

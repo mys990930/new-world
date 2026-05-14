@@ -10,6 +10,7 @@ use image::RgbaImage;
 use new_world::renderer::OffscreenRenderOutput;
 use new_world::world::CHUNK_EDGE_I32;
 use new_world::world::WorldMeta;
+use new_world::world::WorldPlanePoint;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
@@ -35,17 +36,15 @@ const ISO_TILE_HEIGHT_RATIO: f32 = 0.50;
 const MACRO_FIELD_TILE_EDGE_BLOCKS: i32 = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
 const PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER: i32 = 8;
 const PREVIEW_MAJOR_CHUNK_GRID_BLOCKS: i32 = CHUNK_EDGE_I32 * PREVIEW_MAJOR_CHUNK_GRID_MULTIPLIER;
-const DEFAULT_BLOCK_LINES: bool = true;
-const TOP_FACE_OUTLINE: [u8; 4] = [5, 9, 12, 96];
-const SIDE_FACE_OUTLINE: [u8; 4] = [2, 5, 7, 88];
-const SIDE_FACE_STEP_LINE: [u8; 4] = [8, 13, 15, 64];
 const PLAYER_CUBE_WIDTH_BLOCKS: f32 = 1.0;
 const PLAYER_CUBE_DEPTH_BLOCKS: f32 = 1.0;
 const PLAYER_CUBE_HEIGHT_BLOCKS: f32 = 4.0;
 const PLAYER_CUBE_TOP_COLOR: [u8; 4] = [96, 255, 68, 242];
 const PLAYER_CUBE_SIDE_A_COLOR: [u8; 4] = [38, 238, 112, 232];
 const PLAYER_CUBE_SIDE_B_COLOR: [u8; 4] = [18, 206, 236, 226];
-const PLAYER_CUBE_OUTLINE: [u8; 4] = [245, 255, 250, 190];
+const NOISY_BOUNDARY_BACKING: [u8; 4] = [0, 16, 22, 82];
+const NOISY_BOUNDARY_CYAN: [u8; 4] = [0, 220, 255, 150];
+const NOISY_BOUNDARY_SURFACE_LIFT_BLOCKS: f32 = 0.25;
 
 #[derive(Debug, Clone)]
 struct PreviewConfig {
@@ -63,7 +62,6 @@ struct PreviewConfig {
     columns_z: Option<u32>,
     chunk_radius: Option<i32>,
     quarter_turns: u8,
-    block_lines: bool,
     perlin: bool,
     output: Option<PathBuf>,
 }
@@ -326,7 +324,6 @@ struct PreviewHeader {
     vertical_px_per_block: f32,
     projected_height_span_px: f32,
     quarter_turns: u8,
-    block_lines: bool,
     player_cube_center_x: f32,
     player_cube_center_z: f32,
     player_cube_bottom_y: f32,
@@ -422,6 +419,7 @@ impl PreviewHeader {
                 self.major_grid_edge_blocks,
                 self.chunk_edge_blocks
             ),
+            "boundary_overlay=cyan_boundary_cache_noisy_curves_draped_visible_surface".to_string(),
             "view=cpu_isometric_columns".to_string(),
             format!(
                 "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px_quarter_turns_{}",
@@ -484,8 +482,7 @@ impl PreviewHeader {
                 self.contour_band_smoothing,
             ),
             "height_snap=round_to_integer_block".to_string(),
-            format!("block_lines={}", self.block_lines),
-            "block_line_style=thin_face_edges_with_integer_side_steps".to_string(),
+            "block_face_outlines=off".to_string(),
             format!(
                 "player_diagnostic_cube=enabled,width:{:.1}b,depth:{:.1}b,height:{:.1}b,center_world:{:.2},{:.2},bottom_y:{:.2},top_y:{:.2},sampled_columns:{}",
                 PLAYER_CUBE_WIDTH_BLOCKS,
@@ -583,8 +580,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mesh_ms = mesh_start.elapsed().as_millis();
 
     let render_start = Instant::now();
-    let (mut image, iso_stats) =
-        render_heightfield_isometric(&heightfield, plan, config.block_lines, player_cube)?;
+    let (mut image, iso_stats) = render_heightfield_isometric(&heightfield, plan, player_cube)?;
     let render_ms = render_start.elapsed().as_millis();
 
     let total_ms = total_start.elapsed().as_millis();
@@ -654,7 +650,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         vertical_px_per_block: iso_stats.vertical_px_per_block,
         projected_height_span_px: iso_stats.projected_height_span_px,
         quarter_turns: config.quarter_turns % 4,
-        block_lines: config.block_lines,
         player_cube_center_x: player_cube.center_world_x,
         player_cube_center_z: player_cube.center_world_z,
         player_cube_bottom_y: player_cube.bottom_y,
@@ -677,6 +672,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         total_ms,
     };
     draw_boundary_overlays(&mut image, &heightfield, plan, window);
+    draw_noisy_boundary_overlay(&mut image, &boundary, &heightfield, plan, window);
     draw_overlay(&mut image, &header);
     draw_iso_compass_offscreen(&mut image, plan);
     write_rgba_png_with_metadata(&image, &output, &header)?;
@@ -705,10 +701,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             config.center_x, config.center_z
         );
     }
-    println!(
-        "block lines: {}",
-        if config.block_lines { "on" } else { "off" }
-    );
+    println!("block face outlines: off");
     println!(
         "perlin micro relief: {}",
         if heightfield.config.perlin.enabled {
@@ -733,6 +726,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "grid overlay: primary macro tile {} blocks, secondary major {} blocks, chunk footprint outline {} blocks",
         MACRO_FIELD_TILE_EDGE_BLOCKS, PREVIEW_MAJOR_CHUNK_GRID_BLOCKS, CHUNK_EDGE_I32
+    );
+    println!(
+        "noisy boundary overlay: cyan BoundaryCache canonical curves draped to visible surface"
     );
     println!(
         "chunk range: cx {}..{}, cz {}..{}, radius {}x{}",
@@ -1156,7 +1152,6 @@ fn iso_cardinal_screen_delta(quarter_turns: u8, dx: f32, dz: f32) -> Point2 {
 fn render_heightfield_isometric(
     tile: &HeightfieldTile,
     plan: IsoRenderPlan,
-    block_lines: bool,
     player_cube: PlayerDiagnosticCube,
 ) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
     let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
@@ -1164,34 +1159,18 @@ fn render_heightfield_isometric(
     let mut column_order = sorted_column_draw_order(tile, plan);
     for (_, x, z) in column_order.drain(..) {
         let index = z * width + x;
-        draw_column_terrain_iso(
-            &mut image,
-            tile,
-            plan,
-            x,
-            z,
-            tile.columns[index],
-            block_lines,
-        );
-        draw_column_water_iso(
-            &mut image,
-            tile,
-            plan,
-            x,
-            z,
-            tile.columns[index],
-            block_lines,
-        );
+        draw_column_terrain_iso(&mut image, tile, plan, x, z, tile.columns[index]);
+        draw_column_water_iso(&mut image, tile, plan, x, z, tile.columns[index]);
     }
 
-    draw_player_diagnostic_cube(&mut image, tile, plan, player_cube, block_lines);
+    draw_player_diagnostic_cube(&mut image, tile, plan, player_cube);
 
     Ok((
         OffscreenRenderOutput {
             width: plan.width,
             height: plan.height,
             rgba: image.into_raw(),
-            draw_call_count: render_draw_call_count(tile, block_lines),
+            draw_call_count: render_draw_call_count(tile),
         },
         IsoRenderStats {
             vertical_px_per_block: plan.vertical_px_per_block,
@@ -1222,17 +1201,16 @@ fn sorted_column_draw_order(
     draw_order
 }
 
-fn render_draw_call_count(tile: &HeightfieldTile, block_lines: bool) -> u32 {
-    let terrain_calls_per_column = if block_lines { 7 } else { 3 };
-    let water_calls_per_column = if block_lines { 5 } else { 3 };
+fn render_draw_call_count(tile: &HeightfieldTile) -> u32 {
+    let terrain_calls_per_column = 3;
+    let water_calls_per_column = 3;
     let water_columns = tile
         .columns
         .iter()
         .filter(|column| water_overlay_height(**column).is_some())
         .count();
-    (tile.columns.len() * terrain_calls_per_column
-        + water_columns * water_calls_per_column
-        + if block_lines { 8 } else { 3 }) as u32
+    (tile.columns.len() * terrain_calls_per_column + water_columns * water_calls_per_column + 3)
+        as u32
 }
 
 fn draw_column_terrain_iso(
@@ -1242,7 +1220,6 @@ fn draw_column_terrain_iso(
     x: usize,
     z: usize,
     column: HeightfieldColumn,
-    block_lines: bool,
 ) {
     let surface = column.surface_height_blocks;
     let color = terrain_color_rgba(column);
@@ -1258,20 +1235,10 @@ fn draw_column_terrain_iso(
                 neighbor_height,
                 surface,
                 shade_rgba(color, side.shade),
-                block_lines,
             );
         }
     }
-    draw_top_face(
-        image,
-        tile,
-        plan,
-        x,
-        z,
-        surface,
-        shade_rgba(color, 1.05),
-        block_lines,
-    );
+    draw_top_face(image, tile, plan, x, z, surface, shade_rgba(color, 1.05));
 }
 
 fn draw_column_water_iso(
@@ -1281,7 +1248,6 @@ fn draw_column_water_iso(
     x: usize,
     z: usize,
     column: HeightfieldColumn,
-    block_lines: bool,
 ) {
     let Some(water) = water_overlay_height(column) else {
         return;
@@ -1301,11 +1267,10 @@ fn draw_column_water_iso(
                 lower_y,
                 water,
                 shade_rgba(color, side.shade),
-                block_lines,
             );
         }
     }
-    draw_top_face(image, tile, plan, x, z, water + 0.10, color, block_lines);
+    draw_top_face(image, tile, plan, x, z, water, color);
 }
 
 fn draw_player_diagnostic_cube(
@@ -1313,7 +1278,6 @@ fn draw_player_diagnostic_cube(
     tile: &HeightfieldTile,
     plan: IsoRenderPlan,
     cube: PlayerDiagnosticCube,
-    block_lines: bool,
 ) {
     let side_edges = [
         (
@@ -1387,7 +1351,6 @@ fn draw_player_diagnostic_cube(
                 cube.bottom_y,
                 cube.top_y(),
                 shade_rgba(*color, side.shade),
-                block_lines,
             );
         }
     }
@@ -1403,7 +1366,6 @@ fn draw_player_diagnostic_cube(
         ],
         cube.top_y(),
         PLAYER_CUBE_TOP_COLOR,
-        block_lines,
     );
 }
 
@@ -1500,7 +1462,6 @@ fn draw_top_face(
     z: usize,
     y: f32,
     color: [u8; 4],
-    block_lines: bool,
 ) {
     let polygon = [
         plan.project_grid(x as f32, z as f32, y, tile),
@@ -1509,9 +1470,6 @@ fn draw_top_face(
         plan.project_grid(x as f32, (z + 1) as f32, y, tile),
     ];
     fill_convex_polygon(image, &polygon, color);
-    if block_lines {
-        draw_polygon_outline(image, &polygon, TOP_FACE_OUTLINE, 1);
-    }
 }
 
 fn draw_rect_top_face(
@@ -1521,7 +1479,6 @@ fn draw_rect_top_face(
     rect: [f32; 4],
     y: f32,
     color: [u8; 4],
-    block_lines: bool,
 ) {
     let polygon = [
         plan.project_grid(rect[0], rect[1], y, tile),
@@ -1530,9 +1487,6 @@ fn draw_rect_top_face(
         plan.project_grid(rect[0], rect[3], y, tile),
     ];
     fill_convex_polygon(image, &polygon, color);
-    if block_lines {
-        draw_polygon_outline(image, &polygon, PLAYER_CUBE_OUTLINE, 1);
-    }
 }
 
 fn draw_side_face(
@@ -1543,7 +1497,6 @@ fn draw_side_face(
     lower_y: f32,
     upper_y: f32,
     color: [u8; 4],
-    block_lines: bool,
 ) {
     let lower_y = lower_y.max(upper_y - 96.0);
     let polygon = [
@@ -1553,31 +1506,6 @@ fn draw_side_face(
         plan.project_grid(edge[0], edge[1], lower_y, tile),
     ];
     fill_convex_polygon(image, &polygon, color);
-    if block_lines {
-        draw_side_face_step_lines(image, tile, plan, edge, lower_y, upper_y);
-        draw_polygon_outline(image, &polygon, SIDE_FACE_OUTLINE, 1);
-    }
-}
-
-fn draw_side_face_step_lines(
-    image: &mut RgbaImage,
-    tile: &HeightfieldTile,
-    plan: IsoRenderPlan,
-    edge: [f32; 4],
-    lower_y: f32,
-    upper_y: f32,
-) {
-    for y in side_face_step_levels(lower_y, upper_y) {
-        let start = plan.project_grid(edge[0], edge[1], y, tile);
-        let end = plan.project_grid(edge[2], edge[3], y, tile);
-        draw_projected_line_thick(image, start, end, SIDE_FACE_STEP_LINE, 1, 1);
-    }
-}
-
-fn side_face_step_levels(lower_y: f32, upper_y: f32) -> impl Iterator<Item = f32> {
-    let first = lower_y.ceil() as i32;
-    let last = upper_y.floor() as i32;
-    (first..=last).map(|y| y as f32)
 }
 
 fn draw_boundary_overlays(
@@ -1694,6 +1622,164 @@ fn draw_world_grid_overlay(
     }
 }
 
+fn draw_noisy_boundary_overlay(
+    image: &mut OffscreenRenderOutput,
+    boundary: &BoundaryCache,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    window: PreviewWindow,
+) {
+    let Some(mut rgba) =
+        RgbaImage::from_raw(image.width, image.height, std::mem::take(&mut image.rgba))
+    else {
+        return;
+    };
+    draw_noisy_boundary_overlay_rgba(&mut rgba, boundary, tile, plan, window);
+    image.rgba = rgba.into_raw();
+}
+
+fn draw_noisy_boundary_overlay_rgba(
+    image: &mut RgbaImage,
+    boundary: &BoundaryCache,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    window: PreviewWindow,
+) {
+    if tile.width == 0 || tile.height == 0 {
+        return;
+    }
+
+    for curve in &boundary.curves {
+        for segment in curve.points.windows(2) {
+            let Some((clipped_start, clipped_end)) =
+                clip_world_segment_to_window(segment[0], segment[1], window)
+            else {
+                continue;
+            };
+            let grid_start = world_point_to_tile_grid(clipped_start, window, tile);
+            let grid_end = world_point_to_tile_grid(clipped_end, window, tile);
+            draw_draped_noisy_boundary_segment(image, tile, plan, grid_start, grid_end);
+        }
+    }
+}
+
+fn draw_draped_noisy_boundary_segment(
+    image: &mut RgbaImage,
+    tile: &HeightfieldTile,
+    plan: IsoRenderPlan,
+    grid_start: WorldPlanePoint,
+    grid_end: WorldPlanePoint,
+) {
+    let dx = grid_end.x - grid_start.x;
+    let dz = grid_end.z - grid_start.z;
+    let steps = dx.abs().max(dz.abs()).ceil().max(1.0) as i32;
+    let mut previous = grid_start;
+    let mut previous_y = noisy_boundary_overlay_height_at_grid(tile, previous);
+
+    for step in 1..=steps {
+        let t = step as f32 / steps as f32;
+        let current = WorldPlanePoint::new(grid_start.x + dx * t, grid_start.z + dz * t);
+        let current_y = noisy_boundary_overlay_height_at_grid(tile, current);
+        let projected_start = plan.project_grid(previous.x, previous.z, previous_y, tile);
+        let projected_end = plan.project_grid(current.x, current.z, current_y, tile);
+        draw_projected_line_thick(
+            image,
+            projected_start,
+            projected_end,
+            NOISY_BOUNDARY_BACKING,
+            1,
+            2,
+        );
+        draw_projected_line_thick(
+            image,
+            projected_start,
+            projected_end,
+            NOISY_BOUNDARY_CYAN,
+            1,
+            1,
+        );
+        previous = current;
+        previous_y = current_y;
+    }
+}
+
+fn noisy_boundary_overlay_height_at_grid(tile: &HeightfieldTile, grid: WorldPlanePoint) -> f32 {
+    visible_heightfield_column_height(nearest_heightfield_column(tile, grid))
+        + NOISY_BOUNDARY_SURFACE_LIFT_BLOCKS
+}
+
+fn nearest_heightfield_column(tile: &HeightfieldTile, grid: WorldPlanePoint) -> &HeightfieldColumn {
+    let max_x = tile.width.saturating_sub(1) as f32;
+    let max_z = tile.height.saturating_sub(1) as f32;
+    let x = grid.x.floor().clamp(0.0, max_x) as usize;
+    let z = grid.z.floor().clamp(0.0, max_z) as usize;
+    &tile.columns[z * tile.width as usize + x]
+}
+
+fn visible_heightfield_column_height(column: &HeightfieldColumn) -> f32 {
+    let surface_y = column.surface_y as f32;
+    column
+        .water_y
+        .map(|water_y| surface_y.max(water_y as f32))
+        .unwrap_or(surface_y)
+}
+
+fn world_point_to_tile_grid(
+    point: WorldPlanePoint,
+    window: PreviewWindow,
+    tile: &HeightfieldTile,
+) -> WorldPlanePoint {
+    let spacing_x = window.world_span_x / tile.width as f32;
+    let spacing_z = window.world_span_z / tile.height as f32;
+    WorldPlanePoint::new(
+        (point.x - window.min_x()) / spacing_x,
+        (point.z - window.min_z()) / spacing_z,
+    )
+}
+
+fn clip_world_segment_to_window(
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    window: PreviewWindow,
+) -> Option<(WorldPlanePoint, WorldPlanePoint)> {
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    let mut t_min: f32 = 0.0;
+    let mut t_max: f32 = 1.0;
+    let planes = [
+        (-dx, start.x - window.min_x()),
+        (dx, window.max_x() - start.x),
+        (-dz, start.z - window.min_z()),
+        (dz, window.max_z() - start.z),
+    ];
+
+    for (p, q) in planes {
+        if p.abs() <= f32::EPSILON {
+            if q < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let t = q / p;
+        if p < 0.0 {
+            if t > t_max {
+                return None;
+            }
+            t_min = t_min.max(t);
+        } else {
+            if t < t_min {
+                return None;
+            }
+            t_max = t_max.min(t);
+        }
+    }
+
+    Some((
+        WorldPlanePoint::new(start.x + dx * t_min, start.z + dz * t_min),
+        WorldPlanePoint::new(start.x + dx * t_max, start.z + dz * t_max),
+    ))
+}
+
 fn draw_projected_line(
     image: &mut RgbaImage,
     start: Point2,
@@ -1715,17 +1801,6 @@ fn draw_projected_line(
             continue;
         }
         blend_rgba(image, x as u32, y as u32, color, color[3] as f32 / 255.0);
-    }
-}
-
-fn draw_polygon_outline(image: &mut RgbaImage, points: &[Point2], color: [u8; 4], thickness: i32) {
-    if points.len() < 2 {
-        return;
-    }
-    for i in 0..points.len() {
-        let start = points[i];
-        let end = points[(i + 1) % points.len()];
-        draw_projected_line_thick(image, start, end, color, 1, thickness);
     }
 }
 
@@ -2038,19 +2113,6 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
             header.chunk_radius_x.max(header.chunk_radius_z),
             header.world_span_blocks
         ),
-        [204, 214, 203, 255],
-        layout.scale,
-    );
-    text_y += layout.line_step;
-    draw_text(
-        &mut rgba,
-        text_x,
-        text_y,
-        if header.block_lines {
-            "EDGE ON 1B SIDE STEPS"
-        } else {
-            "EDGE OFF"
-        },
         [204, 214, 203, 255],
         layout.scale,
     );
@@ -2489,7 +2551,6 @@ where
         columns_z: None,
         chunk_radius: None,
         quarter_turns: 0,
-        block_lines: DEFAULT_BLOCK_LINES,
         perlin: false,
         output: None,
     };
@@ -2524,12 +2585,6 @@ where
             }
             "--world-center" | "--world-coordinates" => {
                 config.center_is_world_blocks = true;
-            }
-            "--block-lines" => {
-                config.block_lines = true;
-            }
-            "--no-block-lines" => {
-                config.block_lines = false;
             }
             "--perlin" => {
                 config.perlin = true;
@@ -2575,7 +2630,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--block-lines|--no-block-lines] [--perlin] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--perlin] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2730,7 +2785,6 @@ mod tests {
                 columns_x: Some(192),
                 columns_z: Some(192),
                 chunk_radius: None,
-                block_lines: DEFAULT_BLOCK_LINES,
                 perlin: false,
                 output: None,
             };
@@ -2826,7 +2880,6 @@ mod tests {
             columns_z: None,
             chunk_radius: None,
             quarter_turns: 0,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         };
@@ -2854,7 +2907,6 @@ mod tests {
             columns_z: None,
             chunk_radius: Some(4),
             quarter_turns: 2,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         };
@@ -2863,6 +2915,67 @@ mod tests {
             config.output_path(),
             PathBuf::from("target/heightfield-preview/s42_cx0_cz0_q2_r4.png")
         );
+    }
+
+    #[test]
+    fn noisy_boundary_overlay_clips_crossing_world_segment_to_window() {
+        let window = PreviewWindow {
+            center_x: 50.0,
+            center_z: 50.0,
+            columns_x: 100,
+            columns_z: 100,
+            world_span_x: 100.0,
+            world_span_z: 100.0,
+        };
+        let (start, end) = clip_world_segment_to_window(
+            WorldPlanePoint::new(-20.0, 50.0),
+            WorldPlanePoint::new(120.0, 50.0),
+            window,
+        )
+        .expect("segment crosses preview window");
+
+        assert!((start.x - 0.0).abs() < 0.001);
+        assert!((start.z - 50.0).abs() < 0.001);
+        assert!((end.x - 100.0).abs() < 0.001);
+        assert!((end.z - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn noisy_boundary_overlay_drops_segment_outside_window() {
+        let window = PreviewWindow {
+            center_x: 50.0,
+            center_z: 50.0,
+            columns_x: 100,
+            columns_z: 100,
+            world_span_x: 100.0,
+            world_span_z: 100.0,
+        };
+        let clipped = clip_world_segment_to_window(
+            WorldPlanePoint::new(-20.0, -10.0),
+            WorldPlanePoint::new(120.0, -10.0),
+            window,
+        );
+
+        assert!(clipped.is_none());
+    }
+
+    #[test]
+    fn noisy_boundary_overlay_height_uses_water_surface_when_above_bed() {
+        let mut tile = two_by_two_heightfield_tile();
+        tile.columns[0].surface_height_blocks = -4.0;
+        tile.columns[0].surface_y = -4;
+        tile.columns[0].water_y = Some(0);
+        let height = noisy_boundary_overlay_height_at_grid(&tile, WorldPlanePoint::new(0.25, 0.25));
+
+        assert!((height - NOISY_BOUNDARY_SURFACE_LIFT_BLOCKS).abs() < 0.001);
+    }
+
+    #[test]
+    fn noisy_boundary_overlay_height_uses_dry_surface() {
+        let tile = two_by_two_heightfield_tile();
+        let height = noisy_boundary_overlay_height_at_grid(&tile, WorldPlanePoint::new(1.25, 0.25));
+
+        assert!((height - (34.0 + NOISY_BOUNDARY_SURFACE_LIFT_BLOCKS)).abs() < 0.001);
     }
 
     #[test]
@@ -2892,7 +3005,6 @@ mod tests {
             columns_z: None,
             chunk_radius: None,
             quarter_turns: 0,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         };
@@ -3002,18 +3114,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_block_line_toggles() {
-        let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
-        let disabled = parse_args_from(["42", "0", "0", "--no-block-lines"]).expect("parse args");
-        let enabled = parse_args_from(["42", "0", "0", "--no-block-lines", "--block-lines"])
-            .expect("parse args");
-
-        assert!(default_config.block_lines);
-        assert!(!disabled.block_lines);
-        assert!(enabled.block_lines);
-    }
-
-    #[test]
     fn parse_perlin_flag_defaults_off_and_can_enable_micro_relief() {
         let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
         let enabled = parse_args_from(["42", "0", "0", "--perlin"]).expect("parse args");
@@ -3039,7 +3139,6 @@ mod tests {
             columns_z: Some(24),
             chunk_radius: None,
             quarter_turns: 0,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         }
@@ -3075,7 +3174,6 @@ mod tests {
             columns_z: None,
             chunk_radius: Some(2),
             quarter_turns: 0,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         };
@@ -3118,7 +3216,6 @@ mod tests {
             columns_z: Some(160),
             chunk_radius: Some(1),
             quarter_turns: 0,
-            block_lines: DEFAULT_BLOCK_LINES,
             perlin: false,
             output: None,
         };
@@ -3183,8 +3280,7 @@ mod tests {
         let tile = two_by_two_heightfield_tile();
         let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
         let cube = center_test_player_cube(&tile);
-        let (image, stats) =
-            render_heightfield_isometric(&tile, plan, DEFAULT_BLOCK_LINES, cube).expect("render");
+        let (image, stats) = render_heightfield_isometric(&tile, plan, cube).expect("render");
         let first = image.rgba.chunks_exact(4).next().expect("pixel");
         let varied = image
             .rgba
@@ -3193,25 +3289,6 @@ mod tests {
 
         assert!(varied);
         assert!(stats.projected_height_span_px > 0.0);
-    }
-
-    #[test]
-    fn block_lines_add_face_edge_pixels() {
-        let tile = two_by_two_heightfield_tile();
-        let plan = IsoRenderPlan::new(&tile, 320, 180, 0).expect("iso render plan");
-        let cube = center_test_player_cube(&tile);
-        let (without_lines, _) =
-            render_heightfield_isometric(&tile, plan, false, cube).expect("render without lines");
-        let (with_lines, _) =
-            render_heightfield_isometric(&tile, plan, true, cube).expect("render with lines");
-        let without_draws = without_lines.draw_call_count;
-        let with_draws = with_lines.draw_call_count;
-
-        assert_ne!(with_lines.rgba, without_lines.rgba);
-        assert!(
-            with_draws > without_draws,
-            "block outline mode should be represented in render diagnostics"
-        );
     }
 
     #[test]
@@ -3230,9 +3307,9 @@ mod tests {
         let plan = IsoRenderPlan::new(&water_tile, 320, 180, 0).expect("iso render plan");
         let cube = center_test_player_cube(&water_tile);
         let (water_image, _) =
-            render_heightfield_isometric(&water_tile, plan, false, cube).expect("render water");
+            render_heightfield_isometric(&water_tile, plan, cube).expect("render water");
         let (dry_image, _) =
-            render_heightfield_isometric(&dry_tile, plan, false, cube).expect("render dry");
+            render_heightfield_isometric(&dry_tile, plan, cube).expect("render dry");
 
         assert!(water_color_rgba(water_tile.columns[0])[3] < 255);
         assert!(
@@ -3243,15 +3320,6 @@ mod tests {
             water_image.rgba, dry_image.rgba,
             "water overlay should change pixels without replacing the terrain bed pass"
         );
-    }
-
-    #[test]
-    fn side_face_step_levels_follow_integer_blocks() {
-        let levels = side_face_step_levels(2.2, 5.0).collect::<Vec<_>>();
-        assert_eq!(levels, vec![3.0, 4.0, 5.0]);
-
-        let empty = side_face_step_levels(4.1, 4.8).collect::<Vec<_>>();
-        assert!(empty.is_empty());
     }
 
     #[test]
@@ -3300,13 +3368,13 @@ mod tests {
     }
 
     #[test]
-    fn all_quarter_turns_render_nonblank_with_block_lines() {
+    fn all_quarter_turns_render_nonblank() {
         let tile = two_by_two_heightfield_tile();
         for quarter in 0..4 {
             let plan = IsoRenderPlan::new(&tile, 320, 180, quarter).expect("iso render plan");
             let cube = center_test_player_cube(&tile);
             let (image, _) =
-                render_heightfield_isometric(&tile, plan, true, cube).expect("render quarter");
+                render_heightfield_isometric(&tile, plan, cube).expect("render quarter");
             let first = image.rgba.chunks_exact(4).next().expect("pixel");
             let varied = image
                 .rgba

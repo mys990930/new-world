@@ -188,11 +188,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      lake lowering은 단일 절대 target으로 완전히 flatten하지 않고, source macro elevation에서 거리 기반
      U자형 bed carve를 적용한다. lake/non-lake boundary 자체에서는 carve를 0으로 시작하고 lake 내부로
      들어갈수록 깊어져야 하며, land side를 함께 깎아 테두리 cusp나 주변 land 단차를 만들면 안 된다.
-   - noisy boundary owner resolve가 raster sample grid에서 아주 작은 disconnected ocean-owned 파편을
-     만들 수 있다. macro_field는 tile edge에 닿은 ocean component와 큰 detached ocean component는
-     보존하되, 작은 고립 ocean fragment는 타일 안에서 가장 큰 ocean component여도 water mask로 확정하지
-     않고 land/coast sample로 되돌린다. fragment 한계는 sample 수가 아니라 block 면적으로 해석한다. 이
-     후처리는 source graph나 lake/wetland mask를 바꾸지 않는 raster cache 정합성 guard다.
+   - noisy boundary owner resolve가 raster sample grid에서 disconnected ocean-owned 파편을 만들 수
+     있다. macro_field는 tile edge에 닿은 ocean component와 `OceanBasin` source를 포함한 큰 detached
+     ocean component는 보존하되, tile 안쪽의 `CoastOcean`-only component는 크기와 무관하게 water mask로
+     확정하지 않고 land/coast sample로 되돌린다. fragment 한계는 sample 수가 아니라 block 면적으로
+     해석한다. 이 후처리는 source graph나 lake/wetland mask를 바꾸지 않는 raster cache 정합성 guard다.
 5. coast guide edge의 rasterized distance field로 coast mask를 보강한다. 이 source는 `macro_map`의
    explicit coast guide만 사용하며, 모든 Voronoi boundary edge를 coast처럼 splat하면 회귀다.
    coast distance는 source guide를 바꾸지 않는 world-space roughness offset을 거쳐 mask로
@@ -244,9 +244,10 @@ heightfield/water surface composition이 이 값을 읽는다.
 
 Ocean은 lake flatten을 공유하지 않는다. `OceanBasin`/`CoastOcean` sample은 macro_map에서 넘어온
 음수 `macro_elevation`을 continental shelf -> continental slope -> ocean basin처럼 읽히는 S-curve
-bathymetry로 변환한다. 해수면에 가까운 값은 얕은 shelf로 남고, 중간 음수 구간은 slope처럼 빠르게
-깊어지며, 큰 음수 구간은 basin depth를 유지해야 한다. ocean combined height가 단일 얕은 값으로
-눌리면 macro_map의 deep/shallow ocean 신호가 사라지므로 회귀다.
+bathymetry로 변환한다. 해수면에 매우 가까운 값은 고정 shallow plane으로 점프하지 않고 source depth에
+가깝게 유지되어 coast->sea y continuity를 보존한다. continental shelf는 좁게 유지하고, 그 뒤의 중간
+음수 구간은 slope처럼 빠르게 깊어지며, 큰 음수 구간은 basin depth를 유지해야 한다. ocean combined
+height가 단일 얕은 값으로 눌리면 macro_map의 deep/shallow ocean 신호가 사라지므로 회귀다.
 
 Dry basin은 lake/ocean처럼 water flatten 대상이 아니다. `DryBasin` mask는 폐쇄 저지대라는
 surface/context와 통계만 드러낸다. dry basin으로 분류되었다면 낮은 분지 맥락은 앞 단계의 macro
@@ -445,11 +446,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - macro_field는 terrain-kind-specific scalar height boundary blend를 소유하지 않는다. owner/mask
   판정은 전체 noisy boundary grid를 계속 사용하지만, source scalar는 macro_map site elevation들의
   local interpolation을 읽는다.
-- sample fill 뒤에는 작은 disconnected ocean-owned raster component를 water mask에서 제거한다. 이 guard는
-  noisy owner side query가 해안 land 안쪽에 만든 1~수백 sample 규모의 고립 `CoastOcean`/`OceanBasin`
-  파편을 downstream water로 확정하지 않기 위한 최소 후처리이며, threshold는 sample spacing에 맞춘 block
-  area 기준으로 계산한다. tile edge ocean, 큰 detached ocean component, lake/wetland mask는 보존한다.
-  타일 안의 유일하거나 가장 큰 ocean component라도 이 면적 기준보다 작고 tile edge에 닿지 않으면 제거한다.
+- sample fill 뒤에는 disconnected ocean-owned raster component를 water mask에서 제거한다. 이 guard는
+  noisy owner side query가 해안 land 안쪽에 만든 고립 `CoastOcean` 파편을 downstream water로 확정하지
+  않기 위한 최소 후처리이며, threshold는 sample spacing에 맞춘 block area 기준으로 계산한다. tile edge
+  ocean과 `OceanBasin` source를 포함한 큰 detached ocean component, lake/wetland mask는 보존한다. 타일
+  안의 유일하거나 가장 큰 ocean component라도 `CoastOcean`-only이고 tile edge에 닿지 않으면 제거한다.
 - `biome_context`와 `biome`은 macro_map이 resolve한 nearest site `GraphBiomeCell`을 전달한다. 이
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.

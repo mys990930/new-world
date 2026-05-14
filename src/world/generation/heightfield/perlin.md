@@ -2,11 +2,11 @@
 
 ## Role
 
-`perlin` owns the optional surface micro-relief pass for graph-first heightfield columns.
+`perlin` owns optional small-scale heightfield relief for graph-first heightfield columns.
 
 It is a child of `heightfield`, not a macro terrain owner. It adds small deterministic block
 offsets inside the heightfield surface resolve. The default config is disabled, so existing
-heightfield generation and previews keep `micro_relief_blocks = 0`.
+heightfield generation and previews keep `micro_relief_blocks = 0` and river bed relief disabled.
 
 ## Contract
 
@@ -16,11 +16,17 @@ heightfield generation and previews keep `micro_relief_blocks = 0`.
 - Preview-enabled relief is applied before contour-band resolve so the band source is less visibly
   stair-stepped.
 - Ocean and lake columns always receive `0` micro relief.
-- River columns currently receive `0` micro relief to protect river continuity.
+- Ocean columns may receive separate bounded bed relief when enabled. This offset applies only to
+  the terrain bed, fades in away from the immediate shoreline, and never moves the sea-level water
+  surface.
+- River columns keep `micro_relief_blocks = 0`, but preview-enabled config may add stronger
+  bounded Perlin offsets to the river terrain bed and the adjacent river bank/shoulder field. River
+  water surface height is calculated from the unperturbed bed so this pass does not own water
+  continuity.
 - Land, ridge, and dry basin columns may receive relief.
 
 ## Non-Goals
 
 - Macro ownership changes.
-- Ocean/lake bathymetry or river surface solving.
+- Macro bathymetry or river surface solving.
 - New crates or chunk-local random state.

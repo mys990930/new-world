@@ -13,6 +13,9 @@ pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 160.0;
 pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.38;
 pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.48;
 pub const DEFAULT_BOUNDARY_DISPLACEMENT_SMOOTHING_PASSES: usize = 5;
+pub const DEFAULT_BOUNDARY_MAX_LOCAL_TURN_DEGREES: f32 = 75.0;
+pub const DEFAULT_BOUNDARY_ANGLE_RELAXATION_PASSES: usize = 6;
+pub const DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS: f32 = 1.0;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
 const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
@@ -38,6 +41,7 @@ pub struct BoundaryConfig {
     pub fault_amplitude: f32,
     pub lake_amplitude: f32,
     pub land_seam_amplitude: f32,
+    pub max_local_turn_degrees: f32,
 }
 
 impl BoundaryConfig {
@@ -57,6 +61,7 @@ impl BoundaryConfig {
             fault_amplitude: 0.21,
             lake_amplitude: 0.32,
             land_seam_amplitude: 0.21,
+            max_local_turn_degrees: DEFAULT_BOUNDARY_MAX_LOCAL_TURN_DEGREES,
         }
     }
 }
@@ -235,6 +240,11 @@ fn validate_boundary_config(config: BoundaryConfig) {
             && (0.0..=0.5).contains(&config.max_site_span_fraction),
         "max site span fraction must be finite in 0..=0.5"
     );
+    assert!(
+        config.max_local_turn_degrees.is_finite()
+            && (1.0..90.0).contains(&config.max_local_turn_degrees),
+        "max local turn degrees must be finite in 1..<90"
+    );
     for value in [
         config.ordinary_amplitude,
         config.coast_amplitude,
@@ -276,6 +286,7 @@ fn build_curve_for_edge(
         amplitude_blocks,
         config.subdivision_levels,
         guard,
+        config.max_local_turn_degrees,
     );
 
     Some(NoisyBoundaryCurve {
@@ -339,6 +350,7 @@ fn noisy_midpoint_curve(
     amplitude_blocks: f32,
     levels: u8,
     guard: BoundaryGuard,
+    max_local_turn_degrees: f32,
 ) -> Vec<WorldPlanePoint> {
     let segment_count = 1_usize << levels;
     let mut points = Vec::with_capacity(segment_count + 1);
@@ -347,7 +359,12 @@ fn noisy_midpoint_curve(
     let length = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
     let normal = WorldPlanePoint::new(-dz / length, dx / length);
     let lateral_limit = amplitude_blocks.max(0.0);
-    let displacements = natural_displacement_series(seed, lateral_limit, segment_count);
+    let mut displacements = natural_displacement_series(seed, lateral_limit, segment_count);
+    limit_displacement_slope(
+        &mut displacements,
+        length / segment_count as f32,
+        max_local_turn_degrees,
+    );
 
     for index in 0..=segment_count {
         let t = index as f32 / segment_count as f32;
@@ -370,7 +387,166 @@ fn noisy_midpoint_curve(
         points.push(guard.clamp(point));
     }
 
+    relax_local_turn_angles(&mut points, guard, max_local_turn_degrees);
+    reinforce_visible_curve_displacement(&mut points, start, end, guard, seed, lateral_limit);
+    relax_local_turn_angles(&mut points, guard, max_local_turn_degrees);
+
     points
+}
+
+fn reinforce_visible_curve_displacement(
+    points: &mut [WorldPlanePoint],
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    guard: BoundaryGuard,
+    seed: u64,
+    lateral_limit: f32,
+) {
+    if points.len() <= 2 || distance(start, end) < 8.0 || lateral_limit <= f32::EPSILON {
+        return;
+    }
+
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    let length = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
+    let normal = WorldPlanePoint::new(-dz / length, dx / length);
+    let signed_offsets = points
+        .iter()
+        .skip(1)
+        .take(points.len().saturating_sub(2))
+        .map(|point| {
+            let t = projection_t(*point, start, end);
+            let base = lerp_point(start, end, t);
+            (point.x - base.x) * normal.x + (point.z - base.z) * normal.z
+        })
+        .collect::<Vec<_>>();
+    let current_max = signed_offsets
+        .iter()
+        .map(|offset| offset.abs())
+        .fold(0.0, f32::max);
+    let target = 2.0_f32.min(lateral_limit);
+    if current_max >= target {
+        return;
+    }
+
+    let dominant_offset = signed_offsets
+        .iter()
+        .copied()
+        .max_by(|a, b| a.abs().total_cmp(&b.abs()))
+        .unwrap_or(0.0);
+    let sign = if dominant_offset.abs() > f32::EPSILON {
+        dominant_offset.signum()
+    } else if unit_f32(splitmix64(seed ^ 0x9151_b1e0_0d15_0001)) < 0.5 {
+        -1.0
+    } else {
+        1.0
+    };
+    let extra = target - current_max;
+    let last = points.len() - 1;
+    for (index, point) in points.iter_mut().enumerate().take(last).skip(1) {
+        let t = index as f32 / last as f32;
+        let offset = endpoint_falloff(t) * extra * sign;
+        *point = guard.clamp(WorldPlanePoint::new(
+            point.x + normal.x * offset,
+            point.z + normal.z * offset,
+        ));
+    }
+    points[0] = start;
+    points[last] = end;
+}
+
+fn projection_t(point: WorldPlanePoint, start: WorldPlanePoint, end: WorldPlanePoint) -> f32 {
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    let length_squared = dx * dx + dz * dz;
+    if length_squared <= f32::EPSILON {
+        return 0.0;
+    }
+    (((point.x - start.x) * dx + (point.z - start.z) * dz) / length_squared).clamp(0.0, 1.0)
+}
+
+fn limit_displacement_slope(values: &mut [f32], step_length: f32, max_local_turn_degrees: f32) {
+    if values.len() <= 2 || step_length <= f32::EPSILON {
+        return;
+    }
+
+    let half_turn_radians = (max_local_turn_degrees.to_radians() * 0.5).max(0.01);
+    let max_delta = step_length * half_turn_radians.tan();
+    if !max_delta.is_finite() || max_delta <= f32::EPSILON {
+        return;
+    }
+
+    for index in 1..values.len() {
+        let lower = values[index - 1] - max_delta;
+        let upper = values[index - 1] + max_delta;
+        values[index] = values[index].clamp(lower, upper);
+    }
+    let last = values.len() - 1;
+    values[last] = 0.0;
+    for index in (0..last).rev() {
+        let lower = values[index + 1] - max_delta;
+        let upper = values[index + 1] + max_delta;
+        values[index] = values[index].clamp(lower, upper);
+    }
+    values[0] = 0.0;
+    values[last] = 0.0;
+}
+
+fn relax_local_turn_angles(
+    points: &mut [WorldPlanePoint],
+    guard: BoundaryGuard,
+    max_local_turn_degrees: f32,
+) {
+    if points.len() <= 2 {
+        return;
+    }
+
+    for _ in 0..DEFAULT_BOUNDARY_ANGLE_RELAXATION_PASSES {
+        let mut changed = false;
+        for index in 1..points.len() - 1 {
+            let prev_len = distance(points[index - 1], points[index]);
+            let next_len = distance(points[index], points[index + 1]);
+            if prev_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+                || next_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+            {
+                continue;
+            }
+
+            let turn = local_turn_degrees(points[index - 1], points[index], points[index + 1]);
+            if turn <= max_local_turn_degrees {
+                continue;
+            }
+
+            let midpoint = lerp_point(points[index - 1], points[index + 1], 0.5);
+            let excess = ((turn - max_local_turn_degrees) / max_local_turn_degrees).clamp(0.0, 1.0);
+            let weight = 0.20 + excess * 0.30;
+            points[index] = guard.clamp(lerp_point(points[index], midpoint, weight));
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+fn local_turn_degrees(
+    previous: WorldPlanePoint,
+    current: WorldPlanePoint,
+    next: WorldPlanePoint,
+) -> f32 {
+    let ax = current.x - previous.x;
+    let az = current.z - previous.z;
+    let bx = next.x - current.x;
+    let bz = next.z - current.z;
+    let a_len = (ax * ax + az * az).sqrt();
+    let b_len = (bx * bx + bz * bz).sqrt();
+    if a_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+        || b_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+    {
+        return 0.0;
+    }
+    let cos = ((ax * bx + az * bz) / (a_len * b_len)).clamp(-1.0, 1.0);
+    cos.acos().to_degrees()
 }
 
 fn natural_displacement_series(seed: u64, lateral_limit: f32, segment_count: usize) -> Vec<f32> {
@@ -774,6 +950,41 @@ mod tests {
                 curve.amplitude
             );
             checked += 1;
+        }
+
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn noisy_curves_limit_meaningful_local_turn_angles() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let config = BoundaryConfig::new(42, 11);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, config);
+        let mut checked = 0;
+
+        for curve in boundary
+            .curves
+            .iter()
+            .filter(|curve| curve_chord_length(curve) >= 32.0 && curve.amplitude >= 8.0)
+        {
+            for window in curve.points.windows(3) {
+                let prev_len = distance(window[0], window[1]);
+                let next_len = distance(window[1], window[2]);
+                if prev_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+                    || next_len < DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS
+                {
+                    continue;
+                }
+
+                let turn = local_turn_degrees(window[0], window[1], window[2]);
+                assert!(
+                    turn <= config.max_local_turn_degrees + 0.5,
+                    "curve {:?} should avoid right-angle local turns: got {:.2} degrees",
+                    curve.edge,
+                    turn
+                );
+                checked += 1;
+            }
         }
 
         assert!(checked > 0);

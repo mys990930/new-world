@@ -1838,11 +1838,12 @@ fn combine_macro_height(
 
 fn ocean_bathymetry_macro_height(source_height: f32) -> f32 {
     let depth = (-source_height).max(0.0).clamp(0.0, 1.0);
-    let shelf = smoothstep_range(0.0, 0.18, depth) * 0.06;
-    let slope = smoothstep_range(0.18, 0.62, depth) * 0.38;
-    let basin = smoothstep_range(0.62, 1.0, depth) * 0.56;
+    let coast_adjacent = depth.min(0.018);
+    let shelf = smoothstep_range(0.018, 0.07, depth) * 0.05;
+    let slope = smoothstep_range(0.07, 0.42, depth) * 0.46;
+    let basin = smoothstep_range(0.42, 0.9, depth) * 0.49;
 
-    -(0.012_f32 + shelf + slope + basin).clamp(0.0, 1.0)
+    -(coast_adjacent + shelf + slope + basin).clamp(0.0, 1.0)
 }
 
 fn lake_bed_macro_height(
@@ -2001,6 +2002,7 @@ fn prune_isolated_ocean_fragments(samples: &mut [MacroFieldSample], config: Macr
         let mut queue = VecDeque::from([start]);
         let mut indices = Vec::new();
         let mut touches_edge = false;
+        let mut has_ocean_basin_source = false;
         visited[start] = true;
 
         while let Some(index) = queue.pop_front() {
@@ -2008,6 +2010,10 @@ fn prune_isolated_ocean_fragments(samples: &mut [MacroFieldSample], config: Macr
             let x = index % width;
             let z = index / width;
             touches_edge |= x == 0 || z == 0 || x + 1 == width || z + 1 == height;
+            has_ocean_basin_source |= matches!(
+                samples[index].surface_kind,
+                Some(MacroSurfaceKind::OceanBasin)
+            );
 
             for neighbor in ocean_component_neighbors(index, x, z, width, height) {
                 if !visited[neighbor] && samples[neighbor].ocean_mask > 0.5 {
@@ -2020,21 +2026,15 @@ fn prune_isolated_ocean_fragments(samples: &mut [MacroFieldSample], config: Macr
         components.push(OceanComponent {
             indices,
             touches_edge,
+            has_ocean_basin_source,
         });
     }
 
     let max_fragment_samples =
         isolated_ocean_fragment_max_samples(config.sample_spacing_blocks).max(1);
-    let largest_component = components
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, component)| component.indices.len())
-        .map(|(index, _)| index);
-
-    for (component_index, component) in components.iter().enumerate() {
+    for component in &components {
         if component.touches_edge
-            || Some(component_index) == largest_component
-            || component.indices.len() > max_fragment_samples
+            || (component.has_ocean_basin_source && component.indices.len() > max_fragment_samples)
         {
             continue;
         }
@@ -2054,6 +2054,7 @@ fn isolated_ocean_fragment_max_samples(sample_spacing_blocks: f32) -> usize {
 struct OceanComponent {
     indices: Vec<usize>,
     touches_edge: bool,
+    has_ocean_basin_source: bool,
 }
 
 fn ocean_component_neighbors(
@@ -2662,6 +2663,79 @@ mod tests {
     }
 
     #[test]
+    fn lone_ocean_fragment_is_not_kept_as_largest_component() {
+        let mut tile = test_contour_tile(&[32.0; 25], 5, 5);
+        let config = tile.config;
+        let fragment_index = 12;
+        tile.samples[fragment_index].surface_kind = Some(MacroSurfaceKind::CoastOcean);
+        tile.samples[fragment_index].macro_elevation = 0.03;
+        tile.samples[fragment_index].ocean_mask = 1.0;
+        tile.samples[fragment_index].combined_macro_height = combine_macro_height(
+            tile.samples[fragment_index].macro_elevation,
+            1.0,
+            tile.samples[fragment_index].coast_mask,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            config,
+        );
+
+        prune_isolated_ocean_fragments(&mut tile.samples, config);
+
+        assert_eq!(tile.samples[fragment_index].ocean_mask, 0.0);
+        assert_eq!(
+            tile.samples[fragment_index].surface_kind,
+            Some(MacroSurfaceKind::CoastLand)
+        );
+        assert!(
+            tile.samples[fragment_index].combined_macro_height > 0.0,
+            "isolated ocean owner sample should return to interpolated land/coast height"
+        );
+    }
+
+    #[test]
+    fn large_detached_coast_ocean_fragment_is_pruned() {
+        let mut tile = test_contour_tile(&[32.0; 900], 30, 30);
+        let config = tile.config;
+        for z in 5..25 {
+            for x in 5..25 {
+                let index = z * 30 + x;
+                tile.samples[index].surface_kind = Some(MacroSurfaceKind::CoastOcean);
+                tile.samples[index].macro_elevation = 0.03;
+                tile.samples[index].ocean_mask = 1.0;
+                tile.samples[index].combined_macro_height = combine_macro_height(
+                    tile.samples[index].macro_elevation,
+                    1.0,
+                    tile.samples[index].coast_mask,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    config,
+                );
+            }
+        }
+
+        prune_isolated_ocean_fragments(&mut tile.samples, config);
+
+        assert!(
+            tile.samples.iter().all(|sample| sample.ocean_mask <= 0.5),
+            "detached CoastOcean-only blobs should not survive as standalone ocean"
+        );
+        assert!(
+            tile.samples
+                .iter()
+                .all(|sample| sample.surface_kind != Some(MacroSurfaceKind::CoastOcean)),
+            "cleared coast-ocean fragments should be reclassified to coast-land"
+        );
+    }
+
+    #[test]
     fn ocean_combined_height_preserves_shelf_slope_basin_depth() {
         let config = test_tile_config();
         let shelf = combine_macro_height(-0.08, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
@@ -2679,6 +2753,33 @@ mod tests {
         assert!(
             slope < -0.12,
             "continental slope should remain visibly below shallow shelf: slope={slope}"
+        );
+    }
+
+    #[test]
+    fn ocean_bathymetry_keeps_coast_adjacent_depth_continuous() {
+        let source = -0.004;
+        let bathymetry = ocean_bathymetry_macro_height(source);
+
+        assert!(
+            (bathymetry - source).abs() < 0.002,
+            "coast-adjacent ocean should not jump to a fixed shallow shelf: source={source} bathymetry={bathymetry}"
+        );
+    }
+
+    #[test]
+    fn ocean_bathymetry_uses_narrow_shelf_before_slope() {
+        let near_coast = ocean_bathymetry_macro_height(-0.03);
+        let shelf_edge = ocean_bathymetry_macro_height(-0.08);
+        let slope = ocean_bathymetry_macro_height(-0.32);
+
+        assert!(
+            shelf_edge < near_coast - 0.025,
+            "shelf should narrow quickly after the coast: near={near_coast} shelf_edge={shelf_edge}"
+        );
+        assert!(
+            slope < shelf_edge - 0.25,
+            "continental slope should deepen soon after the narrowed shelf: shelf_edge={shelf_edge} slope={slope}"
         );
     }
 
