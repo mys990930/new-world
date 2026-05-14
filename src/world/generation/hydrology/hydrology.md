@@ -12,6 +12,22 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 
 ---
 
+## 하위 문서
+
+이 문서는 hydrology stage의 루트 계약과 public output, 전체 처리 순서를 소유한다. 하위 문서는
+컨텍스트를 작게 유지하기 위한 책임별 진입점이며, 현재 코드는 아직 대부분 `mod.rs`에 모여 있다.
+
+- `routing.md`: downhill graph, local minimum resolution, watershed, raw flow accumulation
+- `selection.md`: headwater/source 후보와 selected river edge 승격 정책
+- `topology.md`: lake contact, shared-corner pruning, selected graph reachability, validation stats
+- `discharge.md`: raw Q, selected/display river-system Q, lake-local cap의 분리와 전파
+
+최소 코드 분리 target은 `routing.rs`, `selection.rs`, `topology.rs`, `discharge.rs`, 그리고 공용
+타입을 담는 `types.rs`다. 코드가 나뉘기 전에도 새 정책을 추가할 때는 위 책임 중 어디에 속하는지
+먼저 문서 기준으로 맞춘다.
+
+---
+
 ## 책임
 
 - watershed, drainage node, river segment 표현

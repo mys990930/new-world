@@ -207,7 +207,11 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
 - `graph/graph.md`: graph region, Voronoi site/corner/edge id와 patch 계약
 - `field/field.md`: hard owner가 아닌 continuous blended field sampling 계약
 - `biome/biome.md`: graph-first final cell biome context와 classification 계약
-- `hydrology/hydrology.md`: watershed, drainage node, selected river edge 계약
+- `hydrology/hydrology.md`: watershed, drainage node, selected river edge 루트 계약
+  - `hydrology/routing.md`: downhill graph, local minima, watershed, raw flow accumulation
+  - `hydrology/selection.md`: selected river source 후보와 edge 승격 정책
+  - `hydrology/topology.md`: lake contact, selected graph pruning, reachability validation
+  - `hydrology/discharge.md`: raw Q, river-system Q, lake-local cap 분리 계약
 - `river_plan/river_plan.md`: selected river를 reach morphology와 broad valley / narrow bed plan으로 번역하는 계약
 - `pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
 - `pixelize/pixelize.md`: `MacroFieldTile`을 chunk-aligned `PixelizedChunkArea`로 변환하는 stage 11 구현과 계약
