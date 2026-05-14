@@ -169,11 +169,13 @@ hydrology result를 biome context에 반영하는 얇은 final pass다.
      하며, lake edge를 쓰거나 terminal/lake에 먼저 닿으면 선택하지 않는다.
    - tributary candidate가 이미 선택된 다른 tributary path를 먼저 만나거나 path를 공유하면 더 좋은
      후보만 deterministic하게 남긴다.
-   - source hydration은 공간적으로 coherent하므로 tributary 후보도 가까운 corner에 몰릴 수 있다.
-     explicit tributary 후보는 score/path potential/hydration/elevation 순서로 평가하고, 이미 수락한
-     tributary source와 너무 가까운 source, 여러 초기 edge가 가까이 나란히 흐르는 path, 같은 local merge
-     neighborhood에 붙는 후순위 후보는 억제한다. 이 정책은 `river_flow_threshold`를 올려 전체 강을
-     줄이는 방식이 아니라 tributary source admission 단계의 spacing guard다.
+   - source hydration은 공간적으로 coherent하므로 selected source 후보도 가까운 corner에 몰릴 수 있다.
+     mainstem과 explicit tributary 후보는 score/path potential/hydration/elevation 순서로 평가하고,
+     이미 수락한 selected river source와 너무 가까운 source, 여러 초기 edge가 가까이 나란히 흐르는 path,
+     같은 local tributary merge neighborhood에 붙는 후순위 후보를 억제한다. 이 정책은
+     `river_flow_threshold`를 올려 전체 강을 줄이는 방식이 아니라 selected source admission 단계의
+     spacing guard다. 지류가 실제 합류부로 접근하는 마지막 구간은 이 병렬 source 억제의 예외이며,
+     selected graph confluence cap이 따로 검증한다.
 9. lake contact topology를 정리한다.
    - selected river는 `MacroLakeEdgeClass::{LakeInternal,LakeBoundary,LakeAdjacentLand}` edge를
      어떤 경우에도 사용하지 않는다. 이 판정은 corner surface만 보지 않고 macro edge의 인접 site와
@@ -233,10 +235,10 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `DEFAULT_TRIBUTARY_SOURCE_THRESHOLD`와 `DEFAULT_TRIBUTARY_SOURCE_HYDRATION`을 통과하고 이미 선택된
   mainstem으로 bounded downhill path를 만들 때만 추가된다.
 - selected river는 source 후보에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
-- explicit tributary source spacing의 기본 launch 값은 source 간 최소 `768` blocks, 초기 path/merge
-  neighborhood 최소 `256` blocks, 초기 path 비교 `4` edges다. 값을 낮추면 충분히 떨어진 tributary
-  source는 늘어날 수 있지만, 인접 Voronoi cell에서 평행한 작은 하천이 여러 개 붙는 artifact는 기본값에서
-  억제되어야 한다.
+- selected source spacing의 기본 launch 값은 source 간 최소 `384` blocks, 초기 path/tributary merge
+  neighborhood 최소 `384` blocks, 초기 path 비교 `4` edges다. 이 값은 world-block 기준 hydrology
+  config에서 읽으며 preview별 hard-code가 아니다. 값을 낮추면 충분히 떨어진 tributary source는 늘어날
+  수 있지만, 인접 Voronoi cell에서 평행한 하천이 여러 개 붙는 artifact는 기본값에서 억제되어야 한다.
 - selected headwater edge 양쪽 land/dry-basin site는 final biome context에서 건조지대로 남으면 안 된다.
   launch 기본 floor는 `DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR = 0.46`이다.
 - ocean outlet으로 이어지는 river는 raw flow와 canonical selected display Q를 기준으로 넓어질 수 있다.
@@ -426,9 +428,10 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   segment의 `flow_accumulation`에 유지한다. 기준을 통과한 lake-bound
   chain은 호수 직전 몇 edge로 truncate하지 않고, lake boundary 직전 land-side endpoint까지 이어질 수
   있다.
-- explicit tributary selection은 mainstem 선정 뒤 후보를 score 순서로 수락하면서 source spacing, early
-  parallel path spacing, merge-neighborhood spacing을 적용한다. 이 후처리는 selected graph의 confluence
-  cap과 lake-edge 금지 정책을 보존하며 raw flow accumulation은 수정하지 않는다.
+- selected river admission은 mainstem과 explicit tributary 후보를 score 순서로 수락하면서 source
+  spacing과 early parallel path spacing을 공통 적용한다. explicit tributary끼리는 merge-neighborhood
+  spacing도 적용한다. 이 후처리는 selected graph의 confluence cap과 lake-edge 금지 정책을 보존하며 raw
+  flow accumulation은 수정하지 않는다.
 - selected river topology는 lake contact와 shared-corner intersection을 후처리로 검증한다. 결과 graph는
   selected segment endpoint에서만 생성되는 `LakeInlet`/`LakeOutlet` node와
   `GraphHydrologyTopologyStats`를 제공하며, preview와 테스트는 disconnected inlet/outlet, selected

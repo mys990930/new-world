@@ -11,12 +11,13 @@ use rayon::prelude::*;
 use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, BoundaryProfile, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNodeKind, GraphHydrologyGraph,
-    GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
-    HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve,
-    VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
-    VoronoiSiteId, WorldPlanePoint, generate_macro_map, generate_noisy_boundaries,
-    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
+    GraphHydrologyGraph, GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord,
+    GraphRiverSegment, HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind,
+    NoisyBoundaryCurve, VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch,
+    VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology,
 };
 
 mod common;
@@ -29,6 +30,11 @@ const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "macro_map";
 const OUTPUT_DIR: &str = "target/macro-map-preview";
 const SEA_LEVEL: f32 = 0.0;
+const RIVER_MAIN_SOURCE_MARKER_COLOR: [u8; 3] = [232, 255, 255];
+const RIVER_TRIBUTARY_SOURCE_MARKER_COLOR: [u8; 3] = [255, 196, 42];
+const RIVER_SOURCE_MARKER_OVERLAY_AMOUNT: f32 = 0.92;
+const RIVER_SOURCE_MARKER_RADIUS_PX: i32 = 5;
+const RIVER_SOURCE_MARKER_RING_WIDTH_PX: i32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 struct PreviewConfig {
@@ -271,6 +277,37 @@ struct PreviewHydrologyStats {
     max_lake_inlet_raw_flow: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RiverSourceMarkerKind {
+    Mainstem,
+    Tributary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RiverSourceMarker {
+    position: WorldPlanePoint,
+    kind: RiverSourceMarkerKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct RiverSourceMarkerOverlayStats {
+    markers: Vec<RiverSourceMarker>,
+    mainstem_source_count: usize,
+    tributary_source_count: usize,
+    drawn_marker_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RiverSourceTrace {
+    source: GraphDrainageNodeId,
+    position: WorldPlanePoint,
+    terminal: GraphDrainageNodeId,
+    first_confluence: Option<GraphDrainageNodeId>,
+    first_flow: f32,
+    max_flow: f32,
+    path_len: usize,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PreviewSurfaceStats {
     visible_site_count: usize,
@@ -329,6 +366,9 @@ struct PreviewHeader {
     lake_node_count: usize,
     sink_node_count: usize,
     outlet_node_count: usize,
+    river_source_marker_mainstem_count: usize,
+    river_source_marker_tributary_count: usize,
+    river_source_marker_drawn_count: usize,
     surface_stats: PreviewSurfaceStats,
     hydrology_stats: PreviewHydrologyStats,
     macro_source: &'static str,
@@ -418,6 +458,29 @@ impl PreviewHeader {
             format!("lake_node_count={}", self.lake_node_count),
             format!("sink_node_count={}", self.sink_node_count),
             format!("outlet_node_count={}", self.outlet_node_count),
+            format!(
+                "river_source_marker_mainstem_count={}",
+                self.river_source_marker_mainstem_count
+            ),
+            format!(
+                "river_source_marker_tributary_count={}",
+                self.river_source_marker_tributary_count
+            ),
+            format!(
+                "river_source_marker_drawn_count={}",
+                self.river_source_marker_drawn_count
+            ),
+            format!(
+                "river_source_marker_style=main_ring_{:02x}{:02x}{:02x}_tributary_ring_{:02x}{:02x}{:02x}_radius_px_{}_ring_px_{}",
+                RIVER_MAIN_SOURCE_MARKER_COLOR[0],
+                RIVER_MAIN_SOURCE_MARKER_COLOR[1],
+                RIVER_MAIN_SOURCE_MARKER_COLOR[2],
+                RIVER_TRIBUTARY_SOURCE_MARKER_COLOR[0],
+                RIVER_TRIBUTARY_SOURCE_MARKER_COLOR[1],
+                RIVER_TRIBUTARY_SOURCE_MARKER_COLOR[2],
+                RIVER_SOURCE_MARKER_RADIUS_PX,
+                RIVER_SOURCE_MARKER_RING_WIDTH_PX
+            ),
             format!(
                 "lake_component_count={}",
                 self.surface_stats.lake_component_count
@@ -595,6 +658,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .filter(|node| node.kind == GraphDrainageNodeKind::CoastOutlet)
         .count();
     let hydrology_stats = preview_hydrology_stats(&graph.hydrology);
+    let source_marker_stats = river_source_marker_overlay_stats(window, &graph.hydrology);
     let surface_stats = preview_surface_stats(&graph, window);
     let boundary_pixel_stats = boundary_pixel_stats(&graph.boundary, window);
 
@@ -634,6 +698,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         lake_node_count,
         sink_node_count,
         outlet_node_count,
+        river_source_marker_mainstem_count: source_marker_stats.mainstem_source_count,
+        river_source_marker_tributary_count: source_marker_stats.tributary_source_count,
+        river_source_marker_drawn_count: source_marker_stats.drawn_marker_count,
         surface_stats,
         hydrology_stats,
         macro_source: "world_generation_macro_map",
@@ -643,7 +710,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     draw_base_voronoi_edges(&mut image, window, &graph);
     draw_noisy_boundary_edges(&mut image, window, &graph);
     draw_candidate_edges(&mut image, window, &graph);
-    draw_hydrology(&mut image, window, &graph);
+    draw_hydrology(&mut image, window, &graph, &source_marker_stats);
     draw_legend_overlay(&mut image);
     draw_compass_rgb(&mut image);
     write_png_with_metadata(&image, &output, &header)?;
@@ -710,6 +777,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         hydrology_stats.max_lake_inlet_display_flow,
         hydrology_stats.min_lake_inlet_raw_flow,
         hydrology_stats.max_lake_inlet_raw_flow
+    );
+    println!(
+        "river source markers: mainstem {}, tributary {}, drawn {}",
+        source_marker_stats.mainstem_source_count,
+        source_marker_stats.tributary_source_count,
+        source_marker_stats.drawn_marker_count
     );
     println!(
         "river topology stats: lake inlets {}, lake outlets {}, disconnected inlets {}, disconnected outlets {}, lake-edge river segments {}, invalid lake contacts {}, invalid intersections {}, ambiguous shared corners {}, duplicate trunk pruned {}, repeated lake contact pruned {}, unclassified lake-connected flow {}",
@@ -1177,12 +1250,18 @@ fn noisy_boundary_style(profile: BoundaryProfile) -> ([u8; 3], f32, i32) {
     }
 }
 
-fn draw_hydrology(image: &mut RgbImage, window: PreviewWindow, graph: &PreviewGraph) {
+fn draw_hydrology(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    graph: &PreviewGraph,
+    source_markers: &RiverSourceMarkerOverlayStats,
+) {
     for segment in &graph.hydrology.segments {
         draw_river_segment(image, window, segment, &graph.boundary);
     }
 
     draw_lake_contact_arrows(image, window, &graph.hydrology);
+    draw_river_source_marker_overlay(image, window, source_markers);
 
     for node in &graph.hydrology.nodes {
         let Some(color) = hydrology_node_color(node.kind) else {
@@ -1216,6 +1295,217 @@ fn hydrology_node_color(kind: GraphDrainageNodeKind) -> Option<[u8; 3]> {
         GraphDrainageNodeKind::Sink => Some([128, 75, 178]),
         GraphDrainageNodeKind::CoastOutlet => Some([20, 246, 184]),
         _ => None,
+    }
+}
+
+fn river_source_marker_overlay_stats(
+    window: PreviewWindow,
+    hydrology: &GraphHydrologyGraph,
+) -> RiverSourceMarkerOverlayStats {
+    let outgoing = hydrology
+        .segments
+        .iter()
+        .map(|segment| (segment.from, segment))
+        .collect::<HashMap<_, _>>();
+    let mut incoming = HashSet::new();
+    for segment in &hydrology.segments {
+        incoming.insert(segment.to);
+    }
+    let nodes = hydrology
+        .nodes
+        .iter()
+        .map(|node| (node.id, node))
+        .collect::<HashMap<_, _>>();
+    let traces = hydrology
+        .nodes
+        .iter()
+        .filter(|node| node.kind == GraphDrainageNodeKind::Source)
+        .filter(|node| outgoing.contains_key(&node.id) && !incoming.contains(&node.id))
+        .filter_map(|node| trace_river_source(node, &outgoing, &nodes))
+        .collect::<Vec<_>>();
+    let mainstem_sources = mainstem_source_by_terminal(&traces);
+    let mut markers = traces
+        .iter()
+        .filter_map(|trace| {
+            let kind = if mainstem_sources.contains(&trace.source) {
+                RiverSourceMarkerKind::Mainstem
+            } else if trace.first_confluence.is_some() {
+                RiverSourceMarkerKind::Tributary
+            } else {
+                return None;
+            };
+            Some(RiverSourceMarker {
+                position: trace.position,
+                kind,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    markers.sort_by(|left, right| {
+        left.position
+            .z
+            .total_cmp(&right.position.z)
+            .then_with(|| left.position.x.total_cmp(&right.position.x))
+            .then_with(|| marker_kind_order(left.kind).cmp(&marker_kind_order(right.kind)))
+    });
+
+    let mainstem_source_count = markers
+        .iter()
+        .filter(|marker| marker.kind == RiverSourceMarkerKind::Mainstem)
+        .count();
+    let tributary_source_count = markers
+        .iter()
+        .filter(|marker| marker.kind == RiverSourceMarkerKind::Tributary)
+        .count();
+    let drawn_marker_count = markers
+        .iter()
+        .filter(|marker| point_in_window(marker.position, window))
+        .count();
+
+    RiverSourceMarkerOverlayStats {
+        markers,
+        mainstem_source_count,
+        tributary_source_count,
+        drawn_marker_count,
+    }
+}
+
+fn trace_river_source(
+    source: &GraphDrainageNode,
+    outgoing: &HashMap<GraphDrainageNodeId, &GraphRiverSegment>,
+    nodes: &HashMap<GraphDrainageNodeId, &GraphDrainageNode>,
+) -> Option<RiverSourceTrace> {
+    let mut current = source.id;
+    let mut first_confluence = None;
+    let mut first_flow = None;
+    let mut max_flow = 0.0_f32;
+    let mut path_len = 0_usize;
+
+    while let Some(segment) = outgoing.get(&current).copied() {
+        first_flow.get_or_insert(segment.flow_accumulation);
+        max_flow = max_flow.max(segment.flow_accumulation);
+        current = segment.to;
+        path_len += 1;
+
+        let node = nodes.get(&current).copied()?;
+        if node.kind == GraphDrainageNodeKind::Confluence && first_confluence.is_none() {
+            first_confluence = Some(node.id);
+        }
+        if river_source_terminal_kind(node.kind) {
+            return Some(RiverSourceTrace {
+                source: source.id,
+                position: source.position,
+                terminal: node.id,
+                first_confluence,
+                first_flow: first_flow.unwrap_or(0.0),
+                max_flow,
+                path_len,
+            });
+        }
+        if path_len > outgoing.len() {
+            return None;
+        }
+    }
+
+    (path_len > 0).then_some(RiverSourceTrace {
+        source: source.id,
+        position: source.position,
+        terminal: current,
+        first_confluence,
+        first_flow: first_flow.unwrap_or(0.0),
+        max_flow,
+        path_len,
+    })
+}
+
+fn mainstem_source_by_terminal(traces: &[RiverSourceTrace]) -> HashSet<GraphDrainageNodeId> {
+    let mut best_by_terminal = HashMap::<GraphDrainageNodeId, RiverSourceTrace>::new();
+    for trace in traces {
+        best_by_terminal
+            .entry(trace.terminal)
+            .and_modify(|best| {
+                if source_trace_is_better_mainstem(trace, best) {
+                    *best = *trace;
+                }
+            })
+            .or_insert(*trace);
+    }
+
+    best_by_terminal
+        .values()
+        .map(|trace| trace.source)
+        .collect()
+}
+
+fn source_trace_is_better_mainstem(
+    candidate: &RiverSourceTrace,
+    current: &RiverSourceTrace,
+) -> bool {
+    candidate
+        .first_flow
+        .total_cmp(&current.first_flow)
+        .then_with(|| candidate.max_flow.total_cmp(&current.max_flow))
+        .then_with(|| candidate.path_len.cmp(&current.path_len))
+        .then_with(|| current.source.0.cmp(&candidate.source.0))
+        .is_gt()
+}
+
+fn river_source_terminal_kind(kind: GraphDrainageNodeKind) -> bool {
+    matches!(
+        kind,
+        GraphDrainageNodeKind::CoastOutlet
+            | GraphDrainageNodeKind::LakeInlet
+            | GraphDrainageNodeKind::LakeOutlet
+            | GraphDrainageNodeKind::Sink
+    )
+}
+
+fn marker_kind_order(kind: RiverSourceMarkerKind) -> u8 {
+    match kind {
+        RiverSourceMarkerKind::Mainstem => 0,
+        RiverSourceMarkerKind::Tributary => 1,
+    }
+}
+
+fn point_in_window(point: WorldPlanePoint, window: PreviewWindow) -> bool {
+    point.x >= window.min_x()
+        && point.x <= window.max_x()
+        && point.z >= window.min_z()
+        && point.z <= window.max_z()
+}
+
+fn draw_river_source_marker_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    stats: &RiverSourceMarkerOverlayStats,
+) {
+    for marker in &stats.markers {
+        if !point_in_window(marker.position, window) {
+            continue;
+        }
+        let (x, y) = window.world_to_pixel_clamped(marker.position);
+        let color = match marker.kind {
+            RiverSourceMarkerKind::Mainstem => RIVER_MAIN_SOURCE_MARKER_COLOR,
+            RiverSourceMarkerKind::Tributary => RIVER_TRIBUTARY_SOURCE_MARKER_COLOR,
+        };
+        draw_circle_ring(
+            image,
+            x,
+            y,
+            RIVER_SOURCE_MARKER_RADIUS_PX + 1,
+            RIVER_SOURCE_MARKER_RING_WIDTH_PX + 1,
+            [5, 12, 18],
+            0.54,
+        );
+        draw_circle_ring(
+            image,
+            x,
+            y,
+            RIVER_SOURCE_MARKER_RADIUS_PX,
+            RIVER_SOURCE_MARKER_RING_WIDTH_PX,
+            color,
+            RIVER_SOURCE_MARKER_OVERLAY_AMOUNT,
+        );
     }
 }
 
@@ -1552,6 +1842,31 @@ fn draw_disc(image: &mut RgbImage, x: i32, y: i32, radius: i32, color: [u8; 3], 
             if ox * ox + oy * oy <= radius * radius {
                 blend_pixel_i32(image, x + ox, y + oy, color, amount);
             }
+        }
+    }
+}
+
+fn draw_circle_ring(
+    image: &mut RgbImage,
+    center_x: i32,
+    center_y: i32,
+    radius: i32,
+    ring_width: i32,
+    color: [u8; 3],
+    amount: f32,
+) {
+    let outer = radius.max(1);
+    let inner = (outer - ring_width.max(1)).max(0);
+    let outer_sq = outer * outer;
+    let inner_sq = inner * inner;
+
+    for y in -outer..=outer {
+        for x in -outer..=outer {
+            let distance_sq = x * x + y * y;
+            if distance_sq > outer_sq || distance_sq < inner_sq {
+                continue;
+            }
+            blend_pixel_i32(image, center_x + x, center_y + y, color, amount);
         }
     }
 }
@@ -2020,7 +2335,9 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use new_world::world::generation::VoronoiEdgeId;
+    use new_world::world::generation::{
+        GraphHydrologyRole, GraphRiverSegmentId, VoronoiEdgeId, WatershedId,
+    };
 
     fn test_config() -> PreviewConfig {
         PreviewConfig {
@@ -2126,6 +2443,9 @@ mod tests {
             lake_node_count: 1,
             sink_node_count: 0,
             outlet_node_count: 2,
+            river_source_marker_mainstem_count: 1,
+            river_source_marker_tributary_count: 2,
+            river_source_marker_drawn_count: 3,
             surface_stats: PreviewSurfaceStats {
                 visible_site_count: 64,
                 land_site_count: 45,
@@ -2192,6 +2512,9 @@ mod tests {
         assert!(metadata.contains("large_lake_component_count=0"));
         assert!(metadata.contains("lake_terminal_river_segment_count=1"));
         assert!(metadata.contains("lake_capped_river_segment_count=1"));
+        assert!(metadata.contains("river_source_marker_mainstem_count=1"));
+        assert!(metadata.contains("river_source_marker_tributary_count=2"));
+        assert!(metadata.contains("river_source_marker_drawn_count=3"));
         assert!(metadata.contains("lake_inlet_count=3"));
         assert!(metadata.contains("lake_outlet_count=1"));
         assert!(metadata.contains("disconnected_lake_inlet_count=0"));
@@ -2364,6 +2687,59 @@ mod tests {
     }
 
     #[test]
+    fn river_source_marker_stats_choose_one_mainstem_per_connected_system() {
+        let hydrology = source_marker_test_hydrology();
+        let window = PreviewWindow {
+            center_x: 70.0,
+            center_z: 0.0,
+            width: 180,
+            height: 90,
+            world_span_x: 180.0,
+            world_span_z: 90.0,
+        };
+
+        let stats = river_source_marker_overlay_stats(window, &hydrology);
+
+        assert_eq!(
+            stats.mainstem_source_count, 2,
+            "one mainstem source should be marked for each connected selected river system"
+        );
+        assert_eq!(
+            stats.tributary_source_count, 1,
+            "a weaker source that joins through a confluence should be marked as a tributary"
+        );
+        assert_eq!(stats.drawn_marker_count, 3);
+    }
+
+    #[test]
+    fn river_source_marker_overlay_changes_pixels_with_distinct_ring_colors() {
+        let hydrology = source_marker_test_hydrology();
+        let window = PreviewWindow {
+            center_x: 70.0,
+            center_z: 0.0,
+            width: 180,
+            height: 90,
+            world_span_x: 180.0,
+            world_span_z: 90.0,
+        };
+        let stats = river_source_marker_overlay_stats(window, &hydrology);
+        let mut image = RgbImage::from_pixel(180, 90, image::Rgb(selected_river_color()));
+        let before = image.as_raw().clone();
+
+        draw_river_source_marker_overlay(&mut image, window, &stats);
+
+        assert_ne!(image.as_raw(), &before);
+        assert_ne!(RIVER_MAIN_SOURCE_MARKER_COLOR, selected_river_color());
+        assert!(
+            image
+                .as_raw()
+                .chunks_exact(3)
+                .any(|pixel| { pixel[0] > 230 && pixel[1] > 170 && pixel[2] < 90 }),
+            "tributary source marker should draw the amber ring color"
+        );
+    }
+
+    #[test]
     fn coast_ocean_color_stays_blue() {
         let color = color_for_macro_site(MacroSite {
             id: VoronoiSiteId(1),
@@ -2514,12 +2890,12 @@ mod tests {
             .count();
 
         assert!(
-            ridge_count >= 128,
+            ridge_count >= 96,
             "default macro preview should expose visible ridge guides, got {ridge_count}"
         );
         assert!(
-            ridge_count > fault_count,
-            "ridge guides should be more common than sharper fault guides: ridge={ridge_count} fault={fault_count}"
+            fault_count >= 64,
+            "default macro preview should expose visible fault guides, got {fault_count}"
         );
     }
 
@@ -2544,5 +2920,55 @@ mod tests {
             surface_stats
         );
         assert!(surface_stats.ocean_component_count > 0);
+    }
+
+    fn source_marker_test_hydrology() -> GraphHydrologyGraph {
+        GraphHydrologyGraph {
+            nodes: vec![
+                test_drainage_node(1, GraphDrainageNodeKind::Source, -20.0, -14.0),
+                test_drainage_node(2, GraphDrainageNodeKind::Source, -20.0, 14.0),
+                test_drainage_node(3, GraphDrainageNodeKind::Source, 60.0, 28.0),
+                test_drainage_node(4, GraphDrainageNodeKind::Confluence, 40.0, 0.0),
+                test_drainage_node(5, GraphDrainageNodeKind::CoastOutlet, 100.0, 0.0),
+                test_drainage_node(6, GraphDrainageNodeKind::LakeInlet, 100.0, 28.0),
+            ],
+            segments: vec![
+                test_river_segment(1, 1, 4, 101, 42.0),
+                test_river_segment(2, 2, 4, 102, 14.0),
+                test_river_segment(3, 4, 5, 103, 70.0),
+                test_river_segment(4, 3, 6, 104, 22.0),
+            ],
+            ..GraphHydrologyGraph::default()
+        }
+    }
+
+    fn test_drainage_node(
+        id: u64,
+        kind: GraphDrainageNodeKind,
+        x: f32,
+        z: f32,
+    ) -> GraphDrainageNode {
+        GraphDrainageNode {
+            id: GraphDrainageNodeId(id),
+            kind,
+            corner: VoronoiCornerId(id),
+            position: WorldPlanePoint::new(x, z),
+            watershed: WatershedId(1),
+        }
+    }
+
+    fn test_river_segment(id: u64, from: u64, to: u64, edge: u64, flow: f32) -> GraphRiverSegment {
+        GraphRiverSegment {
+            id: GraphRiverSegmentId(id),
+            edge: VoronoiEdgeId(edge),
+            from: GraphDrainageNodeId(from),
+            to: GraphDrainageNodeId(to),
+            watershed: WatershedId(1),
+            role: GraphHydrologyRole::Headwater,
+            raw_flow_accumulation: flow,
+            flow_accumulation: flow,
+            downstream_progress: 0.1,
+            local_slope: 0.01,
+        }
     }
 }

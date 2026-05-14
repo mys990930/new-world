@@ -1333,6 +1333,116 @@ mod tests {
     }
 
     #[test]
+    fn close_parallel_mainstem_sources_keep_best_spaced_source() {
+        let downstream = vec![Some(2), Some(3), Some(4), Some(5), None, None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(100)),
+            Some(VoronoiEdgeId(101)),
+            Some(VoronoiEdgeId(102)),
+            Some(VoronoiEdgeId(103)),
+            None,
+            None,
+        ];
+        let flow = vec![150.0, 140.0, 150.0, 140.0, 150.0, 140.0];
+        let elevations = vec![0.82, 0.80, 0.52, 0.50, 0.0, 0.0];
+        let source_hydration = vec![0.62, 0.61, 0.20, 0.20, 0.0, 0.0];
+        let corner_positions = vec![
+            WorldPlanePoint::new(0.0, 0.0),
+            WorldPlanePoint::new(96.0, 0.0),
+            WorldPlanePoint::new(0.0, 256.0),
+            WorldPlanePoint::new(96.0, 256.0),
+            WorldPlanePoint::new(0.0, 512.0),
+            WorldPlanePoint::new(96.0, 512.0),
+        ];
+        let terminals = vec![false, false, false, false, true, true];
+        let lake_candidates = vec![false; 6];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(100),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(101),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(100),
+                },
+                CornerNeighbor {
+                    index: 4,
+                    edge: VoronoiEdgeId(102),
+                },
+            ],
+            vec![
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(101),
+                },
+                CornerNeighbor {
+                    index: 5,
+                    edge: VoronoiEdgeId(103),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(102),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(103),
+            }],
+        ];
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            Some(&corner_positions),
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 6],
+            &[None; 6],
+            &[None; 6],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 6],
+                contact_component_by_land_corner: vec![None; 6],
+                inlet_vertices: vec![false; 6],
+                outlet_vertices: vec![false; 6],
+                inlet_land_vertices: vec![false; 6],
+                outlet_land_vertices: vec![false; 6],
+            },
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig {
+                tributary_source_min_spacing_blocks: 256.0,
+                tributary_parallel_path_min_spacing_blocks: 192.0,
+                ..HydrologyConfig::default()
+            },
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![true, false, true, false, false, false],
+            "independent selected mainstem starts should use the same source/path spacing guard as tributaries"
+        );
+    }
+
+    #[test]
     fn explicit_tributary_merge_preserves_downstream_system_q() {
         let raw_flow = vec![28.0, 92.0, 130.0, 130.0];
         let selected = vec![true, true, true, false];

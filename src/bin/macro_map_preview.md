@@ -53,6 +53,11 @@
     so coast/material/river paths read as natural curves instead of jagged polylines.
   - selected river chains are drawn from hydrology `GraphRiverSegment` results as cyan/blue
     overlays following each segment edge id's canonical noisy curve.
+  - selected river sources are drawn as ring markers above the river line. A mainstem source marker
+    is chosen once per selected river terminal/system from the upstream-most source trace, while
+    tributary source markers are sources whose downstream trace reaches a confluence before a
+    terminal. Interior selected river corners are not treated as sources even if their debug node
+    kind is `Source`.
   - selected river chains are drawn only for macro edges whose lake edge class is `NonLake`; lake
     internal, lake boundary, and lake-adjacent land edges are never rendered as selected rivers.
   - river width and opacity follow the hydrology segment's selected/display `flow_accumulation`,
@@ -74,6 +79,11 @@
     from the endpoint toward downstream. These arrows are shortened near the endpoint so they do not
     lay a long shaft over a lake edge. These markers are drawn above the river line so topology
     changes are visible in the preview.
+  - selected river source markers are drawn as rings above the river line. A connected selected river
+    system gets one mainstem source marker, chosen from its source traces by strongest first segment
+    display flow with deterministic tie-breaks. Additional source nodes that merge into that selected
+    system through a `Confluence` node are marked as tributary sources. The preview does not treat
+    every `GraphDrainageNodeKind::Source` as a mainstem marker.
   - selected river occupancy is stricter than the raw flow ledger: if multiple selected upstream
     branches would share the same corner as separate visible chains, hydrology keeps the largest
     branch and prunes the losing upstream selected tree until explicit confluence geometry exists.
@@ -90,9 +100,10 @@
   edge counts, selected river/lake/sink/outlet counts, lake/ocean terminal segment counts,
   lake component count, small lake component count, inland water site count, dry basin site
   count, max lake component size, large lake component count, ocean component count, lake-capped
-  segment count, lake inlet/outlet count, disconnected lake inlet/outlet count, selected lake-edge
+  segment count, source marker mainstem/tributary/drawn counts, lake inlet/outlet count, disconnected lake inlet/outlet count, selected lake-edge
   river segment count, invalid lake contact/intersection count, ambiguous shared corner count,
   duplicate trunk pruned count, repeated lake contact pruned count, unclassified lake-connected flow count,
+  selected river source marker mainstem/tributary/drawn counts,
   lake/ocean max display/raw flow, lake inlet raw/display flow range, boundary curve count,
   boundary profile counts, boundary guard violation count, boundary average/max amplitude blocks,
   boundary average/max pixel displacement at the current preview scale, boundary nearly-straight
@@ -129,7 +140,8 @@
    `VoronoiCorner.position` values, clipping the world-space segment to the preview window, and
    projecting it onto pixel centers. This layer draws graph-derived coast, ridge, and fault guide overlays.
 11. Draw selected river chains by following each selected segment's canonical noisy edge curve.
-12. Draw lake/inlet/outlet/sink/coast-outlet drainage node markers from hydrology results.
+12. Draw selected river source markers and lake/inlet/outlet/sink/coast-outlet drainage node markers
+    from hydrology results.
 13. Draw the compact legend and encode PNG metadata.
 
 The fill layer is a nearest-site diagnostic color field. Its apparent pixel boundary can differ from

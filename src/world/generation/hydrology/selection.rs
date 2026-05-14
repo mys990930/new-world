@@ -197,12 +197,32 @@ pub(super) fn select_river_paths(
 
     sort_headwater_candidates(&mut candidates);
 
+    let mut accepted_source_paths = Vec::new();
     for candidate in candidates {
         let start = candidate.index;
         let terminal = terminal_indices[start];
         let first_lake = first_downstream_lakes[start];
         let lake_policy = lake_policies[terminal]
             .or_else(|| first_lake.and_then(|lake| lake_inlet_policies[lake]));
+
+        let chain =
+            selected_chain_from_source(start, downstream, downstream_edges, terminals, first_lake);
+        if chain_intersects_selected_path(&chain, &selected, downstream) {
+            continue;
+        }
+        let accepted_candidate = SelectedSourcePathCandidate {
+            source: candidate,
+            path: chain.clone(),
+            merge_index: None,
+        };
+        if selected_source_path_conflicts(
+            &accepted_candidate,
+            &accepted_source_paths,
+            corner_positions,
+            config,
+        ) {
+            continue;
+        }
 
         if let Some(policy) = lake_policy {
             if selected_lake_chains[policy.component_root] >= policy.max_incoming_chains {
@@ -211,15 +231,10 @@ pub(super) fn select_river_paths(
             selected_lake_chains[policy.component_root] += 1;
         }
 
-        let chain =
-            selected_chain_from_source(start, downstream, downstream_edges, terminals, first_lake);
-        if chain_intersects_selected_path(&chain, &selected, downstream) {
-            continue;
-        }
-
         for index in chain {
             selected[index] = true;
         }
+        accepted_source_paths.push(accepted_candidate);
     }
 
     let mainstem_selected = selected.clone();
@@ -262,7 +277,6 @@ pub(super) fn select_river_paths(
             .then_with(|| left.source.index.cmp(&right.source.index))
     });
 
-    let mut accepted_tributaries = Vec::new();
     for candidate in tributary_candidates {
         if !tributary_path_can_merge(
             &candidate,
@@ -275,8 +289,17 @@ pub(super) fn select_river_paths(
         ) {
             continue;
         }
-        if accepted_tributary_conflicts(&candidate, &accepted_tributaries, corner_positions, config)
-        {
+        let accepted_candidate = SelectedSourcePathCandidate {
+            source: candidate.source,
+            path: candidate.path.clone(),
+            merge_index: Some(candidate.merge_index),
+        };
+        if selected_source_path_conflicts(
+            &accepted_candidate,
+            &accepted_source_paths,
+            corner_positions,
+            config,
+        ) {
             continue;
         }
         for index in &candidate.path {
@@ -285,7 +308,7 @@ pub(super) fn select_river_paths(
                 incoming_selected[target] = incoming_selected[target].saturating_add(1);
             }
         }
-        accepted_tributaries.push(candidate);
+        accepted_source_paths.push(accepted_candidate);
     }
 
     enforce_lake_contact_topology(
@@ -340,9 +363,9 @@ pub(super) fn select_river_paths(
     }
 }
 
-fn accepted_tributary_conflicts(
-    candidate: &TributarySourceCandidate,
-    accepted: &[TributarySourceCandidate],
+fn selected_source_path_conflicts(
+    candidate: &SelectedSourcePathCandidate,
+    accepted: &[SelectedSourcePathCandidate],
     corner_positions: Option<&[WorldPlanePoint]>,
     config: HydrologyConfig,
 ) -> bool {
@@ -354,16 +377,15 @@ fn accepted_tributary_conflicts(
     };
 
     accepted.iter().any(|other| {
-        candidate.merge_index == other.merge_index
+        shared_tributary_merge_conflicts(candidate, other, positions, config)
             || source_spacing_conflicts(candidate, other, positions, config)
             || early_parallel_path_conflicts(candidate, other, positions, config)
-            || merge_neighborhood_conflicts(candidate, other, positions, config)
     })
 }
 
 fn source_spacing_conflicts(
-    candidate: &TributarySourceCandidate,
-    other: &TributarySourceCandidate,
+    candidate: &SelectedSourcePathCandidate,
+    other: &SelectedSourcePathCandidate,
     positions: &[WorldPlanePoint],
     config: HydrologyConfig,
 ) -> bool {
@@ -374,8 +396,8 @@ fn source_spacing_conflicts(
 }
 
 fn early_parallel_path_conflicts(
-    candidate: &TributarySourceCandidate,
-    other: &TributarySourceCandidate,
+    candidate: &SelectedSourcePathCandidate,
+    other: &SelectedSourcePathCandidate,
     positions: &[WorldPlanePoint],
     config: HydrologyConfig,
 ) -> bool {
@@ -400,15 +422,23 @@ fn early_parallel_path_conflicts(
     close_pairs >= 2
 }
 
-fn merge_neighborhood_conflicts(
-    candidate: &TributarySourceCandidate,
-    other: &TributarySourceCandidate,
+fn shared_tributary_merge_conflicts(
+    candidate: &SelectedSourcePathCandidate,
+    other: &SelectedSourcePathCandidate,
     positions: &[WorldPlanePoint],
     config: HydrologyConfig,
 ) -> bool {
+    let (Some(candidate_merge), Some(other_merge)) = (candidate.merge_index, other.merge_index)
+    else {
+        return false;
+    };
+    if candidate_merge == other_merge {
+        return true;
+    }
+
     let min_spacing = config.tributary_parallel_path_min_spacing_blocks;
     min_spacing > 0.0
-        && squared_corner_distance(candidate.merge_index, other.merge_index, positions)
+        && squared_corner_distance(candidate_merge, other_merge, positions)
             .is_some_and(|distance| distance < min_spacing * min_spacing)
 }
 
@@ -491,6 +521,13 @@ struct TributarySourceCandidate {
     source: HeadwaterSourceCandidate,
     path: Vec<usize>,
     merge_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SelectedSourcePathCandidate {
+    source: HeadwaterSourceCandidate,
+    path: Vec<usize>,
+    merge_index: Option<usize>,
 }
 
 #[allow(clippy::too_many_arguments)]

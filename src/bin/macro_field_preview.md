@@ -117,7 +117,7 @@ of giving every tile its own artificial low and high.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a thicker standing-water/terrain boundary overlay on `macro`, `combined`, and `lit`,
-   a scale bar, a compass overlay, and a thin macro-field cache tile grid.
+   selected river source ring markers, a scale bar, a compass overlay, and a thin macro-field cache tile grid.
 11. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
@@ -154,6 +154,8 @@ Each PNG contains:
 - noisy Voronoi edge overlay curve/segment count, standing-water boundary segment count, and scale
   bar length
 - contour step, major interval, min/max level, level count, segment count, height color ramp, and overlay flag
+- selected river source marker mainstem/tributary/drawn counts; markers are emitted only for
+  source nodes with no selected incoming segment, so interior river corners are not drawn as sources
 - lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
   min/average/max/stddev
 - channel meaning notes for macro, mask, ridge, river, combined, contour, and lit outputs

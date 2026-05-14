@@ -1508,6 +1508,11 @@ fn river_source_marker_overlay_stats(
         .iter()
         .map(|segment| (segment.from, segment.to))
         .collect::<std::collections::HashMap<_, _>>();
+    let incoming = hydrology
+        .segments
+        .iter()
+        .map(|segment| segment.to)
+        .collect::<std::collections::HashSet<_>>();
     let nodes = hydrology
         .nodes
         .iter()
@@ -1517,7 +1522,7 @@ fn river_source_marker_overlay_stats(
         .nodes
         .iter()
         .filter(|node| node.kind == GraphDrainageNodeKind::Source)
-        .filter(|node| outgoing.contains_key(&node.id))
+        .filter(|node| !incoming.contains(&node.id))
         .filter_map(|node| {
             let kind = classify_source_marker(node.id, &outgoing, &nodes)?;
             Some(RiverSourceMarker {
