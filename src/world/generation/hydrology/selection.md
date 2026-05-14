@@ -61,11 +61,13 @@
 4. explicit tributary는 downstream path를 따라 이미 선택된 main river에 닿아야 하며, 다른 tributary와
    먼저 교차하거나 path를 공유하면 안 된다.
 5. selected source는 `tributary_source_min_spacing_blocks`보다 가까운 이미 수락된 selected river
-   source와 같이 남으면 안 된다. 초기 downstream path가 여러 edge 동안
-   `tributary_parallel_path_min_spacing_blocks` 안에서 나란히 흐르면 mainstem/tributary 구분 없이
-   후순위 후보를 억제한다. explicit tributary끼리 같은 local merge target neighborhood에 붙는 경우도
-   후순위 후보를 억제한다. 단, 지류가 선택된 본류에 합류하기 위해 가까워지는 마지막 merge 접근은
-   허용하고, confluence cap에서 별도 검증한다.
+   source와 같이 남으면 안 된다. explicit tributary나 mainstem/tributary 조합은 초기 downstream path가
+   여러 edge 동안 `tributary_parallel_path_min_spacing_blocks` 안에서 나란히 흐르면 후순위 후보를
+   억제한다. mainstem끼리는 초기 source가 떨어져 있어도 downstream selected path 전체 중 어느 구간이
+   `tributary_parallel_path_min_spacing_blocks` 안으로 들어오면 독립 병렬 본류로 남기지 않는다.
+   explicit tributary끼리 같은 local merge target neighborhood에 붙는 경우도 후순위 후보를 억제한다.
+   단, 지류가 선택된 본류에 합류하기 위해 가까워지는 마지막 merge 접근은 허용하고, confluence cap에서
+   별도 검증한다.
 6. 선택된 river는 downstream path를 따라 terminal, lake policy endpoint, 또는 mainstem merge point까지
    이어져야 한다.
 7. selection은 raw flow 원장을 수정하지 않는다.

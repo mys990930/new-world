@@ -240,10 +240,12 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `DEFAULT_TRIBUTARY_SOURCE_THRESHOLD`와 `DEFAULT_TRIBUTARY_SOURCE_HYDRATION`을 통과하고 이미 선택된
   mainstem으로 bounded downhill path를 만들 때만 추가된다.
 - selected river는 source 후보에서 시작하되, 선택된 순간 downstream chain을 outlet/sink/lake까지 계속 포함한다.
-- selected source spacing의 기본 launch 값은 source 간 최소 `384` blocks, 초기 path/tributary merge
-  neighborhood 최소 `384` blocks, 초기 path 비교 `4` edges다. 이 값은 world-block 기준 hydrology
-  config에서 읽으며 preview별 hard-code가 아니다. 값을 낮추면 충분히 떨어진 tributary source는 늘어날
-  수 있지만, 인접 Voronoi cell에서 평행한 하천이 여러 개 붙는 artifact는 기본값에서 억제되어야 한다.
+- selected source spacing의 기본 launch 값은 source 간 최소 `384` blocks, path/tributary merge
+  neighborhood 최소 `384` blocks, tributary 초기 path 비교 `4` edges다. mainstem끼리는 source와
+  초기 edge가 떨어져 있어도 downstream selected path 전체가 같은 spacing guard를 통과해야 한다. 이 값은
+  world-block 기준 hydrology config에서 읽으며 preview별 hard-code가 아니다. 값을 낮추면 충분히
+  떨어진 tributary source는 늘어날 수 있지만, 인접 Voronoi cell에서 평행한 하천이 여러 개 붙는 artifact는
+  기본값에서 억제되어야 한다.
 - selected headwater edge 양쪽 land/dry-basin site는 final biome context에서 건조지대로 남으면 안 된다.
   launch 기본 floor는 `DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR = 0.46`이다.
 - ocean outlet으로 이어지는 river는 raw flow와 canonical selected display Q를 기준으로 넓어질 수 있다.

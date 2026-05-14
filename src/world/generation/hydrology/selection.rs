@@ -9,9 +9,9 @@ use super::topology::{
     remove_repeated_lake_contact_chains,
 };
 use super::types::{
+    GraphLocalMinimumResolution, HydrologyConfig, LakeContactTopology, LakeTerminalPolicy,
     DEFAULT_HEADWATER_SOURCE_HYDRATION, DEFAULT_HEADWATER_SOURCE_SCORE,
-    GraphLocalMinimumResolution, HydrologyConfig, LAKE_INLET_RIVER_THRESHOLD_CAP,
-    LakeContactTopology, LakeTerminalPolicy,
+    LAKE_INLET_RIVER_THRESHOLD_CAP,
 };
 
 pub(super) struct SelectedRiverPaths {
@@ -480,7 +480,13 @@ fn early_parallel_path_conflicts(
         return false;
     }
 
-    let compare_edges = config.tributary_parallel_path_compare_edges as usize;
+    let both_mainstems = candidate.merge_index.is_none() && other.merge_index.is_none();
+    let compare_edges = if both_mainstems {
+        candidate.path.len().max(other.path.len())
+    } else {
+        config.tributary_parallel_path_compare_edges as usize
+    };
+    let required_close_pairs = if both_mainstems { 1 } else { 2 };
     let close_pairs = candidate
         .path
         .iter()
@@ -493,7 +499,7 @@ fn early_parallel_path_conflicts(
         })
         .count();
 
-    close_pairs >= 2
+    close_pairs >= required_close_pairs
 }
 
 fn shared_tributary_merge_conflicts(

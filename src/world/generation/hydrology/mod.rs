@@ -7,7 +7,7 @@ mod types;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
+use super::biome::{classify_graph_biome, GraphBiomeWaterRole};
 use super::graph::VoronoiGraphPatch;
 use super::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use discharge::{build_nodes, build_segments, resolve_selected_flow_accumulation};
@@ -23,7 +23,10 @@ use topology::{
 use types::validate_hydrology_config;
 
 pub use types::{
-    DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
+    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner,
+    GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
+    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
+    WatershedId, DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
     DEFAULT_LAKE_AREA_UNITS_PER_CHAIN, DEFAULT_LAKE_DISCHARGE_CAP_CEILING,
     DEFAULT_LAKE_DISCHARGE_CAP_FLOOR, DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA,
     DEFAULT_LAKE_DISCHARGE_RANGE_PER_AREA, DEFAULT_LAKE_INLET_OUTLET_MIN_EDGE_HOPS,
@@ -32,10 +35,6 @@ pub use types::{
     DEFAULT_TRIBUTARY_MAX_PATH_EDGES, DEFAULT_TRIBUTARY_PARALLEL_PATH_COMPARE_EDGES,
     DEFAULT_TRIBUTARY_PARALLEL_PATH_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_HYDRATION,
     DEFAULT_TRIBUTARY_SOURCE_MIN_SPACING_BLOCKS, DEFAULT_TRIBUTARY_SOURCE_THRESHOLD,
-    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyCorner,
-    GraphHydrologyGraph, GraphHydrologyRole, GraphHydrologyTopologyStats,
-    GraphLocalMinimumResolution, GraphRiverSegment, GraphRiverSegmentId, HydrologyConfig,
-    WatershedId,
 };
 
 pub fn solve_hydrology(
@@ -310,7 +309,7 @@ fn headwater_adjacent_sites(
 #[cfg(test)]
 mod tests {
     use super::discharge::resolve_selected_flow_accumulation;
-    use super::routing::{CornerNeighbor, resolve_terminal_indices};
+    use super::routing::{resolve_terminal_indices, CornerNeighbor};
     use super::selection::{
         lake_policy_for_area, resolve_lake_terminal_policies, select_river_paths,
     };
@@ -322,12 +321,12 @@ mod tests {
     use super::*;
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
-        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
-        generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+        DEFAULT_SITE_SPACING_BLOCKS,
     };
     use crate::world::generation::macro_map::{
-        MacroCorner, MacroMapConfig, MacroSurfaceKind, generate_macro_map,
+        generate_macro_map, MacroCorner, MacroMapConfig, MacroSurfaceKind,
     };
     use std::collections::HashMap;
 
@@ -1493,6 +1492,130 @@ mod tests {
             selected,
             vec![true, false, true, false, false, false],
             "independent selected mainstem starts should use the same source/path spacing guard as tributaries"
+        );
+    }
+
+    #[test]
+    fn downstream_parallel_mainstems_keep_two_cell_spacing() {
+        let downstream = vec![
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(8),
+            Some(9),
+            Some(10),
+            Some(11),
+            Some(12),
+            Some(13),
+            None,
+            None,
+        ];
+        let downstream_edges = (0..14)
+            .map(|index| {
+                if index < 12 {
+                    Some(VoronoiEdgeId(300 + index as u64))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let flow = vec![
+            180.0, 170.0, 180.0, 170.0, 180.0, 170.0, 180.0, 170.0, 180.0, 170.0, 180.0, 170.0,
+            180.0, 170.0,
+        ];
+        let elevations = vec![
+            0.82, 0.81, 0.36, 0.35, 0.34, 0.33, 0.32, 0.31, 0.30, 0.29, 0.28, 0.27, 0.0, 0.0,
+        ];
+        let source_hydration = vec![
+            0.62, 0.61, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20, 0.0, 0.0,
+        ];
+        let corner_positions = vec![
+            WorldPlanePoint::new(0.0, 0.0),
+            WorldPlanePoint::new(700.0, 0.0),
+            WorldPlanePoint::new(0.0, 300.0),
+            WorldPlanePoint::new(700.0, 300.0),
+            WorldPlanePoint::new(0.0, 600.0),
+            WorldPlanePoint::new(700.0, 600.0),
+            WorldPlanePoint::new(0.0, 900.0),
+            WorldPlanePoint::new(700.0, 900.0),
+            WorldPlanePoint::new(0.0, 1200.0),
+            WorldPlanePoint::new(250.0, 1200.0),
+            WorldPlanePoint::new(0.0, 1500.0),
+            WorldPlanePoint::new(250.0, 1500.0),
+            WorldPlanePoint::new(0.0, 1800.0),
+            WorldPlanePoint::new(250.0, 1800.0),
+        ];
+        let terminals = vec![
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            true, true,
+        ];
+        let lake_candidates = vec![false; 14];
+        let resolutions = (0..14)
+            .map(|index| {
+                if index >= 12 {
+                    GraphLocalMinimumResolution::OceanOutlet
+                } else {
+                    GraphLocalMinimumResolution::None
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut adjacency = vec![Vec::new(); 14];
+        for (source, target) in downstream.iter().copied().enumerate() {
+            if let Some(target) = target {
+                let edge = VoronoiEdgeId(300 + source as u64);
+                adjacency[source].push(CornerNeighbor {
+                    index: target,
+                    edge,
+                });
+                adjacency[target].push(CornerNeighbor {
+                    index: source,
+                    edge,
+                });
+            }
+        }
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            Some(&corner_positions),
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 14],
+            &[None; 14],
+            &[None; 14],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 14],
+                contact_component_by_land_corner: vec![None; 14],
+                inlet_vertices: vec![false; 14],
+                outlet_vertices: vec![false; 14],
+                inlet_land_vertices: vec![false; 14],
+                outlet_land_vertices: vec![false; 14],
+            },
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig {
+                tributary_source_min_spacing_blocks: 384.0,
+                tributary_parallel_path_min_spacing_blocks: 384.0,
+                ..HydrologyConfig::default()
+            },
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![
+                true, false, true, false, true, false, true, false, true, false, true, false,
+                false, false,
+            ],
+            "mainstem spacing should suppress later downstream parallel runs, not only adjacent sources"
         );
     }
 
