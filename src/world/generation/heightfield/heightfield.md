@@ -252,8 +252,11 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   bevel 대상이 아니며, lake bed/water 정책은 lake mask 내부에서만 처리한다.
 - river water hint를 shoreline ocean/lake ramp 기준으로 사용하지 않는다.
 - `river_valley_strength >= river_water_threshold`이거나 river bed hint가 충분한 column은 `River` hint가 될 수 있다.
-  river column은 macro_field의 bed-depth hint를 읽어 terrain bed를 water surface와 분리한다. ocean/lake
-  visible surface는 여전히 `y = 0`이지만, river bed는 하구에서도 sea level 아래로 패일 수 있다.
+  river column은 macro_field의 bed-depth hint를 읽어 terrain bed를 water surface와 분리한다. 이 hint는
+  river plan의 Q 기반 `bed_depth_blocks`에서 온 값이므로 heightfield가 다시 임의의 큰 상수로 증폭하지
+  않는다. 상류 수원부는 얕은 1-block 안팎 stream과 작은 V-cut 감각으로 시작하고, 하류로 갈수록 Q에
+  비례해 더 깊은 bed와 더 큰 water depth를 허용한다. ocean/lake visible surface는 여전히 `y = 0`이지만,
+  river bed는 하구에서도 sea level 아래로 패일 수 있다.
   integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
   이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
   hydrology water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.

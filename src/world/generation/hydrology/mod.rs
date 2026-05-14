@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
-use super::biome::{classify_graph_biome, GraphBiomeWaterRole};
+use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroCorner, MacroEdge, MacroSurfaceKind};
 
@@ -2255,11 +2255,11 @@ mod tests {
     use super::*;
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
-        generate_macro_map, MacroCorner, MacroMapConfig, MacroSurfaceKind,
+        MacroCorner, MacroMapConfig, MacroSurfaceKind, generate_macro_map,
     };
     use std::collections::HashMap;
 

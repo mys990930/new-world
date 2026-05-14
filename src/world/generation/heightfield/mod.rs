@@ -275,9 +275,9 @@ pub fn heightfield_column_from_sample(
             snap_height_to_block(lake_water_level_blocks.unwrap_or(config.sea_level_blocks)) as f32,
         )
     } else if is_river_hint {
-        Some(
+        Some(snap_height_to_block(
             (surface_height_blocks + river_water_depth_blocks(sample)).max(config.sea_level_blocks),
-        )
+        ) as f32)
     } else {
         None
     };
@@ -335,13 +335,15 @@ fn river_bed_depth_blocks(sample: &MacroFieldSample) -> f32 {
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
     let bed = sample.river_bed_depth_hint.clamp(0.0, 1.0);
     let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
-    (bed * 40.0).max(1.0 + flow * 2.0 + rough).clamp(1.0, 40.0)
+    (bed * 40.0)
+        .max(1.0 + flow * 1.5 + rough * 0.4)
+        .clamp(1.0, 40.0)
 }
 
 fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
     let bed_depth = river_bed_depth_blocks(sample);
-    (bed_depth * (0.55 + flow * 0.35)).clamp(1.0, 40.0)
+    (bed_depth * (0.78 + flow * 0.17)).clamp(1.0, bed_depth.max(1.0))
 }
 
 fn lake_water_level_blocks(sample: &MacroFieldSample, config: HeightfieldConfig) -> f32 {
@@ -1666,6 +1668,49 @@ mod tests {
             tile.stats.max_river_water_neighbor_delta_blocks
         );
         assert_eq!(tile.stats.river_uphill_flow_neighbor_count, 0);
+    }
+
+    #[test]
+    fn headwater_river_bed_stays_shallow_and_nearly_filled() {
+        let mut headwater = sample_with_river(0.0, 0.0, 0.004, 0.05);
+        headwater.river_bed_depth_hint = 3.0 / 40.0;
+        let column = heightfield_column_from_sample(&headwater, HeightfieldConfig::default());
+
+        assert_eq!(column.terrain_kind, HeightfieldTerrainKind::River);
+        assert!(
+            column.river_bed_depth_blocks <= 3.0,
+            "headwater stream carve should stay within the small V-cut range: {}",
+            column.river_bed_depth_blocks
+        );
+        assert!(
+            column.water_y.expect("river water") - column.surface_y <= 2,
+            "shallow headwater water should sit close to the surrounding bed instead of exposing a deep trench: bed={} water={:?}",
+            column.surface_y,
+            column.water_y
+        );
+    }
+
+    #[test]
+    fn river_bed_depth_scales_with_flow_hint() {
+        let mut headwater = sample_with_river(0.0, 0.0, 0.02, 0.05);
+        headwater.river_bed_depth_hint = 3.0 / 40.0;
+        let mut lower = sample_with_river(1.0, 0.0, 0.02, 0.85);
+        lower.river_bed_depth_hint = 18.0 / 40.0;
+
+        let headwater = heightfield_column_from_sample(&headwater, HeightfieldConfig::default());
+        let lower = heightfield_column_from_sample(&lower, HeightfieldConfig::default());
+
+        assert!(
+            lower.river_bed_depth_blocks > headwater.river_bed_depth_blocks * 3.0,
+            "downstream river bed depth should follow river-plan Q scale: headwater={} lower={}",
+            headwater.river_bed_depth_blocks,
+            lower.river_bed_depth_blocks
+        );
+        assert!(
+            lower.water_y.expect("lower water") - lower.surface_y
+                > headwater.water_y.expect("headwater water") - headwater.surface_y,
+            "larger Q should allow deeper water while keeping the surface separate from bed"
+        );
     }
 
     #[test]

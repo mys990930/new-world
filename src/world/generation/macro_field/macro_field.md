@@ -447,11 +447,13 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
   뒤 chamfer distance field로 만든다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
-  canonical noisy curve를 anti-aliased corridor로 굽는다. subpixel coverage 기반 valley strength,
-  nearest distance, blended flow hint, 단순 bed/roughness/gravel diagnostic hint를 저장한다. 기본
-  `river_carve_scale`은 preview에서 broad-valley lowering이
-  식별되되 과도하게 깊어지지 않도록 `0.08`이다. 실제 narrow bed depth는 combined height에 직접 과하게
-  새기지 않고 heightfield/water/surface stage가 읽는 hint로 남긴다.
+  canonical noisy curve를 anti-aliased corridor로 굽는다. corridor width와 bed-depth hint는 fixed radius나
+  flow hint만으로 재추정하지 않고 river plan의 `broad_valley_width_blocks`와 `bed_depth_blocks`를 읽는다.
+  subpixel coverage 기반 valley strength, nearest distance, blended flow hint, 단순 bed/roughness/gravel
+  diagnostic hint를 저장한다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
+  lowering이 과도하게 깊어지지 않도록 `0.018`이며, 낮은 flow에서는 이 값의 작은 일부만 적용한다. 실제
+  narrow bed depth는 combined height에 직접 과하게 새기지 않고 heightfield/water/surface stage가 읽는
+  hint로 남긴다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.
