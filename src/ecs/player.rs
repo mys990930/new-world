@@ -193,11 +193,7 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
         velocity.linear[1] = 0.0;
     }
 
-    let horizontal_delta = horizontal_motion_delta(
-        velocity.linear,
-        horizontal_speed,
-        frame_delta,
-    );
+    let horizontal_delta = horizontal_motion_delta(velocity.linear, horizontal_speed, frame_delta);
     if horizontal_delta != [0.0, 0.0] {
         position = move_horizontally_with_step_up(
             world,

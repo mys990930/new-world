@@ -790,28 +790,12 @@ fn macro_field_sample_from_context(
             (distance_to_coast_blocks / (config.coast_width_blocks * 4.0)).clamp(0.0, 1.0);
         clamp_unit((-continentality).max(0.0) * 0.70 + inlandness * 0.30)
     };
-    let raw_signed_macro_elevation = if effective_land_owned {
-        0.035
-            + ((elevation_seed + 1.0) * 0.5) * 0.62
-            + continentality.max(0.0) * 0.14
-            + mountainness * 0.08
-            + ridgeness * 0.04
-            - basinness * 0.06
-    } else {
-        (-0.035 + continentality.min(0.0) * 0.32 + elevation_seed * 0.36 - basinness * 0.16)
-            .min(-0.01)
-    };
-    let signed_macro_elevation = if effective_land_owned && coastness >= 0.55 {
-        coast_adjacent_land_elevation(
-            raw_signed_macro_elevation.max(0.0005),
-            context.ruggedness,
-            mountainness,
-            ridgeness,
-        )
-    } else {
-        raw_signed_macro_elevation
-    }
-    .clamp(-1.0, 1.5);
+    let raw_signed_macro_elevation = signed_macro_elevation_from_continentality_and_ruggedness(
+        continentality,
+        elevation_seed,
+        context.ruggedness,
+    );
+    let signed_macro_elevation = raw_signed_macro_elevation.clamp(-1.0, 1.5);
 
     let surface_kind = surface_kind(
         fields,
@@ -822,7 +806,7 @@ fn macro_field_sample_from_context(
         context.inland_water_surface,
         coastness,
         basinness,
-        raw_signed_macro_elevation.max(0.01),
+        signed_macro_elevation.max(0.0),
         context.feature_hash,
     );
     let biome_context = graph_biome_context(
@@ -893,16 +877,28 @@ fn graph_biome_water_role(
     }
 }
 
-fn coast_adjacent_land_elevation(
-    raw_elevation: f32,
+fn signed_macro_elevation_from_continentality_and_ruggedness(
+    continentality: f32,
+    elevation_seed: f32,
     ruggedness: f32,
-    mountainness: f32,
-    ridgeness: f32,
 ) -> f32 {
-    let rocky_relief = clamp_unit(ruggedness * 0.55 + mountainness * 0.30 + ridgeness * 0.15);
-    let ceiling = 0.0005 + rocky_relief * 0.00075;
+    let sea_level_signal = clamp_signed(continentality);
+    let ruggedness = clamp_unit(ruggedness);
+    let magnitude = sea_level_signal.abs();
+    let shaped_signal = if sea_level_signal >= 0.0 {
+        magnitude.powf(1.24)
+    } else {
+        -smoothstep(0.0, 1.0, magnitude)
+    };
+    let relief_gate = if sea_level_signal >= 0.0 {
+        magnitude.powf(1.12)
+    } else {
+        smoothstep(0.0, 1.0, magnitude)
+    };
+    let local_relief = clamp_signed(elevation_seed) * (0.10 + ruggedness * 0.55) * relief_gate;
+    let base_scale = 0.78 + ruggedness * 0.22;
 
-    raw_elevation.min(ceiling).max(0.0005)
+    shaped_signal * base_scale + local_relief
 }
 
 fn corner_site_neighbors(
@@ -1576,6 +1572,35 @@ mod tests {
     }
 
     #[test]
+    fn sea_level_continentality_threshold_maps_to_zero_elevation() {
+        let elevation = signed_macro_elevation_from_continentality_and_ruggedness(0.0, 0.95, 1.0);
+
+        assert!(
+            elevation.abs() <= 0.000_001,
+            "continentality threshold should be the macro elevation sea level, got {elevation}"
+        );
+    }
+
+    #[test]
+    fn ruggedness_increases_neighbor_elevation_contrast() {
+        let smooth_low =
+            signed_macro_elevation_from_continentality_and_ruggedness(0.30, -0.45, 0.05);
+        let smooth_high =
+            signed_macro_elevation_from_continentality_and_ruggedness(0.30, 0.45, 0.05);
+        let rugged_low =
+            signed_macro_elevation_from_continentality_and_ruggedness(0.30, -0.45, 0.95);
+        let rugged_high =
+            signed_macro_elevation_from_continentality_and_ruggedness(0.30, 0.45, 0.95);
+        let smooth_delta = (smooth_high - smooth_low).abs();
+        let rugged_delta = (rugged_high - rugged_low).abs();
+
+        assert!(
+            rugged_delta > smooth_delta * 2.0,
+            "ruggedness should amplify same-continentality local relief contrast: smooth_delta={smooth_delta} rugged_delta={rugged_delta}"
+        );
+    }
+
+    #[test]
     fn land_macro_elevation_does_not_apply_coast_distance_recovery_profile() {
         let config = test_macro_config(404);
         let base = SiteContext {
@@ -1601,32 +1626,10 @@ mod tests {
         );
 
         assert!(
-            coast.signed_macro_elevation <= 0.0015,
-            "coast-adjacent land owner should be waterline-compatible before macro_field blending, got {}",
-            coast.signed_macro_elevation
-        );
-        assert!(
-            inland.signed_macro_elevation > coast.signed_macro_elevation,
-            "inland owner can keep high graph elevation without requiring a coast-distance recovery curve: coast={} inland={}",
+            (inland.signed_macro_elevation - coast.signed_macro_elevation).abs() <= 0.000_001,
+            "identical graph fields should not change elevation only because coast distance changes: coast={} inland={}",
             coast.signed_macro_elevation,
             inland.signed_macro_elevation
-        );
-    }
-
-    #[test]
-    fn rugged_coast_owner_can_be_higher_than_plain_coast_without_full_highland_jump() {
-        let raw_elevation = 0.80;
-        let plain = coast_adjacent_land_elevation(raw_elevation, 0.05, 0.05, 0.05);
-        let rugged = coast_adjacent_land_elevation(raw_elevation, 0.95, 0.90, 0.90);
-
-        assert!(plain < rugged);
-        assert!(
-            rugged < raw_elevation * 0.25,
-            "coast owner should not jump straight to highland elevation: rugged={rugged} raw={raw_elevation}"
-        );
-        assert!(
-            rugged <= 0.0015,
-            "coast owner ceiling should stay near the waterline in normalized height: {rugged}"
         );
     }
 
@@ -1700,6 +1703,131 @@ mod tests {
             "coast distance must not force inland lowlands above nearer highlands: lowland={} highland={}",
             far_lowland.signed_macro_elevation,
             near_highland.signed_macro_elevation
+        );
+    }
+
+    #[test]
+    fn coast_adjacent_land_deltas_are_not_systematically_steeper_than_inland_edges() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(
+            42,
+            -70 * DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            0,
+        ));
+        let map = generate_macro_map(&patch, test_macro_config(42));
+        let site_map = macro_sites_by_id(&map);
+        let mut coast_deltas = Vec::new();
+        let mut inland_deltas = Vec::new();
+
+        for edge in &map.edges {
+            let Some(left) = site_map.get(&edge.sites[0]) else {
+                continue;
+            };
+            let Some(right) = site_map.get(&edge.sites[1]) else {
+                continue;
+            };
+            if left.surface_kind.is_land_owned() && right.surface_kind.is_land_owned() {
+                let delta = (left.signed_macro_elevation - right.signed_macro_elevation).abs();
+                let nearest_coast = left
+                    .distance_to_coast_blocks
+                    .min(right.distance_to_coast_blocks);
+
+                if nearest_coast <= DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS {
+                    coast_deltas.push(delta);
+                } else if left.distance_to_coast_blocks
+                    >= DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS * 2.0
+                    && right.distance_to_coast_blocks
+                        >= DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS * 2.0
+                {
+                    inland_deltas.push(delta);
+                }
+            }
+        }
+
+        let coast_stats = DistributionStats::from_values(coast_deltas);
+        let inland_stats = DistributionStats::from_values(inland_deltas);
+        eprintln!(
+            "macro_map coast-adjacent-land/inland-land elevation deltas seed=42 cx=-70 cz=0 coast_adjacent={:?} inland={:?}",
+            coast_stats, inland_stats
+        );
+
+        assert!(
+            coast_stats.count >= 12,
+            "not enough coast-adjacent land-land edges: {coast_stats:?}"
+        );
+        assert!(
+            inland_stats.count >= 24,
+            "not enough inland land-land edges: {inland_stats:?}"
+        );
+        assert!(
+            coast_stats.median <= inland_stats.p75 * 1.35,
+            "coast median delta should not be uniformly steeper than inland upper-quartile deltas: coast={coast_stats:?} inland={inland_stats:?}"
+        );
+        assert!(
+            coast_stats.average <= inland_stats.average * 1.50,
+            "coast average delta should not dominate inland average delta: coast={coast_stats:?} inland={inland_stats:?}"
+        );
+    }
+
+    #[test]
+    fn coastland_to_inland_land_deltas_do_not_dominate_inland_edges() {
+        let patch = generate_voronoi_graph_patch(preview_like_request(
+            42,
+            -70 * DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+            0,
+        ));
+        let map = generate_macro_map(&patch, test_macro_config(42));
+        let site_map = macro_sites_by_id(&map);
+        let mut coastland_transition_deltas = Vec::new();
+        let mut inland_deltas = Vec::new();
+
+        for edge in &map.edges {
+            let Some(left) = site_map.get(&edge.sites[0]) else {
+                continue;
+            };
+            let Some(right) = site_map.get(&edge.sites[1]) else {
+                continue;
+            };
+            let delta = (left.signed_macro_elevation - right.signed_macro_elevation).abs();
+            let left_coastland = left.surface_kind == MacroSurfaceKind::CoastLand;
+            let right_coastland = right.surface_kind == MacroSurfaceKind::CoastLand;
+            let left_inland_continent = left.surface_kind == MacroSurfaceKind::Continent;
+            let right_inland_continent = right.surface_kind == MacroSurfaceKind::Continent;
+
+            if (left_coastland && right_inland_continent)
+                || (right_coastland && left_inland_continent)
+            {
+                coastland_transition_deltas.push(delta);
+            } else if left_inland_continent
+                && right_inland_continent
+                && left.distance_to_coast_blocks >= DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS * 2.0
+                && right.distance_to_coast_blocks >= DEFAULT_MACRO_GRAPH_DISTANCE_STEP_BLOCKS * 2.0
+            {
+                inland_deltas.push(delta);
+            }
+        }
+
+        let coastland_stats = DistributionStats::from_values(coastland_transition_deltas);
+        let inland_stats = DistributionStats::from_values(inland_deltas);
+        eprintln!(
+            "macro_map CoastLand-to-inland-continent/inland-continent elevation deltas seed=42 cx=-70 cz=0 coastland_transition={:?} inland={:?}",
+            coastland_stats, inland_stats
+        );
+
+        assert!(
+            coastland_stats.count >= 12,
+            "not enough CoastLand-to-inland-continent edges: {coastland_stats:?}"
+        );
+        assert!(
+            inland_stats.count >= 24,
+            "not enough inland continent-continent edges: {inland_stats:?}"
+        );
+        assert!(
+            coastland_stats.median <= inland_stats.p75 * 1.35,
+            "CoastLand-to-inland-continent median delta should not be uniformly steeper than inland continent upper-quartile deltas: coastland={coastland_stats:?} inland={inland_stats:?}"
+        );
+        assert!(
+            coastland_stats.average <= inland_stats.average * 1.50,
+            "CoastLand-to-inland-continent average delta should not dominate inland continent average delta: coastland={coastland_stats:?} inland={inland_stats:?}"
         );
     }
 
@@ -1803,7 +1931,6 @@ mod tests {
                     .all(|(index, promoted)| !*promoted || land_mask[index]),
                 "tiny local-minima lake promotion must not confuse ocean/water ownership"
             );
-
             let groups = connected_components(&patch.sites, &adjacency, &mask);
             let promoted_sizes = component_sizes(&groups);
             let component_limited = mask.iter().enumerate().all(|(index, promoted)| {
@@ -2293,6 +2420,43 @@ mod tests {
             .filter(|edge| sites.contains_key(&edge.sites[0]) && sites.contains_key(&edge.sites[1]))
             .map(|edge| (edge.id, *edge))
             .collect()
+    }
+
+    #[derive(Debug)]
+    struct DistributionStats {
+        count: usize,
+        average: f32,
+        median: f32,
+        p75: f32,
+    }
+
+    impl DistributionStats {
+        fn from_values(mut values: Vec<f32>) -> Self {
+            values.sort_by(|left, right| left.total_cmp(right));
+            let count = values.len();
+            let average = if count == 0 {
+                0.0
+            } else {
+                values.iter().sum::<f32>() / count as f32
+            };
+
+            Self {
+                count,
+                average,
+                median: percentile(&values, 0.50),
+                p75: percentile(&values, 0.75),
+            }
+        }
+    }
+
+    fn percentile(sorted_values: &[f32], percentile: f32) -> f32 {
+        if sorted_values.is_empty() {
+            return 0.0;
+        }
+
+        let index =
+            ((sorted_values.len() - 1) as f32 * percentile.clamp(0.0, 1.0)).round() as usize;
+        sorted_values[index]
     }
 
     fn assert_close(actual: f32, expected: f32) {

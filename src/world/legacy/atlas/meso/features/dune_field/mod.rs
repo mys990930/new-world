@@ -71,6 +71,7 @@ struct GuideSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub struct DuneFieldRidgeCandidate {
     pub coord: AtlasCoord,
     pub center_x: f32,
@@ -190,6 +191,7 @@ fn collect_peak_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<Gui
     candidates
 }
 
+#[cfg(test)]
 pub fn debug_dune_field_ridge_candidates(guides: &MesoGuideMap) -> Vec<DuneFieldRidgeCandidate> {
     let meso_span_blocks =
         (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;

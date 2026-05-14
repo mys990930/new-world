@@ -132,12 +132,22 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
   world-space displacement를 적용한다. 즉 noisy boundary의 정의는 "직선 segment를 더 촘촘히 그린
   것"이 아니라, endpoint anchor는 유지하면서 중간 control/sample point가 좌우로 울퉁불퉁하게 흔들린
   polyline이다.
-- displacement는 low/mid frequency coherent wave, 몇 개의 deterministic value-noise knot,
-  약한 high-frequency wave를 합성한 뒤 smoothing pass를 거친다. sample마다 독립 jitter를 강하게
-  넣지 않는다. 독립적인 salt-and-pepper offset은 자연스러운 coastline/field boundary가 아니라
-  톱니 모양 polyline으로 보이기 쉽기 때문이다.
-- endpoint에서는 displacement가 0으로 줄어드는 smooth falloff를 적용한다. endpoint anchor는 graph
-  topology와 adjacent patch stability를 위해 고정하고, interior만 더 크게 요동할 수 있다.
+- displacement는 broad low-frequency coherent wave와 넓게 잡은 mid-frequency wave를 중심으로,
+  몇 개의 deterministic value-noise knot을 약하게 합성한다. high-frequency wave는 launch tuning에서
+  사실상 제거하고, fine knot contribution은 큰 shape에 미묘한 비대칭만 더하는 수준으로 제한한다.
+  sample마다 독립 jitter를 강하게 넣지 않는다. 독립적인 salt-and-pepper offset은 자연스러운
+  coastline/field boundary가 아니라 톱니 모양 polyline이나 pointy local inflection으로 보이기 쉽기
+  때문이다.
+- 합성 displacement는 기본 5회 smoothing pass를 거친다. smoothing은 endpoint를 항상 0으로 다시
+  고정해 graph anchor와 adjacent patch stability를 보존하면서, interior의 좁은 corner spike와
+  clustered angular bend를 더 적극적으로 완화한다.
+- smoothing 뒤 전체 displacement가 너무 작아진 edge에는 single broad bend를 소량 보강한다. 이
+  보강은 visible displacement floor를 지키기 위한 저주파 shape이며, jagged local detail을 다시
+  도입하지 않는다.
+- endpoint에서는 displacement가 0으로 줄어드는 smooth falloff를 적용한다. launch tuning은 anchor
+  근처의 bend가 뾰족해지지 않도록 falloff를 완만하게 시작시키고, edge 중앙부에서 broad wobble을
+  유지한다. endpoint anchor는 graph topology와 adjacent patch stability를 위해 고정하고, interior만
+  더 크게 요동할 수 있다.
 - noisy point는 edge normal 방향으로 흔들되 guard 영역으로 clamp한다. 한쪽 normal 방향이 guard에
   눌려 직선으로 붕괴하면 반대 방향 후보를 사용해 유효한 perpendicular displacement를 유지한다.
 - endpoint는 항상 원본 corner 위치를 유지한다.
@@ -219,7 +229,9 @@ curve가 없으므로 boundary stats의 책임이 아니다. river/lake 접촉 �
 - visible displacement: non-degenerate edge는 interior point가 원본 straight segment와 같은 직선 위에
   머물면 안 되며, 기본 amplitude는 4K preview scale에서 식별 가능해야 한다.
 - smoothness: adjacent sample의 normal displacement가 독립 jitter처럼 급격히 튀지 않아야 한다.
-  구현은 평균 second-difference를 테스트해 톱니형 polyline 회귀를 잡는다.
+  구현은 평균 second-difference를 강하게 제한해 톱니형 polyline 회귀를 잡는다.
+- local sharpness: 평균 roughness가 낮아도 일부 point에 pointy corner spike가 생기면 회귀다. 구현은
+  normal displacement second-difference의 high-percentile과 maximum을 낮은 threshold로 함께 테스트한다.
 - no duplicate river curve: hydrology selected segment가 boundary curve 수를 늘리면 안 된다.
 - lake constraint: lake edge에도 canonical noisy curve는 있지만 selected river segment는 해당 edge를
   사용할 수 없다.

@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use new_world::world::{
-    CHUNK_EDGE_I32, ChunkCoord, ChunkData, VoxelizationColumnPlan, VoxelizationPlan, WORLD_FLOOR_Y,
-    WorldBlockCoord, WorldCore, load_chunk, save_chunk,
+    CHUNK_EDGE_I32, ChunkCoord, ChunkData, GraphFirstVoxelColumnPlan, GraphFirstVoxelPlan,
+    VoxelizationColumnPlan, VoxelizationPlan, WORLD_FLOOR_Y, WorldBlockCoord, WorldCore,
+    load_chunk, save_chunk,
 };
 
 pub const WORLD_CREATE_MANIFEST_FILE: &str = "manifest.toml";
@@ -250,9 +251,63 @@ pub fn summarize_stack_from_voxelization_plan(
     }
 }
 
+pub fn summarize_stack_from_graph_first_voxel_plan(
+    plan: &GraphFirstVoxelPlan,
+    center_x: i32,
+    center_z: i32,
+    min_chunk_y: i32,
+    max_chunk_y: i32,
+) -> CreatedWorldStackSummary {
+    let min_world_y = min_chunk_y * CHUNK_EDGE_I32;
+    let max_world_y = (max_chunk_y + 1) * CHUNK_EDGE_I32 - 1;
+    let scan_min_y = min_world_y.max(WORLD_FLOOR_Y);
+
+    let mut relief_min_y = i32::MAX;
+    let mut relief_max_y = i32::MIN;
+    let mut solid_columns = 0_u32;
+
+    if scan_min_y <= max_world_y {
+        for column in plan.columns_for_chunk_xz(center_x, center_z) {
+            let top_y = graph_first_column_top_non_air_y(*column);
+            if top_y < scan_min_y {
+                continue;
+            }
+
+            let relief_y = top_y.min(max_world_y);
+            solid_columns = solid_columns.saturating_add(1);
+            relief_min_y = relief_min_y.min(relief_y);
+            relief_max_y = relief_max_y.max(relief_y);
+        }
+    }
+
+    let relief_min_y = (solid_columns > 0).then_some(relief_min_y);
+    let relief_max_y = (solid_columns > 0).then_some(relief_max_y);
+    let relief_range = match (relief_min_y, relief_max_y) {
+        (Some(min_y), Some(max_y)) => max_y - min_y,
+        _ => 0,
+    };
+    let score = i64::from(solid_columns) * 100_000
+        + i64::from(relief_range) * 1_000
+        + i64::from(relief_max_y.unwrap_or(min_world_y));
+
+    CreatedWorldStackSummary {
+        center_x,
+        center_z,
+        relief_min_y,
+        relief_max_y,
+        relief_range,
+        solid_columns,
+        score,
+    }
+}
+
 fn column_top_non_air_y(column: VoxelizationColumnPlan) -> i32 {
     column
         .water_top_y
         .unwrap_or(i32::MIN)
         .max(column.terrain_top_y)
+}
+
+fn graph_first_column_top_non_air_y(column: GraphFirstVoxelColumnPlan) -> i32 {
+    column.top_non_air_y()
 }

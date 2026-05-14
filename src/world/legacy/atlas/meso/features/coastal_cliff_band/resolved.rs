@@ -25,6 +25,7 @@ pub(crate) struct CoastalCliffBandWindow {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub(crate) struct CoastalCliffBandResolvedObjectDebug {
     pub owner_region: MesoRegionCoord,
     pub center_x: f32,
@@ -41,6 +42,7 @@ pub(crate) struct CoastalCliffBandResolvedObjectDebug {
 
 #[derive(Debug, Clone)]
 struct ResolvedCoastalCliffObject {
+    #[cfg(test)]
     owner_region: MesoRegionCoord,
     center_x: f32,
     center_z: f32,
@@ -94,6 +96,7 @@ pub(crate) fn build_coastal_cliff_band_window(
     CoastalCliffBandWindow { chunk, cliffs }
 }
 
+#[cfg(test)]
 pub(crate) fn debug_coastal_cliff_band_resolved_objects_from_window(
     window: &CoastalCliffBandWindow,
 ) -> Vec<CoastalCliffBandResolvedObjectDebug> {
@@ -159,6 +162,9 @@ fn resolve_coastal_cliff(
     owner_region: MesoRegionCoord,
     nearby_sources: &[CliffSource],
 ) -> Option<ResolvedCoastalCliffObject> {
+    #[cfg(not(test))]
+    let _ = owner_region;
+
     let (heading_x, heading_z) = cliff_heading(source, nearby_sources);
     let normal_x = -heading_z;
     let normal_z = heading_x;
@@ -240,6 +246,7 @@ fn resolve_coastal_cliff(
         rotated_extents(heading_x, heading_z, half_length_blocks, total_cross);
 
     Some(ResolvedCoastalCliffObject {
+        #[cfg(test)]
         owner_region,
         center_x,
         center_z,

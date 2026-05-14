@@ -33,7 +33,6 @@ struct ResolvedCrater {
     floor_radius_scale: f32,
     bowl_depth_blocks: f32,
     rim_raise_blocks: f32,
-    apron_raise_blocks: f32,
     rim_outer_scale: f32,
     apron_outer_scale: f32,
     contour_primary_phase: f32,
@@ -177,12 +176,6 @@ fn resolve_crater(source: GuideSource, nearby_sources: &[GuideSource]) -> Option
             1.26,
             crater_hash01(source.coord, source.cell, SOURCE_RIM_OUTER_SALT ^ 0x55AA),
         );
-    let apron_raise_blocks = rim_raise_blocks
-        * lerp_f32(
-            0.12,
-            0.28,
-            crater_hash01(source.coord, source.cell, SOURCE_APRON_SALT ^ 0xAA55),
-        );
     let contour_primary_phase =
         crater_hash01(source.coord, source.cell, SOURCE_CONTOUR_PRIMARY_SALT)
             * std::f32::consts::TAU;
@@ -224,7 +217,6 @@ fn resolve_crater(source: GuideSource, nearby_sources: &[GuideSource]) -> Option
         floor_radius_scale,
         bowl_depth_blocks: bowl_depth_blocks.clamp(3.6, 18.0),
         rim_raise_blocks: rim_raise_blocks.clamp(1.8, 10.5),
-        apron_raise_blocks: apron_raise_blocks.clamp(0.2, 2.8),
         rim_outer_scale,
         apron_outer_scale,
         contour_primary_phase,

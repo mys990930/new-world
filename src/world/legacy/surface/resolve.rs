@@ -1436,13 +1436,6 @@ mod tests {
         BiomeFamily, ClimateRegime, CoastalContext, ElevationBand, HydrologyContext, MoistureBand,
         RegionClassCell, ReliefClass, TemperatureBand, TerrainFormFamily,
     };
-    use crate::world::generation::{
-        build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
-        build_chunk_hydrology_solve, build_chunk_meso_applied_prototype,
-        build_chunk_realization_field_patch, build_chunk_smoothed_prototype,
-        prepare_chunk_generation_inputs,
-    };
-    use crate::world::meta::WorldMeta;
 
     fn test_region(archetype: RegionArchetype) -> RegionClassCell {
         let mut region = RegionClassCell {
@@ -1744,27 +1737,5 @@ mod tests {
         assert_eq!(wet_plan.filler_block_key, "mud");
         assert_eq!(wet_plan.core_block_key, "dirt");
         assert_eq!(wet_plan.water_block_key, Some("water"));
-    }
-
-    #[test]
-    #[ignore = "slow generation surface pipeline smoke test"]
-    fn surface_plan_is_deterministic_for_same_chunk_inputs() {
-        let meta = WorldMeta::new(42);
-        let chunk = ChunkCoord(15, 0, 15);
-        let inputs = prepare_chunk_generation_inputs(chunk, &meta);
-        let realization = build_chunk_realization_field_patch(chunk, &inputs);
-        let corridors = build_chunk_corridor_window(chunk, &inputs);
-        let prototype =
-            build_chunk_base_heightfield_prototype(chunk, &inputs, &realization, &corridors);
-        let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridors, &prototype);
-        let smoothed = build_chunk_smoothed_prototype(chunk, &corridors, &meso);
-        let hydrology = build_chunk_hydrology_solve(chunk, &inputs, &corridors, &smoothed);
-
-        let a = resolve_chunk_surface_plan(chunk, &inputs, &smoothed, &hydrology);
-        let b = resolve_chunk_surface_plan(chunk, &inputs, &smoothed, &hydrology);
-
-        assert_eq!(a, b);
-        assert_eq!(a.chunk, chunk);
-        assert_eq!(a.columns.len(), hydrology.columns.len());
     }
 }

@@ -7,6 +7,9 @@ pub mod hydrology;
 pub mod macro_field;
 pub mod macro_map;
 pub mod pipeline;
+pub mod pixelize;
+pub mod river_plan;
+pub mod voxel;
 
 // Legacy generation remains available through `world::generation::*` until the
 // graph-first pipeline replaces the current runtime generator entrypoints.
@@ -46,11 +49,14 @@ pub use heightfield::{
     DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
     DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
     DEFAULT_HEIGHTFIELD_NORMALIZED_MIN, DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS,
+    DEFAULT_HEIGHTFIELD_PERLIN_AMPLITUDE_BLOCKS, DEFAULT_HEIGHTFIELD_PERLIN_BASE_SCALE_BLOCKS,
+    DEFAULT_HEIGHTFIELD_PERLIN_LACUNARITY, DEFAULT_HEIGHTFIELD_PERLIN_MAX_ABS_BLOCKS,
+    DEFAULT_HEIGHTFIELD_PERLIN_OCTAVES, DEFAULT_HEIGHTFIELD_PERLIN_PERSISTENCE,
     DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS, DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD,
-    DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS, DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS,
-    DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS, HeightfieldColumn, HeightfieldConfig,
-    HeightfieldContourConfig, HeightfieldTerrainKind, HeightfieldTile, HeightfieldTileStats,
-    generate_heightfield_tile, heightfield_column_from_sample,
+    DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS, HeightfieldColumn, HeightfieldConfig,
+    HeightfieldContourConfig, HeightfieldPerlinConfig, HeightfieldPerlinPlacement,
+    HeightfieldTerrainKind, HeightfieldTile, HeightfieldTileStats, generate_heightfield_tile,
+    heightfield_column_from_sample,
 };
 #[allow(unused_imports)]
 pub use hydrology::{
@@ -64,16 +70,16 @@ pub use hydrology::{
 };
 #[allow(unused_imports)]
 pub use macro_field::{
-    DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_COAST_FLATTEN_STRENGTH,
-    DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
-    DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH,
-    DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE, DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS,
-    DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE, DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS,
-    DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MACRO_FIELD_CONTOUR_NORMALIZED_MAX,
-    MACRO_FIELD_CONTOUR_NORMALIZED_MIN, MacroFieldContourLevel, MacroFieldContourSegment,
-    MacroFieldContourSet, MacroFieldRasterContext, MacroFieldSample, MacroFieldTile,
-    MacroFieldTileConfig, MacroFieldTileStats, combined_macro_height_to_blocks,
+    DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS,
+    DEFAULT_MACRO_FIELD_BOUNDARY_ROUGHNESS_BLOCKS, DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS,
+    DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+    DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH, DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE,
+    DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE,
+    DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS, DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS,
+    MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    MACRO_FIELD_CONTOUR_NORMALIZED_MAX, MACRO_FIELD_CONTOUR_NORMALIZED_MIN, MacroFieldContourLevel,
+    MacroFieldContourSegment, MacroFieldContourSet, MacroFieldRasterContext, MacroFieldSample,
+    MacroFieldTile, MacroFieldTileConfig, MacroFieldTileStats, combined_macro_height_to_blocks,
     extract_macro_field_contours, generate_macro_field_tile, sample_macro_field_point,
 };
 #[allow(unused_imports)]
@@ -87,4 +93,21 @@ pub use macro_map::{
 pub use pipeline::{
     ColumnSynthesisRequest, ColumnSynthesisSample, GRAPH_GENERATION_STAGES, GraphGenerationStage,
     GraphWorldGenerationConfig, graph_generation_stages,
+};
+#[allow(unused_imports)]
+pub use pixelize::{
+    PixelizeConfig, PixelizedChunkArea, PixelizedChunkAreaStats, PixelizedColumn,
+    PixelizedTerrainKind, generate_pixelized_chunk_area, pixelized_column_from_macro_sample,
+};
+#[allow(unused_imports)]
+pub use river_plan::{
+    DEFAULT_RIVER_PLAN_TRUNK_FLOW, RiverChain, RiverChainId, RiverPlan, RiverPlanConfig,
+    RiverPlanStats, RiverReach, RiverReachId, RiverReachType, RiverSegmentPlan, build_river_plan,
+};
+#[allow(unused_imports)]
+pub use voxel::{
+    GraphFirstVoxelBuildConfig, GraphFirstVoxelColumnPlan, GraphFirstVoxelError,
+    GraphFirstVoxelFillConfig, GraphFirstVoxelPlan, build_graph_first_voxel_plan,
+    build_graph_first_voxel_plan_from_pixelized_area,
+    graph_first_voxel_column_from_pixelized_column, voxelize_graph_first_chunk,
 };

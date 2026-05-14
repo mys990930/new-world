@@ -6,7 +6,7 @@
 
 이 모듈은 새 파이프라인이 legacy generator를 대체하기 전까지 compile-time stage contract를
 제공한다. 실제 stage 구현은 `graph`, `macro_map`, `hydrology`, `river_plan`, `boundary`, `field`,
-`macro_field`, `meso_feature`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
+`macro_field`, `pixelize`, `heightfield`, `surface_plan`, `voxel`, `preview` 문서와 구현으로 분산된다.
 
 ---
 
@@ -14,8 +14,8 @@
 
 - graph-first generation stage 이름 정의
 - initial generation config surface 정의
-- chunk voxelization이 나중에 소비할 column synthesis request/result shape 정의
-- stage 순서가 macro guide, hydrology, heightfield, voxel fill 순서를 어기지 않도록 고정
+- chunk voxelization이 나중에 소비할 pixelize/column synthesis request/result shape 정의
+- stage 순서가 macro guide, hydrology, pixelize, heightfield, voxel fill 순서를 어기지 않도록 고정
 
 ---
 
@@ -43,12 +43,11 @@
 8. final cell context / climate / hydration / biome resolve
 9. noisy boundary realization
 10. macro field rasterization
-11. meso feature planning
-12. Perlin micro relief
-13. heightfield and water surface
-14. surface plan
-15. vegetation plan
-16. voxel fill
+11. chunk pixelize
+12. heightfield / voxel-column realization
+13. surface plan
+14. vegetation plan
+15. voxel fill
 
 pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜야 한다.
 
@@ -70,12 +69,20 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
   context를 raster/cache 가능한 sample channel이나 downstream hint로 보존한다.
 - noisy boundary는 모든 Voronoi edge의 canonical geometry layer이며 raw graph topology를 대체하지 않는다.
   river는 별도 noisy curve를 만들지 않고 selected edge id path가 이 canonical geometry를 따른다.
-- macro field rasterization은 graph/macro/hydrology/river-plan/final-cell-context/boundary 결과를 heightfield와 chunk sampling이
+- macro field rasterization은 graph/macro/hydrology/river-plan/final-cell-context/boundary 결과를 pixelize와 downstream heightfield가
   빠르게 읽을 수 있는 graph-derived signed distance / influence field cache로 굽는 중간 layer다.
   이 단계는 새 noise source가 아니며, source of truth는 앞 단계의 vector/graph annotation에 남아 있다.
-- meso feature는 macro guide와 hydrology constraint를 읽은 뒤 Perlin보다 큰 국소 지형 deformation plan을 만든다.
-- Perlin micro relief는 마지막 표면 디테일이며 macro ownership을 뒤집지 않는다.
-- material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다.
+- chunk pixelize는 stage 10 `MacroFieldTile`만 소비해 chunk boundary에 정렬된
+  `1 world block = 1 pixel = 1 voxel column` output을 만든다. 이 단계는 graph topology, hydrology,
+  river plan, noisy boundary를 다시 해석하지 않고 source `MacroFieldSample`의 channel을 column
+  좌표계와 integer surface/water hint로 옮긴다.
+- heightfield / voxel-column realization은 pixelized column output을 downstream input으로 소비한다.
+  새 path에서 heightfield는 first chunk-aligned pixel resolve를 다시 수행하거나 `MacroFieldTile`을
+  직접 resample하지 않는다. meso feature와 Perlin micro relief는 이 rewrite path에서 heightfield가
+  읽을 deformation/detail input으로 재도입되며, macro ownership을 뒤집으면 안 된다.
+- material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다. 현재 launch
+  저장 slice에서는 surface/material/vegetation plan을 stub으로 두고, `PixelizedColumn.surface_y`와
+  `water_y`만 읽어 비물 지형은 `grass`, 물은 `water`로 채운다.
 
 ---
 
@@ -95,7 +102,8 @@ graph region cache
 -> final cell context cache
 -> boundary cache
 -> macro field tile cache
--> micro relief / heightfield cache
+-> pixelized chunk area cache
+-> heightfield / voxel-column realization cache
 -> chunk generation samples column/window data
 -> voxel fill writes ChunkData
 ```
@@ -127,13 +135,16 @@ miss에서만 worker thread가 수행한다.
 - `BoundaryCache`: 모든 graph edge id에 대한 canonical noisy polyline/spline
 - `MacroFieldTileCache`: macro elevation, coast/lake/ocean/dry basin mask, ridge/fault influence,
   river valley field, final cell context/biome influence, combined macro height 같은 graph-derived raster field
-- `HeightfieldCache`: chunk column sampling이 읽을 surface height, water level, terrain kind hint field
+- `PixelizedChunkAreaCache`: chunk-aligned `1 world block = 1 pixel = 1 voxel column` resolved columns,
+  integer `surface_y`, optional integer `water_y`, terrain kind hint, source macro masks
+- `HeightfieldCache`: pixelized column output을 읽어 downstream voxel-column/surface path가 소비할
+  surface height, water level, terrain kind hint field
 
 초기 구현에서는 이 캐시들이 하나의 넓은 graph patch value로 묶여 있을 수 있다. 그래도 public
 계약은 “chunk fill이 graph/macro/hydrology를 생성하지 않고 읽는다”는 방향을 유지해야 한다.
 
 `MacroFieldTileCache`는 chunk fill hot path의 graph query 반복을 막기 위한 cache canvas다. chunk
-column sampler는 nearest graph edge, noisy curve distance, lake containment, ridge envelope,
+pixelize stage는 nearest graph edge, noisy curve distance, lake containment, ridge envelope,
 river plan guide distance를 직접 반복 계산하지 않고, macro field tile의 sample 값을 읽는다. tile cache miss는
 worker에서 graph/macro/hydrology/river-plan/final-cell-context/boundary cache를 입력으로 rasterize한다.
 
@@ -146,16 +157,21 @@ chunk hot path가 아니라 macro field cache miss에서만 수행되어야 한�
 macro field tile의 기본 channel은 아래를 포함해야 한다.
 
 - macro elevation: signed macro elevation을 noisy boundary 기준으로 연속 샘플링한 큰 지형 높이
-- coast/lake/ocean/dry basin mask: water ownership과 shoreline/lake flatten이 읽는 mask/distance
+- coast/lake/ocean/dry basin mask: water ownership, lake flatten, shoreline diagnostics/downstream policy가 읽는 mask/distance
 - ridge/fault influence: ridge/fault guide edge의 canonical noisy curve 주변 envelope
 - river valley: river plan의 broad valley parameter를 rasterize한 distance/flow/carve strength와,
   heightfield/water가 읽을 narrow bed hint
-- combined macro height: macro elevation, ridge raise, broad river valley, coast/lake flatten을 합성한 pre-Perlin height
+- combined macro height: macro elevation, ridge raise, broad river valley, lake flatten을 합성한 pre-Perlin height
 
-heightfield cache는 macro field 이후에 생성된다. launch vertical slice에서는 meso feature plan과
-Perlin micro relief를 아직 실행하지 않고 `meso_delta = 0`, `micro_relief = 0`으로 둔다. 이 상태에서도
-heightfield cache는 `combined_macro_height`를 block-space column으로 매핑하고, ocean/lake mask에서
-water level hint를 만들며, ridge/river/dry basin channel을 terrain kind hint로 보존해야 한다.
+pixelized chunk area cache는 macro field 이후에 생성된다. launch vertical slice에서는 이 cache가
+`combined_macro_height`를 block-space column으로 매핑하고, ocean/lake mask에서 water level hint를
+만들며, ridge/river/dry basin channel을 terrain kind hint로 보존한다. heightfield rewrite는 이
+pixelized column output을 소비해 meso/perlin/detail, surface/water safety, voxel-column realization을
+이어간다.
+
+launch graph-first save path는 `PixelizedChunkAreaCache` 이후에 얇은 `GraphFirstVoxelPlan`을 만든다.
+이 plan은 surface/material/vegetation 정책을 확장하지 않고 `surface_y`/`water_y`만 보존한다. 같은
+plan을 여러 y chunk에 재사용하므로 vertical chunk stack은 같은 x/z column 결과를 공유한다.
 
 ### Job Boundary
 
@@ -191,10 +207,15 @@ region cache의 내부 의미를 직접 결정하지 않는다.
    world-owned generation cache를 읽어야 한다.
 7. macro field tile은 noise source가 아니라 graph-derived cache이며, Perlin micro relief는 이 cache
    이후에만 합성된다.
+8. chunk pixelize는 stage 10 `MacroFieldTile`을 stage 12 heightfield/voxel-column path가 읽을
+   chunk-aligned column cache로 바꾸는 유일한 first pixel resolve 단계다.
 
 ---
 
 ## 현재 구현 상태
 
-- 현재는 v2 pipeline compile-time scaffold 단계다.
+- 현재는 v2 pipeline vertical slice 단계다.
 - legacy generation entrypoint는 migration 동안 `world::generation`을 통해 re-export된다.
+- graph-first `pixelize`와 launch `voxel` fill이 연결되어 `world_create`가 bounded created-world dump를
+  저장할 수 있다.
+- surface/material/vegetation은 아직 stub이며, 최종 block palette policy는 들어오지 않았다.

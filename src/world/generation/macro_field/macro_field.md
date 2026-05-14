@@ -145,23 +145,18 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 1. tile origin, width, height, sample spacing으로 world-space `(x, z)`를 계산한다.
 2. ridge, coast, river plan guide를 tile-local influence field로 rasterize한다.
    - ridge/coast는 launch 성능을 위해 source pixel과 chamfer distance propagation을 계속 사용할 수 있다.
-   - river는 stage 7 `RiverPlan`이 제공한 reach별 broad valley parameter와 narrow bed hint를
-     selected edge의 canonical noisy geometry에서 출발한 macro-field-only visible realization curve
-     위에 굽는다. 이 realization curve는 hydrology topology나 boundary source-of-truth를 바꾸지 않는다.
-     낮은 Q/좁은 하천은 canonical noisy curve를 거의 그대로 따르고, 높은 Q/넓은 하천은 endpoint를
-     고정한 채 edge chord와 저주파 잔여 변주 쪽으로 interior point를 당겨 noisy wiggle을 완화한다.
-     macro field가 직접 selected segment를 reach로 분류하거나 river path를 새로 고르면 안 된다.
-   - 각 sample cell은 broad valley strength, reach type, display flow, narrow bed hint를 보존한다.
-     combined height에는 broad valley를 주로 반영하고, narrow bed 외곽을 강하게 파서 round source
-     point나 segment endpoint cap이 만드는 원형 blob/scallop이 보이면 회귀다.
+   - river는 stage 7 `RiverPlan`의 selected edge id와 flow hint를 읽고, 해당 edge의 canonical noisy
+     curve를 그대로 tile-local influence field로 굽는다. macro field는 flow-smoothed realization curve,
+     별도 thalweg offset, 하구 fan geometry를 만들지 않는다.
+   - 각 sample cell은 river valley strength, nearest distance, blended flow hint, bed/roughness/gravel
+     diagnostic hint를 보존한다. combined height에는 단순 broad valley lowering만 반영하며, narrow bed
+     단면을 macro field에서 직접 완성하지 않는다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
-   - river anti-aliased bake는 selected river segment의 flow-smoothed realization curve를 구성하는
-     선분들을 굽되, 겹친 stroke를 후처리 blur나 soft union으로 더하지 않는다. 각 sample은 가장 가까운
-     thalweg/segment의 단면을 우선 소유하며, 같은 thalweg band 안에서만 flow hint를 좁게 섞는다.
-     두 원형/캡슐형 stroke의 외곽이 서로 더해져 intersection cusp가 preview에서 뾰족한 점으로 보이면
-     회귀다.
+   - river anti-aliased bake는 selected river segment의 canonical curve 선분들을 굽고, sample별로 더
+     가까운 segment contribution을 우선한다. cusp 제거용 macro-level closing, nearest-thalweg ownership,
+     flow-smoothed curve 같은 실험 구현은 현재 롤백된 상태다.
 3. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
@@ -211,33 +206,14 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      guide/source 진단용으로 유지하지만, ridge raise는 broad mountain elevation model이 들어올 때까지
      disabled/stub 상태다. 기존 narrow ridge envelope가 1블록 등고선 기준에서 pinpoint maxima를 만들어
      contour가 층마다 불연속적으로 튀어 보였기 때문이다.
-7. river plan의 reach parameter를 읽어 broad valley field와 narrow bed hint를 만든다.
+7. river plan의 selected edge와 flow hint를 읽어 river valley field와 diagnostic bed hint를 만든다.
    - river 전용 noisy curve나 새 river topology를 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
-   - macro_field가 combined height에 강하게 반영하는 값은 좁은 river bed가 아니라 broad valley다.
-     broad valley width/depth는 reach type과 selected/display flow에서 파생한다.
-   - narrow bed width/depth, bank transition, floodplain parameter는 heightfield/water/surface stage가
-     읽을 hint로 보존한다. 이 hint는 preview의 river channel에서 진단할 수 있지만, combined macro
-     height에 강바닥 외곽을 그대로 새기면 안 된다.
-   - 상류 reach는 좁고 급한 broad valley와 얕고 좁은 V자형 bed hint를 갖고, 하류 trunk는 넓고
-     완만한 broad valley와 깊고 넓은 U자형 bed hint를 가져야 한다. downstream river bed도 완전한
-     평면 바닥으로 깎으면 안 되며, 강비탈에서 강바닥 중심으로 연속적으로 깊어지는 rounded U profile을
-     유지해야 한다. 기존 지형/shore noise는 이 profile 위에 약하게 남아야 한다.
-   - 물로 보이지 않을 만큼 작은 selected tributary는 macro-field combined height에서 broad-valley
-     carve strength가 더 약해야 한다. 얕은 수심 대비 폭이 넓은 corridor가 반복되어 carving noise처럼
-     보이면 회귀다. 큰 river는 완만한 bank shoulder를 유지하되, 작은 river는 좁고 얕게 남겨야 한다.
-   - launch 구현은 `RiverSegmentPlan`의 display flow, local slope, bed/bank/floodplain parameter와
-     canonical noisy curve bend를 읽어 deterministic thalweg offset, lateral bank roughness,
-     outer-bank cutbank hint, inner-bank gravel/deposition hint를 rasterize한다. river raster path 자체는
-     Q/bed width/broad valley width에 따라 flow-smoothed visible realization curve를 사용한다. 큰 flow는
-     전체 곡률이 완만해지고 넓고 깊은 bed hint를 만들며, 작은 flow는 canonical noisy wiggle과 좁고
-     거친 bank noise를 더 강하게 보존한다.
-     `river_valley_strength`는 downstream water/river mask가 읽는 0..1 공간 profile이며, broad-valley
-     depth를 곱해 작은 값으로 압축하면 heightfield river bed carve가 threshold를 넘지 못해 사라지는
-     회귀다. 깊이 정보는 `river_bed_depth_hint`와 river plan morphology field로 따로 전달한다.
-   - lower/trunk river의 sea-facing mouth endpoint는 inland segment join과 반대로 둥글고 넓게 퍼지는
-     terminal fan을 가질 수 있다. 이 fan은 selected river topology를 바꾸지 않고 macro-field raster
-     표현에서만 river valley와 bed hint를 부드럽게 확장한다.
+   - macro_field가 combined height에 반영하는 값은 단순 river valley strength다. 좁은 river bed,
+     U/V 단면, cutbank/gravel 편향, 하구 fan은 이 단계에서 만들지 않는다.
+   - `river_valley_strength`는 downstream water/river mask가 읽는 0..1 공간 profile이다. 깊이 정보는
+     현재 단순 diagnostic hint로만 전달하며, 현실적인 단면 carve는 heightfield/water/surface 단계에서
+     다시 설계한다.
 8. final cell context를 sample 위치에 맞춰 raster/cache한다.
    - final temperature, final hydration, hydrology role, water proximity, rain shadow, biome influence는
      stage 8에서 이미 resolve된 값이다.
@@ -326,7 +302,7 @@ sample한다.
 
 launch 구현은 ridge/coast/river influence를 per-sample full curve scan 대신 tile-local raster pass로
 굽는다. ridge/coast는 source pixel과 distance propagation으로 envelope를 만들고, river는 river plan의
-broad valley parameter와 flow-smoothed visible realization curve를 segment-local tile guide로 굽는다.
+selected edge가 가리키는 canonical noisy curve를 segment-local tile guide로 굽는다.
 ownership side 판정은 아직 per-sample query로 남아 있는데,
 이것은 visible mask boundary 정확도를 지키기 위한 보수적 선택이다. site bucket lookup은 sample fill
 hot path에서 후보 `Vec`을 만들지 않고 bucket window를 직접 순회해야 하며, nearest polyline query는
@@ -471,10 +447,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
   뒤 chamfer distance field로 만든다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
-  canonical noisy curve에서 flow-dependent realization polyline을 만든 뒤 anti-aliased thick corridor로
-  굽는다. overlapping segment는 soft union/closing이 아니라 nearest-thalweg ownership으로 병합하며,
-  subpixel coverage 기반 valley strength, nearest-segment distance, blended flow hint,
-  bed depth hint, bank roughness, gravel, cutbank hint를 함께 저장한다. 기본
+  canonical noisy curve를 anti-aliased corridor로 굽는다. subpixel coverage 기반 valley strength,
+  nearest distance, blended flow hint, 단순 bed/roughness/gravel diagnostic hint를 저장한다. 기본
   `river_carve_scale`은 preview에서 broad-valley lowering이
   식별되되 과도하게 깊어지지 않도록 `0.08`이다. 실제 narrow bed depth는 combined height에 직접 과하게
   새기지 않고 heightfield/water/surface stage가 읽는 hint로 남긴다.

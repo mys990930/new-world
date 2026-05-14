@@ -70,3 +70,12 @@ nearby vegetation placement를 함께 조회해야 한다.
 3. vegetation은 water, cliff, active river channel, bare coast 같은 금지 mask를 존중해야 한다.
 4. vegetation stage는 `ChunkData`를 직접 수정하지 않는다.
 5. chunk 경계를 넘는 tree/feature는 어느 chunk를 먼저 생성해도 같은 block 결과를 내야 한다.
+
+---
+
+## 현재 구현 상태
+
+- graph-first 저장 vertical slice에서는 vegetation placement를 생성하지 않는다.
+- `world_create`가 사용하는 launch voxel fill은 vegetation plan을 빈 plan으로 취급한다.
+- 나무, 풀, 수생 식생, chunk 경계 feature anchor 정책은 후속 구현 범위이며 현재 `ChunkData`에는
+  terrain/water만 기록된다.

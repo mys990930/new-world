@@ -47,7 +47,8 @@
 
 ## Channels
 
-- `macro`: signed macro elevation sampled through noisy-boundary owner/blend logic.
+- `macro`: signed macro elevation from the noisy-boundary-selected macro_map owner, without
+  preview-side or macro_field-side scalar height blending.
 - `mask`: ocean, lake/wetland, dry basin, explicit ocean coast, and land context following noisy
   boundaries. Dry basin is a land-owned closed basin context, not a shoreline.
 - `ridge`: connected distance-envelope influence around ridge noisy boundary curves. It should read
@@ -56,7 +57,7 @@
 - `river`: flow-scaled flat-bottom valley influence around selected hydrology river curves.
   Upstream segments are narrow and shallow but should not read as knife-cut V shapes; downstream
   trunks are wider with flatter beds and broader shoulders.
-- `combined`: macro elevation minus visible river valley carve guide, coast flatten, and water
+- `combined`: macro elevation minus visible river valley carve guide and water
   flatten, rendered as a subtle terrain ramp rather than a diagnostic heat map. Ridge influence is
   diagnostic-only in the current launch slice and does not raise combined height until a broader
   mountain elevation model is reintroduced.
@@ -105,7 +106,7 @@ of giving every tile its own artificial low and high.
 6. Apply the post-hydrology selected-headwater hydration floor to final biome cells.
 7. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
 8. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
-  - noisy-boundary owner/blend for macro elevation and masks,
+  - noisy-boundary owner/mask selection while preserving the selected owner macro elevation,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - selected hydrology river noisy curves through a tile-local anti-aliased thick polyline bake
@@ -115,7 +116,8 @@ of giving every tile its own artificial low and high.
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
 9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
 10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
-   overlay, a scale bar, a compass overlay, and a thin macro-field cache tile grid.
+   overlay, a thicker standing-water/terrain boundary overlay on `macro`, `combined`, and `lit`,
+   a scale bar, a compass overlay, and a thin macro-field cache tile grid.
 11. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
@@ -149,7 +151,8 @@ Each PNG contains:
 - min/max/average plus robust preview contrast range for macro elevation, ridge influence, river
   valley, and combined macro height
 - fixed absolute preview scale, white saturation fraction, and tile boundary grid spacing/count
-- noisy Voronoi edge overlay curve/segment count and scale bar length
+- noisy Voronoi edge overlay curve/segment count, standing-water boundary segment count, and scale
+  bar length
 - contour step, major interval, min/max level, level count, segment count, height color ramp, and overlay flag
 - lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
   min/average/max/stddev
@@ -158,7 +161,7 @@ Each PNG contains:
 ## Interpretation Notes
 
 - `lit` is still pre-Perlin. Any fine detail visible there comes from macro elevation gradients,
-  noisy-boundary blend, ridge/coast/river influence, or the lighting contrast itself.
+  noisy-boundary owner/mask transitions, ridge/coast/river influence, or the lighting contrast itself.
 - `lit` uses smoothing only for preview lighting. It does not blur or rewrite
   `combined_macro_height`; the goal is to suppress sample-scale macro transitions while keeping
   broad continent/ridge/basin/coast height differences visible as white-material hillshade.
@@ -166,6 +169,10 @@ Each PNG contains:
   not as a lake/ocean surface and not as a mandatory deep carve.
 - Tiny 1..3-cell local-minima lakes are water/lake mask features even when no selected river reaches
   them. They should not be recolored or shaped as dry basin bowls in `mask`, `combined`, or `lit`.
+- `macro`, `combined`, and `lit` draw a deterministic standing-water boundary overlay wherever the
+  sampled field changes between ocean/lake water and terrain. Dry basin and explicit ocean coast are
+  terrain for this overlay. The line is a strong yellow registration aid, thicker and more visible
+  than the faint noisy Voronoi reference edge.
 - `combined` uses the same absolute height scale as before, but its colors should read like a
   top-down pre-Perlin terrain surface: muted blue-gray low/ocean values, subdued green-gray low
   land, olive/gray midlands, and pale gray high values without white saturation. It should not show

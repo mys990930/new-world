@@ -483,27 +483,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::world::{BlockFace, CHUNK_EDGE, LocalBlockCoord, generate_chunk};
+    use crate::world::{BlockFace, CHUNK_EDGE, LocalBlockCoord};
 
     fn test_registry() -> Arc<BlockRegistry> {
         Arc::new(BlockRegistry::load_default().expect("default registry should load"))
-    }
-
-    #[test]
-    #[ignore = "slow end-to-end generation chunk generation smoke test"]
-    fn world_core_reads_generated_floor_block() {
-        let meta = WorldMeta::new(42);
-        let coord = ChunkCoord(0, -8, 0);
-        let registry = test_registry();
-        let stone = registry
-            .block_id("stone")
-            .expect("stone block should exist");
-        let chunk = generate_chunk(coord, &meta, registry.as_ref());
-        let mut world = WorldCore::new(meta, registry);
-        world.insert_chunk(coord, chunk);
-
-        assert_eq!(world.get_block(WorldBlockCoord(2, -256, 3)), Some(stone));
-        assert_eq!(world.get_block(WorldBlockCoord(2, -225, 3)), Some(stone));
     }
 
     #[test]

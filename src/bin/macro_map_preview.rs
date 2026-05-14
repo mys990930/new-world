@@ -2283,6 +2283,7 @@ mod tests {
                     raw_flow_accumulation: 12.0,
                     flow_accumulation: 12.0,
                     downstream_progress: 0.1,
+                    local_slope: 0.01,
                 },
                 GraphRiverSegment {
                     id: new_world::world::generation::GraphRiverSegmentId(2),
@@ -2294,6 +2295,7 @@ mod tests {
                     raw_flow_accumulation: 12.0,
                     flow_accumulation: 12.0,
                     downstream_progress: 0.1,
+                    local_slope: 0.01,
                 },
             ],
             topology_stats: Default::default(),
@@ -2322,6 +2324,7 @@ mod tests {
             raw_flow_accumulation: 160.0,
             flow_accumulation: 12.0,
             downstream_progress: 0.2,
+            local_slope: 0.01,
         };
 
         assert_eq!(

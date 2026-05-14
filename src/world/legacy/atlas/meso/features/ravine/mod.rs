@@ -68,6 +68,7 @@ impl RavineSurfaceSample {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub struct RavineCandidate {
     pub coord: AtlasCoord,
     pub center_x: f32,
@@ -99,6 +100,7 @@ pub(crate) fn build_ravine_window(
     resolved::build_ravine_window(guides, chunk)
 }
 
+#[cfg(test)]
 pub(crate) fn sample_ravine_apply_signal_from_window(
     window: &RavineWindow,
     world_x: i32,
@@ -125,6 +127,7 @@ pub(crate) fn sample_ravine_surface_from_window(
     )
 }
 
+#[cfg(test)]
 pub fn debug_ravine_candidates(guides: &MesoGuideMap) -> Vec<RavineCandidate> {
     let meso_span_blocks =
         (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;

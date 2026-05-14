@@ -1,7 +1,10 @@
 use rayon::prelude::*;
+use std::collections::VecDeque;
 
 use super::graph::WorldPlanePoint;
 use super::macro_field::{MacroFieldSample, MacroFieldTile};
+
+pub mod perlin;
 
 pub const DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_MIN_BLOCKS: f32 = -1024.0;
@@ -11,12 +14,22 @@ pub const DEFAULT_HEIGHTFIELD_NORMALIZED_MAX: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD: f32 = 0.72;
 pub const DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS: f32 = -12.0;
 pub const DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS: f32 = -2.0;
-pub const DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS: f32 = 128.0;
-pub const DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS: f32 = 1.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_MIN_GAP_BLOCKS: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
+const SHORELINE_BEVEL_RADIUS_BLOCKS: f32 = 16.0;
+const SHORELINE_BEVEL_MIN_SLOPE_BLOCKS: f32 = 0.65;
+const SHORELINE_BEVEL_MAX_SLOPE_BLOCKS: f32 = 3.0;
+const SHORELINE_BEVEL_VARIATION_SCALE_BLOCKS: f32 = 9.0;
+const SHORELINE_BEVEL_NOISE_SALT: u64 = 0x51de_5a07_e7a1_1c05;
+
+pub use perlin::{
+    DEFAULT_HEIGHTFIELD_PERLIN_AMPLITUDE_BLOCKS, DEFAULT_HEIGHTFIELD_PERLIN_BASE_SCALE_BLOCKS,
+    DEFAULT_HEIGHTFIELD_PERLIN_LACUNARITY, DEFAULT_HEIGHTFIELD_PERLIN_MAX_ABS_BLOCKS,
+    DEFAULT_HEIGHTFIELD_PERLIN_OCTAVES, DEFAULT_HEIGHTFIELD_PERLIN_PERSISTENCE,
+    HeightfieldPerlinConfig, HeightfieldPerlinPlacement,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeightfieldContourConfig {
@@ -47,9 +60,8 @@ pub struct HeightfieldConfig {
     pub river_water_threshold: f32,
     pub ocean_bed_blocks: f32,
     pub lake_bed_blocks: f32,
-    pub shore_ramp_blocks: f32,
-    pub shore_min_land_blocks: f32,
     pub contour: HeightfieldContourConfig,
+    pub perlin: HeightfieldPerlinConfig,
 }
 
 impl Default for HeightfieldConfig {
@@ -63,9 +75,8 @@ impl Default for HeightfieldConfig {
             river_water_threshold: DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD,
             ocean_bed_blocks: DEFAULT_HEIGHTFIELD_OCEAN_BED_BLOCKS,
             lake_bed_blocks: DEFAULT_HEIGHTFIELD_LAKE_BED_BLOCKS,
-            shore_ramp_blocks: DEFAULT_HEIGHTFIELD_SHORE_RAMP_BLOCKS,
-            shore_min_land_blocks: DEFAULT_HEIGHTFIELD_SHORE_MIN_LAND_BLOCKS,
             contour: HeightfieldContourConfig::default(),
+            perlin: HeightfieldPerlinConfig::default(),
         }
     }
 }
@@ -100,8 +111,13 @@ pub struct HeightfieldColumn {
     pub dry_basin_mask: f32,
     pub coast_mask: f32,
     pub ridge_influence: f32,
+    pub terrain_ruggedness: f32,
     pub river_valley_strength: f32,
     pub river_flow_hint: f32,
+    pub river_bed_depth_blocks: f32,
+    pub river_bank_roughness_hint: f32,
+    pub river_gravel_hint: f32,
+    pub river_cutbank_hint: f32,
     pub meso_delta_blocks: f32,
     pub micro_relief_blocks: f32,
 }
@@ -177,7 +193,7 @@ pub fn generate_heightfield_tile(
         .par_iter()
         .map(|sample| heightfield_column_from_sample(sample, config))
         .collect::<Vec<_>>();
-    apply_neighbor_shoreline_continuity(
+    apply_ocean_shoreline_bevel(
         &mut columns,
         macro_tile.config.width as usize,
         macro_tile.config.height as usize,
@@ -208,16 +224,41 @@ pub fn heightfield_column_from_sample(
     validate_heightfield_config(config);
     let raw_surface_height_blocks = normalized_to_blocks(sample.combined_macro_height, config);
     let contour = contour_config_for_sample(sample, config);
+    let meso_delta_blocks = 0.0;
+    let micro_relief_blocks = perlin::micro_relief_blocks(sample, config.perlin);
+    let contour_source_height_blocks = match config.perlin.placement {
+        HeightfieldPerlinPlacement::BeforeContour => {
+            raw_surface_height_blocks + meso_delta_blocks + micro_relief_blocks
+        }
+        HeightfieldPerlinPlacement::AfterContourBeforeSnap => raw_surface_height_blocks,
+    };
     let contour_guided_surface_height_blocks =
-        resolve_contour_band_height(raw_surface_height_blocks, contour);
+        resolve_contour_band_height(contour_source_height_blocks, contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
-    let meso_delta_blocks = 0.0;
-    let micro_relief_blocks = 0.0;
-    let surface_height_blocks =
-        contour_guided_surface_height_blocks + meso_delta_blocks + micro_relief_blocks;
-    let surface_height_blocks = if is_ocean || is_lake {
-        config.sea_level_blocks
+    let has_river_bed_hint = sample.river_valley_strength >= config.river_water_threshold
+        && sample.river_flow_hint > 0.0;
+    let is_river_hint = has_river_bed_hint && !is_ocean && !is_lake;
+    let river_bed_depth_blocks = if has_river_bed_hint {
+        river_bed_depth_blocks(sample)
+    } else {
+        0.0
+    };
+    let surface_height_blocks = match config.perlin.placement {
+        HeightfieldPerlinPlacement::BeforeContour => contour_guided_surface_height_blocks,
+        HeightfieldPerlinPlacement::AfterContourBeforeSnap => {
+            contour_guided_surface_height_blocks + meso_delta_blocks + micro_relief_blocks
+        }
+    };
+    let lake_water_level_blocks = is_lake.then(|| lake_water_level_blocks(sample, config));
+    let surface_height_blocks = if (is_ocean || is_lake) && has_river_bed_hint {
+        lake_water_level_blocks.unwrap_or(config.sea_level_blocks) - river_bed_depth_blocks
+    } else if is_ocean || is_lake {
+        lake_water_level_blocks
+            .map(|water| lake_bed_height_blocks(surface_height_blocks, water, config))
+            .unwrap_or(config.sea_level_blocks)
+    } else if is_river_hint {
+        surface_height_blocks - river_bed_depth_blocks
     } else {
         surface_height_blocks.max(config.sea_level_blocks)
     };
@@ -227,19 +268,22 @@ pub fn heightfield_column_from_sample(
         snap_to_contour_step(constrained_surface_height_blocks, contour);
     let surface_y = snap_height_to_block(final_surface_height_blocks);
     let surface_height_blocks = surface_y as f32;
-    let is_river_hint = sample.river_valley_strength >= config.river_water_threshold
-        && sample.river_flow_hint > 0.0
-        && !is_ocean
-        && !is_lake;
-    let water_level_blocks = if is_ocean || is_lake {
+    let water_level_blocks = if is_ocean {
         Some(snap_height_to_block(config.sea_level_blocks) as f32)
+    } else if is_lake {
+        Some(
+            snap_height_to_block(lake_water_level_blocks.unwrap_or(config.sea_level_blocks)) as f32,
+        )
     } else if is_river_hint {
-        Some(surface_height_blocks + 1.0)
+        Some(
+            (surface_height_blocks + river_water_depth_blocks(sample)).max(config.sea_level_blocks),
+        )
     } else {
         None
     };
     let water_y = water_level_blocks.map(snap_height_to_block);
-    let river_water_height_blocks = is_river_hint.then_some(surface_height_blocks + 1.0);
+    let river_water_height_blocks =
+        has_river_bed_hint.then_some(water_y.unwrap_or(surface_y) as f32);
     let terrain_kind = if is_ocean {
         HeightfieldTerrainKind::Ocean
     } else if is_lake {
@@ -250,8 +294,6 @@ pub fn heightfield_column_from_sample(
         HeightfieldTerrainKind::DryBasin
     } else if sample.ridge_influence > 0.55 {
         HeightfieldTerrainKind::Ridge
-    } else if sample.coast_mask > 0.45 {
-        HeightfieldTerrainKind::Coast
     } else {
         HeightfieldTerrainKind::Land
     };
@@ -274,11 +316,51 @@ pub fn heightfield_column_from_sample(
         dry_basin_mask: sample.dry_basin_mask,
         coast_mask: sample.coast_mask,
         ridge_influence: sample.ridge_influence,
+        terrain_ruggedness: sample
+            .biome_context
+            .map(|context| context.ruggedness.clamp(0.0, 1.0))
+            .unwrap_or(0.0),
         river_valley_strength: sample.river_valley_strength,
         river_flow_hint: sample.river_flow_hint,
+        river_bed_depth_blocks,
+        river_bank_roughness_hint: sample.river_bank_roughness_hint,
+        river_gravel_hint: sample.river_gravel_hint,
+        river_cutbank_hint: sample.river_cutbank_hint,
         meso_delta_blocks,
         micro_relief_blocks,
     }
+}
+
+fn river_bed_depth_blocks(sample: &MacroFieldSample) -> f32 {
+    let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    let bed = sample.river_bed_depth_hint.clamp(0.0, 1.0);
+    let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
+    (bed * 40.0).max(1.0 + flow * 2.0 + rough).clamp(1.0, 40.0)
+}
+
+fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
+    let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    let bed_depth = river_bed_depth_blocks(sample);
+    (bed_depth * (0.55 + flow * 0.35)).clamp(1.0, 40.0)
+}
+
+fn lake_water_level_blocks(sample: &MacroFieldSample, config: HeightfieldConfig) -> f32 {
+    let source_level = normalized_to_blocks(sample.macro_elevation, config);
+    let shoreline_margin = config.lake_bed_blocks.abs().max(2.0) * 8.0;
+
+    (source_level - shoreline_margin)
+        .max(config.sea_level_blocks + 1.0)
+        .clamp(config.min_height_blocks, config.max_height_blocks)
+}
+
+fn lake_bed_height_blocks(
+    raw_bed_height_blocks: f32,
+    water_level_blocks: f32,
+    config: HeightfieldConfig,
+) -> f32 {
+    let shallow_gap = config.lake_bed_blocks.abs().max(1.0);
+    let max_depth = shallow_gap * 12.0;
+    raw_bed_height_blocks.max(water_level_blocks - max_depth)
 }
 
 fn normalized_to_blocks(value: f32, config: HeightfieldConfig) -> f32 {
@@ -327,176 +409,165 @@ fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {
     (value / step).floor() * step
 }
 
-fn apply_shoreline_contour_ceiling(
-    surface_height_blocks: f32,
-    water_distance_blocks: f32,
-    sample_spacing_blocks: f32,
-    config: HeightfieldConfig,
-) -> f32 {
-    if !water_distance_blocks.is_finite() || sample_spacing_blocks <= 0.0 {
-        return surface_height_blocks;
-    }
-    let edge_distance = (water_distance_blocks - sample_spacing_blocks * 0.5).max(0.0);
-    let step = config.contour.step_blocks.max(1.0);
-    let allowed_steps_from_water = (edge_distance / sample_spacing_blocks).floor();
-    let max_land_height = config.sea_level_blocks + allowed_steps_from_water * step;
-    surface_height_blocks
-        .max(config.sea_level_blocks)
-        .min(max_land_height)
-}
-
-fn apply_neighbor_shoreline_continuity(
+fn apply_ocean_shoreline_bevel(
     columns: &mut [HeightfieldColumn],
     width: usize,
     height: usize,
     sample_spacing_blocks: f32,
     config: HeightfieldConfig,
 ) {
-    if columns.is_empty() || width == 0 || height == 0 || config.shore_ramp_blocks <= 0.0 {
+    if columns.is_empty() || width == 0 || height == 0 {
         return;
     }
-    let water_distance =
-        standing_water_distance_field(columns, width, height, sample_spacing_blocks, config);
-    for (index, column) in columns.iter_mut().enumerate() {
-        if is_standing_water(*column) || water_distance[index] > config.shore_ramp_blocks {
+
+    let mut distance = vec![f32::INFINITY; columns.len()];
+    let mut ocean_ruggedness = vec![0.0; columns.len()];
+    let mut queue = VecDeque::new();
+    for (index, column) in columns.iter().enumerate() {
+        if matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean) {
+            distance[index] = 0.0;
+            ocean_ruggedness[index] = column.terrain_ruggedness.clamp(0.0, 1.0);
+            queue.push_back(index);
+        }
+    }
+
+    let step = sample_spacing_blocks.max(1.0);
+    while let Some(index) = queue.pop_front() {
+        let next_distance = distance[index] + step;
+        if next_distance > SHORELINE_BEVEL_RADIUS_BLOCKS {
             continue;
         }
-        let clamped = apply_shoreline_contour_ceiling(
-            column.constrained_surface_height_blocks,
-            water_distance[index],
-            sample_spacing_blocks,
+        for neighbor in neighbor_indices(index, width, height) {
+            if next_distance < distance[neighbor] {
+                distance[neighbor] = next_distance;
+                ocean_ruggedness[neighbor] = ocean_ruggedness[index];
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    for (index, column) in columns.iter_mut().enumerate() {
+        if distance[index] == 0.0
+            || !distance[index].is_finite()
+            || distance[index] > SHORELINE_BEVEL_RADIUS_BLOCKS
+            || column.has_water_column()
+            || matches!(
+                column.terrain_kind,
+                HeightfieldTerrainKind::River | HeightfieldTerrainKind::DryBasin
+            )
+        {
+            continue;
+        }
+
+        let shoreline_ruggedness =
+            ((column.terrain_ruggedness + ocean_ruggedness[index]) * 0.5).clamp(0.0, 1.0);
+        let max_height = shoreline_bevel_max_height(
+            column.position,
+            distance[index],
+            shoreline_ruggedness,
             config,
         );
-        if clamped < column.constrained_surface_height_blocks {
-            column.constrained_surface_height_blocks = clamped;
-            let final_surface_height_blocks = snap_to_contour_step(clamped, config.contour);
-            column.surface_y = snap_height_to_block(final_surface_height_blocks);
+        if column.surface_height_blocks > max_height {
+            let snapped = snap_to_contour_step(max_height, config.contour);
+            column.constrained_surface_height_blocks =
+                column.constrained_surface_height_blocks.min(max_height);
+            column.surface_y = snap_height_to_block(snapped);
             column.surface_height_blocks = column.surface_y as f32;
-            if matches!(column.terrain_kind, HeightfieldTerrainKind::Land) {
-                column.terrain_kind = HeightfieldTerrainKind::Coast;
-            }
         }
     }
 }
 
-fn standing_water_distance_field(
-    columns: &[HeightfieldColumn],
-    width: usize,
-    height: usize,
-    sample_spacing_blocks: f32,
+fn shoreline_bevel_max_height(
+    position: WorldPlanePoint,
+    distance_blocks: f32,
+    ruggedness: f32,
     config: HeightfieldConfig,
-) -> Vec<f32> {
-    let mut distance = columns
-        .iter()
-        .map(|column| {
-            if is_standing_water(*column) {
-                0.0
-            } else {
-                f32::INFINITY
-            }
-        })
-        .collect::<Vec<_>>();
-    let diagonal = sample_spacing_blocks * std::f32::consts::SQRT_2;
-    let limit = config.shore_ramp_blocks + diagonal;
-    for _ in 0..2 {
-        for z in 0..height {
-            for x in 0..width {
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    -1,
-                    0,
-                    sample_spacing_blocks,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    0,
-                    -1,
-                    sample_spacing_blocks,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    -1,
-                    -1,
-                    diagonal,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    1,
-                    -1,
-                    diagonal,
-                    width,
-                    height,
-                    limit,
-                );
-            }
-        }
-        for z in (0..height).rev() {
-            for x in (0..width).rev() {
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    1,
-                    0,
-                    sample_spacing_blocks,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    0,
-                    1,
-                    sample_spacing_blocks,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    1,
-                    1,
-                    diagonal,
-                    width,
-                    height,
-                    limit,
-                );
-                update_distance_from_neighbor(
-                    &mut distance,
-                    x,
-                    z,
-                    -1,
-                    1,
-                    diagonal,
-                    width,
-                    height,
-                    limit,
-                );
-            }
-        }
+) -> f32 {
+    let distance = distance_blocks.clamp(0.0, SHORELINE_BEVEL_RADIUS_BLOCKS);
+    let rugged_t = smoothstep01(ruggedness.clamp(0.0, 1.0));
+    let slope = lerp(
+        SHORELINE_BEVEL_MIN_SLOPE_BLOCKS,
+        SHORELINE_BEVEL_MAX_SLOPE_BLOCKS,
+        rugged_t,
+    );
+    let slope = slope * shoreline_bevel_variation_factor(position, rugged_t);
+    let base_height = config.sea_level_blocks + distance * slope;
+    (base_height + shoreline_bevel_perlin_blocks(position, distance, rugged_t, config))
+        .max(config.sea_level_blocks)
+}
+
+fn shoreline_bevel_variation_factor(position: WorldPlanePoint, rugged_t: f32) -> f32 {
+    let lower = lerp(0.96, 0.58, rugged_t);
+    let upper = lerp(1.04, 1.42, rugged_t);
+    let noise = smooth_value_noise_2d(
+        position,
+        SHORELINE_BEVEL_VARIATION_SCALE_BLOCKS,
+        SHORELINE_BEVEL_NOISE_SALT,
+    );
+    lerp(lower, upper, noise * 0.5 + 0.5).clamp(0.45, 1.55)
+}
+
+fn shoreline_bevel_perlin_blocks(
+    position: WorldPlanePoint,
+    distance_blocks: f32,
+    rugged_t: f32,
+    config: HeightfieldConfig,
+) -> f32 {
+    if !config.perlin.enabled {
+        return 0.0;
     }
-    distance
+
+    let distance_t = smoothstep01(distance_blocks / SHORELINE_BEVEL_RADIUS_BLOCKS);
+    let rugged_scale = lerp(0.42, 1.0, rugged_t);
+    let amplitude = (config.perlin.amplitude_blocks * 0.75)
+        .min(config.perlin.max_abs_blocks * 0.75)
+        .max(0.0)
+        * distance_t
+        * rugged_scale;
+    if amplitude <= f32::EPSILON {
+        return 0.0;
+    }
+
+    perlin::octave_noise_2d(position.x, position.z, config.perlin, 1.65, 37) * amplitude
+}
+
+fn smooth_value_noise_2d(position: WorldPlanePoint, scale_blocks: f32, salt: u64) -> f32 {
+    let scale = scale_blocks.max(1.0);
+    let x = position.x / scale;
+    let z = position.z / scale;
+    let x0 = x.floor() as i32;
+    let z0 = z.floor() as i32;
+    let tx = smoothstep01(x - x0 as f32);
+    let tz = smoothstep01(z - z0 as f32);
+    let a = signed_lattice_noise(x0, z0, salt);
+    let b = signed_lattice_noise(x0 + 1, z0, salt);
+    let c = signed_lattice_noise(x0, z0 + 1, salt);
+    let d = signed_lattice_noise(x0 + 1, z0 + 1, salt);
+    let top = lerp(a, b, tx);
+    let bottom = lerp(c, d, tx);
+    lerp(top, bottom, tz).clamp(-1.0, 1.0)
+}
+
+fn signed_lattice_noise(x: i32, z: i32, salt: u64) -> f32 {
+    let mut hash = salt
+        ^ (x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash ^= hash >> 30;
+    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash ^= hash >> 27;
+    hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
+    hash ^= hash >> 31;
+    let unit = (hash >> 40) as f32 / ((1_u64 << 24) - 1) as f32;
+    unit * 2.0 - 1.0
+}
+
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn apply_river_water_descent(columns: &mut [HeightfieldColumn], width: usize, height: usize) {
@@ -587,31 +658,6 @@ fn is_standing_water(column: HeightfieldColumn) -> bool {
         column.terrain_kind,
         HeightfieldTerrainKind::Ocean | HeightfieldTerrainKind::Lake
     )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn update_distance_from_neighbor(
-    distance: &mut [f32],
-    x: usize,
-    z: usize,
-    dx: isize,
-    dz: isize,
-    cost: f32,
-    width: usize,
-    height: usize,
-    limit: f32,
-) {
-    let nx = x as isize + dx;
-    let nz = z as isize + dz;
-    if nx < 0 || nz < 0 || nx >= width as isize || nz >= height as isize {
-        return;
-    }
-    let index = z * width + x;
-    let neighbor = nz as usize * width + nx as usize;
-    let candidate = distance[neighbor] + cost;
-    if candidate < distance[index] && candidate <= limit {
-        distance[index] = candidate;
-    }
 }
 
 fn snap_height_to_block(value: f32) -> i32 {
@@ -865,10 +911,6 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.normalized_min_height < config.normalized_max_height);
     assert!(config.ocean_bed_blocks <= 0.0);
     assert!(config.lake_bed_blocks <= 0.0);
-    assert!(config.shore_ramp_blocks.is_finite());
-    assert!(config.shore_min_land_blocks.is_finite());
-    assert!(config.shore_ramp_blocks >= 0.0);
-    assert!(config.shore_min_land_blocks >= 0.0);
     assert!(config.contour.step_blocks.is_finite());
     assert!(config.contour.min_gap_blocks.is_finite());
     assert!(config.contour.river_min_gap_blocks.is_finite());
@@ -877,6 +919,16 @@ fn validate_heightfield_config(config: HeightfieldConfig) {
     assert!(config.contour.min_gap_blocks >= 0.0);
     assert!(config.contour.river_min_gap_blocks >= 0.0);
     assert!(config.contour.band_smoothing >= 0.0);
+    assert!(config.perlin.amplitude_blocks.is_finite());
+    assert!(config.perlin.base_scale_blocks.is_finite());
+    assert!(config.perlin.persistence.is_finite());
+    assert!(config.perlin.lacunarity.is_finite());
+    assert!(config.perlin.max_abs_blocks.is_finite());
+    assert!(config.perlin.amplitude_blocks >= 0.0);
+    assert!(config.perlin.base_scale_blocks > 0.0);
+    assert!(config.perlin.persistence >= 0.0);
+    assert!(config.perlin.lacunarity >= 1.0);
+    assert!(config.perlin.max_abs_blocks >= 0.0);
 }
 
 #[cfg(test)]
@@ -943,6 +995,89 @@ mod tests {
     }
 
     #[test]
+    fn default_perlin_is_disabled_and_keeps_micro_relief_zero() {
+        let config = HeightfieldConfig::default();
+        let column =
+            heightfield_column_from_sample(&sample(17.0, 29.0, 0.25, 0.0, 0.0, 0.0, 0.0), config);
+
+        assert!(!config.perlin.enabled);
+        assert_eq!(column.micro_relief_blocks, 0.0);
+    }
+
+    #[test]
+    fn enabled_perlin_produces_bounded_land_micro_relief() {
+        let config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let column =
+            heightfield_column_from_sample(&sample(17.0, 29.0, 0.25, 0.0, 0.0, 0.0, 0.0), config);
+
+        assert_ne!(column.micro_relief_blocks, 0.0);
+        assert!(
+            column.micro_relief_blocks.abs() <= config.perlin.max_abs_blocks,
+            "micro relief should stay bounded: {}",
+            column.micro_relief_blocks
+        );
+    }
+
+    #[test]
+    fn preview_perlin_applies_micro_relief_before_contour_band() {
+        let config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let column =
+            heightfield_column_from_sample(&sample(17.0, 29.0, 0.25, 0.0, 0.0, 0.0, 0.0), config);
+        let expected = resolve_contour_band_height(
+            column.raw_surface_height_blocks + column.micro_relief_blocks,
+            config.contour,
+        );
+
+        assert_eq!(
+            config.perlin.placement,
+            HeightfieldPerlinPlacement::BeforeContour
+        );
+        assert_eq!(column.contour_guided_surface_height_blocks, expected);
+        assert_eq!(
+            column.surface_height_blocks, expected,
+            "preview Perlin should perturb the contour source rather than stack after the band"
+        );
+    }
+
+    #[test]
+    fn enabled_perlin_does_not_affect_ocean_lake_or_river_columns() {
+        let config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let ocean =
+            heightfield_column_from_sample(&sample(17.0, 29.0, -0.2, 1.0, 0.0, 0.0, 0.0), config);
+        let lake =
+            heightfield_column_from_sample(&sample(17.0, 29.0, -0.2, 0.0, 1.0, 0.0, 0.0), config);
+        let river =
+            heightfield_column_from_sample(&sample_with_river(17.0, 29.0, 0.25, 0.75), config);
+
+        assert_eq!(ocean.micro_relief_blocks, 0.0);
+        assert_eq!(lake.micro_relief_blocks, 0.0);
+        assert_eq!(river.micro_relief_blocks, 0.0);
+    }
+
+    #[test]
+    fn enabled_perlin_is_deterministic_for_same_world_position_and_config() {
+        let config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let sample = sample(17.0, 29.0, 0.25, 0.0, 0.0, 0.0, 0.0);
+        let first = heightfield_column_from_sample(&sample, config);
+        let second = heightfield_column_from_sample(&sample, config);
+
+        assert_eq!(first.micro_relief_blocks, second.micro_relief_blocks);
+        assert_eq!(first.surface_height_blocks, second.surface_height_blocks);
+    }
+
+    #[test]
     fn contour_guided_height_is_pure_lower_band_and_snaps() {
         let config = HeightfieldConfig::default();
         let sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
@@ -995,7 +1130,7 @@ mod tests {
     }
 
     #[test]
-    fn default_river_corridor_gap_matches_land_gap() {
+    fn default_river_corridor_uses_same_gap_but_can_cut_bed() {
         let config = HeightfieldConfig::default();
         let land =
             heightfield_column_from_sample(&sample(0.0, 0.0, 0.00110, 0.0, 0.0, 0.0, 0.0), config);
@@ -1006,9 +1141,15 @@ mod tests {
             config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
             "default launch slice uses the same zero-block gap for land and river corridors"
         );
-        assert_eq!(
-            land.surface_height_blocks, river.surface_height_blocks,
-            "river corridors should not differ from land while default gaps are unified"
+        assert!(
+            river.surface_height_blocks < land.surface_height_blocks,
+            "river bed hint should cut the bed below the surrounding land: land={} river={}",
+            land.surface_height_blocks,
+            river.surface_height_blocks
+        );
+        assert!(
+            river.water_level_blocks.is_some(),
+            "river corridor should keep water separate from the carved bed"
         );
     }
 
@@ -1031,9 +1172,11 @@ mod tests {
             land.surface_height_blocks, 0.0,
             "wider configured land gap should still hold ordinary terrain back"
         );
-        assert_eq!(
-            river.surface_height_blocks, 1.0,
-            "river corridors keep the smaller gap so water descent does not lose one-block steps"
+        assert!(
+            river.surface_height_blocks < land.surface_height_blocks,
+            "river corridors keep the smaller gap and then apply river bed carve: land={} river={}",
+            land.surface_height_blocks,
+            river.surface_height_blocks
         );
     }
 
@@ -1216,6 +1359,11 @@ mod tests {
         );
 
         assert_eq!(column.surface_height_blocks, expected);
+        assert_eq!(
+            column.terrain_kind,
+            HeightfieldTerrainKind::Land,
+            "coast_mask is preserved as data but should not create a heightfield-specific terrain kind"
+        );
     }
 
     #[test]
@@ -1263,12 +1411,60 @@ mod tests {
     }
 
     #[test]
-    fn neighbor_shoreline_continuity_clamps_land_next_to_water() {
+    fn lake_water_surface_uses_lake_bed_depth_instead_of_absolute_sea_level() {
+        let mut lake = sample(0.0, 0.0, 0.05, 0.0, 1.0, 0.0, 0.0);
+        lake.combined_macro_height = 0.04;
+        let column = heightfield_column_from_sample(&lake, HeightfieldConfig::default());
+
+        assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Lake);
+        assert!(
+            column.water_level_blocks.expect("lake water") > DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "inland lake water should derive from the lake source elevation, not y=0"
+        );
+        assert!(
+            column.surface_height_blocks < column.water_level_blocks.expect("lake water"),
+            "lake bed should sit below the water surface"
+        );
+        assert!(
+            column.water_level_blocks.expect("lake water") < column.raw_surface_height_blocks + 8.0,
+            "lake water should stay tied to the carved bed instead of riding high on the source terrain"
+        );
+        assert_eq!(
+            column.visible_surface_height_blocks(),
+            column.water_level_blocks.expect("lake water")
+        );
+    }
+
+    #[test]
+    fn lake_bed_preserves_local_relief_instead_of_flattening_to_one_plane() {
+        let mut shallow = sample(0.0, 0.0, 0.05, 0.0, 1.0, 0.0, 0.0);
+        shallow.combined_macro_height = 0.047;
+        let mut deep = sample(1.0, 0.0, 0.05, 0.0, 1.0, 0.0, 0.0);
+        deep.combined_macro_height = 0.038;
+
+        let shallow = heightfield_column_from_sample(&shallow, HeightfieldConfig::default());
+        let deep = heightfield_column_from_sample(&deep, HeightfieldConfig::default());
+
+        assert_eq!(shallow.water_y, deep.water_y);
+        assert!(
+            deep.surface_height_blocks < shallow.surface_height_blocks,
+            "lake bed should preserve U-shaped bed variation instead of a completely flat floor: shallow={} deep={}",
+            shallow.surface_height_blocks,
+            deep.surface_height_blocks
+        );
+        assert!(
+            shallow.water_y.expect("lake water") - deep.surface_y <= 24,
+            "lake bed carve should stay depth-capped instead of making an abrupt shaft"
+        );
+    }
+
+    #[test]
+    fn coast_adjacent_land_preserves_contour_band_without_extra_clamp() {
         let config = MacroFieldTileConfig::new(0.0, 0.0, 3, 1, 32.0);
         let samples = vec![
             sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0),
-            sample(32.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
-            sample(64.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+            sample(32.0, 0.0, 0.00049, 0.0, 0.0, 0.0, 0.0),
+            sample(64.0, 0.0, 0.00098, 0.0, 0.0, 0.0, 0.0),
         ];
         let macro_tile = MacroFieldTile {
             config,
@@ -1279,42 +1475,26 @@ mod tests {
         let coast = tile.column(1, 0).expect("coast column");
         let inland = tile.column(2, 0).expect("inland column");
 
-        assert!(coast.raw_surface_height_blocks > 50.0);
+        assert_eq!(coast.surface_height_blocks, 1.0);
+        assert_eq!(inland.surface_height_blocks, 2.0);
+        assert!(coast.surface_height_blocks > DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS);
+        assert!(inland.surface_height_blocks > coast.surface_height_blocks);
         assert_eq!(
-            coast.surface_height_blocks, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-            "first land sample next to water should start at sea level in contour-step mode"
-        );
-        assert_eq!(
-            inland.surface_height_blocks,
-            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS + DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
-            "second land sample should rise by one contour step"
-        );
-        assert!(inland.surface_height_blocks >= coast.surface_height_blocks);
-        assert!(
-            tile.stats.max_shore_visible_neighbor_delta_blocks
-                <= DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
-            "water/shore visible top should not jump more than one contour step, got {}",
-            tile.stats.max_shore_visible_neighbor_delta_blocks
-        );
-        assert!(
-            tile.stats.max_constrained_neighbor_delta_blocks
-                < tile.stats.max_raw_neighbor_delta_blocks,
-            "shoreline continuity should reduce the raw neighbor jump"
+            tile.stats.max_shore_visible_neighbor_delta_blocks,
+            DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
+            "standing-water shoreline should only reflect the ordinary contour step"
         );
     }
 
     #[test]
-    fn coast_adjacent_land_jump_is_bounded_even_when_raw_macro_is_high() {
-        let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 2, 32.0);
+    fn ocean_shoreline_bevel_cuts_adjacent_land_into_a_ramp() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 1.0);
         let samples = vec![
             sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0),
-            sample(32.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
-            sample(64.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
-            sample(96.0, 0.0, 0.95, 0.0, 0.0, 0.0, 0.0),
-            sample(0.0, 32.0, -0.8, 1.0, 0.0, 0.0, 0.0),
-            sample(32.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
-            sample(64.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
-            sample(96.0, 32.0, 0.95, 0.0, 0.0, 0.0, 0.0),
+            sample(1.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0),
+            sample(2.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0),
+            sample(3.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0),
+            sample(4.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0),
         ];
         let macro_tile = MacroFieldTile {
             config,
@@ -1322,25 +1502,88 @@ mod tests {
             stats: MacroFieldTileStats::default(),
         };
         let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+        let heights = (0..5)
+            .map(|x| tile.column(x, 0).expect("column").surface_y)
+            .collect::<Vec<_>>();
 
-        for z in 0..2 {
-            let first_land = tile.column(1, z).expect("first land ring");
-            let second_land = tile.column(2, z).expect("second land ring");
-            assert_eq!(
-                first_land.surface_height_blocks, DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-                "first land ring at z={z} should start at sea level"
-            );
-            assert_eq!(
-                second_land.surface_height_blocks,
-                DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS + DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
-                "second land ring at z={z} should rise by one contour step"
-            );
-        }
+        assert_eq!(heights[0], 0);
         assert!(
-            tile.stats.max_shore_visible_neighbor_delta_blocks
-                <= DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS,
-            "standing-water shoreline jump should stay within one contour step, got {}",
-            tile.stats.max_shore_visible_neighbor_delta_blocks
+            heights[1] <= 1 && heights[2] <= 2 && heights[3] <= 4,
+            "shoreline bevel should cut high coastal land into a shallow ramp: {heights:?}"
+        );
+        assert!(
+            heights.windows(2).all(|pair| pair[1] - pair[0] <= 2),
+            "shoreline ramp should avoid a vertical sea cliff: {heights:?}"
+        );
+    }
+
+    #[test]
+    fn ocean_shoreline_bevel_uses_neighboring_ruggedness_for_slope() {
+        let smooth = generate_heightfield_tile(
+            &shoreline_ruggedness_test_tile(0.05, 0.05),
+            HeightfieldConfig::default(),
+        );
+        let rugged = generate_heightfield_tile(
+            &shoreline_ruggedness_test_tile(0.95, 0.95),
+            HeightfieldConfig::default(),
+        );
+        let smooth_adjacent = smooth.column(1, 0).expect("smooth coast").surface_y;
+        let rugged_adjacent = rugged.column(1, 0).expect("rugged coast").surface_y;
+
+        assert!(
+            smooth_adjacent < rugged_adjacent,
+            "low ruggedness coast should bevel more gently than rugged coast: smooth={smooth_adjacent} rugged={rugged_adjacent}"
+        );
+        assert!(
+            rugged_adjacent <= 3,
+            "rugged coast can be steep but should not become a vertical wall: {rugged_adjacent}"
+        );
+    }
+
+    #[test]
+    fn ocean_shoreline_bevel_variation_range_grows_with_ruggedness() {
+        let low_left =
+            shoreline_bevel_variation_factor(WorldPlanePoint::new(1.0, 0.0), smoothstep01(0.05));
+        let low_right =
+            shoreline_bevel_variation_factor(WorldPlanePoint::new(19.0, 0.0), smoothstep01(0.05));
+        let high_left =
+            shoreline_bevel_variation_factor(WorldPlanePoint::new(1.0, 0.0), smoothstep01(0.95));
+        let high_right =
+            shoreline_bevel_variation_factor(WorldPlanePoint::new(19.0, 0.0), smoothstep01(0.95));
+        let low_span = (low_left - low_right).abs();
+        let high_span = (high_left - high_right).abs();
+
+        assert!(
+            high_span > low_span * 3.0,
+            "rugged coastline should allow a wider within-cell bevel variation range: low={low_span} high={high_span}"
+        );
+        assert!(
+            (0.45..=1.55).contains(&high_left) && (0.45..=1.55).contains(&high_right),
+            "variation should stay bounded: {high_left} {high_right}"
+        );
+    }
+
+    #[test]
+    fn shoreline_bevel_perlin_only_applies_when_enabled() {
+        let position = WorldPlanePoint::new(37.0, -91.0);
+        let distance_blocks = SHORELINE_BEVEL_RADIUS_BLOCKS * 0.5;
+        let disabled = shoreline_bevel_perlin_blocks(
+            position,
+            distance_blocks,
+            0.8,
+            HeightfieldConfig::default(),
+        );
+        let enabled_config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let enabled = shoreline_bevel_perlin_blocks(position, distance_blocks, 0.8, enabled_config);
+
+        assert_eq!(disabled, 0.0);
+        assert_ne!(enabled, 0.0);
+        assert!(
+            enabled.abs() <= enabled_config.perlin.max_abs_blocks * 0.75,
+            "shoreline bevel perlin should stay bounded: {enabled}"
         );
     }
 
@@ -1426,6 +1669,66 @@ mod tests {
     }
 
     #[test]
+    fn river_bed_hint_can_cut_below_sea_level_at_ocean_mouth() {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 2, 1, 1.0);
+        let mut river = sample_with_river(0.0, 0.0, 0.0, 0.95);
+        river.river_bed_depth_hint = 0.85;
+        river.river_bank_roughness_hint = 0.2;
+        let samples = vec![river, sample(1.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0)];
+        let macro_tile = MacroFieldTile {
+            config,
+            samples,
+            stats: MacroFieldTileStats::default(),
+        };
+
+        let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+        let river = tile.column(0, 0).expect("river mouth");
+        let ocean = tile.column(1, 0).expect("ocean");
+
+        assert_eq!(ocean.visible_surface_height_blocks(), 0.0);
+        assert_eq!(river.terrain_kind, HeightfieldTerrainKind::River);
+        assert!(
+            river.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "river bed should stay carved below sea level near the mouth: {}",
+            river.surface_height_blocks
+        );
+        assert!(
+            river.water_level_blocks.unwrap_or_default() >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "river water surface should remain distinct from the carved bed"
+        );
+        assert!(
+            river.river_bed_depth_blocks > 0.0,
+            "heightfield should preserve the river bed depth diagnostic"
+        );
+    }
+
+    #[test]
+    fn selected_river_bed_hint_can_cut_ocean_column_below_sea_level() {
+        let mut mouth = sample_with_river(0.0, 0.0, -0.25, 0.98);
+        mouth.ocean_mask = 1.0;
+        mouth.river_bed_depth_hint = 0.9;
+
+        let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+        assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Ocean);
+        assert_eq!(
+            column.water_level_blocks,
+            Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS),
+            "ocean mouth water surface should stay at sea level"
+        );
+        assert!(
+            column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "selected river bed hint should carve the ocean-mouth bed below y=0: {}",
+            column.surface_height_blocks
+        );
+        assert_eq!(
+            column.visible_surface_height_blocks(),
+            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "visible standing-water top remains the sea surface, not the carved bed"
+        );
+    }
+
+    #[test]
     fn raw_and_contour_heights_are_recorded_before_snap() {
         let mut sample = sample(0.0, 0.0, 0.123, 0.0, 0.0, 0.0, 0.0);
         sample.coast_mask = 0.65;
@@ -1484,7 +1787,43 @@ mod tests {
             river_valley_strength: 0.0,
             river_distance_blocks: f32::INFINITY,
             river_flow_hint: 0.0,
+            river_bed_depth_hint: 0.0,
+            river_bank_roughness_hint: 0.0,
+            river_gravel_hint: 0.0,
+            river_cutbank_hint: 0.0,
             combined_macro_height: height,
+        }
+    }
+
+    fn shoreline_ruggedness_test_tile(
+        ocean_ruggedness: f32,
+        land_ruggedness: f32,
+    ) -> MacroFieldTile {
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 3, 1, 1.0);
+        let mut ocean = sample(0.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0);
+        ocean.biome_context = Some(test_biome_context(ocean_ruggedness));
+        let mut coast = sample(1.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0);
+        coast.biome_context = Some(test_biome_context(land_ruggedness));
+        let mut inland = sample(2.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0);
+        inland.biome_context = Some(test_biome_context(land_ruggedness));
+
+        MacroFieldTile {
+            config,
+            samples: vec![ocean, coast, inland],
+            stats: MacroFieldTileStats::default(),
+        }
+    }
+
+    fn test_biome_context(ruggedness: f32) -> super::super::biome::GraphBiomeContext {
+        super::super::biome::GraphBiomeContext {
+            temperature: 0.5,
+            hydration: 0.5,
+            elevation: 0.0,
+            continentality: 0.0,
+            coastness: 1.0,
+            mountainness: 0.0,
+            ruggedness,
+            water_role: super::super::biome::GraphBiomeWaterRole::Land,
         }
     }
 

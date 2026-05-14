@@ -122,6 +122,8 @@ ContinuousFieldSample::clamped(self) -> ContinuousFieldSample
 
 GraphHydrologyGraph::segments_for_edge(edge: VoronoiEdgeId) -> impl Iterator<Item = &GraphRiverSegment>
 graph_generation_stages() -> &'static [GraphGenerationStage]
+build_graph_first_voxel_plan(meta, min_chunk_x, max_chunk_x, min_chunk_z, max_chunk_z, config) -> Result<GraphFirstVoxelPlan, GraphFirstVoxelError>
+voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, registry: &BlockRegistry) -> Result<ChunkData, GraphFirstVoxelError>
 ```
 
 ---
@@ -211,7 +213,12 @@ graph_generation_stages() -> &'static [GraphGenerationStage]
   일부 morphology 계산을 직접 수행한다.
 - 현재 `heightfield` leaf는 `MacroFieldTile`을 column-oriented heightfield cache로 변환하는 vertical
   slice를 제공한다. meso feature와 Perlin micro relief는 아직 `0` stub이다.
-- 아직 구현되지 않은 것: Perlin micro relief 실제 합성, final surface/material resolve, voxel fill 연결.
-- 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 갖춰진 뒤 legacy generation을 대체한다.
+- 현재 `voxel` leaf는 launch용 graph-first voxel fill을 제공한다. `PixelizedChunkArea`를
+  `GraphFirstVoxelPlan`으로 변환하고, `surface_y`/`water_y`를 읽어 `grass`와 `water`만으로
+  `ChunkData`를 채운다.
+- `world_create`는 graph-first plan을 사용해 bounded created-world dump를 저장할 수 있다.
+- 아직 구현되지 않은 것: Perlin micro relief 실제 합성, final surface/material resolve,
+  vegetation placement, 최종 voxel palette policy.
+- 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 더 안정화된 뒤 legacy runtime generation을 대체한다.
 - planned `new-world-textmode` support should expose a structured per-chunk observer view containing cell biome, chunk weather scalar state, surface condition, ecology events, and world update records while keeping console formatting outside `world`.
 - old atlas `LocalWeatherState` remains a migration bridge until chunk-scoped weather state replaces weather consumers.

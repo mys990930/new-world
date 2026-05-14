@@ -64,6 +64,7 @@ impl CraterSurfaceSample {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub struct CraterCandidate {
     pub coord: AtlasCoord,
     pub center_x: f32,
@@ -103,16 +104,6 @@ pub const DEF: MesoFeatureDef = MesoFeatureDef {
         "The runtime helper is ready for later meso-apply wiring, but shared candidate selection and material hooks still belong to the main thread.",
     ],
 };
-
-#[cfg(test)]
-pub(crate) fn sample_apply_signal(
-    guides: &MesoGuideMap,
-    world_x: i32,
-    world_z: i32,
-) -> CraterApplySample {
-    let window = build_crater_window(guides, chunk_coord_for_world_xz(world_x, world_z));
-    sample_crater_apply_signal_from_window(&window, world_x, world_z)
-}
 
 #[cfg(test)]
 pub(crate) fn sample_surface(
@@ -254,6 +245,7 @@ fn collect_crater_sources(guides: &MesoGuideMap, meso_span_blocks: f32) -> Vec<G
     candidates
 }
 
+#[cfg(test)]
 pub fn debug_crater_candidates(guides: &MesoGuideMap) -> Vec<CraterCandidate> {
     let meso_span_blocks =
         (crate::world::CHUNK_EDGE_I32 * crate::world::MESO_GUIDE_CELL_SIZE_IN_CHUNKS as i32) as f32;

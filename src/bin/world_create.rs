@@ -1,4 +1,3 @@
-﻿use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::io::{self, ErrorKind};
@@ -8,9 +7,8 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use new_world::world::{
-    BlockRegistry, ChunkCoord, ChunkGenerationInputs, WorldMeta,
-    build_chunk_generation_voxelization_plan, chunk_generation_input_area,
-    generate_chunk_from_voxelization_plan, prepare_chunk_generation_inputs,
+    BlockRegistry, ChunkCoord, GraphFirstVoxelBuildConfig, GraphFirstVoxelPlan, WorldMeta,
+    build_graph_first_voxel_plan, voxelize_graph_first_chunk,
 };
 
 #[path = "shared/world_dump_common.rs"]
@@ -18,7 +16,7 @@ mod world_dump_common;
 
 use world_dump_common::{
     CreatedWorldManifest, CreatedWorldStackSummary, save_chunk_to_dump,
-    summarize_stack_from_voxelization_plan, write_manifest,
+    summarize_stack_from_graph_first_voxel_plan, write_manifest,
 };
 
 const DEFAULT_CENTER_X: i32 = 0;
@@ -81,7 +79,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let max_chunk = ChunkCoord(center_x + radius, max_y_chunk, center_z + radius);
 
     let stack_coords = stack_xz_coords(min_chunk, max_chunk);
-    let input_cache = Arc::new(WorldCreateInputCache::for_stacks(&meta, &stack_coords));
+    let voxel_plan = Arc::new(build_graph_first_voxel_plan(
+        &meta,
+        min_chunk.0,
+        max_chunk.0,
+        min_chunk.2,
+        max_chunk.2,
+        GraphFirstVoxelBuildConfig::new(meta.seed, meta.generator_version),
+    )?);
     let generated_stacks = stack_coords
         .into_par_iter()
         .map(|(chunk_x, chunk_z)| {
@@ -90,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 chunk_z,
                 min_chunk.1,
                 max_chunk.1,
-                input_cache.as_ref(),
+                voxel_plan.as_ref(),
                 block_registry.as_ref(),
                 output.as_path(),
             )
@@ -135,6 +140,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     write_manifest(&output, &manifest)?;
 
     println!("world create complete");
+    println!("generator: graph-first voxel fill");
     println!("seed: {seed}");
     println!(
         "chunk bounds: x={}..{}, y={}..{}, z={}..{}",
@@ -161,62 +167,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct WorldCreateInputCacheKey {
-    origin_x: i32,
-    origin_z: i32,
-    width: u32,
-    height: u32,
-}
-
-impl WorldCreateInputCacheKey {
-    fn for_chunk(coord: ChunkCoord) -> Self {
-        let area = chunk_generation_input_area(coord);
-
-        Self {
-            origin_x: area.origin().x,
-            origin_z: area.origin().z,
-            width: area.width(),
-            height: area.height(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct WorldCreateInputCache {
-    entries: HashMap<WorldCreateInputCacheKey, ChunkGenerationInputs>,
-}
-
-impl WorldCreateInputCache {
-    fn for_stacks(meta: &WorldMeta, stack_coords: &[(i32, i32)]) -> Self {
-        let mut representatives = HashMap::<WorldCreateInputCacheKey, ChunkCoord>::new();
-        for &(chunk_x, chunk_z) in stack_coords {
-            let coord = ChunkCoord(chunk_x, 0, chunk_z);
-            representatives
-                .entry(WorldCreateInputCacheKey::for_chunk(coord))
-                .or_insert(coord);
-        }
-
-        let entries = representatives
-            .into_par_iter()
-            .map(|(key, coord)| (key, prepare_chunk_generation_inputs(coord, meta)))
-            .collect::<HashMap<_, _>>();
-
-        Self { entries }
-    }
-
-    fn inputs_for_chunk(&self, coord: ChunkCoord) -> ChunkGenerationInputs {
-        let key = WorldCreateInputCacheKey::for_chunk(coord);
-        let mut inputs = self
-            .entries
-            .get(&key)
-            .expect("world-create input cache should cover every requested stack")
-            .clone();
-        inputs.chunk = coord;
-        inputs
-    }
-}
-
 fn stack_xz_coords(min_chunk: ChunkCoord, max_chunk: ChunkCoord) -> Vec<(i32, i32)> {
     let mut coords = Vec::new();
     for chunk_z in min_chunk.2..=max_chunk.2 {
@@ -232,22 +182,19 @@ fn generate_stack(
     chunk_z: i32,
     min_y_chunk: i32,
     max_y_chunk: i32,
-    input_cache: &WorldCreateInputCache,
+    voxel_plan: &GraphFirstVoxelPlan,
     block_registry: &BlockRegistry,
     output: &std::path::Path,
 ) -> Result<CreatedWorldStackSummary, String> {
-    let plan_coord = ChunkCoord(chunk_x, 0, chunk_z);
-    let inputs = input_cache.inputs_for_chunk(plan_coord);
-    let voxelization = build_chunk_generation_voxelization_plan(&inputs);
-
     for chunk_y in min_y_chunk..=max_y_chunk {
         let coord = ChunkCoord(chunk_x, chunk_y, chunk_z);
-        let chunk = generate_chunk_from_voxelization_plan(coord, &voxelization, block_registry);
+        let chunk = voxelize_graph_first_chunk(coord, voxel_plan, block_registry)
+            .map_err(|error| error.to_string())?;
         save_chunk_to_dump(output, &chunk).map_err(|error| error.to_string())?;
     }
 
-    Ok(summarize_stack_from_voxelization_plan(
-        &voxelization,
+    Ok(summarize_stack_from_graph_first_voxel_plan(
+        voxel_plan,
         chunk_x,
         chunk_z,
         min_y_chunk,

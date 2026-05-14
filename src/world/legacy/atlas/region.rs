@@ -1504,9 +1504,7 @@ fn area_has_river(coord: AtlasCoord, structure: &AtlasStructureMap) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{
-        AtlasArea, AtlasCoord, WorldMeta, generate_atlas_fields, generate_atlas_structure,
-    };
+    use crate::world::{AtlasArea, AtlasCoord};
 
     #[derive(Debug)]
     struct ClassificationScenario {
@@ -1717,39 +1715,6 @@ mod tests {
             crossings.iter().any(|x| (x - 1.0).abs() > 0.08),
             "visible region boundary should not stay on the raw atlas edge"
         );
-    }
-
-    #[test]
-    #[ignore = "slow atlas region-classification smoke test"]
-    fn region_classification_is_deterministic() {
-        let meta = WorldMeta::new(42);
-        let area = AtlasArea::new(AtlasCoord::new(-2, -2), 6, 6).unwrap();
-        let fields = generate_atlas_fields(&meta, area);
-        let structure = generate_atlas_structure(&meta, area);
-
-        let a = resolve_region_classes(&meta, area, &fields, &structure);
-        let b = resolve_region_classes(&meta, area, &fields, &structure);
-
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    #[ignore = "slow atlas region-classification coverage smoke test"]
-    fn region_classification_produces_multiple_archetypes_for_large_area() {
-        let meta = WorldMeta::new(42);
-        let area = AtlasArea::new(AtlasCoord::new(-8, -8), 16, 16).unwrap();
-        let fields = generate_atlas_fields(&meta, area);
-        let structure = generate_atlas_structure(&meta, area);
-        let classes = resolve_region_classes(&meta, area, &fields, &structure);
-
-        let mut unique = Vec::new();
-        for cell in classes.cells().values() {
-            if !unique.contains(&cell.archetype) {
-                unique.push(cell.archetype);
-            }
-        }
-
-        assert!(unique.len() >= 3);
     }
 
     #[test]

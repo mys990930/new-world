@@ -6,8 +6,11 @@ use super::biome::{GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroCorner, MacroEdge, MacroSurfaceKind};
 
-pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 10.0;
+pub const DEFAULT_RIVER_FLOW_THRESHOLD: f32 = 30.0;
 pub const DEFAULT_HEADWATER_ELEVATION: f32 = 0.10;
+const DEFAULT_HEADWATER_SOURCE_HYDRATION: f32 = 0.34;
+const DEFAULT_HEADWATER_SOURCE_SCORE: f32 = 0.40;
+const LAKE_INLET_RIVER_THRESHOLD_CAP: f32 = 22.0;
 pub const DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR: f32 = 0.46;
 pub const DEFAULT_LAKE_RIVER_FLOW_THRESHOLD_MULTIPLIER: f32 = 5.0;
 pub const DEFAULT_LAKE_DISCHARGE_CAP_PER_AREA: f32 = 0.35;
@@ -125,6 +128,7 @@ pub struct GraphRiverSegment {
     pub raw_flow_accumulation: f32,
     pub flow_accumulation: f32,
     pub downstream_progress: f32,
+    pub local_slope: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -252,18 +256,26 @@ pub fn solve_hydrology(
     let lake_policies =
         resolve_lake_terminal_policies(&terminal_indices, &lake_candidates, &resolutions, config);
     let lake_inlet_policies = resolve_lake_inlet_policies(&lake_candidates, &adjacency, config);
+    let source_hydration = patch
+        .corners
+        .iter()
+        .map(|corner| corner.base_fields.hydration)
+        .collect::<Vec<_>>();
     let selected_rivers = select_river_paths(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
         &elevations,
+        &source_hydration,
         &terminals,
         &lake_candidates,
+        &resolutions,
         &terminal_indices,
         &first_downstream_lakes,
         &lake_policies,
         &lake_inlet_policies,
         &lake_topology,
+        &adjacency,
         &edge_map,
         config,
     );
@@ -1104,7 +1116,10 @@ fn lake_inlet_selection_threshold(
     config: HydrologyConfig,
 ) -> f32 {
     let area_scale = (area_units / config.lake_area_units_per_chain).sqrt();
-    (config.river_flow_threshold * (3.0 + area_scale)).max(discharge_cap * 1.35)
+    let base_threshold = config
+        .river_flow_threshold
+        .min(LAKE_INLET_RIVER_THRESHOLD_CAP);
+    (base_threshold * (3.0 + area_scale)).max(discharge_cap * 1.35)
 }
 
 fn resolve_first_downstream_lakes(
@@ -1196,22 +1211,25 @@ fn select_river_paths(
     downstream_edges: &[Option<VoronoiEdgeId>],
     flow: &[f32],
     elevations: &[f32],
+    source_hydration: &[f32],
     terminals: &[bool],
     lake_candidates: &[bool],
+    resolutions: &[GraphLocalMinimumResolution],
     terminal_indices: &[usize],
     first_downstream_lakes: &[Option<usize>],
     lake_policies: &[Option<LakeTerminalPolicy>],
     lake_inlet_policies: &[Option<LakeTerminalPolicy>],
     lake_topology: &LakeContactTopology,
+    adjacency: &[Vec<CornerNeighbor>],
     edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
     config: HydrologyConfig,
 ) -> SelectedRiverPaths {
     let mut selected = vec![false; downstream.len()];
     let mut selected_lake_chains = vec![0_usize; downstream.len()];
-    let mut candidates = flow
+    let mut candidates = downstream
         .iter()
         .enumerate()
-        .filter_map(|(index, &amount)| {
+        .filter_map(|(index, _)| {
             let terminal = terminal_indices[index];
             let lake_policy = lake_policies[terminal].or_else(|| {
                 first_downstream_lakes[index].and_then(|lake| lake_inlet_policies[lake])
@@ -1221,22 +1239,36 @@ fn select_river_paths(
             } else {
                 config.river_flow_threshold
             };
-            (amount >= threshold
-                && elevations[index] >= config.headwater_elevation
-                && downstream_edges[index].is_some_and(|edge| !is_lake_edge(edge, edge_map))
-                && !terminals[index]
-                && !lake_candidates[index])
-                .then_some(index)
+            let source = headwater_source_candidate(
+                index,
+                downstream,
+                downstream_edges,
+                flow,
+                elevations,
+                source_hydration,
+                terminals,
+                lake_candidates,
+                first_downstream_lakes,
+                adjacency,
+                edge_map,
+                config,
+                threshold,
+            )?;
+            Some(source)
         })
         .collect::<Vec<_>>();
 
     candidates.sort_by(|&left, &right| {
-        flow[right]
-            .total_cmp(&flow[left])
-            .then_with(|| left.cmp(&right))
+        right
+            .path_potential
+            .total_cmp(&left.path_potential)
+            .then_with(|| right.score.total_cmp(&left.score))
+            .then_with(|| right.elevation.total_cmp(&left.elevation))
+            .then_with(|| left.index.cmp(&right.index))
     });
 
-    for start in candidates {
+    for candidate in candidates {
+        let start = candidate.index;
         let terminal = terminal_indices[start];
         let first_lake = first_downstream_lakes[start];
         let lake_policy = lake_policies[terminal]
@@ -1285,9 +1317,16 @@ fn select_river_paths(
         lake_inlet_policies,
         edge_map,
     );
-    remove_invalid_terminal_intersections(&mut selected, downstream, flow, lake_candidates);
-    let duplicate_trunk_pruned_count =
-        remove_ambiguous_shared_corner_intersections(&mut selected, downstream, flow);
+    remove_invalid_terminal_intersections(
+        &mut selected,
+        downstream,
+        flow,
+        lake_candidates,
+        terminals,
+        resolutions,
+    );
+    let mut duplicate_trunk_pruned_count =
+        prune_multi_incoming_selected_branches(&mut selected, downstream, flow);
     let repeated_lake_contact_pruned_count =
         remove_repeated_lake_contact_chains(&mut selected, downstream, lake_topology);
     enforce_lake_contact_topology(
@@ -1301,12 +1340,173 @@ fn select_river_paths(
         lake_inlet_policies,
         edge_map,
     );
+    duplicate_trunk_pruned_count +=
+        prune_multi_incoming_selected_branches(&mut selected, downstream, flow);
 
     SelectedRiverPaths {
         selected,
         duplicate_trunk_pruned_count,
         repeated_lake_contact_pruned_count,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HeadwaterSourceCandidate {
+    index: usize,
+    path_potential: f32,
+    score: f32,
+    elevation: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn headwater_source_candidate(
+    index: usize,
+    downstream: &[Option<usize>],
+    downstream_edges: &[Option<VoronoiEdgeId>],
+    flow: &[f32],
+    elevations: &[f32],
+    source_hydration: &[f32],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    first_downstream_lakes: &[Option<usize>],
+    adjacency: &[Vec<CornerNeighbor>],
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
+    config: HydrologyConfig,
+    threshold: f32,
+) -> Option<HeadwaterSourceCandidate> {
+    if terminals[index]
+        || lake_candidates[index]
+        || elevations[index] < config.headwater_elevation
+        || downstream_edges[index].is_none_or(|edge| is_lake_edge(edge, edge_map))
+    {
+        return None;
+    }
+
+    let ridge_context = source_ridge_context(index, adjacency, edge_map);
+    let local_peak =
+        is_headwater_local_peak(index, elevations, terminals, lake_candidates, adjacency);
+    let near_local_peak = is_headwater_near_local_peak(
+        index,
+        elevations,
+        terminals,
+        lake_candidates,
+        adjacency,
+        0.08,
+    );
+    let high_context =
+        elevations[index] >= (config.headwater_elevation + 0.28).max(0.38) || ridge_context >= 0.28;
+    let hydration = source_hydration.get(index).copied().unwrap_or(0.0);
+    let hydrated_source_context = hydration >= 0.44 && near_local_peak;
+    if !local_peak && !high_context && !hydrated_source_context {
+        return None;
+    }
+
+    let elevation_bonus = ((elevations[index] - config.headwater_elevation) / 0.55).clamp(0.0, 1.0);
+    let score = hydration * 0.52 + elevation_bonus * 0.30 + ridge_context * 0.30;
+    if hydration < DEFAULT_HEADWATER_SOURCE_HYDRATION && score < DEFAULT_HEADWATER_SOURCE_SCORE {
+        return None;
+    }
+
+    let path_potential = downstream_path_potential(
+        index,
+        downstream,
+        flow,
+        terminals,
+        lake_candidates,
+        first_downstream_lakes,
+    );
+    if path_potential < threshold {
+        return None;
+    }
+
+    Some(HeadwaterSourceCandidate {
+        index,
+        path_potential,
+        score,
+        elevation: elevations[index],
+    })
+}
+
+fn is_headwater_local_peak(
+    index: usize,
+    elevations: &[f32],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    adjacency: &[Vec<CornerNeighbor>],
+) -> bool {
+    adjacency[index]
+        .iter()
+        .filter(|neighbor| !terminals[neighbor.index] && !lake_candidates[neighbor.index])
+        .all(|neighbor| elevations[index] >= elevations[neighbor.index] - 0.001)
+}
+
+fn is_headwater_near_local_peak(
+    index: usize,
+    elevations: &[f32],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    adjacency: &[Vec<CornerNeighbor>],
+    tolerance: f32,
+) -> bool {
+    adjacency[index]
+        .iter()
+        .filter(|neighbor| !terminals[neighbor.index] && !lake_candidates[neighbor.index])
+        .all(|neighbor| elevations[index] + tolerance >= elevations[neighbor.index])
+}
+
+fn source_ridge_context(
+    index: usize,
+    adjacency: &[Vec<CornerNeighbor>],
+    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
+) -> f32 {
+    adjacency[index]
+        .iter()
+        .filter_map(|neighbor| edge_map.get(&neighbor.edge))
+        .map(|edge| {
+            let guide = edge.guide;
+            let explicit_ridge = if guide.is_ridge_candidate { 0.30 } else { 0.0 };
+            guide
+                .mountainness
+                .max(guide.ridgeness)
+                .max(guide.drainage_divide_potential)
+                .max(explicit_ridge)
+        })
+        .fold(0.0, f32::max)
+}
+
+fn downstream_path_potential(
+    start: usize,
+    downstream: &[Option<usize>],
+    flow: &[f32],
+    terminals: &[bool],
+    lake_candidates: &[bool],
+    first_downstream_lakes: &[Option<usize>],
+) -> f32 {
+    let first_lake = first_downstream_lakes[start];
+    let mut current = start;
+    let mut best = 0.0_f32;
+    let mut guard = 0;
+
+    loop {
+        if terminals[current] || lake_candidates[current] {
+            break;
+        }
+        best = best.max(flow[current]);
+        let Some(next) = downstream[current] else {
+            break;
+        };
+        if first_lake.is_some_and(|lake| next == lake) || terminals[next] {
+            best = best.max(flow[current]);
+            break;
+        }
+        current = next;
+        guard += 1;
+        if guard > downstream.len() {
+            break;
+        }
+    }
+
+    best
 }
 
 fn enforce_lake_contact_topology(
@@ -1430,6 +1630,8 @@ fn remove_invalid_terminal_intersections(
     downstream: &[Option<usize>],
     flow: &[f32],
     lake_candidates: &[bool],
+    terminals: &[bool],
+    resolutions: &[GraphLocalMinimumResolution],
 ) {
     let mut incoming = vec![Vec::<usize>::new(); selected.len()];
     let mut has_outgoing = vec![false; selected.len()];
@@ -1445,7 +1647,19 @@ fn remove_invalid_terminal_intersections(
     }
 
     for (corner, sources) in incoming.into_iter().enumerate() {
-        if sources.len() <= 1 || has_outgoing[corner] || lake_candidates[corner] {
+        let is_explicit_terminal = terminals[corner]
+            || matches!(
+                resolutions[corner],
+                GraphLocalMinimumResolution::OceanOutlet
+                    | GraphLocalMinimumResolution::OutletCarve
+                    | GraphLocalMinimumResolution::Lake
+                    | GraphLocalMinimumResolution::Sink
+            );
+        if sources.len() <= 1
+            || has_outgoing[corner]
+            || lake_candidates[corner]
+            || is_explicit_terminal
+        {
             continue;
         }
         let keep = sources
@@ -1465,7 +1679,7 @@ fn remove_invalid_terminal_intersections(
     }
 }
 
-fn remove_ambiguous_shared_corner_intersections(
+fn prune_multi_incoming_selected_branches(
     selected: &mut [bool],
     downstream: &[Option<usize>],
     flow: &[f32],
@@ -1484,13 +1698,12 @@ fn remove_ambiguous_shared_corner_intersections(
         }
 
         let Some((_, sources)) = incoming
-            .into_iter()
+            .iter()
             .enumerate()
             .find(|(_, sources)| sources.len() > 1)
         else {
             break;
         };
-
         let keep = sources
             .iter()
             .copied()
@@ -1499,13 +1712,18 @@ fn remove_ambiguous_shared_corner_intersections(
                     .total_cmp(&flow[right])
                     .then_with(|| right.cmp(&left))
             })
-            .expect("ambiguous shared corner should have at least one selected source");
+            .expect("multi-incoming vertex should have a strongest selected source");
+        let remove = sources
+            .iter()
+            .copied()
+            .filter(|&source| source != keep)
+            .collect::<Vec<_>>();
 
-        for source in sources {
-            if source == keep || !selected[source] {
-                continue;
+        for source in remove {
+            if selected[source] {
+                selected[source] = false;
+                pruned += 1;
             }
-            pruned += remove_selected_upstream_tree(source, selected, downstream);
         }
     }
 
@@ -1580,35 +1798,6 @@ fn remove_repeated_lake_contact_chains(
     }
 
     pruned
-}
-
-fn remove_selected_upstream_tree(
-    root: usize,
-    selected: &mut [bool],
-    downstream: &[Option<usize>],
-) -> usize {
-    let mut incoming = vec![Vec::<usize>::new(); selected.len()];
-    for (index, is_selected) in selected.iter().copied().enumerate() {
-        if !is_selected {
-            continue;
-        }
-        if let Some(target) = downstream[index] {
-            incoming[target].push(index);
-        }
-    }
-
-    let mut removed = 0_usize;
-    let mut stack = vec![root];
-    while let Some(index) = stack.pop() {
-        if !selected[index] {
-            continue;
-        }
-        selected[index] = false;
-        removed += 1;
-        stack.extend(incoming[index].iter().copied());
-    }
-
-    removed
 }
 
 fn resolve_selected_flow_accumulation(
@@ -1799,7 +1988,6 @@ fn resolve_topology_stats(
         if incoming[index] <= 1 {
             continue;
         }
-        let is_valid_confluence = outgoing[index] == 1;
         let is_explicit_terminal = matches!(
             resolutions[index],
             GraphLocalMinimumResolution::OceanOutlet
@@ -1807,13 +1995,13 @@ fn resolve_topology_stats(
                 | GraphLocalMinimumResolution::Lake
                 | GraphLocalMinimumResolution::Sink
         );
-        if !is_valid_confluence && !is_explicit_terminal {
-            stats.invalid_river_intersection_count += 1;
+        if !is_explicit_terminal {
+            stats.invalid_river_intersection_count += incoming[index].saturating_sub(1) as usize;
         }
         if lake_candidates[index] && incoming[index] > 1 {
             stats.invalid_river_intersection_count += incoming[index].saturating_sub(1) as usize;
         }
-        if incoming[index] > 1 {
+        if !is_explicit_terminal {
             stats.ambiguous_shared_corner_count += incoming[index].saturating_sub(1) as usize;
         }
     }
@@ -1868,6 +2056,12 @@ fn build_segments(
             let target = downstream[index]?;
             let edge = downstream_edges[index]?;
             let drop = elevations[index] - elevations[target];
+            let length = squared_distance(
+                patch.corners[index].position,
+                patch.corners[target].position,
+            )
+            .sqrt()
+            .max(f32::EPSILON);
             Some(GraphRiverSegment {
                 id: GraphRiverSegmentId(splitmix64(
                     edge.0 ^ patch.corners[index].id.0.rotate_left(17),
@@ -1880,6 +2074,7 @@ fn build_segments(
                 raw_flow_accumulation: flow[index],
                 flow_accumulation: selected_flow[index],
                 downstream_progress: drop.max(0.005),
+                local_slope: (drop / length).max(0.0),
             })
         })
         .collect::<Vec<_>>();
@@ -1901,6 +2096,12 @@ fn river_role(flow: f32) -> GraphHydrologyRole {
 
 fn node_id(corner: VoronoiCornerId) -> GraphDrainageNodeId {
     GraphDrainageNodeId(splitmix64(corner.0 ^ 0x75a7_2f38_1e91_4d0c))
+}
+
+fn squared_distance(a: WorldPlanePoint, b: WorldPlanePoint) -> f32 {
+    let dx = a.x - b.x;
+    let dz = a.z - b.z;
+    dx * dx + dz * dz
 }
 
 fn splitmix64(mut value: u64) -> u64 {
@@ -1940,6 +2141,7 @@ mod tests {
                     raw_flow_accumulation: 12.0,
                     flow_accumulation: 12.0,
                     downstream_progress: 0.4,
+                    local_slope: 0.01,
                 },
                 GraphRiverSegment {
                     id: GraphRiverSegmentId(2),
@@ -1951,6 +2153,7 @@ mod tests {
                     raw_flow_accumulation: 3.0,
                     flow_accumulation: 3.0,
                     downstream_progress: 0.2,
+                    local_slope: 0.02,
                 },
             ],
             topology_stats: GraphHydrologyTopologyStats::default(),
@@ -1976,8 +2179,13 @@ mod tests {
 
     #[test]
     fn selected_river_segments_have_downstream_continuity() {
-        let (patch, macro_map) = test_inputs(91);
-        let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+        let (_, hydro) = (1..=32)
+            .find_map(|seed| {
+                let (patch, macro_map) = test_inputs(seed);
+                let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+                (!hydro.segments.is_empty()).then_some((patch, hydro))
+            })
+            .expect("default hydrology should select visible river chains in the seed scan");
         let corners = hydro
             .corners
             .iter()
@@ -1988,11 +2196,11 @@ mod tests {
             .iter()
             .map(|segment| (segment.from, segment))
             .collect::<HashMap<_, _>>();
-
-        assert!(
-            !hydro.segments.is_empty(),
-            "default hydrology should select visible river chains"
-        );
+        let nodes_by_id = hydro
+            .nodes
+            .iter()
+            .map(|node| (node.id, node))
+            .collect::<HashMap<_, _>>();
 
         for segment in &hydro.segments {
             assert!(
@@ -2016,10 +2224,17 @@ mod tests {
                 continue;
             }
 
-            assert!(
-                segments_by_from.contains_key(&segment.to),
-                "selected segment should continue to an outlet or explicit resolution"
-            );
+            if !segments_by_from.contains_key(&segment.to) {
+                let node = nodes_by_id
+                    .get(&segment.to)
+                    .copied()
+                    .expect("segment target node should exist");
+                assert_eq!(
+                    node.kind,
+                    GraphDrainageNodeKind::Source,
+                    "selected segment should continue to an outlet, explicit resolution, or a pruned tributary endpoint"
+                );
+            }
         }
     }
 
@@ -2035,6 +2250,477 @@ mod tests {
         {
             assert_ne!(corner.resolution, GraphLocalMinimumResolution::None);
         }
+    }
+
+    #[test]
+    fn selected_tributaries_prune_weaker_multi_incoming_branch() {
+        let downstream = vec![Some(2), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(40)),
+            Some(VoronoiEdgeId(41)),
+            Some(VoronoiEdgeId(42)),
+            None,
+        ];
+        let flow = vec![14.0, 26.0, 48.0, 48.0];
+        let elevations = vec![0.65, 0.70, 0.40, 0.0];
+        let terminals = vec![false, false, false, true];
+        let lake_candidates = vec![false; 4];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let terminal_indices = resolve_terminal_indices(&downstream);
+        let first_downstream_lakes = vec![None; 4];
+        let lake_policies = vec![None; 4];
+        let lake_inlet_policies = vec![None; 4];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None; 4],
+            contact_component_by_land_corner: vec![None; 4],
+            inlet_vertices: vec![false; 4],
+            outlet_vertices: vec![false; 4],
+            inlet_land_vertices: vec![false; 4],
+            outlet_land_vertices: vec![false; 4],
+        };
+        let source_hydration = vec![0.55, 0.55, 0.20, 0.0];
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(40),
+            }],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(41),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(40),
+                },
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(41),
+                },
+                CornerNeighbor {
+                    index: 3,
+                    edge: VoronoiEdgeId(42),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(42),
+            }],
+        ];
+        let config = HydrologyConfig {
+            river_flow_threshold: 10.0,
+            ..HydrologyConfig::default()
+        };
+
+        let selected_rivers = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &terminal_indices,
+            &first_downstream_lakes,
+            &lake_policies,
+            &lake_inlet_policies,
+            &lake_topology,
+            &adjacency,
+            &HashMap::new(),
+            config,
+        );
+
+        assert_eq!(selected_rivers.selected, vec![false, true, true, false]);
+        assert_eq!(selected_rivers.duplicate_trunk_pruned_count, 1);
+
+        let node_kinds = resolve_node_kinds(
+            &selected_rivers.selected,
+            &downstream,
+            &flow,
+            &terminals,
+            &resolutions,
+            &lake_topology,
+            &lake_inlet_policies,
+            config,
+        );
+        let stats = resolve_topology_stats(
+            &selected_rivers.selected,
+            &downstream,
+            &lake_candidates,
+            &resolutions,
+            &downstream_edges,
+            &HashMap::new(),
+            &node_kinds,
+            selected_rivers.duplicate_trunk_pruned_count,
+            selected_rivers.repeated_lake_contact_pruned_count,
+        );
+
+        assert_eq!(node_kinds[2], GraphDrainageNodeKind::Source);
+        assert_eq!(node_kinds[3], GraphDrainageNodeKind::CoastOutlet);
+        assert_eq!(stats.invalid_river_intersection_count, 0);
+        assert_eq!(stats.ambiguous_shared_corner_count, 0);
+        assert_eq!(stats.invalid_lake_contact_count, 0);
+    }
+
+    #[test]
+    fn multi_incoming_prune_keeps_upstream_tributary_axis() {
+        let downstream = vec![Some(2), Some(3), Some(3), Some(4), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(50)),
+            Some(VoronoiEdgeId(51)),
+            Some(VoronoiEdgeId(52)),
+            Some(VoronoiEdgeId(53)),
+            None,
+        ];
+        let flow = vec![12.0, 35.0, 24.0, 60.0, 60.0];
+        let elevations = vec![0.72, 0.76, 0.55, 0.40, 0.0];
+        let source_hydration = vec![0.55, 0.55, 0.30, 0.0, 0.0];
+        let terminals = vec![false, false, false, false, true];
+        let lake_candidates = vec![false; 5];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None; 5],
+            contact_component_by_land_corner: vec![None; 5],
+            inlet_vertices: vec![false; 5],
+            outlet_vertices: vec![false; 5],
+            inlet_land_vertices: vec![false; 5],
+            outlet_land_vertices: vec![false; 5],
+        };
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(50),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(51),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(50),
+                },
+                CornerNeighbor {
+                    index: 3,
+                    edge: VoronoiEdgeId(52),
+                },
+            ],
+            vec![
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(51),
+                },
+                CornerNeighbor {
+                    index: 2,
+                    edge: VoronoiEdgeId(52),
+                },
+                CornerNeighbor {
+                    index: 4,
+                    edge: VoronoiEdgeId(53),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(53),
+            }],
+        ];
+
+        let selected_rivers = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 5],
+            &[None; 5],
+            &[None; 5],
+            &lake_topology,
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig::default(),
+        );
+
+        assert_eq!(
+            selected_rivers.selected,
+            vec![true, true, false, true, false],
+            "the weaker merge edge should be removed while its upstream tributary axis remains visible"
+        );
+        assert_eq!(selected_rivers.duplicate_trunk_pruned_count, 1);
+
+        let mut incoming = vec![0_u32; downstream.len()];
+        for (index, is_selected) in selected_rivers.selected.iter().copied().enumerate() {
+            if is_selected {
+                incoming[downstream[index].expect("selected edge should have target")] += 1;
+            }
+        }
+        assert!(
+            incoming.into_iter().all(|count| count <= 1),
+            "selected geometry must still have at most one incoming segment per vertex"
+        );
+    }
+
+    #[test]
+    fn default_selection_threshold_prunes_small_tributary_starts() {
+        let downstream = vec![Some(2), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(40)),
+            Some(VoronoiEdgeId(41)),
+            Some(VoronoiEdgeId(42)),
+            None,
+        ];
+        let flow = vec![14.0, 26.0, 48.0, 48.0];
+        let elevations = vec![0.65, 0.70, 0.40, 0.0];
+        let terminals = vec![false, false, false, true];
+        let lake_candidates = vec![false; 4];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let terminal_indices = resolve_terminal_indices(&downstream);
+        let source_hydration = vec![0.55, 0.55, 0.20, 0.0];
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(40),
+            }],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(41),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(40),
+                },
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(41),
+                },
+                CornerNeighbor {
+                    index: 3,
+                    edge: VoronoiEdgeId(42),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(42),
+            }],
+        ];
+        let selected_rivers = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &terminal_indices,
+            &[None; 4],
+            &[None; 4],
+            &[None; 4],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 4],
+                contact_component_by_land_corner: vec![None; 4],
+                inlet_vertices: vec![false; 4],
+                outlet_vertices: vec![false; 4],
+                inlet_land_vertices: vec![false; 4],
+                outlet_land_vertices: vec![false; 4],
+            },
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig::default(),
+        );
+
+        assert_eq!(
+            DEFAULT_RIVER_FLOW_THRESHOLD, 30.0,
+            "launch default intentionally raises the selected-headwater threshold"
+        );
+        assert_eq!(
+            selected_rivers.selected,
+            vec![false, true, true, false],
+            "the smaller tributary start should be pruned while the stronger branch preserves the downstream trunk"
+        );
+    }
+
+    #[test]
+    fn stricter_default_threshold_prunes_marginal_tributary_starts() {
+        let downstream = vec![Some(1), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(60)),
+            Some(VoronoiEdgeId(61)),
+            Some(VoronoiEdgeId(62)),
+            None,
+        ];
+        let flow = vec![8.0, 18.0, 21.0, 21.0];
+        let elevations = vec![0.64, 0.44, 0.30, 0.0];
+        let source_hydration = vec![0.56, 0.42, 0.25, 0.0];
+        let terminals = vec![false, false, false, true];
+        let lake_candidates = vec![false; 4];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 4],
+            &[None; 4],
+            &[None; 4],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 4],
+                contact_component_by_land_corner: vec![None; 4],
+                inlet_vertices: vec![false; 4],
+                outlet_vertices: vec![false; 4],
+                inlet_land_vertices: vec![false; 4],
+                outlet_land_vertices: vec![false; 4],
+            },
+            &vec![Vec::new(); 4],
+            &HashMap::new(),
+            HydrologyConfig::default(),
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![false; 4],
+            "a terrain-like source should still be pruned when downstream path potential stays below the bumped default threshold"
+        );
+    }
+
+    #[test]
+    fn source_candidate_selects_headwater_before_downstream_threshold_crossing() {
+        let downstream = vec![Some(1), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(50)),
+            Some(VoronoiEdgeId(51)),
+            Some(VoronoiEdgeId(52)),
+            None,
+        ];
+        let flow = vec![3.0, 12.0, 32.0, 32.0];
+        let elevations = vec![0.62, 0.28, 0.22, 0.0];
+        let source_hydration = vec![0.55, 0.0, 0.0, 0.0];
+        let terminals = vec![false, false, false, true];
+        let lake_candidates = vec![false; 4];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 4],
+            &[None; 4],
+            &[None; 4],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 4],
+                contact_component_by_land_corner: vec![None; 4],
+                inlet_vertices: vec![false; 4],
+                outlet_vertices: vec![false; 4],
+                inlet_land_vertices: vec![false; 4],
+                outlet_land_vertices: vec![false; 4],
+            },
+            &vec![Vec::new(); 4],
+            &HashMap::new(),
+            HydrologyConfig::default(),
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![true, true, true, false],
+            "selection should start at the hydrated terrain source, not only at the first threshold crossing"
+        );
+    }
+
+    #[test]
+    fn threshold_crossing_without_source_context_is_not_selected() {
+        let downstream = vec![Some(1), Some(2), Some(3), None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(50)),
+            Some(VoronoiEdgeId(51)),
+            Some(VoronoiEdgeId(52)),
+            None,
+        ];
+        let flow = vec![4.0, 28.0, 32.0, 32.0];
+        let elevations = vec![0.16, 0.14, 0.12, 0.0];
+        let source_hydration = vec![0.10, 0.10, 0.10, 0.0];
+        let terminals = vec![false, false, false, true];
+        let lake_candidates = vec![false; 4];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 4],
+            &[None; 4],
+            &[None; 4],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 4],
+                contact_component_by_land_corner: vec![None; 4],
+                inlet_vertices: vec![false; 4],
+                outlet_vertices: vec![false; 4],
+                inlet_land_vertices: vec![false; 4],
+                outlet_land_vertices: vec![false; 4],
+            },
+            &vec![Vec::new(); 4],
+            &HashMap::new(),
+            HydrologyConfig::default(),
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![false; 4],
+            "a downstream threshold crossing should not create a selected river without a source-like start"
+        );
     }
 
     #[test]
@@ -2229,14 +2915,10 @@ mod tests {
         assert_eq!(hydro.topology_stats.invalid_river_intersection_count, 0);
         assert_eq!(hydro.topology_stats.invalid_lake_contact_count, 0);
         assert_eq!(hydro.topology_stats.ambiguous_shared_corner_count, 0);
-        assert!(
-            hydro.topology_stats.duplicate_trunk_pruned_count > 0,
-            "seed 42 should exercise duplicate selected trunk pruning"
-        );
         assert_eq!(
             invalid_shared_corner_count(&hydro),
             0,
-            "selected river graph should only share corners through downstream confluence/branch logic"
+            "selected river graph should not leave multiple selected incoming segments at one vertex"
         );
     }
 
@@ -2498,13 +3180,16 @@ mod tests {
             &downstream_edges,
             &flow,
             &elevations,
+            &[0.55, 0.55, 0.55, 0.0, 0.0, 0.0, 0.0],
             &terminals,
             &lake_candidates,
+            &resolutions,
             &terminal_indices,
             &first_downstream_lakes,
             &lake_policies,
             &lake_inlet_policies,
             &lake_topology,
+            &vec![Vec::new(); 7],
             &HashMap::new(),
             config,
         )
@@ -2621,13 +3306,16 @@ mod tests {
             &downstream_edges,
             &flow,
             &elevations,
+            &[0.55, 0.0, 0.0, 0.0],
             &terminals,
             &lake_candidates,
+            &resolutions,
             &terminal_indices,
             &first_downstream_lakes,
             &lake_policies,
             &lake_inlet_policies,
             &lake_topology,
+            &vec![Vec::new(); 4],
             &HashMap::new(),
             config,
         )
@@ -2927,11 +3615,9 @@ mod tests {
 
     fn invalid_shared_corner_count(graph: &GraphHydrologyGraph) -> usize {
         let mut incoming = HashMap::<GraphDrainageNodeId, usize>::new();
-        let mut outgoing = HashMap::<GraphDrainageNodeId, usize>::new();
         let nodes = nodes_by_id(graph);
 
         for segment in &graph.segments {
-            *outgoing.entry(segment.from).or_default() += 1;
             *incoming.entry(segment.to).or_default() += 1;
         }
 
@@ -2941,15 +3627,13 @@ mod tests {
                 if *count <= 1 {
                     return false;
                 }
-                let outgoing_count = outgoing.get(node).copied().unwrap_or(0);
                 let kind = nodes[node].kind;
-                outgoing_count != 1
-                    && !matches!(
-                        kind,
-                        GraphDrainageNodeKind::LakeInlet
-                            | GraphDrainageNodeKind::Sink
-                            | GraphDrainageNodeKind::CoastOutlet
-                    )
+                !matches!(
+                    kind,
+                    GraphDrainageNodeKind::LakeInlet
+                        | GraphDrainageNodeKind::Sink
+                        | GraphDrainageNodeKind::CoastOutlet
+                )
             })
             .count()
     }

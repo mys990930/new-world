@@ -105,3 +105,13 @@ SurfaceColumnPlan {
 
 이 plan들은 `ChunkData`를 수정하지 않는다. 마지막 voxel fill 단계가 water, material, vegetation
 priority를 함께 보고 실제 block을 배치한다.
+
+---
+
+## 현재 구현 상태
+
+- graph-first 저장 vertical slice에서는 아직 실제 surface/material resolve를 구현하지 않았다.
+- `world_create`가 사용하는 launch voxel fill은 이 단계를 stub으로 넘기며, 비물 지형은 임시로
+  registry의 `grass` block 하나만 사용한다.
+- ocean/lake/river/coast별 material policy는 이 문서의 계약으로 남아 있으며, 현재 stub이 최종 정책을
+  대체하지 않는다.

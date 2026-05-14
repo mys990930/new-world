@@ -18,15 +18,17 @@
 | `biome_map_preview` | Top-down graph-first biome map preview, one color per resolved Voronoi cell | Works; reads `GraphMacroMap.biomes` from the core biome classifier output |
 | `chunk_preview` | Quarter-view chunk preview | Recommended in `--stage prototype` or `--stage hydrology`; direct-seed `full` and `--lod-blocks > 1` are currently blocked by generation TODOs |
 | `chunk_topdown_preview` | Exact top-down realized block-column preview | Works with an existing created-world dump; direct-seed mode currently depends on `generate_chunk(...)` TODO |
+| `generation_preview_suite` | Orchestrates the key graph-first preview binaries into one ordered folder | Works as a thin child-process suite |
 | `graph_voronoi_preview` | 4K top-down graph-first Voronoi macro graph and site-field preview maps | Works |
 | `heightfield_preview` | Quarter-view graph-first heightfield column preview from macro field cache | Works |
 | `macro_field_preview` | Top-down graph-first macro field rasterization channel preview | Works |
 | `macro_map_preview` | Top-down graph-first macro map composite with ocean/land/elevation and selected guide overlays | Works |
 | `meso_preview` | Top-down isolated meso-feature preview over a flat baseline | Works for explicit seed / coordinate windows |
 | `new-world-textmode` | Continuously refreshed console grid for fixed tick time/weather/surface/ecology events over the ECS `3x3` active chunk scope | Works as the first textmode simulation slice |
+| `pixelize_preview` | Top-down graph-first chunk pixelize preview, one resolved column per world block by default | Works with the current core `pixelize` API export |
 | `terrain_probe` | Per-chunk / per-column generation probe dump | Currently blocked by `probe_chunk(...)` and `probe_column(...)` TODO |
 | `tree_preview` | Quarter-view preview of five generated variants for one climate tree blueprint | Works |
-| `world_create` | Generate and persist a created-world dump | Currently blocked by `generate_chunk(...)` TODO |
+| `world_create` | Generate and persist a created-world dump | Works through the graph-first launch voxel fill path |
 
 ## chunk_preview
 
@@ -161,6 +163,46 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
     includes a compact two-column legend.
   - See [graph_voronoi_preview.md](./graph_voronoi_preview.md).
 
+## generation_preview_suite
+
+- Purpose: run the main graph-first preview sequence and collect the PNGs into one directory.
+- Parameters:
+  - positional: `<seed>`
+  - optional: `--center-chunk-x <i32>` / `--cx <i32>`, `--center-chunk-z <i32>` / `--cz <i32>`,
+    `--radius <i32>` / `--r <i32>`, `--output <path>`, `--overview-width <u32>`,
+    `--overview-height <u32>`, `--zoom-width <u32>`, `--zoom-height <u32>`,
+    `--heightfield-width <u32>`, `--heightfield-height <u32>`, `--contour-step <i32>`
+- Defaults:
+  - center chunk `= (0, 0)`
+  - `--radius 8`
+  - `--radius 0` is allowed for one-chunk smoke runs; the macro-field zoom child receives `1`
+    internally because it needs a nonzero world span.
+  - overview images `= 3840 x 2160`
+  - zoom/pixelize images `= 1280 x 720`
+  - heightfield image `= 1280 x 720`
+  - `--contour-step 8`
+  - output directory `target/generation-preview-suite/s<seed>_cx<cx>_cz<cz>_r<r>`
+- Output files:
+  - `01_graph_cont.png`
+  - `02_graph_elev.png`
+  - `03_macro_map.png`
+  - `04_biome_map.png`
+  - `05_macro_combined.png`
+  - `06_macro_zoom.png`
+  - `07_pixelize.png`
+  - `08_heightfield.png`
+- Example:
+
+```bash
+cargo run --bin generation_preview_suite -- 42 --center-chunk-x -70 --center-chunk-z 0 --radius 8 --output target/generation-preview-suite/s42_cx-70_cz0_r8
+```
+
+- Notes:
+  - The suite accepts chunk coordinates and converts them to world-block centers for graph/macro
+    overview binaries.
+  - It reuses existing preview binaries as child processes and does not own terrain/rendering policy.
+  - See [generation_preview_suite.md](./generation_preview_suite.md).
+
 ## heightfield_preview
 
 - Purpose: render a quarter-view diagnostic preview for graph-first heightfield columns.
@@ -168,8 +210,8 @@ cargo run --bin graph_voronoi_preview -- 42 0 0 --mode all --output target/graph
   - positional: `<seed> <center-x> <center-z>` where center coordinates are chunk coordinates by default
   - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--chunk-radius <i32>`, `--columns-x <u32>`,
     `--columns-z <u32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`,
-    `--land-bias <f32>`, `--quarter-turns <u8>`, `--block-lines`,
-    `--no-block-lines`, `--world-center`, `--stage heightfield`, `--output <path>`
+    `--land-bias <f32>`, `--quarter-turns <u8>`, `--world-center`, `--stage heightfield`,
+    `--output <path>`
 - Defaults:
   - `--width 1280`
   - `--height 720`
@@ -188,9 +230,9 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
     then renders diagnostic voxelized columns.
   - Positional center is chunk-based so it is consistent with `--chunk-radius`; `--world-center` is
     only a compatibility path for old world-block invocations.
-  - The compass follows the current quarter-view projection, and thin block lines are on by default
-    to make column scale readable. They draw subtle top/side face edges plus integer side-step
-    guides; `--no-block-lines` disables only this diagnostic overlay.
+  - The compass follows the current quarter-view projection. Per-block face outlines and integer
+    side-step guides are not rendered; scale context comes from filled faces, the player diagnostic
+    cube, and world/grid overlays.
   - Horizontal density is expressed as direct column count. Free-window mode defaults to `768` X
     columns; chunk-radius mode defaults to `32` columns per chunk on each axis, matching one
     column per world block for the current `32` block chunk edge. Heightfield Y relief is resolved
@@ -232,6 +274,34 @@ cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 72
   - `river` and `combined` should show flat-bottom river valleys with flow-scaled shoulders, not
     narrow V cuts.
   - See [macro_field_preview.md](./macro_field_preview.md).
+
+## pixelize_preview
+
+- Purpose: render a top-down PNG for the graph-first pixelize stage over an inclusive square chunk
+  footprint.
+- Parameters:
+  - positional: `<seed> <cx> <cz> <r>` where `cx/cz` are center chunk coordinates and `r` is the
+    inclusive square chunk radius
+  - optional: `--width <u32>`, `--height <u32>`, `--region-size-blocks <i32>`,
+    `--site-spacing-blocks <i32>`, `--land-bias <f32>`, `--stage pixelize`, `--output <path>`
+- Defaults:
+  - output dimensions default to `(2r + 1) * CHUNK_EDGE` on each axis, so the default image has one
+    output pixel per pixelized world-block column
+  - default output path is `target/pixelize-preview/s<seed>_cx<cx>_cz<cz>_r<r>.png`
+- Example:
+
+```bash
+cargo run --bin pixelize_preview -- 42 0 0 1 --output target/pixelize-preview/smoke.png
+```
+
+- Notes:
+  - The binary builds graph, macro map, hydrology, noisy boundary, and macro field inputs through
+    public generation APIs, then calls the core pixelize API.
+  - `--width` and `--height` scale the already pixelized chunk area for display; the underlying
+    data remains one column per world block.
+  - Depends on the core `PixelizeConfig`, `generate_pixelized_chunk_area`, `PixelizedChunkArea`,
+    and `PixelizedColumn` exports.
+  - See [pixelize_preview.md](./pixelize_preview.md).
 
 ## macro_map_preview
 
@@ -362,14 +432,21 @@ cargo run --bin world_create -- 42 --center-x 0 --center-z 0 --radius 16 --outpu
 ```
 
 - Notes:
-  - The CLI is in place, but direct world creation still depends on `generate_chunk(...)`, which is currently a generation `todo!` path.
+  - Direct world creation now uses the graph-first launch path:
+    graph/macro/hydrology/boundary/macro-field/pixelize -> `GraphFirstVoxelPlan` -> `ChunkData`.
+  - surface/material and vegetation are intentionally stubbed; water columns are `water`, all other
+    terrain is `grass`.
   - See [world_create.md](./world_create.md).
 
 ## Cross-Tool Suggestions
 
 - Use `graph_voronoi_preview` to inspect graph identity and smoothed base fields.
+- Use `generation_preview_suite` when you want the standard graph-first preview sequence in one
+  ordered output folder.
 - Use `macro_map_preview` to inspect macro ownership, coast/lake separation, hydrology, and guide overlays.
 - Use `macro_field_preview` to inspect graph-derived raster fields, contours, combined macro height, and lit top-down height previews.
+- Use `pixelize_preview` to inspect chunk-aligned one-column-per-block output before the heightfield
+  and voxel-column realization path.
 - Use `heightfield_preview` to inspect contour-guided heightfield columns before final voxel fill.
 - Use `chunk_preview --stage prototype` or `--stage hydrology` when you need the older chunk-oriented diagnostic paths.
 - Use `chunk_topdown_preview --world-dir ...` when you already have a valid created-world dump and need exact realized block-column inspection.

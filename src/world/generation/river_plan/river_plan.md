@@ -87,30 +87,16 @@ RiverReach {
 RiverPlanConfig)`는 hydrology의 selected segment set을 보존하며, lake edge selected segment 같은
 위반은 제거하지 않고 `RiverPlanStats`에 기록한다.
 
-`RiverSegmentPlan`은 reach morphology 값과 함께 per-segment hydraulic ledger를 노출한다.
+`RiverSegmentPlan`은 reach morphology 값과 hydrology-derived flow diagnostics를 노출한다.
 segment별 downstream endpoint 정보는 `RiverPlan.segment_endpoints`와 `RiverPlan::endpoints(id)`에서
 별도 table로 제공한다. 이 endpoint는 hydrology segment의 `from -> to` 방향을 그대로 따른다.
 
-```text
-upstream_area = selected incoming raw-flow sum을 제외한 segment-local/raw drainage area
-tributary_flow = segment.from node로 들어오는 selected upstream segment의 Q 합
-raw discharge_q = upstream_area + tributary_flow
-morphology_discharge_q = selected chain 방향으로 smoothing한 Q
-width = a * morphology_discharge_q^0.5
-depth = c * morphology_discharge_q^0.55
-velocity = Q / (width * depth)
-```
-
-`a`와 `c`는 chain id에서 파생한 deterministic coefficient다. 같은 입력은 항상 같은 계수를 만들고,
-같은 chain 안의 segment는 같은 coefficient를 공유한다. `discharge_q`는 raw hydraulic ledger로
-보존하고, morphology에는 chain-local smoothing을 거친 Q를 사용한다. hydrology가 multi-incoming
-selected geometry를 strongest upstream branch 하나로 prune해도,
-downstream selected segment의 `raw_flow_accumulation`은 pruning 전 전체 drainage를 담는다. 따라서
-`upstream_area`는 선택되지 않은 drainage 합류분을 Q floor로 보존하고, width/depth는 selected branch가
-하나뿐이어도 downstream raw Q를 따라 커질 수 있다. lake inlet/outlet morphology는 hydrology가 lake
-capacity로 제한한 selected/display discharge를 상한으로 사용해 ocean trunk처럼 과하게 커지지 않게 한다.
-다만 selected/pruned join 직후에 raw Q가 크게 튀더라도 `morphology_discharge_q`는 한 segment에서
-급격히 커지지 않도록 제한해, dry-carve bank/valley가 갑자기 floodplain처럼 부풀지 않게 한다.
+현재 구현은 full hydraulic ledger나 chain-local Q smoothing을 하지 않는다. 각 selected segment는
+hydrology의 `flow_accumulation`, `raw_flow_accumulation`, `downstream_progress`, `local_slope`를
+보존하고, public API 호환을 위해 `upstream_area`, `discharge_q`, coefficient, velocity field를 채우지만
+합류 후 Q를 다시 적분하거나 downstream post-pass로 morphology를 조정하지 않는다. 복잡한 유량/상하류
+scale 정책은 다시 설계할 때까지 이 단계 밖으로 밀어 두며, `river_plan`은 hydrology 결과를 안정적인
+table로 번역하는 얇은 bridge 역할을 우선한다.
 
 ---
 
@@ -192,39 +178,16 @@ parameter와 downstream-progress 기반 profile을 만들고, macro field가 bro
 ## 처리 순서
 
 1. `GraphHydrologyGraph.segments`에서 selected river segment를 읽는다.
-2. downstream corner 관계를 따라 chain을 만든다.
-   - hydrology가 selected geometry의 multi-incoming branch를 이미 prune했으므로 일반 chain은 한 vertex에
-     여러 selected incoming을 기대하지 않는다.
-   - lake inlet에서 끝난 chain과 lake outlet에서 시작하는 chain은 별도 chain이다.
-3. 각 chain에 downstream progress를 누적한다.
-4. 각 segment/reach의 display flow, raw flow, terminal role을 읽는다.
-5. selected segment graph를 downstream으로 걸어 per-segment Q ledger를 만든다.
-   - segment 방향은 hydrology의 `from -> to`를 따른다.
-   - `tributary_flow`는 해당 segment의 `from` node로 들어오는 selected upstream segment Q의 합이다.
-   - `upstream_area`는 hydrology raw accumulation에서 selected upstream raw-flow 합을 뺀 non-negative
-     local/raw contribution이다.
-   - hydrology가 weaker upstream branch를 selected geometry에서 prune한 경우에도 downstream raw
-     accumulation은 보존되므로, 합류 뒤 첫 downstream segment와 그 이후 segment는 unselected drainage를
-     `upstream_area`에 포함한 더 큰 Q를 가진다. hydrology는 weaker branch 전체가 아니라 충돌 vertex로
-     들어가는 마지막 merge edge만 제거할 수 있으므로, river_plan은 충돌 직전에서 끝나는 upstream
-     tributary centerline도 별도 short chain으로 계획할 수 있다.
-6. reach type을 분류한다.
-7. reach type과 Q/display cap/order를 기반으로 chain-local `morphology_discharge_q`를 만든다.
-   - raw `discharge_q`는 diagnostic/hydraulic ledger로 보존한다.
-   - morphology Q는 upstream에서 downstream으로 완만히 커지며, headwater는 최소 visible Q floor를
-     가져 좁고 얕은 강바닥으로 계속 보인다.
-   - lake inlet은 display/cap을 우선하므로 필요하면 morphology Q가 하류 방향으로 낮아질 수 있다.
-8. smoothed morphology Q를 기반으로 valley/bed/floodplain parameter를 계산한다.
-   - bed width/depth는 작은 Q에서도 최소 폭/깊이를 가져 upstream selected river가 사라지지 않는다.
-   - broad valley width/depth, bank transition, floodplain은 Q에 더 민감하게 스케일되어 headwater와
-     upper dry carve가 downstream floodplain처럼 넓게 보이면 회귀다.
-9. 각 downstream chain을 따라 bed depth와 broad valley depth를 deterministic하게 post-pass 보정한다.
-   - display flow가 커지는 main chain에서는 depth가 대체로 하류 방향으로 깊어진다.
-   - reach 경계에서 한 segment만에 큰 step carve가 생기지 않도록 adjacent depth 증가량을 제한한다.
-   - lake inlet은 lake capacity cap을 우선하므로 필요한 경우 하류 방향 얕아짐을 허용한다.
-10. macro field와 heightfield가 사용할 plan table을 만든다.
-11. downstream renderers가 river mouth/fan 방향을 알 수 있도록 selected segment의 `from_position`,
-    `to_position`, `downstream_position` endpoint table을 노출한다.
+2. 각 selected segment를 현재 launch bridge에서는 독립 chain/reach로 등록한다.
+   - hydrology의 `from -> to` 방향, terminal node kind, edge id는 그대로 보존한다.
+   - 복잡한 branch merge, multi-incoming 합류 적분, downstream continuity pass는 현재 구현 범위가 아니다.
+3. 각 segment/reach의 display flow, raw flow, terminal role을 읽어 reach type을 분류한다.
+4. reach type과 selected/display flow에서 보수적인 morphology parameter를 계산한다.
+   - 이 값은 downstream stage가 읽을 diagnostic/guide이며, macro_field가 복잡한 단면 carve를 직접
+     재구성하는 근거가 되어서는 안 된다.
+5. macro field와 heightfield가 사용할 plan table을 만든다.
+6. downstream renderers가 hydrology 방향을 알 수 있도록 selected segment의 `from_position`,
+   `to_position`, `downstream_position` endpoint table을 노출한다.
 
 ---
 
@@ -269,7 +232,7 @@ diagnostic overlay로 볼 수 있어야 한다.
 1. `river_plan`은 selected river segment를 새로 선택하거나 제거하지 않는다.
 2. selected river topology는 hydrology의 source of truth다.
 3. reach type과 width/depth parameter는 deterministic해야 한다.
-4. downstream으로 갈수록 display flow가 커지는 trunk에서는 broad valley와 bed width가 커져야 한다.
+4. downstream scale 정책은 현재 단순 bridge 상태이며, 복잡한 Q continuity를 여기서 보장하지 않는다.
 5. lake terminal/inlet reach는 lake capacity cap을 존중해야 하며 ocean outlet trunk처럼 넓어지면 안 된다.
 6. macro field는 broad valley를 주로 읽고, narrow bed를 combined height에 과하게 직접 반영하면 안 된다.
 7. heightfield/water는 river bed/water hint를 읽을 수 있지만, hydrology routing을 다시 풀면 안 된다.
@@ -281,33 +244,16 @@ diagnostic overlay로 볼 수 있어야 한다.
 
 - `src/world/generation/river_plan/mod.rs`가 `RiverPlanConfig`, `RiverPlan`, `RiverChain`,
   `RiverReach`, `RiverSegmentPlan`, `RiverPlanStats`, `build_river_plan`을 제공한다.
-- 구현은 hydrology selected segment를 chain/reach로 묶고, display/raw flow, downstream progress,
-  local slope, terminal node kind를 읽어 reach type을 계산한다.
-- 각 selected segment는 raw `Q = upstream_area + tributary_flow` 원장을 가진다. `upstream_area`는
-  hydrology raw accumulation에서 selected upstream raw-flow를 제외한 local/raw contribution이고,
-  `tributary_flow`는 같은 `from` node로 들어오는 upstream selected segment Q의 합이다. hydrology가
-  multi-incoming selected geometry를 prune한 뒤에는 선택되지 않은 drainage 합류분이 downstream
-  `upstream_area`에 남아, selected incoming branch가 하나뿐이어도 downstream width/depth가 raw Q를 따라
-  커질 수 있다.
-- bed width/depth는 deterministic chain coefficient를 적용한 `width = a * morphology_q^0.5`,
-  `depth = c * morphology_q^0.55`를 우선 기반으로 삼고 reach type별 launch scale로 clamp한다.
-  `discharge_q`는 raw ledger로 남고, `morphology_q`는 selected chain 방향으로 smoothing되어 selected/pruned
-  join 직후 raw Q 점프가 한 번에 큰 dry valley carve로 나타나지 않게 한다. depth exponent는 Q에 더
-  민감하게 조정되었지만, downstream post-pass가 reach 경계의 급격한 carve step을 계속 제한한다.
-- launch scale은 headwater를 약 `2` block 폭에서 시작할 수 있게 낮추고, lower/trunk 폭은 이전
-  `200+` block 목표보다 낮춘다. 이번 scale은 특히 upper/middle을 다시 줄여 middle은 lower의 대략
-  절반, upper는 middle의 대략 절반 느낌으로 읽히게 한다. broad valley 폭과 floodplain도 함께 낮춰 모든
-  selected river 주변에 거대한 고정 반경 corridor가 생기지 않게 한다.
-- broad valley, bank transition, floodplain은 bed보다 morphology Q에 더 민감하다. upper/headwater
-  selected river는 좁고 얕은 bed로 보존하되 dry-carve 주변 계곡과 floodplain은 작아야 한다.
-- per-segment depth는 chain-local downstream post-pass를 거쳐 reach 경계의 갑작스러운 carve step을
-  줄인다. 이 pass는 selected segment를 추가/삭제하지 않고, lake inlet cap은 보존한다.
-- lake inlet/outlet은 raw `discharge_q`를 보존하지만 morphology에는 lake capacity가 적용된
-  selected/display discharge cap을 우선 적용한다.
-- 작은 Q는 좁고 거친 단면, 큰 Q는 넓고 깊지만 더 완만한 단면을 갖는다. roughness, gravel,
-  cutbank hint는 downstream stage가 강둑을 완전히 매끈하게 만들지 않도록 보존한다.
+- 구현은 hydrology selected segment를 보존하면서 segment별 독립 chain/reach row를 만든다. display/raw
+  flow, downstream progress, local slope, terminal node kind를 읽어 reach type을 계산한다.
+- `upstream_area`, `tributary_flow`, `discharge_q`, `morphology_discharge_q` field는 API 호환과
+  diagnostics를 위해 남아 있지만, 현재 구현은 selected graph를 따라 합류 Q를 다시 누적하지 않는다.
+  `tributary_flow`는 0이며 `discharge_q`/`morphology_discharge_q`는 segment raw/display flow의 단순
+  projection이다.
+- bed/broad valley/floodplain/roughness/gravel/cutbank 값은 reach type과 segment flow에서 계산하는
+  보수적인 guide다. downstream continuity post-pass, chain coefficient 기반 smoothing, river mouth fan
+  geometry는 현재 구현하지 않는다.
 - `RiverPlan.segment_endpoints`는 hydrology node position에서 온 `from_position`, `to_position`,
-  `downstream_position`을 제공한다. downstream renderer는 이 table로 sea-facing mouth endpoint만
-  fan-out 처리할 수 있으며, river_plan은 fan geometry 자체는 만들지 않는다.
-- `macro_field`는 더 이상 selected segment flow만으로 reach/width/depth를 직접 판단하지 않고,
-  `RiverSegmentPlan`을 canonical noisy boundary curve에 rasterize한다.
+  `downstream_position`을 제공한다.
+- `macro_field`는 `RiverPlan`을 selected river edge source와 flow hint source로 소비하지만, plan의
+  Q ledger나 U/V 단면 정책을 재구성하지 않는다.

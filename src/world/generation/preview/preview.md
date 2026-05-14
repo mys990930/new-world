@@ -13,7 +13,7 @@
 
 - stage별 preview input area, seed, generator version, config 계약
 - deterministic PNG 또는 raw dump 출력 계약
-- graph, macro map, hydrology, river plan, boundary, field, heightfield, surface 결과를 독립적으로 검사할 수 있는 surface 정의
+- graph, macro map, hydrology, river plan, boundary, field, macro field, pixelize, heightfield, surface 결과를 독립적으로 검사할 수 있는 surface 정의
 - artifact regression을 테스트와 연결할 수 있는 기준 제공
 
 ---
@@ -24,6 +24,24 @@
 - interactive editor UI
 - runtime chunk storage mutation
 - generation stage 의미 소유
+
+---
+
+## Preview Data Cache
+
+- preview binary는 기본적으로 `target/preview-cache/<binary>/` 아래 bincode data cache를 먼저 읽는다.
+- `--refresh`가 있을 때만 해당 preview 데이터를 다시 계산하고 cache를 갱신한다.
+- cache key는 preview 입력 인자, generator version, 그리고 data-producing source file fingerprint를
+  포함한다. 따라서 stage 산출 데이터 로직이 바뀌면 기본 실행도 낡은 cache를 재사용하지 않고 새로
+  계산한다.
+- graph-first preview는 PNG 결과물이 아니라 graph/macro/hydrology/boundary/macro-field/pixelize/heightfield
+  계열 stage 산출 데이터를 cache한다. PNG metadata와 overlay는 cache된 data에서 다시 렌더된다.
+- `macro_field_preview`의 base cache는 `PreviewWorld`와 world-owned `MacroFieldTile`까지 저장한다.
+  contour step, major interval, channel, overlay 여부, output path는 render 파생 옵션이므로 cache key에
+  들어가지 않는다. 따라서 contour 조건만 바꾸면 저장된 macro field tile에서 contour만 다시 추출해
+  빠르게 PNG를 다시 뽑는다.
+- legacy renderer preview는 아직 world generation stage cache 타입으로 분리되지 않은 부분이 있어,
+  PNG 파일 자체가 아니라 PNG 인코딩 전 raw preview payload를 cache한다.
 
 ---
 
@@ -45,12 +63,15 @@
 12. final temperature/hydration/biome influence preview
 13. noisy edge preview
 14. macro field rasterization preview
-15. meso feature plan preview
-16. Perlin micro relief preview
-17. heightfield and water surface preview
-18. biome/material/surface plan preview
-19. vegetation placement preview
-20. voxel fill preview
+15. chunk pixelize preview
+16. heightfield / voxel-column realization preview
+17. biome/material/surface plan preview
+18. vegetation placement preview
+19. voxel fill preview
+
+`generation_preview_suite`는 새 stage를 만들지 않고, 위 preview 대상 중 현재 핵심 graph-first 흐름을
+한 폴더에 모으는 orchestration binary다. suite output은 stage별 source of truth가 아니며, 각 PNG의
+의미와 metadata 계약은 호출된 child preview binary 문서가 소유한다.
 
 ---
 
@@ -237,7 +258,7 @@ binary다.
 
 macro field는 noise source가 아니다. 이 preview는 graph/macro/hydrology/river-plan/final-cell-context/boundary cache를
 world-space sample grid로 굽는 과정을 검사한다. source of truth는 graph topology, macro annotation,
-selected hydrology result, river reach morphology plan, canonical noisy boundary에 남고, `MacroFieldTile`은 heightfield와 chunk fill이
+selected hydrology result, river reach morphology plan, canonical noisy boundary에 남고, `MacroFieldTile`은 pixelize와 downstream heightfield/chunk fill이
 빠르게 읽기 위한 graph-derived signed distance / influence field cache다.
 
 preview와 runtime cache miss는 ridge/coast/river guide distance를 sample마다 반복 계산하지 않아야
@@ -245,9 +266,13 @@ preview와 runtime cache miss는 ridge/coast/river guide distance를 sample마�
 distance propagation으로 influence field를 만들 수 있다. river channel은 stage 7 `RiverPlan`의
 broad valley parameter와 narrow bed hint를 같은 noisy edge geometry 위에 굽는다. 이 pass는
 selected hydrology topology를 바꾸지 않고, subpixel coverage 기반 valley strength, nearest guide
-distance, blended display flow, reach type을 저장한 뒤 그 결과를 렌더한다.
+distance, blended display flow, reach type을 저장한 뒤 그 결과를 렌더한다. river rasterization은
+row-range local buffer를 Rayon worker가 독립적으로 채우고 row-major 순서로 결합해 deterministic
+multi-thread output을 유지한다.
 ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launch 단계에서 per-sample query가
 남을 수 있지만, 이 비용은 chunk fill hot path가 아니라 macro field tile cache miss에 한정된다.
+sample fill은 site bucket 후보를 allocation 없이 직접 순회하고, nearest polyline 후보는 제곱거리로
+비교한 뒤 최종 selected distance만 계산해 deterministic output을 유지하면서 CPU scalar work를 줄인다.
 
 ### 입력
 
@@ -259,7 +284,8 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   - `--world-span-blocks <i32>`: 이미지 가로가 덮는 world-block 폭, 기본 `32768`
   - `--chunk-radius <i32>`: world-block center를 유지한 채 가로 footprint를 `radius * 2 * CHUNK_EDGE`
     block으로 정한다. 기본 footprint `32768`은 현재 `CHUNK_EDGE = 32` 기준 `chunk_radius = 512`와 같다.
-    더 작은 값을 넣으면 같은 이미지 해상도에서 더 작은 world footprint를 보므로 확대된다.
+    heightfield density의 작은 window가 필요하면 `--world-span-blocks 1024 --width 1024` 또는 작은
+    `--chunk-radius` zoom-in을 명시한다.
   - `--stage macro_field`
   - `--channel <all|macro|mask|ridge|river|combined|lit|contour>`: 기본 `lit`
   - `--contour-step <blocks>`: contour channel과 overlay가 사용할 block-height 간격, 기본 `32`
@@ -281,7 +307,7 @@ ownership/mask의 noisy-boundary side 판정은 정확도 유지를 위해 launc
   valley strength, narrow bed hint, display flow, reach type. 이 channel은 모든 강을 같은 폭으로
   칠하지 않고, 상류/하류와 lake inlet/outlet의 morphology 차이를 보여야 한다. macro field combined
   height는 broad valley를 주로 반영하고, narrow bed는 heightfield/water가 읽을 hint로 보존한다.
-- `combined`: Perlin 합성 전 macro elevation + ridge raise - broad river valley - coast/lake flatten 결과.
+- `combined`: Perlin 합성 전 macro elevation + ridge raise - broad river valley - lake flatten 결과.
   이 단계의 river effect는 최종 water/voxel carve가 아니라 heightfield가 읽을 2D broad valley guide이며,
   combined/lit preview에서 좁은 물길을 과하게 새기면 회귀다. `combined`는 진단용 heat map이 아니라
   macro base 위에 ridge와 broad valley가 얹힌 pre-Perlin terrain surface로 읽히도록 subtle terrain
@@ -320,8 +346,18 @@ renderer/GPU 계약을 만들지 않는다.
   overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
   field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
   macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다.
+- `macro_field_preview`는 hydrology가 선택하고 `RiverPlan`이 morphology를 부여한 모든 river segment의
+  centerline을 같은 `BoundaryCache` canonical noisy curve 위에 별도 cyan/blue overlay로 표시한다.
+  본류성 reach(`Lower`, `Trunk`, `LakeOutlet`)는 지류보다 약간 더 두껍고 밝게 그리되, 이는 강폭
+  rasterization 결과가 아니라 강 중심 줄기를 확인하기 위한 reference line이다. 상류/지류와 본류가
+  모두 표시되어야 하며, metadata/stdout은 selected centerline segment 수, 화면에 그려진 clipped
+  polyline segment 수, 본류/지류 segment 수를 기록한다.
 - `lit` channel은 broad hillshade가 우선 읽혀야 하므로 다른 channel보다 더 희미한 Voronoi edge
   overlay를 사용한다. lit에서 edge가 조명/고저차보다 먼저 보이면 회귀다.
+- `macro`, `combined`, `lit` channel은 sampled macro field에서 ocean/lake water와 terrain이 맞닿는
+  곳에 더 두꺼운 standing-water boundary overlay를 그린다. Water 판정은 ocean mask 또는 lake mask이고,
+  dry basin과 explicit ocean coast는 terrain으로 취급한다. 이 overlay는 희미한 Voronoi reference edge보다
+  진한 노란색으로 더 쉽게 읽혀야 하지만 channel 값을 완전히 압도하면 회귀다.
 - macro-field cache tile grid는 보조 진단 overlay로 유지할 수 있지만, graph edge overlay보다 강하게
   읽히면 안 된다. 이 grid는 각 tile 내부에서 height를 따로 low/high normalize한다는 뜻이 아니다.
 - 모든 `macro_field_preview` output은 world footprint를 이해할 수 있도록 scale bar를 표시한다.
@@ -333,6 +369,12 @@ renderer/GPU 계약을 만들지 않는다.
   metadata/stdout은 raw gradient, smoothed-normal gradient, broad hillshade brightness range/stddev를
   기록해 실제 combined height 변화와 lighting-only smoothing/contrast를 구분해야 한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
+
+기본 `macro_field_preview`는 stage 비교를 위해 `macro_map_preview`와 같은 `32768` world-block
+overview footprint와 `3840 x 2160` sample grid를 사용한다. `MacroFieldTile` 타입 자체는 여전히
+`width * sample_spacing_blocks` by `height * sample_spacing_blocks` footprint를 갖는 일반 raster
+surface이며, runtime cache와 pixelize handoff의 1-block density는 `1024` block tile 또는 명시적
+zoom-in preview에서 확인한다.
 
 ### 검증 기준
 
@@ -353,14 +395,85 @@ renderer/GPU 계약을 만들지 않는다.
 
 ---
 
+## `pixelize_preview` CLI 계약
+
+`pixelize_preview`는 stage 11 chunk pixelize output을 chunk 생성 없이 검사하는 topdown preview
+binary다.
+
+이 preview는 stage 10 `MacroFieldTile`을 chunk-aligned `PixelizedChunkArea`로 변환한 뒤, 각 resolved
+column을 하나의 PNG pixel로 그린다. source of truth는 `MacroFieldTile.samples[]`에 들어 있는
+graph-derived field이며, preview renderer가 graph topology, hydrology, river plan, noisy boundary를
+직접 다시 query하면 안 된다.
+
+### 입력
+
+- 필수 positional 인자: `<seed> <cx> <cz> <r>`
+  - `cx`, `cz`는 chunk coordinate다.
+  - `r`은 inclusive square chunk radius이며, footprint는 `(2r + 1)` chunks on each horizontal axis다.
+- 선택 인자:
+  - `--width <u32>`: 출력 PNG width. 기본은 sampled column count와 일치한다.
+  - `--height <u32>`: 출력 PNG height. 기본은 sampled column count와 일치한다.
+  - `--region-size-blocks <i32>`
+  - `--site-spacing-blocks <i32>`
+  - `--land-bias <f32>`
+  - `--stage pixelize`
+  - `--output <path>`
+
+### 출력
+
+- 기본 출력은 `target/pixelize-preview/` 아래 PNG다.
+- 기본 파일명은 `s<seed>_cx<cx>_cz<cz>_r<radius>.png`처럼 seed와 chunk footprint를 담는다.
+- PNG의 각 pixel은 정확히 하나의 `PixelizedColumn`이다. 기본 출력 density는
+  `1 world block = 1 pixel = 1 voxel column`이며, `--width`/`--height`가 다르면 renderer가 표시만
+  scale하고 stage 11 column count 자체를 바꾸지 않는다. Rectangular output은 square chunk footprint를
+  가로/세로로 늘이지 않고 중앙 square map viewport 안에 nearest-neighbor로 표시하며, 남는 좌우 또는
+  상하 band는 neutral letterbox color로 채운다.
+- color ramp는 integer `surface_y`를 기준으로 deterministic terrain height를 표시한다. ocean/lake
+  standing water, river water hint, dry basin, ridge hint는 legend/metadata 또는 optional overlay/channel로
+  분리해 표시할 수 있어야 한다.
+- PNG metadata/stdout은 input seed, center chunk, chunk radius, chunk x/z range, world block bounds,
+  column resolution, sea level, surface height min/avg/max, water column count, river-water hint count,
+  dry/ridge column count, source macro-field cache key, generator version, square render viewport,
+  `BoundaryCache` canonical noisy boundary overlay 여부를 기록한다.
+- overlay는 chunk footprint outline, chunk grid, subtle graph Voronoi cell edge overlay, scale bar,
+  small legend, topdown compass를 포함한다.
+  Voronoi cell edge overlay는 raw corner-to-corner graph edge가 아니라 stage 9 `BoundaryCache`의
+  canonical noisy boundary curve를 사용한다. 각 noisy polyline segment는 requested chunk/world
+  footprint에 clipping한 뒤 pixelized column/border lattice로 snap하고, snapped endpoint 사이를
+  4-connected orthogonal stair-step grid path로 확장한 다음 square map viewport에 투영한다. 따라서
+  boundary overlay는 pixelize unit을 정확히 따라가며 diagonal stroke가 column interior를 가로지르지
+  않는다. Rectangular output은 square map viewport를 중앙에 유지하고 남는 band를 neutral letterbox
+  color로 채운다. 이 overlay는 height color ramp를 압도하지 않는 진단용 reference layer다.
+  방향 기준은 macro field topdown과 같아서 이미지 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
+
+### 현재 구현 상태
+
+- 이 binary는 graph/macro/hydrology/boundary/macro-field input을 준비한 뒤 `PixelizedChunkArea`를
+  렌더한다. Stage 11 column output은 `generate_pixelized_chunk_area`가 소유하고, binary의 graph access는
+  metadata count와 stage 9 `BoundaryCache` canonical noisy curve overlay에 한정된다.
+- 문서 계약상 `pixelize_preview`는 `heightfield_preview`보다 앞선 stage surface다. heightfield rewrite는
+  이 preview가 검사한 pixelized columns를 downstream input으로 소비해야 한다.
+
+### 검증 기준
+
+- 같은 seed/config/chunk range는 같은 pixelized column과 PNG metadata를 만든다.
+- output pixel count는 chunk footprint의 world-block column count와 일치한다.
+- 모든 `surface_y`/`water_y`는 integer block height여야 한다.
+- source macro masks와 `combined_macro_height`는 metadata 또는 debug dump로 추적 가능해야 한다.
+- preview renderer가 `MacroFieldTile`을 직접 재샘플해 `PixelizedChunkArea`를 우회하면 회귀다.
+
+---
+
 ## `heightfield_preview` CLI 계약
 
-`heightfield_preview`는 stage 13 heightfield / water surface vertical slice를 chunk 생성 없이 검사하는
+`heightfield_preview`는 stage 12 heightfield / voxel-column realization vertical slice를 chunk 생성 없이 검사하는
 isometric preview binary다.
 
-이 preview는 `MacroFieldTile`을 `HeightfieldTile` column cache로 변환한 뒤, column을 diagnostic box로
-voxelize해서 isometric camera를 가진 offscreen renderer에 전달한다. 실제 `ChunkData` final fill은 아니며,
-surface/material/vegetation stage도 아직 적용하지 않는다.
+새 stage contract에서 이 preview는 stage 11 `PixelizedChunkArea` / `PixelizedColumn`을 downstream
+heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 voxelize해서 isometric renderer에
+전달한다. 실제 `ChunkData` final fill은 아니며, surface/material/vegetation stage도 아직 적용하지 않는다.
+현재 구현은 compatibility vertical slice라서 `MacroFieldTile`을 직접 읽을 수 있지만, rewrite target은
+`pixelize_preview`가 검사한 resolved columns를 소비하는 것이다.
 
 ### 입력
 
@@ -383,9 +496,6 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps
-  - `--block-lines` / `--no-block-lines`: 각 diagnostic block/column face의 매우 얇은 outline 표시.
-    기본은 `--block-lines` on이다. side face에는 정수 `y` step마다 얇은 guide line도 함께 그려
-    `--chunk-radius 1` 같은 작은 preview에서 개별 block scale을 읽을 수 있게 한다.
   - `--stage heightfield`
   - `--output <path>`
 
@@ -407,8 +517,8 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
   outline key, scale bar, 방향 compass를 표시한다. `heightfield_preview`에서 terrain scale을
   읽는 주 grid는 `macro_field_preview`와 같은 1024-block macro tile grid다.
   column resolution은 실제 샘플링된 column count를 뜻하며, legend에는 sample spacing과
-  chunk-radius 모드의 columns-per-chunk도 함께 표시한다. block outline이 켜져 있으면 legend/metadata는 top/side face edge와 정수 side-step
-  line이 표시된다는 것을 기록해야 한다.
+  chunk-radius 모드의 columns-per-chunk도 함께 표시한다. per-block face outline과 정수 side-step
+  line은 렌더하지 않는다.
 - overlay와 metadata/stdout은 중앙 player diagnostic cube를 기록한다. 이 큐브는 final gameplay
   entity가 아니라 heightfield preview scale marker이며, world/block 기준 `1 x 1 x 4` block 크기,
   중앙 world position, bottom/top `y`, sampled column count를 표시해야 한다.
@@ -421,33 +531,37 @@ surface/material/vegetation stage도 아직 적용하지 않는다.
 
 ### 현재 구현 상태
 
+- 현재 binary는 아직 compatibility path로 `MacroFieldTile`을 직접 읽는 구현일 수 있다. stage 12 rewrite
+  완료 후에는 `PixelizedChunkArea`를 입력으로 받아야 하며, first chunk-aligned pixel resolve를 반복하면 안 된다.
 - meso feature와 Perlin micro relief는 `0` stub이다.
 - `combined_macro_height -0.5..0.0..1.0`를 `-1024..0..2048 block` signed sea-level scale로 매핑한다.
-  중심 관심 구간 `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. 이 launch scale은 현재
-  `combined_macro_height` 분포를 크게 확대해서 보는 실험값이다.
+  중심 관심 구간 `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. 이 scale은 macro field contour,
+  heightfield resolve, downstream pixel/column preview가 공유하는 block-domain 계약이다.
 - ocean/lake mask는 sea-level `y = 0` water hint가 된다. 현재 heightfield vertical slice에서는
   ocean/lake visible surface도 `y = 0`이며, bathymetry/bed depression을 preview terrain으로 렌더하지
   않는다.
-- heightfield output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다. raw
-  macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
+- heightfield/pixelize output은 voxel-oriented preview/fill을 위해 integer block height로 snap한다.
+  raw macro scalar는 diagnostic field로 보존되지만, surface/water column output은 integer `y`를 따른다.
 - heightfield는 macro field contour preview와 같은 block-height scale을 사용한다. 기본 contour step은
   1 block이고 일반 land terrain의 기본 minimum gap은 0 block이다. `combined_macro_height`에서 얻은
   raw block height를 해당 contour band의 lower integer level로 quantize한다. 현재 기본값에서는 raw
   block height와 visible block height가 같은 scale을 유지한다. river corridor 기본 minimum gap도
   0 block이며, 이후 필요하면 별도 override로 다시 분리할 수 있다. smoothing/interpolation은 현재 disabled/stub이다.
-  water/shoreline constraint는 sea-level safety pass로 유지하되 final land output은 constraint 뒤에도
-  contour step에 snap된다. contour line segment 자체는 debug surface이며 heightfield source of truth가
+  standing-water shoreline continuity clamp는 현재 제거되어 있으며 final land output은 raw block height의
+  contour lower band를 보존한다. contour line segment 자체는 debug surface이며 heightfield source of truth가
   아니다.
 - 일반 terrain에는 인접 column 기준 ceiling pass를 적용하지 않는다. raw/macro source가 크게 뛰면
   integer snap 뒤 visible surface도 같은 block scale로 뛰며, 그 점프는 source field 진단 대상으로 남긴다.
-- ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 grid-distance 기반
-  contour ceiling으로 `0, 1, 2, ...` 계단을 따라 올라가야 한다. explicit cliff/meso feature가 없는
-  launch slice에서 바다 옆 land가 즉시 높은 vertical cliff로 솟으면 회귀다.
+- ocean/lake water surface는 `y = 0`이며, standing water와 인접한 land는 heightfield post-pass에서
+  grid-distance 기반 contour ceiling을 받지 않는다. launch slice에서 바다 옆 land가 즉시 높은 vertical
+  cliff로 솟으면 macro/pixelize source scalar 또는 coast profile을 먼저 진단한다.
 - broad river valley는 이미 `combined_macro_height`에 반영되어 있으므로 heightfield stage에서
-  같은 계곡을 다시 carve하지 않는다. macro field 쪽 river guide는 `RiverPlan`의 broad valley
-  parameter를 반영하고, narrow bed hint는 water/surface/voxel 단계가 읽을 별도 정보로 보존한다.
-  다만 river hint column에는 preliminary integer river water height를 만들고, 인접 river/standing-water
-  surface와 한 block 이하의 step으로 천천히 내려오도록 clamping한다.
+  같은 계곡을 다시 carve하지 않는다. macro field 쪽 river guide는 selected hydrology flow/slope/bend
+  context에서 broad valley와 narrow bed, bank roughness, gravel, cutbank hint를 만든다.
+  heightfield는 이 중 bed-depth hint만 terrain bed/water split에 반영하고, gravel/cutbank는
+  downstream surface/material diagnostic hint로 보존한다. river hint column에는 preliminary integer river
+  water height를 만들고, 인접 river/standing-water surface와 한 block 이하의 step으로 천천히 내려오도록
+  clamping한다.
 - block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
   green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
 - player diagnostic cube는 terrain diagnostic ramp와 명확히 구분되는 형광색으로 그린다. 큐브 footprint는
@@ -472,7 +586,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   topdown plane, and quarter-specific missing back/side faces are regressions.
 - The player diagnostic cube participates in the same quarter-turn painter order and visible-face
   policy as terrain columns. It should not introduce fixed east/south faces that break rotated
-  previews, and existing block outline mode should remain readable on both terrain and cube faces.
+  previews.
 - Macro-field tile boundary overlay is drawn at the generation cache tile scale, currently 1024
   blocks, and is the primary readable grid so the scale matches `macro_field_preview`. The
   heightfield preview draws only the chunk-aligned preview footprint outline instead of every
@@ -490,7 +604,54 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - water mask가 있는 column은 water level hint를 가져야 한다.
 - meso/perlin stub 값은 0이어야 한다.
 - surface/water height output은 integer block height여야 한다.
-- coast-adjacent land는 sea level에서 완만히 올라가는 ramp를 가져야 한다.
+- coast-adjacent land는 heightfield shoreline continuity clamp 없이 macro/pixelize source height를 보존해야 한다.
+
+---
+
+## `generation_preview_suite` CLI 계약
+
+`generation_preview_suite`는 generation stage를 직접 렌더하지 않는 취합 binary다. 기존 preview
+binary들을 순서대로 실행하고, 결과 PNG를 하나의 output directory에 짧은 ordered filename으로 저장한다.
+
+### 입력
+
+- 필수 positional 인자: `<seed>`
+- 선택 인자:
+  - `--center-chunk-x <i32>` / `--cx <i32>`: 기본 `0`
+  - `--center-chunk-z <i32>` / `--cz <i32>`: 기본 `0`
+  - `--radius <i32>` / `--r <i32>`: positive chunk-radius, 기본 `8`.
+  - `--output <path>`: 기본 `target/generation-preview-suite/s<seed>_cx<cx>_cz<cz>_r<r>`
+  - `--overview-width <u32>`, `--overview-height <u32>`
+  - `--zoom-width <u32>`, `--zoom-height <u32>`
+  - `--heightfield-width <u32>`, `--heightfield-height <u32>`
+  - `--contour-step <i32>`: 기본 `8`
+
+### 좌표 계약
+
+- suite의 center는 chunk coordinate다.
+- graph/macro/biome overview child는 world-block center를 받으므로 suite가
+  `center_chunk * CHUNK_EDGE + CHUNK_EDGE / 2`로 변환한다.
+- `pixelize_preview`와 `heightfield_preview`는 chunk center/radius를 그대로 받는다.
+- zoomed `macro_field_preview`는 변환된 world-block center와 `--chunk-radius <r>`를 함께 받는다.
+
+### 출력 순서
+
+1. `01_graph_cont.png`: `graph_voronoi_preview --mode continentality`
+2. `02_graph_elev.png`: `graph_voronoi_preview --mode elevation`
+3. `03_macro_map.png`: `macro_map_preview`
+4. `04_biome_map.png`: `biome_map_preview`
+5. `05_macro_combined.png`: `macro_field_preview --channel combined --contours --contour-step 8`
+6. `06_macro_zoom.png`: 같은 macro field combined/contour view를 chunk radius footprint로 zoom
+7. `07_pixelize.png`: 같은 chunk center/radius의 `pixelize_preview`
+8. `08_heightfield.png`: 같은 chunk center/radius의 `heightfield_preview`
+
+### 불변식
+
+1. suite는 terrain policy나 preview renderer를 복제하지 않는다.
+2. child preview 중 하나가 실패하면 suite도 실패해야 한다.
+3. ordered filename은 비교와 보고를 위해 안정적이어야 한다.
+4. child binary가 sibling executable로 존재하면 그것을 우선 실행하고, 없으면 `cargo run --bin`으로
+   fallback할 수 있다.
 
 ---
 
@@ -522,5 +683,5 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 3. preview는 문서와 테스트의 보조물이 아니라 generation artifact를 발견하는 1차 검증 표면이다.
 4. 이상한 작은 흔적이 보이면 무시하지 않고 source-of-truth 문서와 테스트로 환류한다.
 5. 매 generation stage는 전용 preview binary 또는 기존 binary의 명시적 stage/mode로 검사 가능해야 한다.
-6. macro field 이후 final heightfield 검증은 흰색 texture와 단순 lighting이 있는 top-down rendering을
+6. macro field/pixelize 이후 final heightfield 검증은 흰색 texture와 단순 lighting이 있는 top-down rendering을
    포함해야 한다.

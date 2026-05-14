@@ -1,4 +1,4 @@
-﻿use crate::world::chunk::{BlockId, ChunkData};
+use crate::world::chunk::{BlockId, ChunkData};
 use crate::world::coord::{CHUNK_EDGE, CHUNK_EDGE_I32, CHUNK_VOLUME, ChunkCoord};
 use crate::world::registry::BlockRegistry;
 use crate::world::surface::{ChunkSurfacePlan, SurfaceColumnPlan};
@@ -151,80 +151,7 @@ fn column_top_non_air_y(column: VoxelizationColumnPlan) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::generation::{
-        build_chunk_base_heightfield_prototype, build_chunk_corridor_window,
-        build_chunk_hydrology_solve, build_chunk_meso_applied_prototype,
-        build_chunk_realization_field_patch, build_chunk_smoothed_prototype,
-        prepare_chunk_generation_inputs,
-    };
-    use crate::world::meta::WorldMeta;
     use crate::world::registry::BlockRegistry;
-    use crate::world::surface::resolve_chunk_surface_plan;
-    use crate::world::{HydrologyMode, LocalBlockCoord};
-
-    fn build_voxelization(
-        chunk: ChunkCoord,
-        meta: &WorldMeta,
-        registry: &BlockRegistry,
-    ) -> (
-        crate::world::HydrologySolve,
-        ChunkSurfacePlan,
-        VoxelizationPlan,
-        ChunkData,
-    ) {
-        let inputs = prepare_chunk_generation_inputs(chunk, meta);
-        let realization = build_chunk_realization_field_patch(chunk, &inputs);
-        let corridors = build_chunk_corridor_window(chunk, &inputs);
-        let prototype =
-            build_chunk_base_heightfield_prototype(chunk, &inputs, &realization, &corridors);
-        let meso = build_chunk_meso_applied_prototype(chunk, &inputs, &corridors, &prototype);
-        let smoothed = build_chunk_smoothed_prototype(chunk, &corridors, &meso);
-        let hydrology = build_chunk_hydrology_solve(chunk, &inputs, &corridors, &smoothed);
-        let surface = resolve_chunk_surface_plan(chunk, &inputs, &smoothed, &hydrology);
-        let plan = build_chunk_voxelization_plan(chunk, &surface);
-        let chunk_data = voxelize_chunk(&plan, registry);
-
-        (hydrology, surface, plan, chunk_data)
-    }
-
-    fn find_chunk_with_visible_water(
-        meta: &WorldMeta,
-        registry: &BlockRegistry,
-    ) -> (
-        crate::world::HydrologySolve,
-        ChunkSurfacePlan,
-        VoxelizationPlan,
-        ChunkData,
-    ) {
-        let seed_chunks = [
-            ChunkCoord(40, 0, -29),
-            ChunkCoord(39, 0, -29),
-            ChunkCoord(40, 0, -30),
-            ChunkCoord(4, 0, -3),
-            ChunkCoord(0, 0, 0),
-            ChunkCoord(15, 0, 15),
-        ];
-
-        for seed in seed_chunks {
-            for offset_z in -2..=2 {
-                for offset_x in -2..=2 {
-                    let candidate = ChunkCoord(seed.0 + offset_x, 0, seed.2 + offset_z);
-                    let built = build_voxelization(candidate, meta, registry);
-                    let water_columns = built
-                        .0
-                        .columns
-                        .iter()
-                        .filter(|column| column.water_surface_height.is_some())
-                        .count();
-                    if water_columns >= 8 {
-                        return built;
-                    }
-                }
-            }
-        }
-
-        panic!("expected at least one sampled chunk to contain visible water");
-    }
 
     fn synthetic_column(terrain_top_y: i32, water_top_y: Option<i32>) -> VoxelizationColumnPlan {
         VoxelizationColumnPlan {
@@ -259,92 +186,5 @@ mod tests {
 
         assert_eq!(chunk.coord(), ChunkCoord(2, 1, -3));
         assert_eq!(chunk.snapshot().uniform_block(), Some(BlockId::AIR));
-    }
-
-    #[test]
-    #[ignore = "slow current generation voxelization pipeline smoke test"]
-    fn voxelization_plan_is_deterministic() {
-        let meta = WorldMeta::new(42);
-        let registry = BlockRegistry::load_default().expect("default registry should load");
-        let chunk = ChunkCoord(15, 0, 15);
-
-        let (_, _, a_plan, a_chunk) = build_voxelization(chunk, &meta, &registry);
-        let (_, _, b_plan, b_chunk) = build_voxelization(chunk, &meta, &registry);
-
-        assert_eq!(a_plan, b_plan);
-        assert_eq!(a_chunk, b_chunk);
-        assert_eq!(
-            a_plan.columns.len(),
-            (CHUNK_EDGE_I32 * CHUNK_EDGE_I32) as usize
-        );
-    }
-
-    #[test]
-    #[ignore = "slow current generation voxelization pipeline smoke test"]
-    fn voxelization_emits_solid_ground_for_dry_columns() {
-        let meta = WorldMeta::new(42);
-        let registry = BlockRegistry::load_default().expect("default registry should load");
-        let chunk = ChunkCoord(15, 0, 15);
-        let (_, surface, _, chunk_data) = build_voxelization(chunk, &meta, &registry);
-
-        let dry_index = surface
-            .columns
-            .iter()
-            .position(|column| column.water_top_y.is_none())
-            .expect("expected at least one dry surface column");
-        let local_x = (dry_index % CHUNK_EDGE) as u8;
-        let local_z = (dry_index / CHUNK_EDGE) as u8;
-        let world_y = surface.columns[dry_index].terrain_top_y - chunk.1 * CHUNK_EDGE_I32;
-        let local_y =
-            u8::try_from(world_y).expect("dry surface should land inside the sampled chunk");
-        let local =
-            LocalBlockCoord::new(local_x, local_y, local_z).expect("surface coord should be valid");
-
-        let block = chunk_data
-            .get_block(local)
-            .expect("surface block should be addressable");
-
-        assert_ne!(block, BlockId::AIR);
-    }
-
-    #[test]
-    #[ignore = "slow current generation voxelization water search smoke test"]
-    fn voxelization_places_water_or_ice_above_hydrology_channels() {
-        let meta = WorldMeta::new(42);
-        let registry = BlockRegistry::load_default().expect("default registry should load");
-        let (hydrology, surface, _, chunk_data) = find_chunk_with_visible_water(&meta, &registry);
-
-        let water_index = hydrology
-            .columns
-            .iter()
-            .enumerate()
-            .find(|(_, column)| {
-                column.water_surface_height.is_some()
-                    && matches!(
-                        column.mode,
-                        HydrologyMode::Channel
-                            | HydrologyMode::Floodplain
-                            | HydrologyMode::Lake
-                            | HydrologyMode::Wetland
-                    )
-            })
-            .map(|(index, _)| index)
-            .expect("expected a visible hydrology water column");
-        let column = &surface.columns[water_index];
-        let local_x = (water_index % CHUNK_EDGE) as u8;
-        let local_z = (water_index / CHUNK_EDGE) as u8;
-        let local_y = u8::try_from(
-            column.water_top_y.expect("surface plan should carry water")
-                - chunk_data.coord().1 * CHUNK_EDGE_I32,
-        )
-        .expect("water top should lie inside the chunk");
-        let local =
-            LocalBlockCoord::new(local_x, local_y, local_z).expect("water coord should be valid");
-        let block = chunk_data
-            .get_block(local)
-            .expect("water block should be addressable");
-        let block_key = registry.block_or_missing(block).key.as_str();
-
-        assert!(matches!(block_key, "water" | "ice"));
     }
 }

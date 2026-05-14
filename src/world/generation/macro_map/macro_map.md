@@ -16,8 +16,10 @@ context를 resolve한다.
 
 - graph base `continentality`를 읽어 continent, ocean basin, island/archipelago ownership resolve
 - ocean, continent, lake, wetland, coast 의미 구분을 위한 macro 입력 제공
-- graph base `elevation_seed`, continentality, basinness를 합성한 signed macro elevation resolve
-- connected ocean coast에 인접한 land owner는 waterline-compatible한 낮은 양수 elevation으로 제한하되, 그 바깥 land elevation은 graph elevation/ruggedness/mountain/basin context를 그대로 보존한다. launch slice의 coastal ceiling은 sea level 바로 위의 아주 작은 band에 머물러야 하며, 높은 terrace를 만들지 않는다.
+- graph base `continentality`와 `ruggedness`를 중심으로 signed macro elevation resolve
+- sea/land 판정에 쓰는 continentality threshold는 signed macro elevation `0`과 일치해야 한다.
+  `ruggedness`는 같은 continentality 주변의 local relief contrast를 키우지만, coast distance가 uniform
+  inland-rise curve를 만들면 안 된다.
 - edge 기반 ridge/fault guide 선택. mountainness/rugged context는 public edge guide가 아니라 점수 입력이다.
 - land/ocean ownership 경계 기반 coast guide 선택
 - ridge/fault/coast guide를 broad field로 확산
@@ -107,9 +109,9 @@ island/archipelago 성향은 graph base `continentality`의 양수 component 해
 `MacroSite`는 continent/ocean basin id, signed macro elevation, continentality,
 coastness/distance-to-coast, mountainness, ridgeness, basinness를 가진다. launch 구현의
 `distance_to_coast_blocks`는 coast guide와 surface context용 annotation이다. positive land elevation을
-coast distance에 따라 계속 낮췄다가 inland에서 회복시키는 source가 되어서는 안 된다. 다만
-coast-adjacent owner 자체는 바다 terrain과 연속적으로 만날 수 있도록 sea level 바로 위의 아주 작은 양수
-ceiling을 갖고, 이 ceiling은 ruggedness/mountainness/ridgeness가 강할수록 약간 높아진다.
+coast distance에 따라 계속 낮췄다가 inland에서 회복시키는 source가 되어서는 안 된다. 해안 바로 안쪽
+height는 coast-specific ceiling이나 ramp가 아니라, sea-level threshold 근처의 continentality 값에서
+자연스럽게 낮아져야 한다.
 작은 land component는
 `Island` 또는 `CoastIsland` surface kind로 드러나며, 별도 island noise source에서 만들어지지 않는다.
 `MacroCorner`는 인접 site ownership과 corner base field를 읽어 같은 macro field를 샘플한다.
@@ -199,11 +201,12 @@ launch 정책은 아래처럼 잡는다.
   3600`이며, 좋은 score의 후보도 `DEFAULT_TINY_LOCAL_MINIMA_LAKE_MAX_CHANCE_PER_10K = 4000` 상한을
   넘지 않는다. 강줄기 중간 또는 독립 폐쇄 저지대의 작은 물웅덩이를 이전보다 자주 만들되 모든 local
   minimum을 물로 채우지 않고 dry basin / closed basin 표현을 계속 유지하는 것이 목적이다.
-- signed macro elevation은 graph `elevation_seed`, `continentality`, basinness를 합성하며, sign 하나만으로
-  대륙/바다 의미를 결정하지 않는다. positive land elevation은 coast distance를 장거리 단조 상승 축으로
-  사용하지 않는다. shoreline owner는 waterline-compatible ceiling으로 제한하지만, 그 다음 land는
-  coast distance recovery curve가 아니라 graph elevation, ruggedness, mountainness, basinness가 만든
-  값으로 이어져야 한다. macro_field는 CoastLand owner를 주변 highland scalar 평균으로 다시 끌어올리면 안 된다.
+- signed macro elevation은 graph `continentality` sea-level threshold를 기준으로 resolve한다.
+  `continentality + land_bias - sea_level == 0`은 macro elevation `0`이어야 하며, 같은 값의 부호가
+  sea/land 판정과 height sign을 함께 결정한다. `ruggedness`는 `elevation_seed`가 주는 local relief
+  variation의 폭을 키워 주변 cell과의 고도차를 더 크게 만들지만, coast distance를 장거리 단조 상승 축으로
+  사용하지 않는다. 따라서 shoreline owner와 그 다음 land는 별도 coast recovery curve가 아니라
+  continentality/ruggedness source field로 이어져야 한다.
 - land signed macro elevation은 coast-adjacent cell에서 곧바로 full highland 값으로 뛰면 안 된다.
   일부 해안은 lowland라 완만할 수 있고, 일부 해안은 high/rugged context라 더 가파를 수 있다. 모든 coast를
   같은 uniform coast-distance ramp나 같은 cliff foot으로 만들면 회귀다. 내륙 전체를 coast distance에
@@ -244,10 +247,12 @@ macro elevation resolve 순서:
 
 1. graph base `continentality`를 land/ocean mask로 해석한다.
 2. connected component를 resolve해 continent, ocean basin, island/archipelago ownership을 정한다.
-3. graph base `elevation_seed`, `continentality`, basinness를 합성한다.
-4. signed macro elevation을 만들되, connected ocean coast-adjacent owner는 sea level 바로 위의 작은 양수
-   ceiling으로 제한한다. 그 바깥 positive land height는 coast distance recovery가 아니라 graph
-   elevation/ruggedness/mountain/basin context를 따른다.
+3. graph base `continentality`를 signed sea-level signal로 사용하고, `ruggedness`로 local relief
+   contrast를 조절한다. `elevation_seed`는 독립 height source가 아니라 ruggedness가 증폭하는 local
+   relief variation으로만 사용한다.
+4. signed macro elevation을 만들되, connected ocean coast-adjacent owner에 별도 coastal ceiling이나
+   inland recovery ramp를 적용하지 않는다. 해안 경사의 급/완만함은 threshold 근처 continentality와
+   ruggedness contrast에서 나와야 한다.
    ownership과 sea level contract는 함께 저장한다.
 5. edge 기반 ridge/fault/plateau 후보를 먼저 정한다.
 6. coast는 signed macro elevation 경계가 아니라 connected ocean basin과 non-ocean terrain 경계에서 우선 찾는다.

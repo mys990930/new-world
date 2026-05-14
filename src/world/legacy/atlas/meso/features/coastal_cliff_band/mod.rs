@@ -1,18 +1,12 @@
 mod resolved;
 
 use crate::world::atlas::{AtlasCoord, MesoGuideCell, MesoGuideMap};
-use crate::world::coord::ChunkCoord;
-#[cfg(test)]
-use crate::world::{CHUNK_EDGE_I32, MESO_GUIDE_CELL_SIZE_IN_CHUNKS};
 
 use super::super::{hash01, lerp_f32, normalize_vec2};
 use super::{MesoFeatureDef, MesoHydrologyCoupling, MesoPlacementFamily};
 
 pub(crate) use resolved::{
-    CoastalCliffBandResolvedObjectDebug, CoastalCliffBandWindow, build_coastal_cliff_band_window,
-    debug_coastal_cliff_band_resolved_objects_from_window,
-    sample_coastal_cliff_band_apply_signal_from_window,
-    sample_coastal_cliff_band_surface_from_window,
+    build_coastal_cliff_band_window, sample_coastal_cliff_band_surface_from_window,
 };
 
 const SOURCE_LENGTH_SALT: u64 = 0xD811_B6D2_2300_0001;
@@ -56,6 +50,7 @@ impl CoastalCliffBandSurfaceSample {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(test)]
 pub struct CoastalCliffBandPeakCandidate {
     pub coord: AtlasCoord,
     pub center_x: f32,
@@ -99,36 +94,6 @@ pub const DEF: MesoFeatureDef = MesoFeatureDef {
 };
 
 #[cfg(test)]
-pub(crate) fn sample_apply_signal(
-    guides: &MesoGuideMap,
-    world_x: i32,
-    world_z: i32,
-) -> CoastalCliffBandApplySample {
-    let window =
-        build_coastal_cliff_band_window(guides, chunk_coord_for_world_xz(world_x, world_z));
-    sample_coastal_cliff_band_apply_signal_from_window(&window, world_x, world_z)
-}
-
-#[cfg(test)]
-pub(crate) fn sample_surface(
-    guides: &MesoGuideMap,
-    world_x: i32,
-    world_z: i32,
-    base_surface_y: f32,
-    relief_budget: f32,
-) -> CoastalCliffBandSurfaceSample {
-    let window =
-        build_coastal_cliff_band_window(guides, chunk_coord_for_world_xz(world_x, world_z));
-    sample_coastal_cliff_band_surface_from_window(
-        &window,
-        guides,
-        world_x,
-        world_z,
-        base_surface_y,
-        relief_budget,
-    )
-}
-
 pub fn debug_coastal_cliff_band_peak_candidates(
     guides: &MesoGuideMap,
 ) -> Vec<CoastalCliffBandPeakCandidate> {
@@ -295,15 +260,6 @@ fn soft_cap_positive(value: f32, cap: f32) -> f32 {
 
 fn coverage_union(a: f32, b: f32) -> f32 {
     (a + b - a * b).clamp(0.0, 1.0)
-}
-
-#[cfg(test)]
-fn chunk_coord_for_world_xz(world_x: i32, world_z: i32) -> ChunkCoord {
-    ChunkCoord(
-        world_x.div_euclid(CHUNK_EDGE_I32),
-        0,
-        world_z.div_euclid(CHUNK_EDGE_I32),
-    )
 }
 
 #[cfg(test)]

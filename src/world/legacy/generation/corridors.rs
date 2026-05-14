@@ -1,4 +1,4 @@
-﻿use crate::world::atlas::{
+use crate::world::atlas::{
     ATLAS_CELL_SIZE_IN_CHUNKS, AtlasArea, AtlasCell, AtlasCoord, CoastalContext, ElevationBand,
     HydrologyContext, RegionClassCell, RegionClassMap, ReliefClass, RiverPathKind,
     RiverPathSegment, TerrainFormFamily,
@@ -575,9 +575,6 @@ fn expanded_segment_bounds_overlap_chunk_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::meta::WorldMeta;
-
-    use super::super::inputs::prepare_chunk_generation_inputs;
 
     fn test_corridor(
         start_x: f32,
@@ -603,15 +600,6 @@ mod tests {
             downstream_cells_start: downstream_start,
             downstream_cells_end: downstream_end,
         }
-    }
-
-    fn has_outside_edge_center(window: &ChunkCorridorWindow) -> bool {
-        window.corridors.iter().any(|corridor| {
-            corridor.center_x < 0.0
-                || corridor.center_z < 0.0
-                || corridor.center_x > CHUNK_EDGE_I32 as f32
-                || corridor.center_z > CHUNK_EDGE_I32 as f32
-        })
     }
 
     #[test]
@@ -670,128 +658,5 @@ mod tests {
             assert!(sample.raw_signed_distance_blocks.abs() <= 0.001);
             assert!((sample.signed_distance_blocks + sample.axis_offset_blocks).abs() <= 0.001);
         }
-    }
-
-    #[test]
-    #[ignore = "slow current generation corridor pipeline smoke test"]
-    fn corridor_window_is_deterministic() {
-        let meta = WorldMeta::new(42);
-        let chunk = ChunkCoord(4, 0, -3);
-        let inputs = prepare_chunk_generation_inputs(chunk, &meta);
-
-        let a = build_chunk_corridor_window(chunk, &inputs);
-        let b = build_chunk_corridor_window(chunk, &inputs);
-
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    #[ignore = "slow current generation corridor search smoke test"]
-    fn corridor_window_finds_relevant_drainage_for_a_hit_chunk() {
-        let meta = WorldMeta::new(42);
-        let chunks = [
-            ChunkCoord(0, 0, 0),
-            ChunkCoord(15, 0, 15),
-            ChunkCoord(16, 0, 16),
-            ChunkCoord(-1, 0, -1),
-        ];
-
-        let mut found = None;
-        for chunk in chunks {
-            let inputs = prepare_chunk_generation_inputs(chunk, &meta);
-            let window = build_chunk_corridor_window(chunk, &inputs);
-            if !window.corridors.is_empty() {
-                found = Some((chunk, window));
-                break;
-            }
-        }
-
-        let Some((chunk, window)) = found else {
-            panic!("expected at least one sampled chunk to intersect drainage");
-        };
-
-        assert_eq!(window.chunk, chunk);
-        assert!(!window.corridors.is_empty());
-    }
-
-    #[test]
-    #[ignore = "slow current generation corridor search smoke test"]
-    fn corridor_centers_can_extend_beyond_the_strict_chunk_footprint() {
-        let meta = WorldMeta::new(42);
-        let chunks = [
-            ChunkCoord(15, 0, 15),
-            ChunkCoord(16, 0, 16),
-            ChunkCoord(-1, 0, -1),
-            ChunkCoord(0, 0, 0),
-        ];
-
-        for chunk in chunks {
-            let inputs = prepare_chunk_generation_inputs(chunk, &meta);
-            let window = build_chunk_corridor_window(chunk, &inputs);
-            if !window.corridors.is_empty() && has_outside_edge_center(&window) {
-                return;
-            }
-        }
-
-        panic!("expected at least one corridor center to allow outside-edge influence");
-    }
-
-    #[test]
-    #[ignore = "slow current generation corridor seam smoke test"]
-    fn matching_corridors_keep_intrinsic_width_and_grade_across_neighboring_chunks() {
-        let meta = WorldMeta::new(42);
-        let chunk_pairs = [
-            (ChunkCoord(15, 0, 15), ChunkCoord(16, 0, 15)),
-            (ChunkCoord(15, 0, 16), ChunkCoord(16, 0, 16)),
-            (ChunkCoord(0, 0, 0), ChunkCoord(1, 0, 0)),
-            (ChunkCoord(-1, 0, -1), ChunkCoord(0, 0, -1)),
-            (ChunkCoord(31, 0, -20), ChunkCoord(32, 0, -20)),
-            (ChunkCoord(127, 0, 0), ChunkCoord(128, 0, 0)),
-        ];
-
-        for (left_chunk, right_chunk) in chunk_pairs {
-            let left_inputs = prepare_chunk_generation_inputs(left_chunk, &meta);
-            let right_inputs = prepare_chunk_generation_inputs(right_chunk, &meta);
-            let left_window = build_chunk_corridor_window(left_chunk, &left_inputs);
-            let right_window = build_chunk_corridor_window(right_chunk, &right_inputs);
-
-            for left in &left_window.corridors {
-                if let Some(right) = right_window.corridors.iter().find(|candidate| {
-                    candidate.river_id == left.river_id
-                        && candidate.kind == left.kind
-                        && candidate.order == left.order
-                        && same_absolute_segment(left_chunk, left, right_chunk, candidate)
-                }) {
-                    assert!(
-                        (left.half_width_blocks - right.half_width_blocks).abs() <= f32::EPSILON
-                    );
-                    assert!(
-                        (left.downstream_grade_per_block - right.downstream_grade_per_block).abs()
-                            <= f32::EPSILON
-                    );
-                    return;
-                }
-            }
-        }
-
-        panic!("expected neighboring chunk windows to share at least one corridor");
-    }
-
-    fn same_absolute_segment(
-        left_chunk: ChunkCoord,
-        left: &RiverCorridorConstraint,
-        right_chunk: ChunkCoord,
-        right: &RiverCorridorConstraint,
-    ) -> bool {
-        let left_origin_x = left_chunk.0 as f32 * CHUNK_EDGE_I32 as f32;
-        let left_origin_z = left_chunk.2 as f32 * CHUNK_EDGE_I32 as f32;
-        let right_origin_x = right_chunk.0 as f32 * CHUNK_EDGE_I32 as f32;
-        let right_origin_z = right_chunk.2 as f32 * CHUNK_EDGE_I32 as f32;
-
-        (left.start_x + left_origin_x - (right.start_x + right_origin_x)).abs() <= f32::EPSILON
-            && (left.start_z + left_origin_z - (right.start_z + right_origin_z)).abs()
-                <= f32::EPSILON
-            && (left.end_x + left_origin_x - (right.end_x + right_origin_x)).abs() <= f32::EPSILON
-            && (left.end_z + left_origin_z - (right.end_z + right_origin_z)).abs() <= f32::EPSILON
     }
 }

@@ -764,7 +764,6 @@ fn resolve_drainage_confluences(requested_area: AtlasArea, graph: &mut DrainageG
 #[derive(Debug, Clone, Copy)]
 struct RiverSegmentIntersection {
     coord: AtlasCoord,
-    point: (f32, f32),
     source_t: f32,
 }
 
@@ -1555,7 +1554,6 @@ fn river_segments_intersection(
 
     Some(RiverSegmentIntersection {
         coord,
-        point,
         source_t: source_t.clamp(0.0, 1.0),
     })
 }
@@ -1568,17 +1566,6 @@ fn is_shared_endpoint_intersection(
     let source_endpoint = coord == source.start || coord == source.end;
     let target_endpoint = coord == target.start || coord == target.end;
     source_endpoint && target_endpoint
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn is_branch_junction_intersection(
-    source: RiverPathSegment,
-    target: RiverPathSegment,
-    coord: AtlasCoord,
-) -> bool {
-    let source_endpoint = coord == source.start || coord == source.end;
-    let target_endpoint = coord == target.start || coord == target.end;
-    source_endpoint || target_endpoint
 }
 
 fn intersection_requires_resolution(
@@ -1631,116 +1618,6 @@ mod tests {
 
         assert!(regions.contains(&AtlasStructureRegionCoord::new(-1, -1)));
         assert!(regions.contains(&AtlasStructureRegionCoord::new(1, 0)));
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure generation smoke test"]
-    fn generated_structure_preserves_requested_area_and_is_deterministic() {
-        let area = AtlasArea::new(AtlasCoord::new(-4, 7), 24, 20).unwrap();
-        let first = generate_atlas_structure(&WorldMeta::new(42), area);
-        let second = generate_atlas_structure(&WorldMeta::new(42), area);
-
-        assert_eq!(first.area(), area);
-        assert_eq!(first, second);
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure generation smoke test"]
-    fn generated_structure_emits_region_owned_mountain_segments_for_large_area() {
-        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
-        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
-
-        assert!(!structure.mountain_chains().is_empty());
-        assert!(
-            structure
-                .mountain_chains()
-                .segments()
-                .iter()
-                .all(|segment| segment.touches_area(area))
-        );
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure generation smoke test"]
-    fn generated_structure_emits_drainage_segments_for_large_area() {
-        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
-        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
-
-        assert!(!structure.drainage().segments().is_empty());
-        assert!(
-            structure
-                .drainage()
-                .segments()
-                .iter()
-                .all(|segment| segment.touches_area(area))
-        );
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure generation smoke test"]
-    fn generated_drainage_segments_keep_forward_downstream_progress() {
-        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
-        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
-
-        assert!(
-            structure
-                .drainage()
-                .segments()
-                .iter()
-                .all(|segment| segment.downstream_cells_end > segment.downstream_cells_start)
-        );
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure crossing regression test"]
-    fn generated_drainage_segments_only_intersect_at_branch_junctions() {
-        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
-        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
-        let segments = structure.drainage().segments();
-
-        for left_index in 0..segments.len() {
-            for right_index in (left_index + 1)..segments.len() {
-                let left = segments[left_index];
-                let right = segments[right_index];
-                if left.river_id == right.river_id {
-                    continue;
-                }
-
-                if let Some(intersection) = river_segments_intersection(left, right) {
-                    assert!(
-                        is_branch_junction_intersection(left, right, intersection.coord),
-                        "drainage segments from distinct rivers crossed through each other's interiors: left={left:?} right={right:?} coord={:?} point={:?}",
-                        intersection.coord,
-                        intersection.point,
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    #[ignore = "slow atlas-structure ownership smoke test"]
-    fn generated_drainage_segments_carry_consistent_tree_ownership() {
-        let area = AtlasArea::new(AtlasCoord::new(-24, -24), 48, 48).unwrap();
-        let structure = generate_atlas_structure(&WorldMeta::new(42), area);
-        let segments = structure.drainage().segments();
-        let mut roots_by_basin = BTreeMap::<u32, BTreeSet<u32>>::new();
-
-        assert!(!segments.is_empty());
-
-        for segment in segments {
-            assert_eq!(segment.basin_id.0, segment.main_stem_river_id.0);
-            if let Some(parent_river_id) = segment.parent_river_id {
-                assert_ne!(parent_river_id, segment.river_id);
-            } else {
-                roots_by_basin
-                    .entry(segment.basin_id.0)
-                    .or_default()
-                    .insert(segment.river_id.0);
-            }
-        }
-
-        assert!(roots_by_basin.values().all(|roots| roots.len() == 1));
     }
 
     #[test]

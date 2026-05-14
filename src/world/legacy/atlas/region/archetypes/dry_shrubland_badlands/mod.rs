@@ -1,4 +1,4 @@
-﻿use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
+use super::super::{BiomeFamily, RegionArchetype, TerrainFormFamily};
 use super::{EcologyDensityHint, RegionArchetypeDef, SeasonalSurfaceProfile, WaterResponseHint};
 
 pub const DEF: RegionArchetypeDef = RegionArchetypeDef {

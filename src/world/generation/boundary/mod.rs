@@ -12,6 +12,7 @@ pub const DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS: f32 = 30.0;
 pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 160.0;
 pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.38;
 pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.48;
+pub const DEFAULT_BOUNDARY_DISPLACEMENT_SMOOTHING_PASSES: usize = 5;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
 const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
@@ -384,29 +385,27 @@ fn natural_displacement_series(seed: u64, lateral_limit: f32, segment_count: usi
             let low_phase = unit_f32(seed) * std::f32::consts::TAU;
             let mid_phase =
                 unit_f32(splitmix64(seed ^ 0x8412_91c3_5a77_9021)) * std::f32::consts::TAU;
-            let high_phase =
-                unit_f32(splitmix64(seed ^ 0x2f2d_091d_a871_1943)) * std::f32::consts::TAU;
-            let low_wave = (t * std::f32::consts::TAU * 1.15 + low_phase).sin() * 0.52;
-            let mid_wave = (t * std::f32::consts::TAU * 2.65 + mid_phase).sin() * 0.31;
-            let high_wave = (t * std::f32::consts::TAU * 5.20 + high_phase).sin() * 0.10;
-            let coarse = smooth_value_noise(seed ^ 0xc01d_cafe_7a11_0001, t, 5) * 0.30;
-            let fine = smooth_value_noise(seed ^ 0xf1b0_5eed_91ce_0002, t, 9) * 0.16;
-            let signed = (low_wave + mid_wave + high_wave + coarse + fine).clamp(-1.0, 1.0);
+            let low_wave = (t * std::f32::consts::TAU * 1.05 + low_phase).sin() * 0.64;
+            let mid_wave = (t * std::f32::consts::TAU * 2.05 + mid_phase).sin() * 0.24;
+            let coarse = smooth_value_noise(seed ^ 0xc01d_cafe_7a11_0001, t, 5) * 0.28;
+            let fine = smooth_value_noise(seed ^ 0xf1b0_5eed_91ce_0002, t, 6) * 0.03;
+            let signed = (low_wave + mid_wave + coarse + fine).clamp(-1.0, 1.0);
 
             signed * lateral_limit * envelope
         })
         .collect::<Vec<_>>();
 
-    for _ in 0..2 {
+    for _ in 0..DEFAULT_BOUNDARY_DISPLACEMENT_SMOOTHING_PASSES {
         values = smooth_displacements(&values);
     }
+    reinforce_minimum_broad_displacement(&mut values, seed, lateral_limit);
 
     values
 }
 
 fn endpoint_falloff(t: f32) -> f32 {
     let sine = (t * std::f32::consts::PI).sin().max(0.0);
-    smoothstep(sine).powf(0.72)
+    smoothstep(sine).powf(1.15)
 }
 
 fn smooth_value_noise(seed: u64, t: f32, knot_count: usize) -> f32 {
@@ -444,6 +443,31 @@ fn smooth_displacements(values: &[f32]) -> Vec<f32> {
     }
     smoothed.push(0.0);
     smoothed
+}
+
+fn reinforce_minimum_broad_displacement(values: &mut [f32], seed: u64, lateral_limit: f32) {
+    if values.len() <= 2 || lateral_limit <= f32::EPSILON {
+        return;
+    }
+
+    let current_max = values.iter().map(|value| value.abs()).fold(0.0, f32::max);
+    let target = (lateral_limit * 0.18)
+        .max(1.25_f32.min(lateral_limit))
+        .min(lateral_limit * 0.42);
+    if current_max >= target {
+        return;
+    }
+
+    let phase = unit_f32(splitmix64(seed ^ 0x75ef_70d1_5eed_5001)) * std::f32::consts::TAU;
+    let reinforcement = target - current_max;
+    let last = values.len() - 1;
+    for (index, value) in values.iter_mut().enumerate().take(last).skip(1) {
+        let t = index as f32 / last as f32;
+        let broad = (t * std::f32::consts::TAU + phase).sin() * endpoint_falloff(t);
+        *value += broad * reinforcement;
+    }
+    values[0] = 0.0;
+    values[last] = 0.0;
 }
 
 fn visible_amplitude_blocks(
@@ -710,10 +734,43 @@ mod tests {
         {
             let roughness = average_normal_second_difference(curve);
             assert!(
-                roughness <= curve.amplitude * 0.22,
+                roughness <= curve.amplitude * 0.10,
                 "curve {:?} should avoid sawtooth jitter: roughness {:.2}, amplitude {:.2}",
                 curve.edge,
                 roughness,
+                curve.amplitude
+            );
+            checked += 1;
+        }
+
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn noisy_curves_avoid_local_corner_spikes() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let boundary = generate_noisy_boundaries(&patch, &macro_map, BoundaryConfig::new(42, 11));
+        let mut checked = 0;
+
+        for curve in boundary
+            .curves
+            .iter()
+            .filter(|curve| curve_chord_length(curve) >= 32.0 && curve.amplitude >= 8.0)
+        {
+            let high_percentile = percentile_normal_second_difference(curve, 0.95);
+            let maximum = max_normal_second_difference(curve);
+            assert!(
+                high_percentile <= curve.amplitude * 0.24,
+                "curve {:?} should not hide clustered sharp bends: p95 curvature {:.2}, amplitude {:.2}",
+                curve.edge,
+                high_percentile,
+                curve.amplitude
+            );
+            assert!(
+                maximum <= curve.amplitude * 0.36,
+                "curve {:?} should avoid pointy local spikes: max curvature {:.2}, amplitude {:.2}",
+                curve.edge,
+                maximum,
                 curve.amplitude
             );
             checked += 1;
@@ -811,8 +868,32 @@ mod tests {
     }
 
     fn average_normal_second_difference(curve: &NoisyBoundaryCurve) -> f32 {
-        if curve.points.len() < 5 {
+        let differences = normal_second_differences(curve);
+        if differences.is_empty() {
             return 0.0;
+        }
+        differences.iter().sum::<f32>() / differences.len() as f32
+    }
+
+    fn percentile_normal_second_difference(curve: &NoisyBoundaryCurve, percentile: f32) -> f32 {
+        let mut differences = normal_second_differences(curve);
+        if differences.is_empty() {
+            return 0.0;
+        }
+        differences.sort_by(|a, b| a.total_cmp(b));
+        let index = ((differences.len() - 1) as f32 * percentile.clamp(0.0, 1.0)).round() as usize;
+        differences[index]
+    }
+
+    fn max_normal_second_difference(curve: &NoisyBoundaryCurve) -> f32 {
+        normal_second_differences(curve)
+            .into_iter()
+            .fold(0.0, f32::max)
+    }
+
+    fn normal_second_differences(curve: &NoisyBoundaryCurve) -> Vec<f32> {
+        if curve.points.len() < 5 {
+            return Vec::new();
         }
         let dx = curve.anchors.end.x - curve.anchors.start.x;
         let dz = curve.anchors.end.z - curve.anchors.start.z;
@@ -828,10 +909,9 @@ mod tests {
                 (point.x - base.x) * normal.x + (point.z - base.z) * normal.z
             })
             .collect::<Vec<_>>();
-        let sum = offsets
+        offsets
             .windows(3)
             .map(|window| (window[2] - 2.0 * window[1] + window[0]).abs())
-            .sum::<f32>();
-        sum / (offsets.len() - 2) as f32
+            .collect()
     }
 }

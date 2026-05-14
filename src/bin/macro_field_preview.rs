@@ -11,13 +11,13 @@ use rayon::prelude::*;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
     DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphHydrologyGraph, GraphMacroMap, GraphRegionArea,
-    GraphRegionCoord, HydrologyConfig, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MacroFieldContourSet,
-    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
-    MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, VoronoiGraphConfig,
-    VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint,
-    apply_headwater_source_hydration_to_biomes, extract_macro_field_contours,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphMacroMap, GraphRegionArea, GraphRegionCoord, HydrologyConfig,
+    MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    MacroFieldContourSet, MacroFieldSample as CoreMacroFieldSample,
+    MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, RiverPlan, RiverReachType,
+    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, WorldPlanePoint,
+    apply_headwater_source_hydration_to_biomes, build_river_plan, extract_macro_field_contours,
     generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
     generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
 };
@@ -49,6 +49,13 @@ const LIT_MAX_SHADE: f32 = 0.96;
 const GRAPH_EDGE_OVERLAY_COLOR: [u8; 3] = [8, 11, 15];
 const GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.075;
 const LIT_GRAPH_EDGE_OVERLAY_AMOUNT: f32 = 0.025;
+const RIVER_CENTERLINE_MAIN_COLOR: [u8; 3] = [12, 238, 255];
+const RIVER_CENTERLINE_TRIBUTARY_COLOR: [u8; 3] = [74, 168, 255];
+const RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.88;
+const LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.62;
+const WATER_BOUNDARY_OVERLAY_COLOR: [u8; 3] = [210, 158, 0];
+const WATER_BOUNDARY_OVERLAY_AMOUNT: f32 = 0.86;
+const WATER_BOUNDARY_OVERLAY_WIDTH_PX: i32 = 6;
 const TILE_GRID_OVERLAY_AMOUNT: f32 = 0.18;
 const MASK_OCEAN_COLOR: [u8; 3] = [31, 90, 164];
 const MASK_LAKE_COLOR: [u8; 3] = [54, 150, 198];
@@ -330,8 +337,8 @@ impl PreviewWindow {
 struct PreviewWorld {
     patch: VoronoiGraphPatch,
     macro_map: GraphMacroMap,
-    hydrology: GraphHydrologyGraph,
     boundary: BoundaryCache,
+    river_plan: RiverPlan,
     river_segment_count: usize,
 }
 
@@ -368,6 +375,26 @@ struct TileGridStats {
 struct GraphEdgeOverlayStats {
     noisy_curve_count: usize,
     drawn_segment_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RiverCenterlineOverlayStats {
+    selected_segment_count: usize,
+    drawn_segment_count: usize,
+    trunk_segment_count: usize,
+    tributary_segment_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WaterBoundaryOverlayStats {
+    vertical_segments: usize,
+    horizontal_segments: usize,
+}
+
+impl WaterBoundaryOverlayStats {
+    fn total_segments(self) -> usize {
+        self.vertical_segments + self.horizontal_segments
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -435,6 +462,12 @@ struct PreviewHeader {
     tile_boundary_horizontal_lines: usize,
     graph_edge_overlay_curve_count: usize,
     graph_edge_overlay_segment_count: usize,
+    river_centerline_overlay_selected_segments: usize,
+    river_centerline_overlay_drawn_segments: usize,
+    river_centerline_overlay_trunk_segments: usize,
+    river_centerline_overlay_tributary_segments: usize,
+    water_boundary_overlay_vertical_segments: usize,
+    water_boundary_overlay_horizontal_segments: usize,
     scale_bar_length_blocks: f32,
     scale_bar_length_pixels: u32,
     contour_step_blocks: f32,
@@ -555,6 +588,40 @@ impl PreviewHeader {
                 LIT_GRAPH_EDGE_OVERLAY_AMOUNT
             ),
             format!(
+                "river_centerline_overlay_segments_selected_drawn={},{}",
+                self.river_centerline_overlay_selected_segments,
+                self.river_centerline_overlay_drawn_segments
+            ),
+            format!(
+                "river_centerline_overlay_segments_trunk_tributary={},{}",
+                self.river_centerline_overlay_trunk_segments,
+                self.river_centerline_overlay_tributary_segments
+            ),
+            format!(
+                "river_centerline_overlay_style=main_{:02x}{:02x}{:02x}_tributary_{:02x}{:02x}{:02x}_amount_{:.3}_lit_amount_{:.3}",
+                RIVER_CENTERLINE_MAIN_COLOR[0],
+                RIVER_CENTERLINE_MAIN_COLOR[1],
+                RIVER_CENTERLINE_MAIN_COLOR[2],
+                RIVER_CENTERLINE_TRIBUTARY_COLOR[0],
+                RIVER_CENTERLINE_TRIBUTARY_COLOR[1],
+                RIVER_CENTERLINE_TRIBUTARY_COLOR[2],
+                RIVER_CENTERLINE_OVERLAY_AMOUNT,
+                LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT
+            ),
+            format!(
+                "water_boundary_overlay_segments_vertical_horizontal={},{}",
+                self.water_boundary_overlay_vertical_segments,
+                self.water_boundary_overlay_horizontal_segments
+            ),
+            format!(
+                "water_boundary_overlay_style=color_{:02x}{:02x}{:02x}_amount_{:.3}_pixel_width_{}",
+                WATER_BOUNDARY_OVERLAY_COLOR[0],
+                WATER_BOUNDARY_OVERLAY_COLOR[1],
+                WATER_BOUNDARY_OVERLAY_COLOR[2],
+                WATER_BOUNDARY_OVERLAY_AMOUNT,
+                WATER_BOUNDARY_OVERLAY_WIDTH_PX
+            ),
+            format!(
                 "scale_bar_blocks_pixels={:.1},{}",
                 self.scale_bar_length_blocks, self.scale_bar_length_pixels
             ),
@@ -650,6 +717,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let render_start = Instant::now();
     let tile_grid = tile_grid_stats(window, config.region_size_blocks as f32);
     let edge_overlay = graph_edge_overlay_stats(window, &preview.boundary);
+    let river_centerline_overlay =
+        river_centerline_overlay_stats(window, &preview.river_plan, &preview.boundary);
+    let water_boundary_overlay =
+        water_boundary_overlay_stats(&tile, config.width as usize, config.height as usize);
     let scale_bar = scale_bar_stats(window);
     let lit_gradient = lit_gradient_stats(&tile, config.width as usize, config.height as usize);
 
@@ -701,6 +772,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             tile_boundary_horizontal_lines: tile_grid.horizontal_lines,
             graph_edge_overlay_curve_count: edge_overlay.noisy_curve_count,
             graph_edge_overlay_segment_count: edge_overlay.drawn_segment_count,
+            river_centerline_overlay_selected_segments: river_centerline_overlay
+                .selected_segment_count,
+            river_centerline_overlay_drawn_segments: river_centerline_overlay.drawn_segment_count,
+            river_centerline_overlay_trunk_segments: river_centerline_overlay.trunk_segment_count,
+            river_centerline_overlay_tributary_segments: river_centerline_overlay
+                .tributary_segment_count,
+            water_boundary_overlay_vertical_segments: water_boundary_overlay.vertical_segments,
+            water_boundary_overlay_horizontal_segments: water_boundary_overlay.horizontal_segments,
             scale_bar_length_blocks: scale_bar.length_blocks,
             scale_bar_length_pixels: scale_bar.length_pixels,
             contour_step_blocks: tile.contours.step_blocks,
@@ -729,6 +808,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         draw_tile_boundary_overlay(&mut image, window, tile_grid);
         if channel != PreviewChannel::Contour {
             draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary, channel);
+            draw_river_centerline_overlay(
+                &mut image,
+                window,
+                &preview.river_plan,
+                &preview.boundary,
+                channel,
+            );
+        }
+        if water_boundary_overlay_enabled(channel) {
+            draw_water_boundary_overlay(
+                &mut image,
+                &tile,
+                config.width as usize,
+                config.height as usize,
+            );
         }
         if channel == PreviewChannel::Contour
             || (config.contours
@@ -839,6 +933,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         tile_grid.horizontal_lines,
         scale_bar.length_blocks,
         scale_bar.length_pixels
+    );
+    println!(
+        "river centerline overlay: selected {}, drawn {}, trunk {}, tributary {}, amount {:.2} (lit {:.2})",
+        river_centerline_overlay.selected_segment_count,
+        river_centerline_overlay.drawn_segment_count,
+        river_centerline_overlay.trunk_segment_count,
+        river_centerline_overlay.tributary_segment_count,
+        RIVER_CENTERLINE_OVERLAY_AMOUNT,
+        LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT
+    );
+    println!(
+        "water boundary overlay: segments v/h {}/{}, total {}, width {} px, amount {:.2}",
+        water_boundary_overlay.vertical_segments,
+        water_boundary_overlay.horizontal_segments,
+        water_boundary_overlay.total_segments(),
+        WATER_BOUNDARY_OVERLAY_WIDTH_PX,
+        WATER_BOUNDARY_OVERLAY_AMOUNT
     );
     println!(
         "noisy boundary displacement avg/max {:.2}/{:.2} blocks",
@@ -1102,13 +1213,14 @@ fn build_preview_world(
         &macro_map,
         BoundaryConfig::new(meta.seed, meta.generator_version),
     );
+    let river_plan = build_river_plan(&patch, &macro_map, &hydrology, Default::default());
     let river_segment_count = hydrology.segments.len();
 
     Ok(PreviewWorld {
         patch,
         macro_map,
-        hydrology,
         boundary,
+        river_plan,
         river_segment_count,
     })
 }
@@ -1143,7 +1255,7 @@ fn rasterize_macro_field(
     let core_tile = generate_macro_field_tile(
         &preview.patch,
         &preview.macro_map,
-        &preview.hydrology,
+        &preview.river_plan,
         &preview.boundary,
         core_config,
     );
@@ -1182,6 +1294,10 @@ impl FieldSample {
             river_valley: sample.river_valley_strength,
             combined_height: sample.combined_macro_height,
         }
+    }
+
+    fn is_standing_water(self) -> bool {
+        self.ocean_mask > 0.5 || self.lake_mask > 0.5
     }
 }
 
@@ -1293,6 +1409,35 @@ fn graph_edge_overlay_stats(
     }
 }
 
+fn river_centerline_overlay_stats(
+    window: PreviewWindow,
+    river_plan: &RiverPlan,
+    boundary: &BoundaryCache,
+) -> RiverCenterlineOverlayStats {
+    let mut stats = RiverCenterlineOverlayStats {
+        selected_segment_count: river_plan.segments.len(),
+        ..RiverCenterlineOverlayStats::default()
+    };
+
+    for segment in &river_plan.segments {
+        if river_segment_is_trunk(segment.reach_type) {
+            stats.trunk_segment_count += 1;
+        } else {
+            stats.tributary_segment_count += 1;
+        }
+        let Some(curve) = boundary_curve_for_edge(boundary, segment.edge) else {
+            continue;
+        };
+        stats.drawn_segment_count += curve
+            .points
+            .windows(2)
+            .filter(|points| clip_world_segment_to_window(points[0], points[1], window).is_some())
+            .count();
+    }
+
+    stats
+}
+
 fn scale_bar_stats(window: PreviewWindow) -> ScaleBarStats {
     let target_blocks = window.world_span_x * 0.16;
     let length_blocks = nice_scale_bar_length(target_blocks);
@@ -1386,6 +1531,45 @@ fn draw_noisy_graph_edge_overlay(
     }
 }
 
+fn draw_river_centerline_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    river_plan: &RiverPlan,
+    boundary: &BoundaryCache,
+    channel: PreviewChannel,
+) {
+    let amount = river_centerline_overlay_amount(channel);
+    if amount <= 0.0 {
+        return;
+    }
+
+    for draw_trunk in [false, true] {
+        for segment in &river_plan.segments {
+            if river_segment_is_trunk(segment.reach_type) != draw_trunk {
+                continue;
+            }
+            let Some(curve) = boundary_curve_for_edge(boundary, segment.edge) else {
+                continue;
+            };
+            let color = if draw_trunk {
+                RIVER_CENTERLINE_MAIN_COLOR
+            } else {
+                RIVER_CENTERLINE_TRIBUTARY_COLOR
+            };
+            let radius = river_centerline_radius_px(segment.reach_type, segment.display_flow);
+            for points in curve.points.windows(2) {
+                let Some((start, end)) = clip_world_segment_to_window(points[0], points[1], window)
+                else {
+                    continue;
+                };
+                let (sx, sy) = world_to_pixel(start, window, image.width(), image.height());
+                let (ex, ey) = world_to_pixel(end, window, image.width(), image.height());
+                draw_pixel_line_with_radius(image, sx, sy, ex, ey, color, amount, radius);
+            }
+        }
+    }
+}
+
 fn graph_edge_overlay_amount(channel: PreviewChannel) -> f32 {
     if channel == PreviewChannel::LitHeightfield {
         LIT_GRAPH_EDGE_OVERLAY_AMOUNT
@@ -1393,6 +1577,143 @@ fn graph_edge_overlay_amount(channel: PreviewChannel) -> f32 {
         0.0
     } else {
         GRAPH_EDGE_OVERLAY_AMOUNT
+    }
+}
+
+fn river_centerline_overlay_amount(channel: PreviewChannel) -> f32 {
+    if channel == PreviewChannel::LitHeightfield {
+        LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT
+    } else if channel == PreviewChannel::Contour {
+        0.0
+    } else {
+        RIVER_CENTERLINE_OVERLAY_AMOUNT
+    }
+}
+
+fn river_segment_is_trunk(reach_type: RiverReachType) -> bool {
+    matches!(
+        reach_type,
+        RiverReachType::Lower | RiverReachType::Trunk | RiverReachType::LakeOutlet
+    )
+}
+
+fn river_centerline_radius_px(reach_type: RiverReachType, display_flow: f32) -> i32 {
+    let flow_radius = if display_flow >= 1024.0 {
+        2
+    } else if display_flow >= 256.0 {
+        1
+    } else {
+        0
+    };
+    match reach_type {
+        RiverReachType::Trunk => flow_radius.max(2),
+        RiverReachType::Lower | RiverReachType::LakeOutlet => flow_radius.max(1),
+        RiverReachType::Middle => flow_radius.min(1),
+        RiverReachType::Headwater | RiverReachType::Upper | RiverReachType::LakeInlet => {
+            flow_radius.min(1)
+        }
+    }
+}
+
+fn boundary_curve_for_edge(
+    boundary: &BoundaryCache,
+    edge: new_world::world::generation::VoronoiEdgeId,
+) -> Option<&new_world::world::generation::NoisyBoundaryCurve> {
+    boundary.curves.iter().find(|curve| curve.edge == edge)
+}
+
+fn water_boundary_overlay_enabled(channel: PreviewChannel) -> bool {
+    matches!(
+        channel,
+        PreviewChannel::MacroElevation
+            | PreviewChannel::CombinedMacroHeight
+            | PreviewChannel::LitHeightfield
+    )
+}
+
+fn water_boundary_overlay_stats(
+    tile: &MacroFieldTile,
+    width: usize,
+    height: usize,
+) -> WaterBoundaryOverlayStats {
+    if width == 0 || height == 0 || tile.samples.len() < width.saturating_mul(height) {
+        return WaterBoundaryOverlayStats::default();
+    }
+
+    let mut vertical_segments = 0;
+    let mut horizontal_segments = 0;
+    for y in 0..height {
+        for x in 0..width {
+            let water = tile.samples[y * width + x].is_standing_water();
+            if x + 1 < width && water != tile.samples[y * width + x + 1].is_standing_water() {
+                vertical_segments += 1;
+            }
+            if y + 1 < height && water != tile.samples[(y + 1) * width + x].is_standing_water() {
+                horizontal_segments += 1;
+            }
+        }
+    }
+
+    WaterBoundaryOverlayStats {
+        vertical_segments,
+        horizontal_segments,
+    }
+}
+
+fn draw_water_boundary_overlay(
+    image: &mut RgbImage,
+    tile: &MacroFieldTile,
+    width: usize,
+    height: usize,
+) {
+    if width == 0 || height == 0 || tile.samples.len() < width.saturating_mul(height) {
+        return;
+    }
+
+    for y in 0..height {
+        for x in 0..width {
+            let water = tile.samples[y * width + x].is_standing_water();
+            if x + 1 < width && water != tile.samples[y * width + x + 1].is_standing_water() {
+                draw_water_boundary_vertical(image, x as i32, y as i32);
+            }
+            if y + 1 < height && water != tile.samples[(y + 1) * width + x].is_standing_water() {
+                draw_water_boundary_horizontal(image, x as i32, y as i32);
+            }
+        }
+    }
+}
+
+fn draw_water_boundary_vertical(image: &mut RgbImage, x: i32, y: i32) {
+    let px = x + 1;
+    let start_dx = -(WATER_BOUNDARY_OVERLAY_WIDTH_PX / 2);
+    let end_dx = start_dx + WATER_BOUNDARY_OVERLAY_WIDTH_PX;
+    for dx in start_dx..end_dx {
+        for dy in 0..=1 {
+            blend_pixel_i32(
+                image,
+                px + dx,
+                y + dy,
+                WATER_BOUNDARY_OVERLAY_COLOR,
+                WATER_BOUNDARY_OVERLAY_AMOUNT,
+            );
+        }
+    }
+}
+
+fn draw_water_boundary_horizontal(image: &mut RgbImage, x: i32, y: i32) {
+    let py = y + 1;
+    let start_dy = -(WATER_BOUNDARY_OVERLAY_WIDTH_PX / 2);
+    let end_dy = start_dy + WATER_BOUNDARY_OVERLAY_WIDTH_PX;
+    for dy in start_dy..end_dy {
+        for dx in 0..=1 {
+            blend_pixel_i32(
+                image,
+                x + dx,
+                py + dy,
+                WATER_BOUNDARY_OVERLAY_COLOR,
+                WATER_BOUNDARY_OVERLAY_AMOUNT,
+            );
+        }
     }
 }
 
@@ -1600,6 +1921,45 @@ fn draw_pixel_line(
         if e2 <= dx {
             error += dx;
             y += sy;
+        }
+    }
+}
+
+fn draw_pixel_line_with_radius(
+    image: &mut RgbImage,
+    start_x: i32,
+    start_y: i32,
+    end_x: i32,
+    end_y: i32,
+    color: [u8; 3],
+    amount: f32,
+    radius: i32,
+) {
+    if radius <= 0 {
+        draw_pixel_line(image, start_x, start_y, end_x, end_y, color, amount);
+        return;
+    }
+
+    let radius_sq = radius * radius;
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dy * dy > radius_sq {
+                continue;
+            }
+            let offset_amount = if dx == 0 && dy == 0 {
+                amount
+            } else {
+                amount * 0.62
+            };
+            draw_pixel_line(
+                image,
+                start_x + dx,
+                start_y + dy,
+                end_x + dx,
+                end_y + dy,
+                color,
+                offset_amount,
+            );
         }
     }
 }
@@ -2322,6 +2682,13 @@ fn blend_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3], amount: f32
     pixels[index..index + 3].copy_from_slice(&blended);
 }
 
+fn blend_pixel_i32(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3], amount: f32) {
+    if x < 0 || y < 0 {
+        return;
+    }
+    blend_pixel(image, x as u32, y as u32, color, amount);
+}
+
 fn set_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3]) {
     if x >= image.width() || y >= image.height() {
         return;
@@ -2388,9 +2755,9 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 mod tests {
     use super::*;
     use new_world::world::generation::{
-        BoundaryAnchors, BoundaryGuard, BoundaryProfile, MacroFieldContourLevel,
-        MacroFieldContourSegment, NoisyBoundaryCurve, VoronoiCornerId, VoronoiEdgeId,
-        VoronoiSiteId,
+        BoundaryAnchors, BoundaryGuard, BoundaryProfile, GraphRiverSegmentId,
+        MacroFieldContourLevel, MacroFieldContourSegment, NoisyBoundaryCurve, RiverChainId,
+        RiverReachId, RiverSegmentPlan, VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId,
     };
 
     fn test_config() -> PreviewConfig {
@@ -2546,6 +2913,123 @@ mod tests {
             GRAPH_EDGE_OVERLAY_AMOUNT <= 0.10,
             "macro field graph edge overlay should be a faint reference layer, not a dominant line layer"
         );
+    }
+
+    #[test]
+    fn river_centerline_overlay_changes_pixels_and_counts_selected_segments() {
+        let mut image = RgbImage::from_pixel(128, 64, image::Rgb([80, 82, 84]));
+        let before = image.as_raw().clone();
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 128,
+            height: 64,
+            world_span_x: 1024.0,
+            world_span_z: 512.0,
+        };
+        let boundary = test_boundary_cache();
+        let river_plan = test_river_plan(RiverReachType::Middle, 128.0);
+        let stats = river_centerline_overlay_stats(window, &river_plan, &boundary);
+
+        draw_river_centerline_overlay(
+            &mut image,
+            window,
+            &river_plan,
+            &boundary,
+            PreviewChannel::CombinedMacroHeight,
+        );
+
+        assert_ne!(image.as_raw(), &before);
+        assert_eq!(stats.selected_segment_count, 1);
+        assert_eq!(stats.trunk_segment_count, 0);
+        assert_eq!(stats.tributary_segment_count, 1);
+        assert!(stats.drawn_segment_count > 0);
+    }
+
+    #[test]
+    fn river_centerline_overlay_thickens_major_reaches_only_as_a_reference_line() {
+        assert_eq!(
+            river_centerline_radius_px(RiverReachType::Headwater, 16.0),
+            0
+        );
+        assert_eq!(river_centerline_radius_px(RiverReachType::Trunk, 1024.0), 2);
+        assert!(river_segment_is_trunk(RiverReachType::Lower));
+        assert!(!river_segment_is_trunk(RiverReachType::Upper));
+    }
+
+    #[test]
+    fn standing_water_boundary_treats_ocean_and_lake_as_water_only() {
+        assert!(
+            FieldSample {
+                ocean_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
+        assert!(
+            FieldSample {
+                lake_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
+        assert!(
+            !FieldSample {
+                dry_mask: 1.0,
+                coast_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
+    }
+
+    #[test]
+    fn water_boundary_overlay_changes_pixels_and_counts_segments() {
+        let tile = simple_test_tile(vec![
+            FieldSample {
+                ocean_mask: 1.0,
+                ..FieldSample::default()
+            },
+            FieldSample {
+                lake_mask: 1.0,
+                ..FieldSample::default()
+            },
+            FieldSample::default(),
+            FieldSample {
+                dry_mask: 1.0,
+                ..FieldSample::default()
+            },
+            FieldSample {
+                lake_mask: 1.0,
+                ..FieldSample::default()
+            },
+            FieldSample::default(),
+        ]);
+        let mut image = RgbImage::from_pixel(3, 2, image::Rgb([180, 180, 180]));
+        let before = image.as_raw().clone();
+        let stats = water_boundary_overlay_stats(&tile, 3, 2);
+
+        draw_water_boundary_overlay(&mut image, &tile, 3, 2);
+
+        assert_ne!(image.as_raw(), &before);
+        assert_eq!(stats.vertical_segments, 3);
+        assert_eq!(stats.horizontal_segments, 1);
+        assert_eq!(stats.total_segments(), 4);
+    }
+
+    #[test]
+    fn water_boundary_overlay_is_limited_to_macro_combined_and_lit_channels() {
+        assert!(water_boundary_overlay_enabled(
+            PreviewChannel::MacroElevation
+        ));
+        assert!(water_boundary_overlay_enabled(
+            PreviewChannel::CombinedMacroHeight
+        ));
+        assert!(water_boundary_overlay_enabled(
+            PreviewChannel::LitHeightfield
+        ));
+        assert!(!water_boundary_overlay_enabled(PreviewChannel::Mask));
+        assert!(!water_boundary_overlay_enabled(PreviewChannel::Contour));
     }
 
     #[test]
@@ -2972,6 +3456,18 @@ mod tests {
         );
     }
 
+    fn simple_test_tile(samples: Vec<FieldSample>) -> MacroFieldTile {
+        MacroFieldTile {
+            samples,
+            macro_stats: ChannelStats::default(),
+            ridge_stats: ChannelStats::default(),
+            river_stats: ChannelStats::default(),
+            combined_stats: ChannelStats::default(),
+            core_stats: CoreMacroFieldTileStats::default(),
+            contours: MacroFieldContourSet::default(),
+        }
+    }
+
     fn contour_test_tile() -> MacroFieldTile {
         MacroFieldTile {
             samples: vec![
@@ -3054,6 +3550,40 @@ mod tests {
                 },
             }],
             stats: Default::default(),
+        }
+    }
+
+    fn test_river_plan(reach_type: RiverReachType, display_flow: f32) -> RiverPlan {
+        RiverPlan {
+            segments: vec![RiverSegmentPlan {
+                segment_id: GraphRiverSegmentId(1),
+                edge: VoronoiEdgeId(1),
+                chain_id: RiverChainId(1),
+                reach_id: RiverReachId(1),
+                reach_type,
+                raw_flow: display_flow,
+                display_flow,
+                upstream_area: display_flow,
+                tributary_flow: 0.0,
+                discharge_q: display_flow,
+                hydraulic_width_coefficient: 1.0,
+                hydraulic_depth_coefficient: 1.0,
+                velocity: 1.0,
+                downstream_progress: 0.5,
+                chain_downstream_progress: 0.5,
+                segment_length_blocks: 256.0,
+                local_slope: 0.01,
+                broad_valley_width_blocks: 64.0,
+                broad_valley_depth_blocks: 6.0,
+                bed_width_blocks: 12.0,
+                bed_depth_blocks: 3.0,
+                bank_transition_width_blocks: 8.0,
+                floodplain_width_blocks: 16.0,
+                roughness_hint: 0.5,
+                gravel_hint: 0.5,
+                cutbank_hint: 0.5,
+            }],
+            ..RiverPlan::default()
         }
     }
 }
