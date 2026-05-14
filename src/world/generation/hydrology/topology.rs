@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
-use super::super::graph::VoronoiEdgeId;
+use super::super::graph::{VoronoiCornerId, VoronoiEdgeId};
 use super::super::macro_map::MacroEdge;
 use super::routing::CornerNeighbor;
 use super::types::{
@@ -427,6 +427,45 @@ pub(super) fn prune_multi_incoming_selected_branches(
                 selected[source] = false;
                 pruned += 1;
             }
+        }
+    }
+
+    pruned
+}
+
+pub(super) fn prune_duplicate_corner_outgoing_selected_branches(
+    selected: &mut [bool],
+    downstream: &[Option<usize>],
+    flow: &[f32],
+    corner_ids: &[VoronoiCornerId],
+) -> usize {
+    let mut outgoing_by_corner = HashMap::<VoronoiCornerId, Vec<usize>>::new();
+
+    for (index, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected || downstream.get(index).copied().flatten().is_none() {
+            continue;
+        }
+        let Some(corner) = corner_ids.get(index).copied() else {
+            continue;
+        };
+        outgoing_by_corner.entry(corner).or_default().push(index);
+    }
+
+    let mut pruned = 0;
+    for sources in outgoing_by_corner.values() {
+        if sources.len() <= 1 {
+            continue;
+        }
+        let keep = strongest_sources(sources, 1, flow)
+            .into_iter()
+            .next()
+            .expect("duplicate outgoing corner should keep one source");
+        for source in sources {
+            if *source == keep || !selected[*source] {
+                continue;
+            }
+            selected[*source] = false;
+            pruned += 1;
         }
     }
 

@@ -16,11 +16,11 @@ use routing::{
     resolve_flow_accumulation, resolve_terminal_indices, resolve_watersheds,
 };
 use selection::{resolve_lake_inlet_policies, resolve_lake_terminal_policies, select_river_paths};
-use topology::{resolve_lake_contact_topology, resolve_node_kinds, resolve_topology_stats};
+use topology::{
+    prune_disconnected_selected_fragments, prune_duplicate_corner_outgoing_selected_branches,
+    resolve_lake_contact_topology, resolve_node_kinds, resolve_topology_stats,
+};
 use types::validate_hydrology_config;
-
-#[cfg(test)]
-use super::graph::VoronoiCornerId;
 
 pub use types::{
     DEFAULT_HEADWATER_ELEVATION, DEFAULT_HEADWATER_SOURCE_HYDRATION_FLOOR,
@@ -131,7 +131,7 @@ pub fn solve_hydrology(
         .iter()
         .map(|corner| corner.position)
         .collect::<Vec<_>>();
-    let selected_rivers = select_river_paths(
+    let mut selected_rivers = select_river_paths(
         &downstream,
         &downstream_edges,
         &flow_accumulation,
@@ -150,7 +150,29 @@ pub fn solve_hydrology(
         &edge_map,
         config,
     );
-    let selected = selected_rivers.selected;
+    let mut selected = selected_rivers.selected;
+    let corner_ids = patch
+        .corners
+        .iter()
+        .map(|corner| corner.id)
+        .collect::<Vec<_>>();
+    let duplicate_corner_outgoing_pruned_count = prune_duplicate_corner_outgoing_selected_branches(
+        &mut selected,
+        &downstream,
+        &flow_accumulation,
+        &corner_ids,
+    );
+    selected_rivers.duplicate_trunk_pruned_count += duplicate_corner_outgoing_pruned_count;
+    if duplicate_corner_outgoing_pruned_count > 0 {
+        selected_rivers.disconnected_river_fragment_pruned_count +=
+            prune_disconnected_selected_fragments(
+                &mut selected,
+                &downstream,
+                &terminals,
+                &resolutions,
+                &lake_topology,
+            );
+    }
     let node_kinds = resolve_node_kinds(
         &selected,
         &downstream,
@@ -294,14 +316,14 @@ mod tests {
     };
     use super::topology::{
         lake_components, lake_hop_distances, prune_disconnected_selected_fragments,
-        remove_repeated_lake_contact_chains,
+        prune_duplicate_corner_outgoing_selected_branches, remove_repeated_lake_contact_chains,
     };
     use super::types::LakeContactTopology;
     use super::*;
     use crate::world::generation::biome::GraphBiomeKind;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiEdgeId,
-        VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
+        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, WorldPlanePoint,
         generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
@@ -738,6 +760,38 @@ mod tests {
         assert!(
             incoming.into_iter().all(|count| count <= 2),
             "selected geometry must still have at most two incoming segments per vertex"
+        );
+    }
+
+    #[test]
+    fn duplicate_corner_confluence_prunes_extra_downstream_split() {
+        let downstream = vec![Some(2), Some(3), Some(4), Some(5), None, None];
+        let mut selected = vec![true, true, true, true, false, false];
+        let flow = vec![18.0, 20.0, 70.0, 90.0, 70.0, 90.0];
+        let corner_ids = vec![
+            VoronoiCornerId(10),
+            VoronoiCornerId(11),
+            VoronoiCornerId(20),
+            VoronoiCornerId(20),
+            VoronoiCornerId(30),
+            VoronoiCornerId(31),
+        ];
+
+        let pruned = prune_duplicate_corner_outgoing_selected_branches(
+            &mut selected,
+            &downstream,
+            &flow,
+            &corner_ids,
+        );
+
+        assert_eq!(
+            pruned, 1,
+            "same Voronoi corner must keep exactly one selected downstream continuation"
+        );
+        assert_eq!(
+            selected,
+            vec![true, true, false, true, false, false],
+            "the stronger downstream continuation should survive while both upstream branches still meet the same corner id"
         );
     }
 
@@ -1439,6 +1493,117 @@ mod tests {
             selected,
             vec![true, false, true, false, false, false],
             "independent selected mainstem starts should use the same source/path spacing guard as tributaries"
+        );
+    }
+
+    #[test]
+    fn spatially_shared_confluence_keeps_one_downstream_continuation() {
+        let downstream = vec![Some(2), Some(3), Some(4), Some(5), None, None];
+        let downstream_edges = vec![
+            Some(VoronoiEdgeId(200)),
+            Some(VoronoiEdgeId(201)),
+            Some(VoronoiEdgeId(202)),
+            Some(VoronoiEdgeId(203)),
+            None,
+            None,
+        ];
+        let flow = vec![90.0, 80.0, 120.0, 100.0, 120.0, 100.0];
+        let elevations = vec![0.82, 0.80, 0.48, 0.47, 0.0, 0.0];
+        let source_hydration = vec![0.62, 0.61, 0.20, 0.20, 0.0, 0.0];
+        let corner_positions = vec![
+            WorldPlanePoint::new(-512.0, 0.0),
+            WorldPlanePoint::new(512.0, 0.0),
+            WorldPlanePoint::new(0.0, 256.0),
+            WorldPlanePoint::new(0.0, 256.0),
+            WorldPlanePoint::new(-128.0, 512.0),
+            WorldPlanePoint::new(128.0, 512.0),
+        ];
+        let terminals = vec![false, false, false, false, true, true];
+        let lake_candidates = vec![false; 6];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let adjacency = vec![
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(200),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(201),
+            }],
+            vec![
+                CornerNeighbor {
+                    index: 0,
+                    edge: VoronoiEdgeId(200),
+                },
+                CornerNeighbor {
+                    index: 4,
+                    edge: VoronoiEdgeId(202),
+                },
+            ],
+            vec![
+                CornerNeighbor {
+                    index: 1,
+                    edge: VoronoiEdgeId(201),
+                },
+                CornerNeighbor {
+                    index: 5,
+                    edge: VoronoiEdgeId(203),
+                },
+            ],
+            vec![CornerNeighbor {
+                index: 2,
+                edge: VoronoiEdgeId(202),
+            }],
+            vec![CornerNeighbor {
+                index: 3,
+                edge: VoronoiEdgeId(203),
+            }],
+        ];
+
+        let selected = select_river_paths(
+            &downstream,
+            &downstream_edges,
+            &flow,
+            &elevations,
+            &source_hydration,
+            Some(&corner_positions),
+            &terminals,
+            &lake_candidates,
+            &resolutions,
+            &resolve_terminal_indices(&downstream),
+            &[None; 6],
+            &[None; 6],
+            &[None; 6],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 6],
+                contact_component_by_land_corner: vec![None; 6],
+                inlet_vertices: vec![false; 6],
+                outlet_vertices: vec![false; 6],
+                inlet_land_vertices: vec![false; 6],
+                outlet_land_vertices: vec![false; 6],
+            },
+            &adjacency,
+            &HashMap::new(),
+            HydrologyConfig {
+                river_flow_threshold: 60.0,
+                tributary_source_min_spacing_blocks: 128.0,
+                tributary_parallel_path_min_spacing_blocks: 128.0,
+                ..HydrologyConfig::default()
+            },
+        )
+        .selected;
+
+        assert_eq!(
+            selected,
+            vec![true, false, true, false, false, false],
+            "rivers that meet at the same world-space corner must merge into one downstream selected continuation"
         );
     }
 

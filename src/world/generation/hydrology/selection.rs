@@ -347,6 +347,8 @@ pub(super) fn select_river_paths(
     );
     duplicate_trunk_pruned_count +=
         prune_multi_incoming_selected_branches(&mut selected, downstream, flow);
+    duplicate_trunk_pruned_count +=
+        prune_spatial_confluence_splits(&mut selected, downstream, flow, corner_positions);
     let disconnected_river_fragment_pruned_count = prune_disconnected_selected_fragments(
         &mut selected,
         downstream,
@@ -361,6 +363,78 @@ pub(super) fn select_river_paths(
         repeated_lake_contact_pruned_count,
         disconnected_river_fragment_pruned_count,
     }
+}
+
+fn prune_spatial_confluence_splits(
+    selected: &mut [bool],
+    downstream: &[Option<usize>],
+    flow: &[f32],
+    corner_positions: Option<&[WorldPlanePoint]>,
+) -> usize {
+    let Some(positions) = corner_positions else {
+        return 0;
+    };
+
+    let mut groups = HashMap::<(i32, i32), Vec<usize>>::new();
+    for (index, position) in positions.iter().copied().enumerate() {
+        groups
+            .entry(spatial_corner_key(position))
+            .or_default()
+            .push(index);
+    }
+
+    let mut pruned = 0_usize;
+    for group in groups.values().filter(|group| group.len() > 1) {
+        let members = group.iter().copied().collect::<HashSet<_>>();
+        let mut incoming = Vec::new();
+        let mut outgoing = Vec::new();
+
+        for (source, is_selected) in selected.iter().copied().enumerate() {
+            if !is_selected {
+                continue;
+            }
+            let Some(target) = downstream[source] else {
+                continue;
+            };
+            let source_in_group = members.contains(&source);
+            let target_in_group = members.contains(&target);
+            if !source_in_group && target_in_group {
+                incoming.push(source);
+            } else if source_in_group && !target_in_group {
+                outgoing.push(source);
+            }
+        }
+
+        if incoming.is_empty() || outgoing.len() <= 1 {
+            continue;
+        }
+
+        let keep = outgoing
+            .iter()
+            .copied()
+            .max_by(|&left, &right| {
+                flow[left]
+                    .total_cmp(&flow[right])
+                    .then_with(|| right.cmp(&left))
+            })
+            .expect("non-empty outgoing list should have a keep candidate");
+        for source in outgoing {
+            if source != keep && selected[source] {
+                selected[source] = false;
+                pruned += 1;
+            }
+        }
+    }
+
+    pruned
+}
+
+fn spatial_corner_key(position: WorldPlanePoint) -> (i32, i32) {
+    const EPSILON_BLOCKS: f32 = 1.0;
+    (
+        (position.x / EPSILON_BLOCKS).round() as i32,
+        (position.z / EPSILON_BLOCKS).round() as i32,
+    )
 }
 
 fn selected_source_path_conflicts(

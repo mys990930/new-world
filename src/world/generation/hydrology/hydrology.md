@@ -191,6 +191,11 @@ hydrology result를 biome context에 반영하는 얇은 final pass다.
    - preview-visible selected geometry에서는 같은 vertex에 최대 두 개의 selected incoming segment만
      허용한다. 정상 confluence는 두 incoming segment가 같은 corner에서 하나의 selected outgoing
      segment로 이어지는 형태다.
+   - 같은 Voronoi corner id가 여러 corner index로 materialize되더라도 public selected graph에서는
+     그 corner id의 downstream selected continuation이 정확히 하나만 남아야 한다.
+   - graph corner id가 다르더라도 같은 world-space 위치로 quantize되는 endpoint group은 preview-visible
+     하나의 꼭짓점으로 취급한다. 이 group으로 selected river가 들어오면 group 밖으로 나가는 selected
+     continuation은 하나만 남긴다.
    - 세 개 이상의 selected upstream branch가 같은 vertex로 들어오면 raw upstream flow가 가장 강한
      incoming edge 두 개만 merge edge로 남기고, 나머지는 충돌 vertex로 들어가는 selected edge를 제거한다.
      이 제거로 downstream selected path와 terminal이 끊긴 ordinary upstream fragment는 selected geometry에서
@@ -290,7 +295,10 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   `unclassified_lake_connected_flow_count`로 계측하고 정상 solve에서 0을 요구한다.
 - selected river occupancy는 `one selected outgoing per corner`인 downhill graph 위에서 selected incoming
   segment를 최대 두 개까지만 허용한다. 두 incoming branch는 하나의 selected outgoing segment로 합류하는
-  confluence일 때만 정상 topology다. 세 개 이상이 같은 vertex로 들어오면 strongest merge edge 두 개만
+  confluence일 때만 정상 topology다. 같은 Voronoi corner id에서 selected outgoing segment가 둘 이상
+  materialize되면 strongest downstream continuation 하나만 남긴다. 같은 world-space 위치에 겹친 여러 corner id도 하나의 visible
+  confluence group으로 취급하며, selected river가 그 group에 들어오면 group 밖으로 다시 둘 이상 갈라지는
+  continuation은 strongest downstream edge 하나만 남긴다. 세 개 이상이 같은 vertex로 들어오면 strongest merge edge 두 개만
   남기고 나머지는 prune한다. weaker branch가 selected downstream path와 valid terminal을 잃으면 selected
   geometry에서 제거한다. raw flow accumulation은 그대로 남기므로 `river_plan`은 그 직후 downstream segment에서
   unselected drainage까지 포함한 raw Q를 morphology floor로 사용할 수 있다.
@@ -395,7 +403,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     edge의 `MacroLakeEdgeClass`도 반드시 `NonLake`여야 한다.
 11. selected river graph의 shared corner는 lake inlet/outlet, sink, coast outlet, 또는 정확히 하나의
     outgoing selected segment를 가진 two-incoming confluence 중 하나로 설명 가능해야 한다. 독립 chain
-    교차나 tributary끼리 먼저 만나는 shared path는 preview-visible geometry에 남기지 않는다.
+    교차나 tributary끼리 먼저 만나는 shared path는 preview-visible geometry에 남기지 않는다. 같은
+    Voronoi corner id에서 합류한 뒤 둘 이상의 downstream selected river로 다시 갈라지는 split도 남기지 않는다.
 12. preview-visible selected river graph는 같은 vertex에 세 개 이상의 selected incoming segment를 남기지
     않는다. 정상 solve의 `ambiguous_shared_corner_count`는 0이어야 하며,
     `duplicate_trunk_pruned_count`는 confluence cap을 초과해 제거한 weaker merge edge segment 수를
@@ -438,7 +447,8 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   lake-edge river segment, invalid lake contact/intersection count와 ambiguous shared corner count가
   0인지 확인한다. disconnected count는 실제 selected segment incoming/outgoing map에서 marker endpoint를
   검사해 계산한다. multi-incoming confluence는 selected geometry에서 strongest merge edge 하나로
-  prune하고, 이로 인해 valid downstream selected terminal을 잃은 weaker branch fragment는 selected
+  prune하고, 같은 world-space 위치에 겹친 corner group에서도 confluence 이후 selected continuation을
+  하나로 canonicalize한다. 이로 인해 valid downstream selected terminal을 잃은 weaker branch fragment는 selected
   geometry에서 제거한다. 최종 reachability pass는 ordinary selected fragment가 connected ocean/coast terminal
   또는 명시 `LakeInlet` endpoint에 닿는지 다시 계산하고, sink/lake-local/open fragment를 제거한다.
   downstream raw accumulation은 `river_plan`의 Q floor 입력으로 보존한다.
