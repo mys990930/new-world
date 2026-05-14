@@ -133,11 +133,12 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
      하며, 미분류 lake-connected flow는 회귀로 계측한다.
 7. hydrology 결과를 river plan으로 번역한다.
    - 이 단계는 물길을 새로 고르지 않는다. source of truth는 stage 6의 selected hydrology result다.
-   - selected river segment를 안정적인 plan table로 옮기고, downstream progress, display flow,
-     terminal role을 기반으로 reach type과 diagnostic morphology hint를 제공한다.
-   - 현재 launch 구현은 복잡한 hydraulic ledger, downstream Q continuity, U/V 단면 정책을 여기서
-     보장하지 않는다. river plan은 selected hydrology result를 terrain generation이 읽기 쉬운 형태로
-     보존하는 얇은 realization layer다.
+   - selected river adjacency를 stable chain/reach table로 옮기고, downstream progress, display flow,
+     raw flow, terminal role을 기반으로 reach type과 diagnostic morphology hint를 제공한다.
+   - launch 구현은 selected segment를 추가/삭제하지 않는 chain-local discharge ledger를 제공한다.
+     ordinary chain에서는 display discharge와 morphology scale이 downstream으로 줄어들지 않으며,
+     lake inlet/outlet은 hydrology의 lake-cap display flow를 존중해 ocean trunk보다 보수적으로 남긴다.
+   - river plan은 full hydraulic simulation, U/V 단면 carve, final water surface solve를 하지 않는다.
    - macro_field는 이 plan에서 selected edge와 flow hint를 읽어 canonical noisy curve를 rasterize한다.
      좁은 강바닥 단면이나 하구 fan을 combined height에 직접 새기지 않는다.
 8. hydrology와 river plan 결과까지 반영한 final cell context를 resolve한다.
@@ -237,9 +238,10 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   구현은 corner downhill, graph-stage local minimum, outlet carve, watershed, flow accumulation,
   selected river segment를 계산한다. 이 단계의 river는 후보 surface가 아니라
   downhill/local-minimum/outlet 정책을 통과한 결과다.
-- stage 7 river plan: selected river segment를 plan table로 번역한다. 현재 구현은 selected segment
-  set을 보존하면서 reach type, display/raw flow, 보수적인 morphology/diagnostic hint를 제공한다.
-  downstream Q continuity와 복잡한 단면 정책은 현재 구현 범위가 아니다.
+- stage 7 river plan: selected river segment를 deterministic chain/reach plan table로 번역한다. 현재
+  구현은 selected segment set을 보존하면서 selected adjacency를 chain으로 걷고, contiguous same-scale
+  segments를 reach로 묶으며, display/raw flow ledger와 보수적인 morphology/diagnostic hint를 제공한다.
+  full hydraulic simulation, 복잡한 단면 carve, final water surface solve는 현재 구현 범위가 아니다.
 - stage 8 final cell context: graph base field, macro ownership/elevation, coast/lake/ocean/dry basin
   context, selected hydrology role, water proximity, rain shadow를 합성해 final temperature/hydration과
   biome influence를 resolve한다. biome은 macro_field보다 먼저 확정되며, downstream stage는 이를

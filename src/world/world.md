@@ -208,9 +208,9 @@ voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, regist
   macro_map은 독자 continent/island noise source를 만들지 않는다.
 - 현재 `hydrology` leaf는 macro elevation/coast guide/graph topology 기반 downhill, watershed,
   flow accumulation, selected river segment scaffold를 제공한다.
-- `river_plan`은 문서 전용 단계로 추가되었으며, hydrology selected river를 reach type, broad valley,
-  narrow bed hint로 번역하는 책임을 소유한다. 현재 구현은 아직 `macro_field` 내부 river influence가
-  일부 morphology 계산을 직접 수행한다.
+- `river_plan`은 hydrology selected river를 deterministic chain/reach, discharge ledger, broad valley,
+  narrow bed hint로 번역한다. hydrology selected topology를 source of truth로 보존하면서 macro_field와
+  heightfield가 읽을 morphology parameter를 제공한다.
 - 현재 `heightfield` leaf는 `MacroFieldTile`을 column-oriented heightfield cache로 변환하는 vertical
   slice를 제공한다. meso feature와 Perlin micro relief는 아직 `0` stub이다.
 - 현재 `voxel` leaf는 launch용 graph-first voxel fill을 제공한다. `PixelizedChunkArea`를
