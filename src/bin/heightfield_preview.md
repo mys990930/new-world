@@ -50,10 +50,11 @@
    as the first render pass even when a water surface exists above them.
 9. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
    a translucent overlay instead of replacing the terrain/bed top.
-10. Draw terrain visible side faces and top faces first, then translucent water top/side faces, then
-   the primary 1024-block macro-field tile grid, secondary/faint 256-block chunk-group references,
-   very faint 32-block chunk boundaries, scale bar, metadata legend, and compass overlay in painter
-   order.
+10. Draw columns in projected painter order. For each column, draw terrain bed/side/top first and
+   then its translucent water top/side overlay, so nearer columns can still occlude farther water.
+   After columns, draw the primary 1024-block macro-field tile grid, secondary/faint 256-block
+   chunk-group references, very faint 32-block chunk boundaries, scale bar, metadata legend, and
+   compass overlay in painter order.
 
 ## Interpretation
 
@@ -101,7 +102,9 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   - pale gray high/ridge
   - muted gray/mauve dry basin
 - Water boxes come from heightfield water hints, not final fluid simulation. They are rendered as
-  translucent top and visible side faces over the already drawn terrain/bed.
+  translucent top and visible side faces immediately after their own terrain/bed column inside the
+  same projected painter pass. Rendering all water after all terrain is a regression because far
+  water can alpha-blend over nearer land and look shifted toward the viewer.
 - Sea level is fixed at `y = 0` for ocean water. Lake water uses the heightfield lake water hint.
   Because the water pass is translucent, ocean/lake/river beds below the waterline remain visible
   enough to inspect bathymetry and riverbed carving near mouths.

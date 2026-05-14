@@ -1161,8 +1161,8 @@ fn render_heightfield_isometric(
 ) -> Result<(OffscreenRenderOutput, IsoRenderStats), Box<dyn Error>> {
     let mut image = RgbaImage::from_pixel(plan.width, plan.height, image::Rgba([12, 15, 18, 255]));
     let width = tile.width as usize;
-    let mut terrain_order = sorted_column_draw_order(tile, plan);
-    for (_, x, z) in terrain_order.drain(..) {
+    let mut column_order = sorted_column_draw_order(tile, plan);
+    for (_, x, z) in column_order.drain(..) {
         let index = z * width + x;
         draw_column_terrain_iso(
             &mut image,
@@ -1173,11 +1173,6 @@ fn render_heightfield_isometric(
             tile.columns[index],
             block_lines,
         );
-    }
-
-    let water_order = sorted_column_draw_order(tile, plan);
-    for (_, x, z) in water_order {
-        let index = z * width + x;
         draw_column_water_iso(
             &mut image,
             tile,
