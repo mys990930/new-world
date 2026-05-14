@@ -99,6 +99,9 @@ chain-local downstream pass로 `upstream_area`, `tributary_flow`, `discharge_q`,
 않으며, ordinary chain 안에서는 display discharge와 morphology scale이 downstream으로 줄어들지 않게
 한다. lake inlet/outlet은 hydrology가 이미 적용한 lake-cap display flow를 우선하므로 raw accumulation이
 커도 ocean trunk처럼 폭과 깊이가 커지지 않는다.
+hydrology는 이제 final selected graph 단계에서 ordinary path의 ocean/coast reachability와 selected/display
+discharge monotonicity를 먼저 보장한다. `river_plan`은 이 invariant를 소비하되, 기존처럼 defensive
+chain-local ledger로 downstream morphology scale이 줄어들지 않게 유지한다.
 
 ---
 
@@ -259,6 +262,9 @@ diagnostic overlay로 볼 수 있어야 한다.
 - 구현은 hydrology selected segment를 모두 보존하면서 selected adjacency를 deterministic chain으로 걷는다.
   source/lake outlet/confluence outflow/topology break에서 시작하고 terminal/lake inlet/sink/outlet/confluence에서
   끝난다.
+- hydrology가 ordinary selected river의 connected ocean/coast terminal reachability와 selected/display
+  discharge monotonicity를 제공하므로, river_plan은 selected segment를 다시 제거하거나 river path를 새로
+  고르지 않는다.
 - adjacent segment가 같은 reach type이면 하나의 reach로 묶인다. reach type은 display flow, raw flow,
   hydrology role, terminal role, chain downstream position을 함께 읽는다.
 - `upstream_area`, `tributary_flow`, `discharge_q`, `morphology_discharge_q` field는 chain-local ledger와

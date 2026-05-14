@@ -293,6 +293,7 @@ pub fn solve_hydrology(
     );
     let selected_flow_accumulation = resolve_selected_flow_accumulation(
         &flow_accumulation,
+        &selected,
         &downstream,
         &terminal_indices,
         &first_downstream_lakes,
@@ -1349,7 +1350,6 @@ fn select_river_paths(
         &mut selected,
         downstream,
         terminals,
-        lake_candidates,
         resolutions,
         lake_topology,
     );
@@ -1816,31 +1816,43 @@ fn prune_disconnected_selected_fragments(
     selected: &mut [bool],
     downstream: &[Option<usize>],
     terminals: &[bool],
-    lake_candidates: &[bool],
     resolutions: &[GraphLocalMinimumResolution],
     lake_topology: &LakeContactTopology,
 ) -> usize {
+    let mut incoming = vec![Vec::<usize>::new(); selected.len()];
     let mut keep = vec![false; selected.len()];
+    let mut queue = VecDeque::new();
 
-    for index in 0..selected.len() {
-        if !selected[index] {
+    for (source, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected {
             continue;
         }
-        keep[index] = selected_path_reaches_valid_terminal(
-            index,
-            selected,
-            downstream,
-            terminals,
-            lake_candidates,
-            resolutions,
-            lake_topology,
-        );
+        let Some(target) = downstream[source] else {
+            continue;
+        };
+        incoming[target].push(source);
+        if selected_ocean_terminal_is_valid(target, terminals, resolutions)
+            || selected_lake_inlet_terminal_is_valid(target, downstream, lake_topology)
+        {
+            keep[source] = true;
+            queue.push_back(source);
+        }
+    }
+
+    while let Some(reachable) = queue.pop_front() {
+        for &upstream in &incoming[reachable] {
+            if keep[upstream] {
+                continue;
+            }
+            keep[upstream] = true;
+            queue.push_back(upstream);
+        }
     }
 
     let mut pruned = 0;
-    for (index, selected) in selected.iter_mut().enumerate() {
-        if *selected && !keep[index] {
-            *selected = false;
+    for (index, is_selected) in selected.iter_mut().enumerate() {
+        if *is_selected && !keep[index] {
+            *is_selected = false;
             pruned += 1;
         }
     }
@@ -1848,73 +1860,21 @@ fn prune_disconnected_selected_fragments(
     pruned
 }
 
-fn selected_path_reaches_valid_terminal(
-    start: usize,
-    selected: &[bool],
-    downstream: &[Option<usize>],
-    terminals: &[bool],
-    lake_candidates: &[bool],
-    resolutions: &[GraphLocalMinimumResolution],
-    lake_topology: &LakeContactTopology,
-) -> bool {
-    let mut current = start;
-    let mut guard = 0;
-
-    while selected.get(current).copied().unwrap_or(false) {
-        let Some(target) = downstream[current] else {
-            return selected_terminal_is_valid(current, terminals, lake_topology, resolutions);
-        };
-        if selected_terminal_is_valid(target, terminals, lake_topology, resolutions)
-            || selected_lake_inlet_terminal_is_valid(
-                target,
-                downstream,
-                lake_candidates,
-                lake_topology,
-            )
-        {
-            return true;
-        }
-        if !selected.get(target).copied().unwrap_or(false) {
-            return false;
-        }
-
-        current = target;
-        guard += 1;
-        if guard > selected.len() {
-            return false;
-        }
-    }
-
-    false
-}
-
-fn selected_terminal_is_valid(
+fn selected_ocean_terminal_is_valid(
     index: usize,
     terminals: &[bool],
-    lake_topology: &LakeContactTopology,
     resolutions: &[GraphLocalMinimumResolution],
 ) -> bool {
     terminals.get(index).copied().unwrap_or(false)
-        || lake_topology
-            .outlet_land_vertices
-            .get(index)
-            .copied()
-            .unwrap_or(false)
         || matches!(
             resolutions.get(index).copied(),
-            Some(
-                GraphLocalMinimumResolution::OceanOutlet
-                    | GraphLocalMinimumResolution::OutletCarve
-                    | GraphLocalMinimumResolution::Lake
-                    | GraphLocalMinimumResolution::Sink
-            )
+            Some(GraphLocalMinimumResolution::OceanOutlet)
         )
 }
 
 fn selected_lake_inlet_terminal_is_valid(
     index: usize,
     downstream: &[Option<usize>],
-    lake_candidates: &[bool],
     lake_topology: &LakeContactTopology,
 ) -> bool {
     lake_topology
@@ -1927,18 +1887,18 @@ fn selected_lake_inlet_terminal_is_valid(
             .copied()
             .flatten()
             .is_some_and(|lake| {
-                lake_candidates.get(lake).copied().unwrap_or(false)
-                    || lake_topology
-                        .component_by_corner
-                        .get(lake)
-                        .copied()
-                        .flatten()
-                        .is_some()
+                lake_topology
+                    .component_by_corner
+                    .get(lake)
+                    .copied()
+                    .flatten()
+                    .is_some()
             })
 }
 
 fn resolve_selected_flow_accumulation(
     raw_flow: &[f32],
+    selected: &[bool],
     downstream: &[Option<usize>],
     terminal_indices: &[usize],
     first_downstream_lakes: &[Option<usize>],
@@ -1948,7 +1908,7 @@ fn resolve_selected_flow_accumulation(
     node_kinds: &[GraphDrainageNodeKind],
     config: HydrologyConfig,
 ) -> Vec<f32> {
-    raw_flow
+    let mut selected_flow = raw_flow
         .par_iter()
         .enumerate()
         .map(|(index, &flow)| {
@@ -1981,7 +1941,94 @@ fn resolve_selected_flow_accumulation(
                 flow
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    enforce_monotone_selected_display_flow(&mut selected_flow, selected, downstream, node_kinds);
+    selected_flow
+}
+
+fn enforce_monotone_selected_display_flow(
+    selected_flow: &mut [f32],
+    selected: &[bool],
+    downstream: &[Option<usize>],
+    node_kinds: &[GraphDrainageNodeKind],
+) {
+    let mut incoming = vec![0_u32; selected.len()];
+    for (index, is_selected) in selected.iter().copied().enumerate() {
+        if !is_selected {
+            continue;
+        }
+        if let Some(target) = downstream[index] {
+            incoming[target] = incoming[target].saturating_add(1);
+        }
+    }
+
+    let mut visited = vec![false; selected.len()];
+    for index in 0..selected.len() {
+        if !selected[index] || incoming[index] > 0 {
+            continue;
+        }
+        propagate_monotone_selected_display_flow(
+            index,
+            selected_flow,
+            selected,
+            downstream,
+            node_kinds,
+            &mut visited,
+        );
+    }
+
+    for index in 0..selected.len() {
+        if selected[index] && !visited[index] {
+            propagate_monotone_selected_display_flow(
+                index,
+                selected_flow,
+                selected,
+                downstream,
+                node_kinds,
+                &mut visited,
+            );
+        }
+    }
+}
+
+fn propagate_monotone_selected_display_flow(
+    start: usize,
+    selected_flow: &mut [f32],
+    selected: &[bool],
+    downstream: &[Option<usize>],
+    node_kinds: &[GraphDrainageNodeKind],
+    visited: &mut [bool],
+) {
+    let mut current = start;
+    let mut carried = 0.0_f32;
+    let mut guard = 0_usize;
+
+    while selected.get(current).copied().unwrap_or(false) && !visited[current] {
+        visited[current] = true;
+        selected_flow[current] = selected_flow[current].max(carried);
+        carried = carried.max(selected_flow[current]);
+
+        let Some(target) = downstream[current] else {
+            break;
+        };
+        if node_kinds
+            .get(target)
+            .copied()
+            .is_some_and(|kind| kind == GraphDrainageNodeKind::LakeInlet)
+        {
+            break;
+        }
+        if !selected.get(target).copied().unwrap_or(false) {
+            break;
+        }
+
+        current = target;
+        guard += 1;
+        if guard > selected.len() {
+            break;
+        }
+    }
 }
 
 fn resolve_node_kinds(
@@ -2378,6 +2425,72 @@ mod tests {
     }
 
     #[test]
+    fn selected_seed_scan_reaches_valid_terminal_with_monotone_display_flow() {
+        let mut saw_selected_path = false;
+
+        for seed in 1..=32 {
+            let (patch, macro_map) = test_inputs(seed);
+            let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
+            let nodes = nodes_by_id(&hydro);
+            let outgoing = hydro
+                .segments
+                .iter()
+                .map(|segment| (segment.from, segment))
+                .collect::<HashMap<_, _>>();
+
+            for start in &hydro.segments {
+                saw_selected_path = true;
+                let mut current = start;
+                let mut previous_display = 0.0_f32;
+                let mut guard = 0_usize;
+
+                loop {
+                    assert!(
+                        current.flow_accumulation + 0.001 >= previous_display,
+                        "seed {seed} selected display flow decreased: {:?}",
+                        current
+                    );
+                    previous_display = previous_display.max(current.flow_accumulation);
+
+                    let to = nodes
+                        .get(&current.to)
+                        .expect("selected segment target node should exist");
+                    match to.kind {
+                        GraphDrainageNodeKind::CoastOutlet | GraphDrainageNodeKind::LakeInlet => {
+                            break;
+                        }
+                        GraphDrainageNodeKind::Lake | GraphDrainageNodeKind::Sink => {
+                            panic!(
+                                "seed {seed} ordinary selected path ended at non-ocean basin node: {:?}",
+                                to
+                            );
+                        }
+                        _ => {}
+                    }
+
+                    let Some(next) = outgoing.get(&current.to).copied() else {
+                        panic!(
+                            "seed {seed} selected ordinary path lost downstream terminal at node {:?}",
+                            to
+                        );
+                    };
+                    current = next;
+                    guard += 1;
+                    assert!(
+                        guard <= hydro.segments.len(),
+                        "seed {seed} selected path cycled without a valid terminal"
+                    );
+                }
+            }
+        }
+
+        assert!(
+            saw_selected_path,
+            "bounded deterministic seed scan should include selected ordinary river paths"
+        );
+    }
+
+    #[test]
     fn local_minima_are_explicitly_resolved() {
         let (patch, macro_map) = test_inputs(123);
         let hydro = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
@@ -2613,6 +2726,83 @@ mod tests {
         assert!(
             incoming.into_iter().all(|count| count <= 1),
             "selected geometry must still have at most one incoming segment per vertex"
+        );
+    }
+
+    #[test]
+    fn final_reachability_prunes_selected_high_flow_sink_fragment() {
+        let downstream = vec![Some(1), None, Some(3), None];
+        let mut selected = vec![true, false, true, false];
+        let terminals = vec![false, false, false, true];
+        let resolutions = vec![
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::Sink,
+            GraphLocalMinimumResolution::None,
+            GraphLocalMinimumResolution::OceanOutlet,
+        ];
+        let lake_topology = LakeContactTopology {
+            component_by_corner: vec![None; 4],
+            contact_component_by_land_corner: vec![None; 4],
+            inlet_vertices: vec![false; 4],
+            outlet_vertices: vec![false; 4],
+            inlet_land_vertices: vec![false; 4],
+            outlet_land_vertices: vec![false; 4],
+        };
+
+        let pruned = prune_disconnected_selected_fragments(
+            &mut selected,
+            &downstream,
+            &terminals,
+            &resolutions,
+            &lake_topology,
+        );
+
+        assert_eq!(
+            selected,
+            vec![false, false, true, false],
+            "ordinary selected river fragments must not survive just because they end in a local sink"
+        );
+        assert_eq!(pruned, 1);
+    }
+
+    #[test]
+    fn selected_display_flow_is_propagated_downstream() {
+        let raw_flow = vec![12.0, 80.0, 24.0, 24.0];
+        let selected = vec![true, true, true, false];
+        let downstream = vec![Some(1), Some(2), Some(3), None];
+        let selected_flow = resolve_selected_flow_accumulation(
+            &raw_flow,
+            &selected,
+            &downstream,
+            &[3, 3, 3, 3],
+            &[None; 4],
+            &[None; 4],
+            &[None; 4],
+            &LakeContactTopology {
+                component_by_corner: vec![None; 4],
+                contact_component_by_land_corner: vec![None; 4],
+                inlet_vertices: vec![false; 4],
+                outlet_vertices: vec![false; 4],
+                inlet_land_vertices: vec![false; 4],
+                outlet_land_vertices: vec![false; 4],
+            },
+            &[
+                GraphDrainageNodeKind::Source,
+                GraphDrainageNodeKind::Source,
+                GraphDrainageNodeKind::Source,
+                GraphDrainageNodeKind::CoastOutlet,
+            ],
+            HydrologyConfig::default(),
+        );
+
+        assert_eq!(
+            &selected_flow[..3],
+            &[12.0, 80.0, 80.0],
+            "display discharge on a selected ordinary path should not shrink downstream"
+        );
+        assert_eq!(
+            raw_flow[2], 24.0,
+            "raw flow remains the diagnostic/source ledger"
         );
     }
 
@@ -3503,6 +3693,7 @@ mod tests {
         };
         let selected_flow = resolve_selected_flow_accumulation(
             &raw_flow,
+            &[false; 4],
             &[None; 4],
             &terminal_indices,
             &first_downstream_lakes,
@@ -3552,6 +3743,7 @@ mod tests {
 
         let selected_flow = resolve_selected_flow_accumulation(
             &raw_flow,
+            &[true, false, false],
             &downstream,
             &terminal_indices,
             &first_downstream_lakes,
@@ -3601,6 +3793,7 @@ mod tests {
         };
         let selected_flow = resolve_selected_flow_accumulation(
             &raw_flow,
+            &[false; 5],
             &[None; 5],
             &terminal_indices,
             &first_downstream_lakes,

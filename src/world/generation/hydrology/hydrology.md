@@ -21,6 +21,10 @@ hydrology는 macro_map이 graph base field에서 resolve한 ownership/elevation,
 - river_plan, heightfield와 surface plan이 읽을 selected river/lake/water constraint 제공
 - macro_map의 `MacroLakeEdgeClass`를 읽어 selected river가 lake internal/boundary/adjacent edge를
   쓰지 않도록 강제
+- ordinary selected river graph가 최종적으로 connected ocean/coast terminal에 닿도록 검증하고,
+  명시 `LakeInlet` 정책으로 분류되지 않은 sink/lake-local/disconnected fragment를 selected geometry에서 제거
+- selected ordinary downstream path의 display/morphology discharge가 하류 방향으로 감소하지 않도록
+  raw accumulation ledger와 별도로 selected/display discharge를 보정
 
 ---
 
@@ -108,6 +112,10 @@ heightfield는 이 segment만 강으로 해석해야 한다. macro_map의 ridge/
 corner의 `flow_accumulation`은 hydrology 원장에 가까운 raw accumulation이며, river segment는
 `raw_flow_accumulation`과 정책 적용 후의 `flow_accumulation`을 함께 가진다. preview의 강 두께와
 초기 river width는 segment의 정책 적용 후 `flow_accumulation`을 사용한다.
+최종 selected ordinary path에서는 이 정책 적용 후 `flow_accumulation`이 downstream으로 감소하지 않는다.
+hydrology는 raw accumulation을 그대로 `raw_flow_accumulation`에 보존하고, selected/display discharge만
+하류 방향 monotone invariant에 맞게 전파한다. 명시 `LakeInlet`은 lake capacity cap을 적용받는 별도
+terminal로 남으며, 일반 ocean outlet trunk와 같은 크기로 승격하지 않는다.
 `GraphRiverSegment.local_slope`는 selected segment 양 끝 corner의 elevation drop을 segment 길이로
 나눈 topology-local hint다. hydrology가 final morphology를 직접 결정하지는 않지만, macro_field가
 작은 급류 구간을 더 거칠고 큰 하류 구간을 더 완만하게 rasterize할 수 있도록 slope 정보를 보존한다.
@@ -156,9 +164,14 @@ hydrology result를 biome context에 반영하는 얇은 final pass다.
      `river_plan`은 unselected drainage가 합류한 뒤의 downstream raw Q를 계속 읽을 수 있다.
    - pruning 뒤에도 여러 incoming이 남으면 명시 lake/sink/coast terminal로 설명되는 경우를 제외하고
      invalid/ambiguous intersection으로 계측한다.
-10. selected river chain이 ocean outlet, 명시적인 lake/sink, 또는 downstream portal/outlet carve 없이 끊기지 않도록 검증한다.
+10. selected river chain이 connected ocean/coast terminal 또는 명시 `LakeInlet` endpoint 없이 끊기지
+    않도록 최종 reachability pass로 검증한다. 이 pass는 topology pruning 뒤에 남은 ordinary selected
+    fragment가 sink, lake-local endpoint, disconnected open fragment, 또는 terminal을 잃은 하류에 매달려
+    있으면 selected geometry에서 제거한다.
 11. `river_plan`이 reach morphology를 만들 수 있도록 selected river segment, flow, downstream
     progress, lake/sink/outlet terminal role을 제공한다.
+12. selected/display discharge를 selected ordinary downstream path에서 monotone 하게 전파한다. raw
+    accumulation은 diagnostic/source ledger로 유지한다.
 
 launch 구현은 아래의 보수적인 정책을 사용한다.
 
@@ -240,6 +253,12 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
   하나로 prune한다. weaker branch가 selected downstream path와 valid terminal을 잃으면 selected geometry에서
   제거한다. raw flow accumulation은 그대로 남기므로 `river_plan`은 그 직후 downstream segment에서
   unselected drainage까지 포함한 raw Q를 morphology floor로 사용할 수 있다.
+- selected topology pruning의 마지막에는 ocean/coast reachability를 다시 계산한다. ordinary selected river는
+  arbitrary sink, lake-local endpoint, disconnected open endpoint를 valid terminal로 취급하지 않는다.
+  lake-bound feeder는 `LakeInlet` marker로 분류된 경우에만 명시 terminal로 유지된다.
+- selected/display discharge는 ordinary selected path에서 downstream으로 줄어들지 않는다. 중간 segment의
+  raw Q가 크거나 lake/sink 정책 전환 때문에 display Q가 튀어도, downstream selected ordinary segment는
+  최소 직전 selected/display Q를 이어받는다. raw Q는 별도 ledger로 보존한다.
 
 최종 river morphology는 hydrology가 직접 만들지 않는다.
 
@@ -340,9 +359,9 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
     `duplicate_trunk_pruned_count`는 multi-incoming vertex에서 제거한 weaker merge edge segment 수를
     나타낸다.
 13. selected ordinary river segment는 downstream selected path를 따라 ocean/coast outlet, explicit
-    sink/outlet carve, lake inlet/outlet policy endpoint, 또는 documented downstream terminal에 닿아야 한다.
-    이 연결을 잃은 fragment는 selected geometry에서 제거하고
-    `disconnected_river_fragment_pruned_count`에 기록한다.
+    `LakeInlet` policy endpoint, 또는 documented downstream portal에 닿아야 한다. sink, lake-local endpoint,
+    outlet-carve label만으로는 ordinary selected terminal이 될 수 없다. 이 연결을 잃은 fragment는 selected
+    geometry에서 제거하고 `disconnected_river_fragment_pruned_count`에 기록한다.
 14. 같은 selected chain은 lake contact를 최대 한 번만 가져야 한다. 이 정책으로 제거된 selected segment는
     `repeated_lake_contact_pruned_count`에 기록한다.
 15. `disconnected_lake_inlet_count`, `disconnected_lake_outlet_count`,
@@ -373,7 +392,12 @@ watershed는 단순 hydrology 결과 이상의 가치가 있다.
   0인지 확인한다. disconnected count는 실제 selected segment incoming/outgoing map에서 marker endpoint를
   검사해 계산한다. multi-incoming confluence는 selected geometry에서 strongest merge edge 하나로
   prune하고, 이로 인해 valid downstream selected terminal을 잃은 weaker branch fragment는 selected
-  geometry에서 제거한다. downstream raw accumulation은 `river_plan`의 Q floor 입력으로 보존한다.
+  geometry에서 제거한다. 최종 reachability pass는 ordinary selected fragment가 connected ocean/coast terminal
+  또는 명시 `LakeInlet` endpoint에 닿는지 다시 계산하고, sink/lake-local/open fragment를 제거한다.
+  downstream raw accumulation은 `river_plan`의 Q floor 입력으로 보존한다.
+- selected/display discharge는 final selected graph 위에서 ordinary downstream 방향으로 monotone 하게
+  전파된다. raw `flow_accumulation` 원장은 corner와 segment의 `raw_flow_accumulation`에 남고, preview와
+  downstream morphology가 읽는 segment `flow_accumulation`만 보정된다.
 - `GraphDrainageNodeKind::Lake`는 selected river가 닿는 표시용 endpoint가 아니라, graph-stage local
   minimum이 lake resolution으로 남았음을 나타내는 내부 drainage/debug node다. 기본 preview에서는 이
   node를 그리지 않고, lake fill과 `LakeInlet`/`LakeOutlet` endpoint만 사용자가 보는 lake hydrology
