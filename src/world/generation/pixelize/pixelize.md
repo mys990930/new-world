@@ -128,17 +128,16 @@ combined_macro_height  1.00 -> 2048 blocks
 `pixelize`는 이 연속 block height를 integer column output으로 snap해 `surface_y`를 만든다. launch
 slice에서는 `heightfield`의 기존 contour lower-band policy와 같은 결과를 내야 하며, raw macro scalar는
 `combined_macro_height`와 `macro_elevation`으로 보존한다.
+ocean/lake/river mask가 없는 일반 land source는 sea level 아래에서도 `surface_y`를 `y = 0`으로 floor하지
+않고, downstream heightfield와 같은 dry below-sea bed를 보존한다.
 
 standing water는 source macro masks를 따른다. `ocean_mask` 또는 `lake_mask`가 standing-water threshold를
 넘으면 `water_y = Some(sea_level_blocks)`가 된다. river water는 selected hydrology를 다시 풀지 않고,
 `MacroFieldSample`의 river valley/bed/water hint를 읽어 optional water hint로만 옮긴다. dry basin은
 water mask가 아니며 `water_y`를 만들지 않는다.
-
-River column classification starts from the heightfield river-water threshold, then area generation
-applies a small chunk-grid cleanup for concave river cusps. A near-threshold land column may be
-promoted to a river water hint only when it already has dense river neighbors and orthogonal support
-in the pixelized 8-neighborhood. This cleanup is stage-11 raster policy: it does not reinterpret graph
-topology, does not change source macro masks, and avoids filling ordinary convex outside corners.
+Concave river cusp cleanup is not owned here. Stage 10 `macro_field` performs bounded river raster
+cleanup before samples become `MacroFieldTile`, so `pixelize` must preserve the supplied source river
+strength and only apply the shared heightfield threshold during column conversion.
 
 ---
 
@@ -203,8 +202,7 @@ preview는 stage 11의 layout contract를 확인하는 표면이다. preview ren
   유지한다.
 - height resolve는 현재 `heightfield_column_from_sample`을 공유해 기존 heightfield compatibility
   vertical slice와 같은 `surface_y` / `water_y` 결과를 낸다.
-- area conversion includes a bounded concave-river-cusp cleanup after the parallel per-sample
-  conversion. It only promotes near-threshold river samples that are mostly surrounded by existing
-  river columns, preserving convex rounded banks and leaving source diagnostic strength intact.
+- river concave-cusp cleanup now belongs to `macro_field`; area conversion does not mutate source
+  river strengths or promote additional river water hints after the parallel per-sample conversion.
 - 기존 `heightfield` 구현은 아직 `MacroFieldTile`을 직접 읽는 compatibility vertical slice다. 다음
   rewrite 단계에서는 `PixelizedChunkArea` / `PixelizedColumn`을 소비하도록 옮긴다.

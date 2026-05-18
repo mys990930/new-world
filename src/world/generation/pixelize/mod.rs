@@ -1,15 +1,12 @@
 use rayon::prelude::*;
 
 use super::heightfield::{
-    heightfield_column_from_sample, HeightfieldConfig, HeightfieldTerrainKind,
+    HeightfieldConfig, HeightfieldTerrainKind, heightfield_column_from_sample,
 };
 use super::macro_field::{MacroFieldSample, MacroFieldTile};
-use crate::world::legacy::coord::{world_to_chunk_local, WorldBlockCoord, CHUNK_EDGE_I32};
+use crate::world::legacy::coord::{CHUNK_EDGE_I32, WorldBlockCoord, world_to_chunk_local};
 
 const WORLD_BLOCK_EPSILON: f32 = 0.001;
-const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
-const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
-const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelizeConfig {
@@ -130,7 +127,7 @@ pub fn generate_pixelized_chunk_area(
 ) -> PixelizedChunkArea {
     validate_pixelize_tile(macro_tile);
 
-    let mut columns = macro_tile
+    let columns = macro_tile
         .samples
         .par_iter()
         .enumerate()
@@ -142,13 +139,6 @@ pub fn generate_pixelized_chunk_area(
             )
         })
         .collect::<Vec<_>>();
-    smooth_pixelized_river_concave_cusps(
-        &mut columns,
-        &macro_tile.samples,
-        macro_tile.config.width as usize,
-        macro_tile.config.height as usize,
-        config,
-    );
     let stats = pixelized_chunk_area_stats(&columns);
     let origin_world_x = world_block_from_sample_position(macro_tile.config.origin.x);
     let origin_world_z = world_block_from_sample_position(macro_tile.config.origin.z);
@@ -228,144 +218,6 @@ fn pixelized_column_from_macro_sample_at_position(
         source_river_valley_strength: sample.river_valley_strength,
         source_river_flow_hint: sample.river_flow_hint,
     }
-}
-
-fn smooth_pixelized_river_concave_cusps(
-    columns: &mut [PixelizedColumn],
-    samples: &[MacroFieldSample],
-    width: usize,
-    height: usize,
-    config: PixelizeConfig,
-) {
-    if columns.len() != samples.len() || width == 0 || height == 0 {
-        return;
-    }
-
-    for _ in 0..RIVER_CONCAVE_CUSP_MAX_PASSES {
-        let promote = (0..columns.len())
-            .filter(|&index| {
-                is_pixelized_river_concave_cusp(columns, samples, width, height, index, config)
-            })
-            .collect::<Vec<_>>();
-        if promote.is_empty() {
-            break;
-        }
-
-        for index in promote {
-            let mut promoted_sample = samples[index];
-            promoted_sample.river_valley_strength = promoted_sample
-                .river_valley_strength
-                .max(config.heightfield.river_water_threshold);
-            let mut promoted = pixelized_column_from_macro_sample_at_position(
-                &promoted_sample,
-                config,
-                samples[index].position,
-            );
-            promoted.source_river_valley_strength = samples[index].river_valley_strength;
-            promoted.source_river_flow_hint = samples[index].river_flow_hint;
-            columns[index] = promoted;
-        }
-    }
-}
-
-fn is_pixelized_river_concave_cusp(
-    columns: &[PixelizedColumn],
-    samples: &[MacroFieldSample],
-    width: usize,
-    height: usize,
-    index: usize,
-    config: PixelizeConfig,
-) -> bool {
-    let column = columns[index];
-    if column.water_y.is_some()
-        || matches!(
-            column.terrain_kind,
-            PixelizedTerrainKind::Ocean
-                | PixelizedTerrainKind::Lake
-                | PixelizedTerrainKind::DryBasin
-        )
-    {
-        return false;
-    }
-
-    let sample = samples[index];
-    let threshold = config.heightfield.river_water_threshold;
-    if sample.river_flow_hint <= 0.0
-        || !sample.river_distance_blocks.is_finite()
-        || sample.river_valley_strength < threshold * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO
-        || sample.ocean_mask > 0.5
-        || sample.lake_mask > 0.5
-        || sample.dry_basin_mask > 0.5
-    {
-        return false;
-    }
-
-    let x = index % width;
-    let z = index / width;
-    let neighbor_count = river_neighbor_count(columns, width, height, x, z);
-    neighbor_count >= RIVER_CONCAVE_CUSP_MIN_NEIGHBORS
-        && has_orthogonal_river_support(columns, width, height, x, z)
-}
-
-fn river_neighbor_count(
-    columns: &[PixelizedColumn],
-    width: usize,
-    height: usize,
-    x: usize,
-    z: usize,
-) -> usize {
-    let mut count = 0;
-    for dz in -1..=1 {
-        for dx in -1..=1 {
-            if dx == 0 && dz == 0 {
-                continue;
-            }
-            if neighbor_is_river(columns, width, height, x, z, dx, dz) {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-fn has_orthogonal_river_support(
-    columns: &[PixelizedColumn],
-    width: usize,
-    height: usize,
-    x: usize,
-    z: usize,
-) -> bool {
-    let north = neighbor_is_river(columns, width, height, x, z, 0, -1);
-    let south = neighbor_is_river(columns, width, height, x, z, 0, 1);
-    let west = neighbor_is_river(columns, width, height, x, z, -1, 0);
-    let east = neighbor_is_river(columns, width, height, x, z, 1, 0);
-
-    (north || south) && (west || east)
-}
-
-fn neighbor_is_river(
-    columns: &[PixelizedColumn],
-    width: usize,
-    height: usize,
-    x: usize,
-    z: usize,
-    dx: isize,
-    dz: isize,
-) -> bool {
-    let Some(nx) = x.checked_add_signed(dx) else {
-        return false;
-    };
-    let Some(nz) = z.checked_add_signed(dz) else {
-        return false;
-    };
-    if nx >= width || nz >= height {
-        return false;
-    }
-
-    matches!(
-        columns[nz * width + nx].terrain_kind,
-        PixelizedTerrainKind::River
-    )
 }
 
 fn validate_pixelize_tile(macro_tile: &MacroFieldTile) {
@@ -485,27 +337,27 @@ fn pixelized_chunk_area_stats(columns: &[PixelizedColumn]) -> PixelizedChunkArea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::generation::boundary::{generate_noisy_boundaries, BoundaryConfig};
+    use crate::world::WorldMeta;
+    use crate::world::generation::boundary::{BoundaryConfig, generate_noisy_boundaries};
     use crate::world::generation::graph::WorldPlanePoint;
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, graph_region_for_world_block, GraphRegionArea,
-        VoronoiGraphConfig, VoronoiGraphPatchRequest, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-        DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
+        VoronoiGraphConfig, VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        graph_region_for_world_block,
     };
     use crate::world::generation::heightfield::{
         DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
         DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD,
     };
-    use crate::world::generation::hydrology::{solve_hydrology, HydrologyConfig};
+    use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
     use crate::world::generation::macro_field::{
-        generate_macro_field_tile, MacroFieldTileConfig, MacroFieldTileStats,
+        MacroFieldTileConfig, MacroFieldTileStats, generate_macro_field_tile,
     };
     use crate::world::generation::macro_map::{
-        generate_macro_map, MacroMapConfig, MacroSurfaceKind,
+        MacroMapConfig, MacroSurfaceKind, generate_macro_map,
     };
-    use crate::world::generation::river_plan::{build_river_plan, RiverPlanConfig};
+    use crate::world::generation::river_plan::{RiverPlanConfig, build_river_plan};
     use crate::world::legacy::coord::CHUNK_EDGE;
-    use crate::world::WorldMeta;
     use std::collections::HashMap;
 
     #[test]
@@ -628,89 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn pixelized_area_fills_near_threshold_concave_river_cusp() {
-        let mut macro_tile = test_macro_tile(0, 0, 1, 1);
-        let threshold = PixelizeConfig::default().heightfield.river_water_threshold;
-        let center = 16usize;
-        for (x, z) in [
-            (center, center - 1),
-            (center, center + 1),
-            (center - 1, center),
-            (center + 1, center),
-            (center - 1, center - 1),
-            (center + 1, center - 1),
-        ] {
-            set_river_strength(&mut macro_tile, x, z, threshold, 0.72);
-        }
-        set_river_strength(
-            &mut macro_tile,
-            center,
-            center,
-            threshold * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO,
-            0.72,
-        );
-
-        let single = pixelized_column_from_macro_sample(
-            macro_tile
-                .sample(center as u32, center as u32)
-                .expect("cusp sample"),
-            PixelizeConfig::default(),
-        );
-        let area = generate_pixelized_chunk_area(&macro_tile, PixelizeConfig::default());
-        let smoothed = area
-            .column(center as u32, center as u32)
-            .expect("cusp column");
-
-        assert_eq!(
-            single.terrain_kind,
-            PixelizedTerrainKind::Land,
-            "single-column conversion keeps the hard threshold; area pixelize owns cusp cleanup"
-        );
-        assert_eq!(smoothed.terrain_kind, PixelizedTerrainKind::River);
-        assert!(
-            smoothed.water_y.is_some(),
-            "near-threshold concave cusp should become a river water hint at pixelize stage"
-        );
-        assert!(
-            smoothed.source_river_valley_strength < threshold,
-            "source macro strength should remain diagnostic rather than being rewritten"
-        );
-    }
-
-    #[test]
-    fn pixelized_area_keeps_convex_river_corner_rounded() {
-        let mut macro_tile = test_macro_tile(0, 0, 1, 1);
-        let threshold = PixelizeConfig::default().heightfield.river_water_threshold;
-        let outside = 16usize;
-        for (x, z) in [
-            (outside, outside - 1),
-            (outside - 1, outside),
-            (outside - 1, outside - 1),
-        ] {
-            set_river_strength(&mut macro_tile, x, z, threshold, 0.72);
-        }
-        set_river_strength(
-            &mut macro_tile,
-            outside,
-            outside,
-            threshold * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO,
-            0.72,
-        );
-
-        let area = generate_pixelized_chunk_area(&macro_tile, PixelizeConfig::default());
-        let convex_corner = area
-            .column(outside as u32, outside as u32)
-            .expect("convex outside corner");
-
-        assert_eq!(
-            convex_corner.terrain_kind,
-            PixelizedTerrainKind::Land,
-            "convex outside corners should not be squared off by concave cusp cleanup"
-        );
-        assert_eq!(convex_corner.water_y, None);
-    }
-
-    #[test]
     fn pixelized_column_preserves_source_ruggedness() {
         let mut sample = sample(0, 0, 0.10, 0.0, 0.0, 0.0, 0.0);
         sample.biome_context = Some(test_biome_context(0.73));
@@ -816,33 +585,6 @@ mod tests {
             "macro scalar should not contain a hidden >1 block discontinuity: left={} right={}",
             left_column.source_combined_macro_height,
             right_column.source_combined_macro_height
-        );
-    }
-
-    #[test]
-    #[ignore = "exact supplied pixelize-preview target; expensive stage-11 regression"]
-    fn seed42_cx64_cz24_r12_pixelize_has_no_dense_concave_river_cusp_candidates() {
-        let (macro_tile, area) = seed42_pixelized_macro_tile_and_area(-64, -24, 12);
-        let remaining = (0..area.columns.len())
-            .filter(|&index| {
-                is_pixelized_river_concave_cusp(
-                    &area.columns,
-                    &macro_tile.samples,
-                    area.width as usize,
-                    area.height as usize,
-                    index,
-                    area.config,
-                )
-            })
-            .count();
-
-        assert!(
-            area.stats.river_hint_column_count > 0,
-            "target preview footprint should include river columns"
-        );
-        assert_eq!(
-            remaining, 0,
-            "pixelize river mask should not leave dense near-threshold concave cusp candidates"
         );
     }
 
@@ -1280,16 +1022,6 @@ mod tests {
         (area, nearest_sites, site_kind)
     }
 
-    fn seed42_pixelized_macro_tile_and_area(
-        center_chunk_x: i32,
-        center_chunk_z: i32,
-        radius: i32,
-    ) -> (MacroFieldTile, PixelizedChunkArea) {
-        let (macro_tile, area, _macro_map) =
-            seed42_pixelized_macro_tile_area_and_macro_map(center_chunk_x, center_chunk_z, radius);
-        (macro_tile, area)
-    }
-
     fn seed42_pixelized_macro_tile_area_and_macro_map(
         center_chunk_x: i32,
         center_chunk_z: i32,
@@ -1496,22 +1228,5 @@ mod tests {
         sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
         sample.river_flow_hint = river_flow_hint;
         sample
-    }
-
-    fn set_river_strength(
-        macro_tile: &mut MacroFieldTile,
-        x: usize,
-        z: usize,
-        river_valley_strength: f32,
-        river_flow_hint: f32,
-    ) {
-        let index = z * macro_tile.config.width as usize + x;
-        let sample = macro_tile.samples.get_mut(index).expect("test sample");
-        sample.river_valley_strength = river_valley_strength;
-        sample.river_flow_hint = river_flow_hint;
-        sample.river_distance_blocks = 1.0;
-        sample.river_bed_depth_hint = 0.45;
-        sample.river_bank_roughness_hint = 0.35;
-        sample.river_gravel_hint = 0.25;
     }
 }

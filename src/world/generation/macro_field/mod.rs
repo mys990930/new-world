@@ -6,7 +6,7 @@ use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 use super::river_plan::{
-    RiverPlan, RiverSegmentPlan, DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
+    DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan, RiverSegmentPlan,
 };
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 64.0;
@@ -34,6 +34,10 @@ const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
 const ISOLATED_OCEAN_FRAGMENT_MAX_BLOCK_AREA: f32 = 512.0;
 const RIVER_BOUNDARY_ROUGHNESS_SALT: u64 = 0xA11E_2F17_5EED_CAFE;
+const RIVER_CORE_STRENGTH_THRESHOLD: f32 = 0.88;
+const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
+const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
+const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -639,11 +643,12 @@ fn rasterize_influence_fields(
 
     let ridge = rasterize_curve_distance_field(&ridge_sources, config, config.ridge_radius_blocks);
     let coast = rasterize_curve_distance_field(&coast_sources, config, config.coast_radius_blocks);
-    let river = rasterize_curve_anti_aliased_polyline_field(
+    let mut river = rasterize_curve_anti_aliased_polyline_field(
         &river_sources,
         config,
         config.river_radius_blocks,
     );
+    smooth_river_concave_cusps(&mut river, config.width as usize, config.height as usize);
     let stats = MacroFieldInfluenceStats {
         ridge_source_curve_count: ridge_sources.len(),
         river_source_curve_count: river_sources.len(),
@@ -677,6 +682,181 @@ struct RasterDistanceField {
     river_gravel_hint: Vec<f32>,
     river_cutbank_hint: Vec<f32>,
     source_pixel_count: usize,
+}
+
+struct RiverRasterRow {
+    distance_blocks: Vec<f32>,
+    river_valley_strength: Vec<f32>,
+    flow_weighted_sum: Vec<f32>,
+    flow_weight_sum: Vec<f32>,
+    river_bed_depth_hint: Vec<f32>,
+    river_bank_roughness_hint: Vec<f32>,
+    river_gravel_hint: Vec<f32>,
+    river_cutbank_hint: Vec<f32>,
+    source_pixel_count: usize,
+}
+
+impl RiverRasterRow {
+    fn new(width: usize) -> Self {
+        Self {
+            distance_blocks: vec![f32::INFINITY; width],
+            river_valley_strength: vec![0.0; width],
+            flow_weighted_sum: vec![0.0; width],
+            flow_weight_sum: vec![0.0; width],
+            river_bed_depth_hint: vec![0.0; width],
+            river_bank_roughness_hint: vec![0.0; width],
+            river_gravel_hint: vec![0.0; width],
+            river_cutbank_hint: vec![0.0; width],
+            source_pixel_count: 0,
+        }
+    }
+}
+
+fn smooth_river_concave_cusps(river: &mut RasterDistanceField, width: usize, height: usize) {
+    let sample_count = width * height;
+    if width == 0 || height == 0 || river.river_valley_strength.len() != sample_count {
+        return;
+    }
+
+    for _ in 0..RIVER_CONCAVE_CUSP_MAX_PASSES {
+        let promote = (0..sample_count)
+            .filter(|&index| is_river_concave_cusp(river, width, height, index))
+            .collect::<Vec<_>>();
+        if promote.is_empty() {
+            break;
+        }
+
+        for index in promote {
+            river.river_valley_strength[index] =
+                river.river_valley_strength[index].max(RIVER_CORE_STRENGTH_THRESHOLD);
+            copy_strongest_neighbor_river_hints(river, width, height, index);
+        }
+    }
+}
+
+fn is_river_concave_cusp(
+    river: &RasterDistanceField,
+    width: usize,
+    height: usize,
+    index: usize,
+) -> bool {
+    let strength = river.river_valley_strength[index];
+    if strength >= RIVER_CORE_STRENGTH_THRESHOLD
+        || strength < RIVER_CORE_STRENGTH_THRESHOLD * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO
+        || river.flow_hint[index] <= 0.0
+        || !river.distance_blocks[index].is_finite()
+    {
+        return false;
+    }
+
+    let x = index % width;
+    let z = index / width;
+    river_neighbor_count(river, width, height, x, z) >= RIVER_CONCAVE_CUSP_MIN_NEIGHBORS
+        && has_orthogonal_river_support(river, width, height, x, z)
+}
+
+fn river_neighbor_count(
+    river: &RasterDistanceField,
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+) -> usize {
+    let mut count = 0;
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dz == 0 {
+                continue;
+            }
+            if neighbor_is_river(river, width, height, x, z, dx, dz) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+fn has_orthogonal_river_support(
+    river: &RasterDistanceField,
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+) -> bool {
+    let north = neighbor_is_river(river, width, height, x, z, 0, -1);
+    let south = neighbor_is_river(river, width, height, x, z, 0, 1);
+    let west = neighbor_is_river(river, width, height, x, z, -1, 0);
+    let east = neighbor_is_river(river, width, height, x, z, 1, 0);
+
+    (north || south) && (west || east)
+}
+
+fn neighbor_is_river(
+    river: &RasterDistanceField,
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    dx: isize,
+    dz: isize,
+) -> bool {
+    let Some(nx) = x.checked_add_signed(dx) else {
+        return false;
+    };
+    let Some(nz) = z.checked_add_signed(dz) else {
+        return false;
+    };
+    if nx >= width || nz >= height {
+        return false;
+    }
+
+    river.river_valley_strength[nz * width + nx] >= RIVER_CORE_STRENGTH_THRESHOLD
+}
+
+fn copy_strongest_neighbor_river_hints(
+    river: &mut RasterDistanceField,
+    width: usize,
+    height: usize,
+    index: usize,
+) {
+    let x = index % width;
+    let z = index / width;
+    let mut best: Option<usize> = None;
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dz == 0 {
+                continue;
+            }
+            let Some(nx) = x.checked_add_signed(dx) else {
+                continue;
+            };
+            let Some(nz) = z.checked_add_signed(dz) else {
+                continue;
+            };
+            if nx >= width || nz >= height {
+                continue;
+            }
+            let neighbor = nz * width + nx;
+            if river.river_valley_strength[neighbor] >= RIVER_CORE_STRENGTH_THRESHOLD
+                && best.is_none_or(|best_index| {
+                    river.river_valley_strength[neighbor] > river.river_valley_strength[best_index]
+                })
+            {
+                best = Some(neighbor);
+            }
+        }
+    }
+
+    if let Some(neighbor) = best {
+        river.river_bed_depth_hint[index] =
+            river.river_bed_depth_hint[index].max(river.river_bed_depth_hint[neighbor]);
+        river.river_bank_roughness_hint[index] =
+            river.river_bank_roughness_hint[index].max(river.river_bank_roughness_hint[neighbor]);
+        river.river_gravel_hint[index] =
+            river.river_gravel_hint[index].max(river.river_gravel_hint[neighbor]);
+        river.river_cutbank_hint[index] =
+            river.river_cutbank_hint[index].max(river.river_cutbank_hint[neighbor]);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -856,43 +1036,29 @@ fn rasterize_curve_anti_aliased_polyline_field(
 
     let width = config.width as usize;
     let height = config.height as usize;
-    let mut distance_blocks = vec![f32::INFINITY; sample_count];
-    let mut river_valley_strength = vec![0.0; sample_count];
-    let mut river_owner_component = vec![usize::MAX; sample_count];
-    let mut flow_weighted_sum = vec![0.0; sample_count];
-    let mut flow_weight_sum = vec![0.0; sample_count];
-    let mut river_bed_depth_hint = vec![0.0; sample_count];
-    let mut river_bank_roughness_hint = vec![0.0; sample_count];
-    let mut river_gravel_hint = vec![0.0; sample_count];
-    let mut river_cutbank_hint = vec![0.0; sample_count];
-
-    for source in &sources {
-        for segment in source.points.windows(2) {
-            rasterize_segment_anti_aliased_stroke(
-                &mut distance_blocks,
-                &mut river_valley_strength,
-                &mut river_owner_component,
-                &mut flow_weighted_sum,
-                &mut flow_weight_sum,
-                &mut river_bed_depth_hint,
-                &mut river_bank_roughness_hint,
-                &mut river_gravel_hint,
-                &mut river_cutbank_hint,
-                width,
-                height,
-                config,
-                segment[0],
-                segment[1],
-                radius_blocks,
-                *source,
-            );
-        }
+    let rows = (0..height)
+        .into_par_iter()
+        .map(|z| rasterize_river_row(&sources, width, height, config, radius_blocks, z))
+        .collect::<Vec<_>>();
+    let source_pixel_count = rows.iter().map(|row| row.source_pixel_count).sum();
+    let mut distance_blocks = Vec::with_capacity(sample_count);
+    let mut river_valley_strength = Vec::with_capacity(sample_count);
+    let mut flow_weighted_sum = Vec::with_capacity(sample_count);
+    let mut flow_weight_sum = Vec::with_capacity(sample_count);
+    let mut river_bed_depth_hint = Vec::with_capacity(sample_count);
+    let mut river_bank_roughness_hint = Vec::with_capacity(sample_count);
+    let mut river_gravel_hint = Vec::with_capacity(sample_count);
+    let mut river_cutbank_hint = Vec::with_capacity(sample_count);
+    for row in rows {
+        distance_blocks.extend(row.distance_blocks);
+        river_valley_strength.extend(row.river_valley_strength);
+        flow_weighted_sum.extend(row.flow_weighted_sum);
+        flow_weight_sum.extend(row.flow_weight_sum);
+        river_bed_depth_hint.extend(row.river_bed_depth_hint);
+        river_bank_roughness_hint.extend(row.river_bank_roughness_hint);
+        river_gravel_hint.extend(row.river_gravel_hint);
+        river_cutbank_hint.extend(row.river_cutbank_hint);
     }
-
-    let source_pixel_count = river_valley_strength
-        .iter()
-        .filter(|strength| **strength > 0.001)
-        .count();
     let flow_hint = flow_weighted_sum
         .into_iter()
         .zip(flow_weight_sum)
@@ -917,19 +1083,47 @@ fn rasterize_curve_anti_aliased_polyline_field(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn rasterize_segment_anti_aliased_stroke(
-    distance_blocks: &mut [f32],
-    river_valley_strength: &mut [f32],
-    river_owner_component: &mut [usize],
-    flow_weighted_sum: &mut [f32],
-    flow_weight_sum: &mut [f32],
-    river_bed_depth_hint: &mut [f32],
-    river_bank_roughness_hint: &mut [f32],
-    river_gravel_hint: &mut [f32],
-    river_cutbank_hint: &mut [f32],
+fn rasterize_river_row(
+    sources: &[RiverRasterSource<'_>],
     width: usize,
     height: usize,
+    config: MacroFieldTileConfig,
+    radius_blocks: f32,
+    z: usize,
+) -> RiverRasterRow {
+    let mut row = RiverRasterRow::new(width);
+    let mut river_owner_component = vec![usize::MAX; width];
+    for source in sources {
+        for segment in source.points.windows(2) {
+            rasterize_segment_anti_aliased_stroke_row(
+                &mut row,
+                &mut river_owner_component,
+                width,
+                height,
+                z,
+                config,
+                segment[0],
+                segment[1],
+                radius_blocks,
+                *source,
+            );
+        }
+    }
+    row.source_pixel_count = row
+        .river_valley_strength
+        .iter()
+        .filter(|strength| **strength > 0.001)
+        .count();
+    row
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rasterize_segment_anti_aliased_stroke_row(
+    row: &mut RiverRasterRow,
+    river_owner_component: &mut [usize],
+    width: usize,
+    height: usize,
+    z: usize,
     config: MacroFieldTileConfig,
     start: WorldPlanePoint,
     end: WorldPlanePoint,
@@ -939,19 +1133,28 @@ fn rasterize_segment_anti_aliased_stroke(
     let strength = source.flow_hint;
     let spacing = config.sample_spacing_blocks;
     let aa_margin = spacing * 0.75;
-    let min_x = ((start.x.min(end.x) - radius_blocks - aa_margin - config.origin.x) / spacing)
+    let active_radius_blocks =
+        river_raster_active_radius_blocks(source, radius_blocks, config.boundary_roughness_blocks);
+    let min_x = ((start.x.min(end.x) - active_radius_blocks - aa_margin - config.origin.x)
+        / spacing)
         .floor()
         .max(0.0) as usize;
-    let max_x = ((start.x.max(end.x) + radius_blocks + aa_margin - config.origin.x) / spacing)
+    let max_x = ((start.x.max(end.x) + active_radius_blocks + aa_margin - config.origin.x)
+        / spacing)
         .ceil()
         .min((width.saturating_sub(1)) as f32) as usize;
-    let min_z = ((start.z.min(end.z) - radius_blocks - aa_margin - config.origin.z) / spacing)
+    let min_z = ((start.z.min(end.z) - active_radius_blocks - aa_margin - config.origin.z)
+        / spacing)
         .floor()
         .max(0.0) as usize;
-    let max_z = ((start.z.max(end.z) + radius_blocks + aa_margin - config.origin.z) / spacing)
+    let max_z = ((start.z.max(end.z) + active_radius_blocks + aa_margin - config.origin.z)
+        / spacing)
         .ceil()
         .min((height.saturating_sub(1)) as f32) as usize;
     if min_x > max_x || min_z > max_z {
+        return;
+    }
+    if z < min_z || z > max_z {
         return;
     }
 
@@ -963,86 +1166,84 @@ fn rasterize_segment_anti_aliased_stroke(
         (0.35, 0.35),
     ];
     let subpixel_count = subpixel_offsets.len() as f32;
-    for z in min_z..=max_z {
-        for x in min_x..=max_x {
-            let global_index = z * width + x;
-            let position = config.sample_position(global_index);
-            let distance = point_segment_distance(position, start, end);
-            if distance > radius_blocks + aa_margin {
-                continue;
-            }
-            let mut profile_sum = 0.0;
-            let mut closest_subpixel_distance = distance;
-            let mut bed_sum = 0.0;
-            let mut rough_sum = 0.0;
-            let mut gravel_sum = 0.0;
-            let mut cutbank_sum = 0.0;
-            for (offset_x, offset_z) in subpixel_offsets {
-                let subpixel = WorldPlanePoint::new(
-                    position.x + offset_x * spacing,
-                    position.z + offset_z * spacing,
-                );
-                let subpixel_distance = point_segment_distance(subpixel, start, end);
-                let valley_strength = river_valley_strength_for_sample_distance(
-                    subpixel_distance,
-                    subpixel,
-                    source.flow_hint,
-                    source.water_width_blocks,
-                    source.valley_width_blocks,
-                    radius_blocks,
-                    config.boundary_roughness_blocks,
-                );
-                let hints = river_hints_from_strength(
-                    valley_strength,
-                    source.flow_hint,
-                    source.bed_depth_blocks,
-                );
-                closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
-                profile_sum += valley_strength;
-                bed_sum += hints.bed_depth_hint;
-                rough_sum += hints.bank_roughness_hint;
-                gravel_sum += hints.gravel_hint;
-                cutbank_sum += hints.cutbank_hint;
-            }
-            let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
-            if anti_aliased_strength <= 0.0 {
-                continue;
-            }
+    for x in min_x..=max_x {
+        let global_index = z * width + x;
+        let position = config.sample_position(global_index);
+        let distance = point_segment_distance(position, start, end);
+        if distance > active_radius_blocks + aa_margin {
+            continue;
+        }
+        let mut profile_sum = 0.0;
+        let mut closest_subpixel_distance = distance;
+        let mut bed_sum = 0.0;
+        let mut rough_sum = 0.0;
+        let mut gravel_sum = 0.0;
+        let mut cutbank_sum = 0.0;
+        let roughness_offset = river_boundary_roughness_offset(
+            position,
+            source.flow_hint,
+            source.water_width_blocks,
+            radius_blocks,
+            config.boundary_roughness_blocks,
+        );
+        for (offset_x, offset_z) in subpixel_offsets {
+            let subpixel = WorldPlanePoint::new(
+                position.x + offset_x * spacing,
+                position.z + offset_z * spacing,
+            );
+            let subpixel_distance = point_segment_distance(subpixel, start, end);
+            let valley_strength = river_valley_strength_for_roughened_distance(
+                subpixel_distance,
+                roughness_offset,
+                source.flow_hint,
+                source.water_width_blocks,
+                source.valley_width_blocks,
+                radius_blocks,
+            );
+            let hints = river_hints_from_strength(
+                valley_strength,
+                source.flow_hint,
+                source.bed_depth_blocks,
+            );
+            closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
+            profile_sum += valley_strength;
+            bed_sum += hints.bed_depth_hint;
+            rough_sum += hints.bank_roughness_hint;
+            gravel_sum += hints.gravel_hint;
+            cutbank_sum += hints.cutbank_hint;
+        }
+        let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
+        if anti_aliased_strength <= 0.0 {
+            continue;
+        }
 
-            let bed_hint = (bed_sum / subpixel_count).clamp(0.0, 1.0);
-            let rough_hint = (rough_sum / subpixel_count).clamp(0.0, 1.0);
-            let gravel_hint = (gravel_sum / subpixel_count).clamp(0.0, 1.0);
-            let cutbank_hint = (cutbank_sum / subpixel_count).clamp(0.0, 1.0);
-            let current_distance = distance_blocks[global_index];
-            let same_thalweg_band = spacing * 0.35;
-            let current_component = river_owner_component[global_index];
-            if current_component == source.component_id && current_distance.is_finite() {
-                distance_blocks[global_index] =
-                    distance_blocks[global_index].min(closest_subpixel_distance);
-                river_valley_strength[global_index] = component_union_strength(
-                    river_valley_strength[global_index],
-                    anti_aliased_strength,
-                );
-                river_bed_depth_hint[global_index] =
-                    river_bed_depth_hint[global_index].max(bed_hint);
-                river_bank_roughness_hint[global_index] =
-                    river_bank_roughness_hint[global_index].max(rough_hint);
-                river_gravel_hint[global_index] = river_gravel_hint[global_index].max(gravel_hint);
-                river_cutbank_hint[global_index] =
-                    river_cutbank_hint[global_index].max(cutbank_hint);
-                flow_weighted_sum[global_index] += strength * anti_aliased_strength;
-                flow_weight_sum[global_index] += anti_aliased_strength;
-            } else if closest_subpixel_distance + same_thalweg_band < current_distance {
-                distance_blocks[global_index] = closest_subpixel_distance;
-                river_valley_strength[global_index] = anti_aliased_strength;
-                river_owner_component[global_index] = source.component_id;
-                river_bed_depth_hint[global_index] = bed_hint;
-                river_bank_roughness_hint[global_index] = rough_hint;
-                river_gravel_hint[global_index] = gravel_hint;
-                river_cutbank_hint[global_index] = cutbank_hint;
-                flow_weighted_sum[global_index] = strength * anti_aliased_strength;
-                flow_weight_sum[global_index] = anti_aliased_strength;
-            }
+        let bed_hint = (bed_sum / subpixel_count).clamp(0.0, 1.0);
+        let rough_hint = (rough_sum / subpixel_count).clamp(0.0, 1.0);
+        let gravel_hint = (gravel_sum / subpixel_count).clamp(0.0, 1.0);
+        let cutbank_hint = (cutbank_sum / subpixel_count).clamp(0.0, 1.0);
+        let current_distance = row.distance_blocks[x];
+        let same_thalweg_band = spacing * 0.35;
+        let current_component = river_owner_component[x];
+        if current_component == source.component_id && current_distance.is_finite() {
+            row.distance_blocks[x] = row.distance_blocks[x].min(closest_subpixel_distance);
+            row.river_valley_strength[x] =
+                component_union_strength(row.river_valley_strength[x], anti_aliased_strength);
+            row.river_bed_depth_hint[x] = row.river_bed_depth_hint[x].max(bed_hint);
+            row.river_bank_roughness_hint[x] = row.river_bank_roughness_hint[x].max(rough_hint);
+            row.river_gravel_hint[x] = row.river_gravel_hint[x].max(gravel_hint);
+            row.river_cutbank_hint[x] = row.river_cutbank_hint[x].max(cutbank_hint);
+            row.flow_weighted_sum[x] += strength * anti_aliased_strength;
+            row.flow_weight_sum[x] += anti_aliased_strength;
+        } else if closest_subpixel_distance + same_thalweg_band < current_distance {
+            row.distance_blocks[x] = closest_subpixel_distance;
+            row.river_valley_strength[x] = anti_aliased_strength;
+            river_owner_component[x] = source.component_id;
+            row.river_bed_depth_hint[x] = bed_hint;
+            row.river_bank_roughness_hint[x] = rough_hint;
+            row.river_gravel_hint[x] = gravel_hint;
+            row.river_cutbank_hint[x] = cutbank_hint;
+            row.flow_weighted_sum[x] = strength * anti_aliased_strength;
+            row.flow_weight_sum[x] = anti_aliased_strength;
         }
     }
 }
@@ -1051,6 +1252,34 @@ fn component_union_strength(existing: f32, incoming: f32) -> f32 {
     let existing = existing.clamp(0.0, 1.0);
     let incoming = incoming.clamp(0.0, 1.0);
     existing.max(incoming)
+}
+
+fn river_raster_active_radius_blocks(
+    source: RiverRasterSource<'_>,
+    configured_radius_blocks: f32,
+    boundary_roughness_blocks: f32,
+) -> f32 {
+    let water_radius = river_water_radius_blocks(
+        source.flow_hint,
+        source.water_width_blocks,
+        configured_radius_blocks,
+    );
+    let valley_radius = river_width_blocks(
+        source.flow_hint,
+        source.valley_width_blocks,
+        configured_radius_blocks,
+    )
+    .max(water_radius + 1.0);
+    let roughness_blocks = river_boundary_roughness_blocks(
+        source.flow_hint,
+        source.water_width_blocks,
+        configured_radius_blocks,
+        boundary_roughness_blocks,
+    );
+
+    valley_radius
+        .max(water_radius + roughness_blocks)
+        .clamp(1.0, configured_radius_blocks)
 }
 
 fn rasterize_curve_sources(
@@ -1489,7 +1718,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 left.0
                     .distance_blocks
                     .total_cmp(&right.0.distance_blocks)
-                    .then_with(|| left.1 .0.cmp(&right.1 .0))
+                    .then_with(|| left.1.0.cmp(&right.1.0))
             })
         else {
             return RiverMorphologySample {
@@ -2201,27 +2430,47 @@ fn river_valley_strength_for_sample_distance(
     configured_radius_blocks: f32,
     boundary_roughness_blocks: f32,
 ) -> f32 {
-    let water_radius = river_water_radius_blocks(
-        flow_hint,
-        planned_water_width_blocks,
-        configured_radius_blocks,
-    );
-    let roughness_blocks = river_boundary_roughness_blocks(
+    let roughness_offset = river_boundary_roughness_offset(
+        position,
         flow_hint,
         planned_water_width_blocks,
         configured_radius_blocks,
         boundary_roughness_blocks,
     );
-    let effective_distance = if roughness_blocks > 0.0 && distance_blocks.is_finite() {
-        let boundary_band = (water_radius * 0.42).max(roughness_blocks * 2.0).max(1.0);
-        let boundary_t = (distance_blocks - water_radius).abs() / boundary_band;
-        let boundary_gate = 1.0 - smoothstep01(boundary_t);
-        let offset =
-            boundary_roughness_offset(position, roughness_blocks, RIVER_BOUNDARY_ROUGHNESS_SALT);
-        (distance_blocks + offset * boundary_gate).max(0.0)
-    } else {
-        distance_blocks
-    };
+    river_valley_strength_for_roughened_distance(
+        distance_blocks,
+        roughness_offset,
+        flow_hint,
+        planned_water_width_blocks,
+        planned_valley_width_blocks,
+        configured_radius_blocks,
+    )
+}
+
+fn river_valley_strength_for_roughened_distance(
+    distance_blocks: f32,
+    roughness_offset_blocks: f32,
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    planned_valley_width_blocks: f32,
+    configured_radius_blocks: f32,
+) -> f32 {
+    let water_radius = river_water_radius_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+    );
+    let effective_distance =
+        if roughness_offset_blocks.abs() > f32::EPSILON && distance_blocks.is_finite() {
+            let boundary_band = (water_radius * 0.42)
+                .max(roughness_offset_blocks.abs() * 2.0)
+                .max(1.0);
+            let boundary_t = (distance_blocks - water_radius).abs() / boundary_band;
+            let boundary_gate = 1.0 - smoothstep01(boundary_t);
+            (distance_blocks + roughness_offset_blocks * boundary_gate).max(0.0)
+        } else {
+            distance_blocks
+        };
 
     river_valley_strength_for_effective_distance(
         effective_distance,
@@ -2230,6 +2479,26 @@ fn river_valley_strength_for_sample_distance(
         planned_valley_width_blocks,
         configured_radius_blocks,
     )
+}
+
+fn river_boundary_roughness_offset(
+    position: WorldPlanePoint,
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    configured_radius_blocks: f32,
+    boundary_roughness_blocks: f32,
+) -> f32 {
+    let roughness_blocks = river_boundary_roughness_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+        boundary_roughness_blocks,
+    );
+    if roughness_blocks <= 0.0 {
+        0.0
+    } else {
+        boundary_roughness_offset(position, roughness_blocks, RIVER_BOUNDARY_ROUGHNESS_SALT)
+    }
 }
 
 fn river_valley_strength_for_effective_distance(
@@ -2489,18 +2758,18 @@ fn usable_side(preferred: f32, fallback: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::boundary::{
-        generate_noisy_boundaries, BoundaryAnchors, BoundaryConfig, BoundaryGuard, BoundaryProfile,
+        BoundaryAnchors, BoundaryConfig, BoundaryGuard, BoundaryProfile, generate_noisy_boundaries,
     };
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, VoronoiSiteId, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-        DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
+        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, VoronoiSiteId,
+        generate_voronoi_graph_patch,
     };
     use crate::world::generation::hydrology::{
-        solve_hydrology, GraphHydrologyGraph, HydrologyConfig,
+        GraphHydrologyGraph, HydrologyConfig, solve_hydrology,
     };
-    use crate::world::generation::macro_map::{generate_macro_map, MacroMapConfig};
-    use crate::world::generation::river_plan::{build_river_plan, RiverPlan, RiverPlanConfig};
+    use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
+    use crate::world::generation::river_plan::{RiverPlan, RiverPlanConfig, build_river_plan};
 
     #[derive(Debug, Clone, Copy, Default)]
     struct NeighborDeltaSummary {
@@ -3380,6 +3649,92 @@ mod tests {
         assert!(
             max > min,
             "anti-aliased river field should preserve a near/far gradient: max={max} min={min}"
+        );
+    }
+
+    #[test]
+    fn river_raster_bounds_use_planned_valley_width_not_configured_search_cap() {
+        let curve = test_noisy_curve(
+            91,
+            vec![
+                WorldPlanePoint::new(0.0, 0.0),
+                WorldPlanePoint::new(128.0, 0.0),
+            ],
+        );
+        let mut source = test_river_source(&curve, 0.25);
+        source.water_width_blocks = 6.0;
+        source.valley_width_blocks = 18.0;
+        let configured_radius = 640.0;
+        let active_radius = river_raster_active_radius_blocks(source, configured_radius, 96.0);
+
+        assert!(
+            active_radius < configured_radius * 0.1,
+            "river raster bbox should follow planned valley width, not the broad search cap: {active_radius}"
+        );
+        assert!(
+            active_radius >= source.valley_width_blocks,
+            "active radius must still cover the planned broad valley"
+        );
+    }
+
+    #[test]
+    fn macro_field_raster_fills_near_threshold_concave_river_cusp() {
+        let width = 9;
+        let height = 9;
+        let mut field = test_river_raster_field(width, height);
+        let center = 4usize;
+        for (x, z) in [
+            (center, center - 1),
+            (center, center + 1),
+            (center - 1, center),
+            (center + 1, center),
+            (center - 1, center - 1),
+            (center + 1, center - 1),
+        ] {
+            set_river_raster_strength(&mut field, width, x, z, RIVER_CORE_STRENGTH_THRESHOLD);
+        }
+        set_river_raster_strength(
+            &mut field,
+            width,
+            center,
+            center,
+            RIVER_CORE_STRENGTH_THRESHOLD * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO,
+        );
+
+        smooth_river_concave_cusps(&mut field, width, height);
+
+        assert!(
+            field.river_valley_strength[center * width + center] >= RIVER_CORE_STRENGTH_THRESHOLD,
+            "near-threshold concave cusp should be promoted in the macro_field river raster"
+        );
+    }
+
+    #[test]
+    fn macro_field_raster_keeps_convex_river_corner_rounded() {
+        let width = 9;
+        let height = 9;
+        let mut field = test_river_raster_field(width, height);
+        let outside = 4usize;
+        for (x, z) in [
+            (outside, outside - 1),
+            (outside - 1, outside),
+            (outside - 1, outside - 1),
+        ] {
+            set_river_raster_strength(&mut field, width, x, z, RIVER_CORE_STRENGTH_THRESHOLD);
+        }
+        set_river_raster_strength(
+            &mut field,
+            width,
+            outside,
+            outside,
+            RIVER_CORE_STRENGTH_THRESHOLD * RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO,
+        );
+
+        smooth_river_concave_cusps(&mut field, width, height);
+
+        assert!(
+            field.river_valley_strength[outside * width + outside] < RIVER_CORE_STRENGTH_THRESHOLD,
+            "convex outside corners should not be squared off by macro_field cusp cleanup"
         );
     }
 
@@ -5243,6 +5598,36 @@ mod tests {
             bed_depth_blocks: lerp(1.5, 18.0, flow_hint.clamp(0.0, 1.0)),
             component_id: 0,
         }
+    }
+
+    fn test_river_raster_field(width: usize, height: usize) -> RasterDistanceField {
+        let sample_count = width * height;
+        RasterDistanceField {
+            distance_blocks: vec![f32::INFINITY; sample_count],
+            river_valley_strength: vec![0.0; sample_count],
+            flow_hint: vec![0.0; sample_count],
+            river_bed_depth_hint: vec![0.0; sample_count],
+            river_bank_roughness_hint: vec![0.0; sample_count],
+            river_gravel_hint: vec![0.0; sample_count],
+            river_cutbank_hint: vec![0.0; sample_count],
+            source_pixel_count: 0,
+        }
+    }
+
+    fn set_river_raster_strength(
+        field: &mut RasterDistanceField,
+        width: usize,
+        x: usize,
+        z: usize,
+        strength: f32,
+    ) {
+        let index = z * width + x;
+        field.river_valley_strength[index] = strength;
+        field.flow_hint[index] = 0.72;
+        field.distance_blocks[index] = 1.0;
+        field.river_bed_depth_hint[index] = 0.45;
+        field.river_bank_roughness_hint[index] = 0.35;
+        field.river_gravel_hint[index] = 0.25;
     }
 
     fn flow_hint(flow_accumulation: f32) -> f32 {

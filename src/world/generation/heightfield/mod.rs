@@ -228,7 +228,8 @@ pub fn heightfield_column_from_sample(
     let has_standing_water_mouth_bed_hint = (is_ocean || is_lake)
         && sample.river_flow_hint > 0.0
         && sample.river_bed_depth_hint > 0.0
-        && sample.river_valley_strength >= config.river_water_threshold * 0.5;
+        && sample.river_distance_blocks.is_finite()
+        && sample.river_valley_strength > 0.0;
     let has_river_bed_hint = has_core_river_hint || has_standing_water_mouth_bed_hint;
     let is_river_hint = has_core_river_hint && !is_ocean && !is_lake;
     let river_bed_depth_blocks = if has_river_bed_hint {
@@ -302,7 +303,7 @@ pub fn heightfield_column_from_sample(
     } else if is_river_hint {
         river_bed_base_height_blocks + river_bed_relief_blocks + river_bed_variation_blocks
     } else {
-        (surface_height_blocks + river_bank_relief_blocks).max(config.sea_level_blocks)
+        surface_height_blocks + river_bank_relief_blocks
     };
     let constrained_surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
@@ -1517,17 +1518,21 @@ mod tests {
     }
 
     #[test]
-    fn coast_mask_negative_non_ocean_land_floors_without_water() {
+    fn coast_mask_negative_non_ocean_land_preserves_below_sea_bed_without_water() {
         let mut coast = sample(0.0, 0.0, -0.25, 0.0, 0.0, 0.0, 0.0);
         coast.coast_mask = 0.35;
         let column = heightfield_column_from_sample(&coast, HeightfieldConfig::default());
 
         assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Land);
-        assert_eq!(column.surface_y, 0);
+        assert!(
+            column.surface_y < 0,
+            "negative coast-mask land should preserve its below-sea terrain bed: {}",
+            column.surface_y
+        );
         assert_eq!(column.water_y, None);
         assert_eq!(
             column.visible_surface_height_blocks(),
-            DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+            column.surface_height_blocks
         );
     }
 
@@ -1554,12 +1559,16 @@ mod tests {
     }
 
     #[test]
-    fn inland_negative_non_water_land_still_floors_at_sea_level() {
+    fn inland_negative_non_water_land_preserves_below_sea_bed() {
         let inland = sample(0.0, 0.0, -0.25, 0.0, 0.0, 0.0, 0.0);
         let column = heightfield_column_from_sample(&inland, HeightfieldConfig::default());
 
         assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Land);
-        assert_eq!(column.surface_y, 0);
+        assert!(
+            column.surface_y < 0,
+            "negative non-water land should preserve its below-sea terrain bed: {}",
+            column.surface_y
+        );
         assert_eq!(column.water_y, None);
     }
 
@@ -2135,6 +2144,33 @@ mod tests {
         assert!(
             column.river_bed_depth_blocks > 0.0,
             "heightfield should preserve selected mouth bed-depth diagnostics"
+        );
+    }
+
+    #[test]
+    fn selected_low_strength_mouth_bed_hint_still_cuts_ocean_column() {
+        let mut mouth = sample_with_river(0.0, 0.0, 0.004, 0.96);
+        mouth.ocean_mask = 1.0;
+        mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.35;
+        mouth.river_distance_blocks = 96.0;
+        mouth.river_bed_depth_hint = 0.82;
+
+        let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+        assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Ocean);
+        assert_eq!(
+            column.water_level_blocks,
+            Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS),
+            "standing water ownership should remain ocean at the mouth"
+        );
+        assert!(
+            column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "selected low-strength mouth bed hint should still cut below sea level: {}",
+            column.surface_height_blocks
+        );
+        assert!(
+            column.river_bed_depth_blocks > 0.0,
+            "selected mouth bed diagnostics should survive noisy boundary attenuation"
         );
     }
 

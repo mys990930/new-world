@@ -249,11 +249,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   물 표면을 유지하면서 terrain bed를 river bed depth만큼 깎아 자연스럽게 연결할 수 있다.
 - `coast_mask`는 heightfield baseline에서 diagnostic field다. ocean/lake/river/dry/ridge mask가 없는
   non-ocean land column은 coast mask가 있어도 일반 land와 같은 floor/snap 정책을 따른다. 따라서
-  negative coast-mask land는 `surface_y = 0`, `water_y = None`으로 floor되고, near-zero positive
+  negative coast-mask land는 below-sea terrain bed와 `water_y = None`을 보존하고, near-zero positive
   coast-mask land도 deterministic shelf variation 없이 ordinary contour snap을 따른다.
-- 일반 land column은 raw block height를 contour lower band로 양자화한 뒤 sea level 아래로 내려가지
-  않는다. 즉 water가 아닌 terrain의 기본 floor는 `y = 0`이다. 이 floor는 connected ocean/ocean mask
-  column의 terrain bed에는 적용하지 않는다.
+- 일반 land column은 raw block height를 contour lower band로 양자화하며, sea level 아래 source terrain을
+  dry land bed로 보존할 수 있다. 즉 water가 아닌 terrain에는 `y = 0` 기본 floor를 적용하지 않는다.
 - 일반 land에는 인접 column 기준 final surface ceiling, ocean shoreline bevel, land-side coast ramp를
   적용하지 않는다. 호수 bed/water 정책은 lake mask 내부에서만 처리한다.
 - river water hint를 shoreline ocean/lake ramp 기준으로 사용하지 않는다.
@@ -265,9 +264,9 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   비례해 더 깊은 bed와 더 큰 water depth를 허용한다. ocean visible water surface는 여전히 `y = 0`이지만,
   river bed는 하구에서도 sea level 아래로 패일 수 있다.
   ocean-owned 또는 lake-owned mouth column은 ordinary river-water threshold보다 낮은 raster strength로
-  들어와도 selected river `bed_depth_hint`가 남아 있으면 standing-water surface와 terrain bed를 분리해
-  mouth bed carve를 적용한다. 이 예외는 water ownership을 새로 만들지 않고, 이미 전달된 selected river
-  bed hint를 terrain bed에만 적용한다.
+  들어와도 finite river distance와 selected river `bed_depth_hint`가 남아 있으면 standing-water surface와
+  terrain bed를 분리해 mouth bed carve를 적용한다. 이 예외는 water ownership을 새로 만들지 않고, 이미
+  전달된 selected river bed hint를 terrain bed에만 적용한다.
   high-core river bed와 adjacent bank/shoulder에는 deterministic value-noise relief를 기본 적용한다.
   bed relief는 water level 계산 뒤 terrain bed에만 들어가며, water depth 범위 안에서 clamp해 수면을
   뚫거나 한 column 이웃 river water continuity를 깨지 않는다. ocean-owned 또는 lake-owned mouth column도
@@ -404,8 +403,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     heightfield-local shallow fallback plane으로 내리면 회귀다. sea-level 이상 ocean bed에는 water
     column을 만들지 않는다. coast-adjacent continuity와 shelf/slope/basin depth는 macro_field
     bathymetry source가 제공해야 하며, heightfield는 그 source bed를 직접 보존한다.
-    ocean owner가 아닌 coast-mask negative land는 일반 non-water land처럼 `surface_y = 0`,
-    `water_y = None`으로 남아야 한다. coast-connected near-zero positive land도 deterministic
+    ocean owner가 아닌 coast-mask negative land는 일반 non-water land처럼 below-sea terrain bed와
+    `water_y = None`을 보존해야 한다. coast-connected near-zero positive land도 deterministic
     shallow-shelf variation 없이 ordinary contour snap을 따라야 한다.
     lake visible surface는 lake source elevation에서 derive한 water level이며, 일반 lake bed는 그
     아래의 U자형 terrain bed로 분리된다. lake water를 항상 `y = 0`에 고정하거나 lake bed를 완전 flat

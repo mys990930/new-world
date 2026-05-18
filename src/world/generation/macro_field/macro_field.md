@@ -160,6 +160,10 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      bend/joint 주변의 pointed cusp를 줄이되 원형 blob처럼 부풀지 않게 한다. 서로 endpoint를 공유하지
      않는 가까운 river component끼리는 nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은
      corridor로 합쳐지지 않게 한다.
+   - river raster pass 뒤에는 bounded concave-cusp cleanup을 같은 macro field cache 안에서 수행한다.
+     near-threshold sample은 이미 dense river neighbors와 orthogonal support를 가진 경우에만 river
+     water/core threshold까지 승격한다. 이 후처리는 raster strength만 보정하며 selected hydrology,
+     river_plan geometry, macro masks를 바꾸지 않고 convex outside bank corner는 보존해야 한다.
 3. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
@@ -338,6 +342,11 @@ hot path에서 후보 `Vec`을 만들지 않고 bucket window를 직접 순회�
 
 프로젝트 요구상 각 generation stage는 topdown preview binary로 확인 가능해야 한다.
 
+`macro_field_preview`의 positional input은 `pixelize_preview`와 같은 `<seed> <cx> <cz> <r>` 계약을
+따른다. `cx/cz`는 chunk coordinate이고, `r`은 inclusive square chunk radius다. 같은 seed/cx/cz/r을
+주면 stage 10 macro field, stage 11 pixelize, stage 12 heightfield preview가 같은 chunk footprint를
+검사한다.
+
 `macro_field` preview는 최소한 아래 channel을 각각 2D로 출력할 수 있어야 한다.
 
 - macro elevation
@@ -481,13 +490,21 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   canonical noisy curve를 anti-aliased corridor로 굽는다. corridor width와 bed-depth hint는 fixed radius나
   flow hint만으로 재추정하지 않고 river plan의 absolute `bed_width_blocks`,
   `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다.
+  river stroke rasterization은 launch 기본 검색 반경 `640` blocks 전체를 segment마다 훑지 않고,
+  river plan이 제공한 실제 broad-valley/water width와 roughness guard로 계산한 tile-local active
+  radius만 스캔한다. 이 radius 밖의 sample은 strength가 0이므로 결과를 바꾸지 않으면서 dense
+  heightfield preview의 river/mouth 경계 비용을 bounded pass로 유지한다. river stroke pass는 row 단위로
+  병렬 rasterize한 뒤 row-major field로 합성한다. 같은 row 안에서는 component-local nearest/union 규칙을
+  유지하고, river boundary roughness noise는 sample당 한 번만 평가해 subpixel coverage 비용을 제한한다.
   subpixel coverage 기반 valley strength, nearest distance, blended flow hint, 단순 bed/roughness/gravel
   diagnostic hint를 저장한다. river water/core threshold는 같은 raster pass에서 bounded deterministic
   world-space roughness를 적용해 지나치게 매끈한 수면 경계를 피하지만, selected edge path와 broad
   valley guide는 그대로 유지한다. 같은 connected river component 안의 overlapping broad strokes는
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
-  corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
+  corridor로 병합하지 않기 위한 launch-scope guard다. raster pass 이후 bounded concave-cusp cleanup은
+  dense near-threshold river holes만 threshold까지 승격하고, convex bank rounding과 source topology를
+  보존한다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
   lowering이 과도하게 깊어지지 않도록 `0.012`이다. 낮은 flow에서는 carve depth를 주로 죽이지 않고,
   river_plan의 좁은 broad-valley width와 raster profile로 land carve 범위를 줄인다.
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
