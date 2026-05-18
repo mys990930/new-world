@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
-use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeWaterRole, classify_graph_biome};
+use super::biome::{classify_graph_biome, GraphBiomeCell, GraphBiomeContext, GraphBiomeWaterRole};
 use super::graph::{
     GraphBaseFields, GraphRegionCoord, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch,
     VoronoiSiteId, WorldPlanePoint,
@@ -261,7 +261,7 @@ pub fn generate_macro_map(patch: &VoronoiGraphPatch, config: MacroMapConfig) -> 
                 id: edge.id,
                 sites: edge.sites,
                 corners: edge.corners,
-                guide: macro_edge_guide(a, b, config),
+                guide: macro_edge_guide_with_corners(a, b, edge.corners, &corner_map, config),
                 lake_class: macro_edge_lake_class(a, b, edge.corners, &corner_map),
             }
         })
@@ -1110,9 +1110,37 @@ fn small_stream_pocket_lake(
     deterministic_roll < chance_per_10k
 }
 
+#[cfg(test)]
 fn macro_edge_guide(
     a: Option<MacroSite>,
     b: Option<MacroSite>,
+    config: MacroMapConfig,
+) -> MacroEdgeGuide {
+    macro_edge_guide_with_corner_kinds(a, b, None, config)
+}
+
+fn macro_edge_guide_with_corners(
+    a: Option<MacroSite>,
+    b: Option<MacroSite>,
+    corners: [VoronoiCornerId; 2],
+    corner_map: &HashMap<VoronoiCornerId, MacroCorner>,
+    config: MacroMapConfig,
+) -> MacroEdgeGuide {
+    let corner_kinds = [
+        corner_map
+            .get(&corners[0])
+            .map(|corner| corner.surface_kind),
+        corner_map
+            .get(&corners[1])
+            .map(|corner| corner.surface_kind),
+    ];
+    macro_edge_guide_with_corner_kinds(a, b, Some(corner_kinds), config)
+}
+
+fn macro_edge_guide_with_corner_kinds(
+    a: Option<MacroSite>,
+    b: Option<MacroSite>,
+    corner_kinds: Option<[Option<MacroSurfaceKind>; 2]>,
     config: MacroMapConfig,
 ) -> MacroEdgeGuide {
     let Some(a) = a else {
@@ -1124,7 +1152,7 @@ fn macro_edge_guide(
 
     let a_land = a.surface_kind.is_land_owned();
     let b_land = b.surface_kind.is_land_owned();
-    let is_coast = a_land != b_land;
+    let is_coast = macro_edge_is_explicit_ocean_boundary(a, b, corner_kinds);
     let coastness = if is_coast {
         1.0
     } else {
@@ -1197,6 +1225,28 @@ fn macro_edge_guide(
         drainage_divide_potential,
         river_potential: 0.0,
     }
+}
+
+fn macro_edge_is_explicit_ocean_boundary(
+    a: MacroSite,
+    b: MacroSite,
+    corner_kinds: Option<[Option<MacroSurfaceKind>; 2]>,
+) -> bool {
+    if is_ocean_to_non_ocean_coast_pair(a.surface_kind, b.surface_kind) {
+        return true;
+    }
+
+    let Some([Some(first), Some(second)]) = corner_kinds else {
+        return false;
+    };
+    is_ocean_to_non_ocean_coast_pair(first, second)
+}
+
+fn is_ocean_to_non_ocean_coast_pair(a: MacroSurfaceKind, b: MacroSurfaceKind) -> bool {
+    if is_lake_surface(a) || is_lake_surface(b) {
+        return false;
+    }
+    a.is_ocean_owned() != b.is_ocean_owned()
 }
 
 fn macro_edge_lake_class(
@@ -1286,8 +1336,8 @@ mod tests {
     use super::super::biome::GraphBiomeKind;
     use super::*;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -1332,16 +1382,14 @@ mod tests {
             })
             .expect("expected at least one deterministic seed with both land and ocean");
 
-        assert!(
-            map.sites
-                .iter()
-                .any(|site| site.signed_macro_elevation > 0.0)
-        );
-        assert!(
-            map.sites
-                .iter()
-                .any(|site| site.signed_macro_elevation < 0.0)
-        );
+        assert!(map
+            .sites
+            .iter()
+            .any(|site| site.signed_macro_elevation > 0.0));
+        assert!(map
+            .sites
+            .iter()
+            .any(|site| site.signed_macro_elevation < 0.0));
     }
 
     #[test]
@@ -2030,6 +2078,92 @@ mod tests {
                 b.surface_kind.is_land_owned()
             );
         }
+    }
+
+    #[test]
+    fn corner_ocean_transition_edges_are_coast_guides_for_river_mouths() {
+        let land_a = test_macro_site(
+            1,
+            Some(MacroContinentId(10)),
+            0.08,
+            0.16,
+            0.80,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
+        let land_b = test_macro_site(
+            2,
+            Some(MacroContinentId(10)),
+            0.10,
+            0.18,
+            0.74,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
+
+        let guide = macro_edge_guide_with_corner_kinds(
+            Some(land_a),
+            Some(land_b),
+            Some([
+                Some(MacroSurfaceKind::CoastLand),
+                Some(MacroSurfaceKind::CoastOcean),
+            ]),
+            test_macro_config(123),
+        );
+
+        assert!(
+            guide.is_coast,
+            "river-mouth extension edges with ocean/non-ocean endpoint semantics must enter the canonical coast guide set"
+        );
+        assert_eq!(guide.coastness, 1.0);
+    }
+
+    #[test]
+    fn lake_corner_transition_edges_do_not_become_coast_guides() {
+        let lake = test_macro_site(
+            1,
+            Some(MacroContinentId(10)),
+            -0.02,
+            0.08,
+            0.10,
+            0.0,
+            0.0,
+            0.0,
+            768.0,
+        );
+        let mut land = test_macro_site(
+            2,
+            Some(MacroContinentId(10)),
+            0.10,
+            0.18,
+            0.10,
+            0.0,
+            0.0,
+            0.0,
+            768.0,
+        );
+        let mut lake = lake;
+        lake.surface_kind = MacroSurfaceKind::LakeCandidate;
+        land.surface_kind = MacroSurfaceKind::Continent;
+
+        let guide = macro_edge_guide_with_corner_kinds(
+            Some(lake),
+            Some(land),
+            Some([
+                Some(MacroSurfaceKind::LakeCandidate),
+                Some(MacroSurfaceKind::Continent),
+            ]),
+            test_macro_config(124),
+        );
+
+        assert!(
+            !guide.is_coast,
+            "lake/non-lake endpoint semantics must not be promoted into ocean coast guides"
+        );
     }
 
     #[test]

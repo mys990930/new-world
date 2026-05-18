@@ -195,7 +195,9 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      확정하지 않고 land/coast sample로 되돌린다. fragment 한계는 sample 수가 아니라 block 면적으로
      해석한다. 이 후처리는 source graph나 lake/wetland mask를 바꾸지 않는 raster cache 정합성 guard다.
 5. coast guide edge의 rasterized distance field로 coast mask를 보강한다. 이 source는 `macro_map`의
-   explicit coast guide만 사용하며, 모든 Voronoi boundary edge를 coast처럼 splat하면 회귀다.
+   explicit coast guide만 사용하며, 모든 Voronoi boundary edge를 coast처럼 splat하면 회귀다. river
+   mouth extension edge가 macro_map에서 coast guide로 분류되면 macro_field도 그 edge의 canonical
+   `BoundaryCache` curve를 coast source로 읽는다.
    coast distance는 source guide를 바꾸지 않는 world-space roughness offset을 거쳐 mask로
    변환한다. 이 roughness는 coast ownership이나 ocean/lake 판정을 뒤집지 않고, 지나치게 매끈한
    visible shoreline band를 덜 인조적으로 보이게 하는 raster 표현 계층이다. launch 기본값은
@@ -218,6 +220,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽고, broad shoulder는
      `broad_valley_width_blocks`를 읽는다. raster 단계에서 Voronoi cell 크기를 다시 읽어 동적으로 폭을
      재계산하지 않는다.
+   - water/core boundary에는 world-space deterministic roughness offset을 작게 적용한다. 이 offset은
+     selected river curve나 hydrology topology를 새로 만들지 않고, river_plan이 정한 water radius 주변의
+     threshold band에서만 거리 profile을 흔든다. roughness amplitude는 planned water width와 flow hint로
+     제한해 headwater가 과하게 넓어지지 않게 하며, broad valley shoulder 밖에서는 0으로 fade되어
+     valley topology나 서로 다른 river component ownership을 바꾸지 않는다.
    - 상류 broad-valley lowering은 land/broad valley가 과하게 넓게 파이지 않도록 낮은 Q에서 좁은
      shoulder로 적용한다. 이 조정은 combined macro height의 broad land-carve width/profile을 줄이며,
      center carve strength와 heightfield가 읽는 river bed/water depth hint는 유지한다.
@@ -469,12 +476,15 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   단계는 biome을 다시 분류하지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
-  뒤 chamfer distance field로 만든다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
+  뒤 chamfer distance field로 만든다. coast source에는 macro_map이 river mouth endpoint semantics로
+  coast guide에 포함한 하구 edge도 포함된다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
   canonical noisy curve를 anti-aliased corridor로 굽는다. corridor width와 bed-depth hint는 fixed radius나
   flow hint만으로 재추정하지 않고 river plan의 absolute `bed_width_blocks`,
   `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다.
   subpixel coverage 기반 valley strength, nearest distance, blended flow hint, 단순 bed/roughness/gravel
-  diagnostic hint를 저장한다. 같은 connected river component 안의 overlapping broad strokes는
+  diagnostic hint를 저장한다. river water/core threshold는 같은 raster pass에서 bounded deterministic
+  world-space roughness를 적용해 지나치게 매끈한 수면 경계를 피하지만, selected edge path와 broad
+  valley guide는 그대로 유지한다. 같은 connected river component 안의 overlapping broad strokes는
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
   corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley

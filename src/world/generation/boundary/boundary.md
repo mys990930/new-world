@@ -79,7 +79,8 @@ fault, lake shore, river corridor를 새 curve로 다시 만들지 않고, 각 f
 constraint parameter에 반영한다.
 
 - `Ordinary`: 일반 graph edge, biome/material blending이나 field sampling의 낮은 amplitude 기준
-- `Coast`: connected ocean과 land 사이의 shoreline profile
+- `Coast`: connected ocean과 non-ocean terrain 사이의 shoreline profile. river mouth extension처럼
+  endpoint corner 의미가 ocean/non-ocean transition인 edge도 macro_map의 coast guide를 통해 이 profile을 쓴다.
 - `Lake`: lake boundary/internal/lake-adjacent edge profile
 - `Ridge`: ridge guide가 붙은 edge, heightfield ridge envelope가 읽을 더 sharp한 profile
 - `Fault`: fault guide가 붙은 edge, lateral noise는 낮고 discontinuity hint를 유지하는 profile
@@ -223,8 +224,9 @@ curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 w
 PNG metadata에는 total curve count, profile별 count, guard violation count, missing macro edge count,
 평균/최대 amplitude block, 현재 preview scale에서의 평균/최대 pixel displacement, nearly-straight
 curve count를 기록한다. river curve count나 river endpoint mismatch 같은 항목은 river 전용 boundary
-curve가 없으므로 boundary stats의 책임이 아니다. river/lake 접촉 정합성은 hydrology stats가 계속
-소유한다.
+curve가 없으므로 boundary stats의 책임이 아니다. river mouth edge가 coast guide로 분류되면 같은
+`NoisyBoundaryCurve`가 `Coast` profile과 river centerline source를 함께 제공한다. river/lake 접촉
+정합성은 hydrology stats가 계속 소유한다.
 
 ---
 

@@ -832,10 +832,12 @@ fn unit_f32(value: u64) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     };
-    use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
+    use crate::world::generation::macro_map::{
+        generate_macro_map, MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig,
+    };
 
     #[test]
     fn boundary_generation_creates_one_curve_for_every_macro_edge() {
@@ -1029,6 +1031,34 @@ mod tests {
             .collect::<std::collections::HashSet<_>>();
 
         assert_eq!(unique_edges.len(), boundary.curves.len());
+    }
+
+    #[test]
+    fn river_mouth_coast_guides_use_coast_boundary_profile() {
+        let edge = MacroEdge {
+            id: VoronoiEdgeId(1),
+            sites: [VoronoiSiteId(10), VoronoiSiteId(11)],
+            corners: [VoronoiCornerId(20), VoronoiCornerId(21)],
+            guide: MacroEdgeGuide {
+                is_coast: true,
+                is_ridge_candidate: true,
+                is_river_candidate: false,
+                is_fault_candidate: true,
+                coastness: 1.0,
+                mountainness: 0.0,
+                ridgeness: 0.0,
+                signed_elevation_gradient: 0.0,
+                drainage_divide_potential: 0.0,
+                river_potential: 0.0,
+            },
+            lake_class: MacroLakeEdgeClass::NonLake,
+        };
+
+        assert_eq!(
+            boundary_profile(edge, &HashMap::new()),
+            BoundaryProfile::Coast,
+            "coast guide priority must make river-mouth coast edges use the canonical coast noisy curve profile"
+        );
     }
 
     #[test]

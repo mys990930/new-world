@@ -116,6 +116,10 @@ height는 coast-specific ceiling이나 ramp가 아니라, sea-level threshold �
 `Island` 또는 `CoastIsland` surface kind로 드러나며, 별도 island noise source에서 만들어지지 않는다.
 `MacroCorner`는 인접 site ownership과 corner base field를 읽어 같은 macro field를 샘플한다.
 `MacroEdge`는 두 site의 macro ownership과 elevation context를 읽어 coast/ridge/fault guide를 붙인다.
+coast guide는 기본적으로 adjacent site의 explicit ocean/non-ocean ownership 경계에서 나오지만,
+river mouth topology처럼 edge의 endpoint corner 의미가 ocean/non-ocean transition을 드러내는 경우도
+같은 canonical coast guide로 승격한다. 이 승격은 lake/wetland boundary에는 적용하지 않으며, downstream
+stage가 하구 해안을 raw Voronoi edge나 별도 river-mouth curve로 처리하지 않게 하는 의미 분류다.
 또한 edge의 인접 site surface kind와 양 endpoint corner surface kind를 함께 읽어 `MacroLakeEdgeClass`를
 붙인다. 이 class는 preview nearest-site fill에서 보이는 lake edge와 hydrology가 금지하는 edge가
 서로 다른 기준을 보지 않도록 맞추기 위한 명시적 edge annotation이다.
@@ -256,7 +260,8 @@ macro elevation resolve 순서:
    ownership과 sea level contract는 함께 저장한다.
 5. edge 기반 ridge/fault/plateau 후보를 먼저 정한다.
 6. coast는 signed macro elevation 경계가 아니라 connected ocean basin과 non-ocean terrain 경계에서 우선 찾는다.
-   내륙 lake/wetland/dry basin과 주변 land의 경계는 coast가 아니다.
+   river mouth 연장을 위해 endpoint corner가 ocean/non-ocean transition인 edge도 같은 coast guide set에
+   포함한다. 내륙 lake/wetland/dry basin과 주변 land의 경계는 coast가 아니다.
 7. ridge/fault/coast skeleton을 broad field로 확산한다.
 8. hydrology가 사용할 divide, basin, outlet 후보를 annotation한다.
 
@@ -369,7 +374,9 @@ noisy boundary, local erosion, talus/sediment, vegetation mask를 통해 자연�
 - site/corner annotation은 explicit ocean-coast 기준 coastness, distance-ish coast value, mountainness, ridgeness, basinness를 포함한다.
 - `mountainness`와 `ridgeness`는 graph의 coherent smoothed ruggedness를 입력으로 읽는다. 단일 site hash
   ruggedness를 그대로 쓰지 않으므로 인접 macro cell 사이의 산악/평원 전환이 덜 discrete하다.
-- edge guide는 coast, ridge candidate, fault candidate를 포함한다. ridge는
+- edge guide는 coast, ridge candidate, fault candidate를 포함한다. coast guide는 adjacent site
+  ownership뿐 아니라 endpoint corner의 explicit ocean/non-ocean transition도 반영해 river mouth edge가
+  ordinary edge로 남지 않게 한다. ridge는
   단순 high elevation edge가 아니라 같은 land component 내부성, signed elevation gradient,
   inlandness, mountainness/rugged context, drainage divide potential을 함께 만족해야 한다.
   stage 3 macro_map은 hydrology 전 river candidate corridor를 선택하지 않으며, selected river chain,

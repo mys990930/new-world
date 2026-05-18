@@ -33,6 +33,7 @@ pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
 const ISOLATED_OCEAN_FRAGMENT_MAX_BLOCK_AREA: f32 = 512.0;
+const RIVER_BOUNDARY_ROUGHNESS_SALT: u64 = 0xA11E_2F17_5EED_CAFE;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -982,12 +983,14 @@ fn rasterize_segment_anti_aliased_stroke(
                     position.z + offset_z * spacing,
                 );
                 let subpixel_distance = point_segment_distance(subpixel, start, end);
-                let valley_strength = river_valley_strength_for_distance(
+                let valley_strength = river_valley_strength_for_sample_distance(
                     subpixel_distance,
+                    subpixel,
                     source.flow_hint,
                     source.water_width_blocks,
                     source.valley_width_blocks,
                     radius_blocks,
+                    config.boundary_roughness_blocks,
                 );
                 let hints = river_hints_from_strength(
                     valley_strength,
@@ -1476,6 +1479,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                         river.valley_width_blocks,
                         river.bed_depth_blocks,
                         config.river_radius_blocks,
+                        config.boundary_roughness_blocks,
                     ),
                     river.edge,
                 ))
@@ -1485,7 +1489,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 left.0
                     .distance_blocks
                     .total_cmp(&right.0.distance_blocks)
-                    .then_with(|| left.1.0.cmp(&right.1.0))
+                    .then_with(|| left.1 .0.cmp(&right.1 .0))
             })
         else {
             return RiverMorphologySample {
@@ -2171,7 +2175,64 @@ fn flow_hint_from_plan(plan: &RiverSegmentPlan) -> f32 {
     width_t.max(flow_t * 0.85)
 }
 
+#[cfg(test)]
 fn river_valley_strength_for_distance(
+    distance_blocks: f32,
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    planned_valley_width_blocks: f32,
+    configured_radius_blocks: f32,
+) -> f32 {
+    river_valley_strength_for_effective_distance(
+        distance_blocks,
+        flow_hint,
+        planned_water_width_blocks,
+        planned_valley_width_blocks,
+        configured_radius_blocks,
+    )
+}
+
+fn river_valley_strength_for_sample_distance(
+    distance_blocks: f32,
+    position: WorldPlanePoint,
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    planned_valley_width_blocks: f32,
+    configured_radius_blocks: f32,
+    boundary_roughness_blocks: f32,
+) -> f32 {
+    let water_radius = river_water_radius_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+    );
+    let roughness_blocks = river_boundary_roughness_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+        boundary_roughness_blocks,
+    );
+    let effective_distance = if roughness_blocks > 0.0 && distance_blocks.is_finite() {
+        let boundary_band = (water_radius * 0.42).max(roughness_blocks * 2.0).max(1.0);
+        let boundary_t = (distance_blocks - water_radius).abs() / boundary_band;
+        let boundary_gate = 1.0 - smoothstep01(boundary_t);
+        let offset =
+            boundary_roughness_offset(position, roughness_blocks, RIVER_BOUNDARY_ROUGHNESS_SALT);
+        (distance_blocks + offset * boundary_gate).max(0.0)
+    } else {
+        distance_blocks
+    };
+
+    river_valley_strength_for_effective_distance(
+        effective_distance,
+        flow_hint,
+        planned_water_width_blocks,
+        planned_valley_width_blocks,
+        configured_radius_blocks,
+    )
+}
+
+fn river_valley_strength_for_effective_distance(
     distance_blocks: f32,
     flow_hint: f32,
     planned_water_width_blocks: f32,
@@ -2199,6 +2260,28 @@ fn river_valley_strength_for_distance(
     let t = ((distance_blocks - water_radius) / (valley_radius - water_radius).max(f32::EPSILON))
         .clamp(0.0, 1.0);
     (0.87 * (1.0 - smoothstep01(t)).powf(1.2)).clamp(0.0, 1.0)
+}
+
+fn river_boundary_roughness_blocks(
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    configured_radius_blocks: f32,
+    boundary_roughness_blocks: f32,
+) -> f32 {
+    if boundary_roughness_blocks <= 0.0 {
+        return 0.0;
+    }
+    let water_radius = river_water_radius_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+    );
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let radius_scale = lerp(0.10, 0.22, flow_t);
+    (water_radius * radius_scale)
+        .min(boundary_roughness_blocks * 0.18)
+        .min(24.0)
+        .clamp(0.0, water_radius * 0.33)
 }
 
 fn river_width_blocks(
@@ -2277,15 +2360,18 @@ fn river_morphology_sample(
     planned_valley_width_blocks: f32,
     planned_bed_depth_blocks: f32,
     configured_radius_blocks: f32,
+    boundary_roughness_blocks: f32,
 ) -> RiverMorphologySample {
     let flow_hint = flow_hint.clamp(0.0, 1.0);
     let distance = polyline_distance(position, points);
-    let valley_strength = river_valley_strength_for_distance(
+    let valley_strength = river_valley_strength_for_sample_distance(
         distance,
+        position,
         flow_hint,
         planned_water_width_blocks,
         planned_valley_width_blocks,
         configured_radius_blocks,
+        boundary_roughness_blocks,
     );
     let hints = river_hints_from_strength(valley_strength, flow_hint, planned_bed_depth_blocks);
 
@@ -3739,6 +3825,104 @@ mod tests {
     }
 
     #[test]
+    fn river_boundary_roughness_scales_with_planned_water_width() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let headwater = river_boundary_roughness_blocks(0.02, 4.0, radius, 96.0);
+        let trunk = river_boundary_roughness_blocks(
+            flow_hint(1024.0),
+            DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
+            radius,
+            96.0,
+        );
+
+        assert!(
+            headwater <= 0.8,
+            "headwater water-boundary roughness should stay sub-block scale: {headwater}"
+        );
+        assert!(
+            trunk > headwater * 8.0 && trunk <= 24.0,
+            "downstream river roughness should be visible but bounded: headwater={headwater} trunk={trunk}"
+        );
+    }
+
+    #[test]
+    fn river_boundary_roughness_perturbs_water_core_threshold_only_near_bank() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let flow = flow_hint(1024.0);
+        let water_width = DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS;
+        let valley_width = 520.0;
+        let water_radius = super::river_water_radius_blocks(flow, water_width, radius);
+        let roughness = river_boundary_roughness_blocks(flow, water_width, radius, 96.0);
+        let threshold_distance = water_radius + roughness * 0.35;
+        let base = river_valley_strength_for_distance(
+            threshold_distance,
+            flow,
+            water_width,
+            valley_width,
+            radius,
+        );
+        let mut min_rough = f32::INFINITY;
+        let mut max_rough = f32::NEG_INFINITY;
+        for x in 0..128 {
+            let position = WorldPlanePoint::new(x as f32 * 19.0, 37.0);
+            let rough = super::river_valley_strength_for_sample_distance(
+                threshold_distance,
+                position,
+                flow,
+                water_width,
+                valley_width,
+                radius,
+                96.0,
+            );
+            min_rough = min_rough.min(rough);
+            max_rough = max_rough.max(rough);
+            assert_eq!(
+                rough,
+                super::river_valley_strength_for_sample_distance(
+                    threshold_distance,
+                    position,
+                    flow,
+                    water_width,
+                    valley_width,
+                    radius,
+                    96.0,
+                ),
+                "river boundary roughness must be deterministic at a world position"
+            );
+        }
+        let far_distance = water_radius + roughness * 4.0;
+        let far_base = river_valley_strength_for_distance(
+            far_distance,
+            flow,
+            water_width,
+            valley_width,
+            radius,
+        );
+        let far_rough = super::river_valley_strength_for_sample_distance(
+            far_distance,
+            WorldPlanePoint::new(913.0, -211.0),
+            flow,
+            water_width,
+            valley_width,
+            radius,
+            96.0,
+        );
+
+        assert!(
+            min_rough < base && max_rough > base,
+            "roughness should move samples on both sides of the smooth core boundary: base={base} min={min_rough} max={max_rough}"
+        );
+        assert!(
+            max_rough >= 0.88 && min_rough < 0.88,
+            "roughened boundary should cross the heightfield river-water threshold: min={min_rough} max={max_rough}"
+        );
+        assert_eq!(
+            far_base, far_rough,
+            "river boundary roughness should fade before broad valley shoulder topology changes"
+        );
+    }
+
+    #[test]
     fn downstream_river_high_core_uses_absolute_plan_water_width() {
         let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
         let flow = flow_hint(1024.0);
@@ -4723,6 +4907,94 @@ mod tests {
         assert!(
             sample.coast_mask <= f32::EPSILON,
             "dry basin / land noisy boundary blend must not render as coast: {}",
+            sample.coast_mask
+        );
+    }
+
+    #[test]
+    fn macro_field_coast_mask_reads_river_mouth_coast_guide_curve() {
+        use crate::world::generation::boundary::{
+            BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
+        };
+        use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
+        use crate::world::generation::macro_map::{
+            MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
+        };
+
+        let land_left = test_site(
+            VoronoiSiteId(1),
+            -64.0,
+            0.0,
+            MacroSurfaceKind::CoastLand,
+            0.03,
+        );
+        let land_right = test_site(
+            VoronoiSiteId(2),
+            64.0,
+            0.0,
+            MacroSurfaceKind::Continent,
+            0.08,
+        );
+        let edge = VoronoiEdgeId(101);
+        let start = WorldPlanePoint::new(0.0, -128.0);
+        let bend = WorldPlanePoint::new(32.0, 0.0);
+        let end = WorldPlanePoint::new(0.0, 128.0);
+        let macro_map = GraphMacroMap {
+            sites: vec![land_left, land_right],
+            corners: Vec::new(),
+            edges: vec![MacroEdge {
+                id: edge,
+                sites: [land_left.id, land_right.id],
+                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                guide: MacroEdgeGuide {
+                    is_coast: true,
+                    is_ridge_candidate: false,
+                    is_river_candidate: false,
+                    is_fault_candidate: false,
+                    coastness: 1.0,
+                    mountainness: 0.0,
+                    ridgeness: 0.0,
+                    signed_elevation_gradient: 0.05,
+                    drainage_divide_potential: 0.0,
+                    river_potential: 0.0,
+                },
+                lake_class: MacroLakeEdgeClass::NonLake,
+            }],
+            biomes: Vec::new(),
+        };
+        let boundary = BoundaryCache {
+            curves: vec![NoisyBoundaryCurve {
+                edge,
+                profile: BoundaryProfile::Coast,
+                anchors: BoundaryAnchors {
+                    corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
+                    sites: [land_left.id, land_right.id],
+                    start,
+                    end,
+                },
+                points: vec![start, bend, end],
+                amplitude: 32.0,
+                seed: 7,
+                guard: BoundaryGuard {
+                    min_x: -96.0,
+                    max_x: 96.0,
+                    min_z: -160.0,
+                    max_z: 160.0,
+                },
+            }],
+            stats: Default::default(),
+        };
+        let patch = Default::default();
+        let river_plan = RiverPlan::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
+        let mut config = test_tile_config();
+        config.coast_radius_blocks = 128.0;
+
+        let sample = sample_macro_field_point(&context, config, bend);
+
+        assert!(
+            sample.coast_mask > 0.75,
+            "macro_field must use the canonical coast guide curve for river-mouth coast masks: {}",
             sample.coast_mask
         );
     }
