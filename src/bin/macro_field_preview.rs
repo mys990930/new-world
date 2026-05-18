@@ -9,21 +9,21 @@ use image::RgbImage;
 use rayon::prelude::*;
 
 use new_world::world::generation::{
-    BoundaryCache, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
-    DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode,
-    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph, GraphMacroMap,
-    GraphRegionArea, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
-    MacroFieldContourSet, MacroFieldSample as CoreMacroFieldSample,
-    MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    extract_macro_field_contours, generate_macro_field_tile, graph_region_for_world_block,
+    BoundaryCache, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
+    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, MacroFieldContourSet,
+    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, RiverPlan, RiverReachType,
-    VoronoiGraphPatch, WorldPlanePoint, extract_macro_field_contours, generate_macro_field_tile,
-    graph_region_for_world_block,
+    VoronoiGraphPatch, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+    DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+    DEFAULT_SITE_SPACING_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
+    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
 };
-use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
+use new_world::world::{WorldMeta, CHUNK_EDGE_I32};
 
 mod common;
 
-use common::generation_preview_context::{PreviewStageInput, build_common_preview_world};
+use common::generation_preview_context::{build_common_preview_world, PreviewStageInput};
 use common::preview_compass::draw_compass_rgb;
 use common::preview_draw::{
     blend_pixel, blend_pixel_i32, blend_rect, draw_circle_ring, draw_pixel_line,
@@ -58,6 +58,7 @@ const RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.88;
 const LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.62;
 const RIVER_MAIN_SOURCE_MARKER_COLOR: [u8; 3] = [118, 246, 255];
 const RIVER_TRIBUTARY_SOURCE_MARKER_COLOR: [u8; 3] = [255, 196, 42];
+const RIVER_CONFLUENCE_MARKER_COLOR: [u8; 3] = [255, 132, 46];
 const RIVER_SOURCE_MARKER_OVERLAY_AMOUNT: f32 = 0.94;
 const RIVER_SOURCE_MARKER_RADIUS_PX: i32 = 5;
 const RIVER_SOURCE_MARKER_RING_WIDTH_PX: i32 = 2;
@@ -889,6 +890,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         if channel != PreviewChannel::Contour {
             draw_river_source_marker_overlay(&mut image, window, &river_source_markers);
+            draw_river_confluence_marker_overlay(&mut image, window, &preview.hydrology);
         }
         draw_scale_bar_overlay(&mut image, window, scale_bar);
         draw_legend_overlay(
@@ -1740,6 +1742,38 @@ fn draw_river_source_marker_overlay(
     }
 }
 
+fn draw_river_confluence_marker_overlay(
+    image: &mut RgbImage,
+    window: PreviewWindow,
+    hydrology: &GraphHydrologyGraph,
+) {
+    let mut incoming = std::collections::HashMap::<GraphDrainageNodeId, usize>::new();
+    let mut outgoing = std::collections::HashMap::<GraphDrainageNodeId, usize>::new();
+    for segment in &hydrology.segments {
+        *incoming.entry(segment.to).or_default() += 1;
+        *outgoing.entry(segment.from).or_default() += 1;
+    }
+
+    for node in &hydrology.nodes {
+        if incoming.get(&node.id).copied().unwrap_or(0) < 2
+            || outgoing.get(&node.id).copied().unwrap_or(0) != 1
+            || !point_in_window(node.position, window)
+        {
+            continue;
+        }
+        let (x, y) = world_to_pixel(node.position, window, image.width(), image.height());
+        draw_circle_ring(
+            image,
+            x,
+            y,
+            RIVER_SOURCE_MARKER_RADIUS_PX + 1,
+            RIVER_SOURCE_MARKER_RING_WIDTH_PX,
+            RIVER_CONFLUENCE_MARKER_COLOR,
+            RIVER_SOURCE_MARKER_OVERLAY_AMOUNT,
+        );
+    }
+}
+
 fn graph_edge_overlay_amount(channel: PreviewChannel) -> f32 {
     if channel == PreviewChannel::LitHeightfield {
         LIT_GRAPH_EDGE_OVERLAY_AMOUNT
@@ -2353,7 +2387,11 @@ fn contour_height_color(height_blocks: f32, is_major: bool) -> [u8; 3] {
             (1.00, [168, 48, 45]),
         ],
     );
-    if is_major { lighten(base, 0.18) } else { base }
+    if is_major {
+        lighten(base, 0.18)
+    } else {
+        base
+    }
 }
 
 fn gradient_fire(value: f32) -> [u8; 3] {
@@ -2868,14 +2906,12 @@ mod tests {
         let paths = output_paths_for_config(&config).unwrap();
 
         assert_eq!(paths.len(), 1);
-        assert!(
-            paths[0]
-                .1
-                .display()
-                .to_string()
-                .replace('\\', "/")
-                .ends_with("target/macro-field-preview/s42_x-10_z20_lit.png")
-        );
+        assert!(paths[0]
+            .1
+            .display()
+            .to_string()
+            .replace('\\', "/")
+            .ends_with("target/macro-field-preview/s42_x-10_z20_lit.png"));
         assert!(!paths[0].1.display().to_string().contains("generator_gv"));
         assert!(!paths[0].1.display().to_string().contains("span"));
     }
@@ -3146,38 +3182,30 @@ mod tests {
             RIVER_TRIBUTARY_SOURCE_MARKER_COLOR, RIVER_CENTERLINE_TRIBUTARY_COLOR,
             "tributary source marker ring should not collapse into the centerline color"
         );
-        assert!(
-            image
-                .as_raw()
-                .chunks_exact(3)
-                .any(|pixel| { pixel[0] > 230 && pixel[1] > 170 && pixel[2] < 90 })
-        );
+        assert!(image
+            .as_raw()
+            .chunks_exact(3)
+            .any(|pixel| { pixel[0] > 230 && pixel[1] > 170 && pixel[2] < 90 }));
     }
 
     #[test]
     fn standing_water_boundary_treats_ocean_and_lake_as_water_only() {
-        assert!(
-            FieldSample {
-                ocean_mask: 1.0,
-                ..FieldSample::default()
-            }
-            .is_standing_water()
-        );
-        assert!(
-            FieldSample {
-                lake_mask: 1.0,
-                ..FieldSample::default()
-            }
-            .is_standing_water()
-        );
-        assert!(
-            !FieldSample {
-                dry_mask: 1.0,
-                coast_mask: 1.0,
-                ..FieldSample::default()
-            }
-            .is_standing_water()
-        );
+        assert!(FieldSample {
+            ocean_mask: 1.0,
+            ..FieldSample::default()
+        }
+        .is_standing_water());
+        assert!(FieldSample {
+            lake_mask: 1.0,
+            ..FieldSample::default()
+        }
+        .is_standing_water());
+        assert!(!FieldSample {
+            dry_mask: 1.0,
+            coast_mask: 1.0,
+            ..FieldSample::default()
+        }
+        .is_standing_water());
     }
 
     #[test]

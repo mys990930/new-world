@@ -6,7 +6,7 @@ use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
 use super::river_plan::{
-    DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan, RiverSegmentPlan,
+    RiverPlan, RiverSegmentPlan, DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
 };
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 64.0;
@@ -19,7 +19,7 @@ pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 640.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.0;
-pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.018;
+pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.012;
 pub const DEFAULT_MACRO_FIELD_LAKE_FLATTEN_STRENGTH: f32 = 0.96;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_BLEND_RADIUS_BLOCKS: f32 = 96.0;
 pub const DEFAULT_MACRO_FIELD_BOUNDARY_ROUGHNESS_BLOCKS: f32 = 96.0;
@@ -2403,18 +2403,18 @@ fn usable_side(preferred: f32, fallback: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::boundary::{
-        BoundaryAnchors, BoundaryConfig, BoundaryGuard, BoundaryProfile, generate_noisy_boundaries,
+        generate_noisy_boundaries, BoundaryAnchors, BoundaryConfig, BoundaryGuard, BoundaryProfile,
     };
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiCornerId,
-        VoronoiEdgeId, VoronoiGraphConfig, VoronoiGraphPatchRequest, VoronoiSiteId,
-        generate_voronoi_graph_patch,
+        generate_voronoi_graph_patch, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, VoronoiSiteId, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+        DEFAULT_SITE_SPACING_BLOCKS,
     };
     use crate::world::generation::hydrology::{
-        GraphHydrologyGraph, HydrologyConfig, solve_hydrology,
+        solve_hydrology, GraphHydrologyGraph, HydrologyConfig,
     };
-    use crate::world::generation::macro_map::{MacroMapConfig, generate_macro_map};
-    use crate::world::generation::river_plan::{RiverPlan, RiverPlanConfig, build_river_plan};
+    use crate::world::generation::macro_map::{generate_macro_map, MacroMapConfig};
+    use crate::world::generation::river_plan::{build_river_plan, RiverPlan, RiverPlanConfig};
 
     #[derive(Debug, Clone, Copy, Default)]
     struct NeighborDeltaSummary {
@@ -3002,7 +3002,7 @@ mod tests {
             "river broad-valley carve should still lower combined height: river={river} base={base}"
         );
         assert_eq!(
-            config.river_carve_scale, 0.018,
+            config.river_carve_scale, 0.012,
             "default broad-valley carve should stay block-scale and leave bed depth to heightfield"
         );
     }

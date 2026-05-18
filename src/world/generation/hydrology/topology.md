@@ -15,6 +15,8 @@
 - `LakeInlet`과 `LakeOutlet` marker가 land-side endpoint에만 생기도록 정리한다.
 - selected graph의 multi-incoming/shared-corner 충돌을 정리하되, 두 incoming이 하나의 outgoing으로
   합류하는 정상 confluence는 보존한다.
+- coast-reaching selected river mouth를 non-lake ocean-owned edge 하나만큼 연장해 downstream stage가
+  하구를 실제 바다 안쪽까지 carve할 수 있게 한다.
 - 서로 다른 corner index가 같은 Voronoi corner id로 materialize되는 경우에도 public selected graph는
   그 corner id에서 하나의 downstream selected continuation만 갖도록 정리한다.
 - graph corner id가 달라도 같은 world-space 위치에 겹쳐 보이는 selected endpoint group은 하나의

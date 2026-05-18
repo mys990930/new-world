@@ -9,9 +9,9 @@ use super::topology::{
     remove_repeated_lake_contact_chains,
 };
 use super::types::{
+    GraphLocalMinimumResolution, HydrologyConfig, LakeContactTopology, LakeTerminalPolicy,
     DEFAULT_HEADWATER_SOURCE_HYDRATION, DEFAULT_HEADWATER_SOURCE_SCORE,
-    GraphLocalMinimumResolution, HydrologyConfig, LAKE_INLET_RIVER_THRESHOLD_CAP,
-    LakeContactTopology, LakeTerminalPolicy,
+    LAKE_INLET_RIVER_THRESHOLD_CAP,
 };
 
 pub(super) struct SelectedRiverPaths {

@@ -381,6 +381,8 @@ source는 tributary marker(amber/yellow ring), terminal/coast/lake endpoint에 �
 mainstem marker(bright cyan/white ring)로 구분한다. marker는 river centerline보다 위, legend/scale
 bar/compass보다 아래에 그려야 하며 metadata/stdout에는 mainstem source marker 수, tributary source
 marker 수, 실제 viewport 안에 그려진 marker 수를 기록한다.
+selected confluence marker는 같은 drainage node에 selected incoming segment가 두 개 이상이고 selected
+outgoing segment가 정확히 하나일 때 orange ring으로 표시할 수 있다.
 
 모든 macro field preview output은 방향 compass overlay를 포함한다. 기준은 world topdown 좌표계이며
 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은 남(S), 왼쪽은 서(W)다. compass는 legend와 scale bar를
@@ -476,7 +478,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
   corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
-  lowering이 과도하게 깊어지지 않도록 `0.018`이다. 낮은 flow에서는 carve depth를 주로 죽이지 않고,
+  lowering이 과도하게 깊어지지 않도록 `0.012`이다. 낮은 flow에서는 carve depth를 주로 죽이지 않고,
   river_plan의 좁은 broad-valley width와 raster profile로 land carve 범위를 줄인다.
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
   `640` blocks다. 실제 narrow bed depth는 combined height에 직접 과하게 새기지 않고

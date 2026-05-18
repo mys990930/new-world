@@ -349,7 +349,8 @@ renderer/GPU 계약을 만들지 않는다.
   direction만 표시한다. contour channel은 minor/major/sea-level key와 contour step/major spacing을 표시한다.
   공통 overlay key는 faint dark/noisy `EDGE` = canonical noisy Voronoi boundary reference,
   cyan/blue `RIV` = selected river centerline, bright cyan/white `SRC M` = mainstem source marker,
-  amber/yellow `SRC T` = tributary source marker, yellow/orange `WATER` = standing-water boundary
+  amber/yellow `SRC T` = tributary source marker, orange confluence marker = selected tributary join,
+  yellow/orange `WATER` = standing-water boundary
   overlay가 표시되는 channel의 water/terrain boundary, `GRID` = macro-field cache tile grid를 뜻한다.
 - 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
   같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.

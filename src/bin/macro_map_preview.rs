@@ -8,17 +8,16 @@ use std::path::{Path, PathBuf};
 use image::RgbImage;
 use rayon::prelude::*;
 
-use new_world::world::WorldMeta;
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, BoundaryProfile, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
-    GraphHydrologyGraph, GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord,
-    GraphRiverSegment, HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind,
-    NoisyBoundaryCurve, VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch,
-    VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint, generate_macro_map,
-    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
-    solve_hydrology,
+    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
+    graph_region_for_world_block, solve_hydrology, BoundaryCache, BoundaryConfig, BoundaryProfile,
+    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph,
+    GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
+    HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve,
+    VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
+    VoronoiSiteId, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
 };
+use new_world::world::WorldMeta;
 
 mod common;
 
@@ -1293,6 +1292,7 @@ fn selected_river_color() -> [u8; 3] {
 
 fn hydrology_node_color(kind: GraphDrainageNodeKind) -> Option<[u8; 3]> {
     match kind {
+        GraphDrainageNodeKind::Confluence => Some([255, 132, 46]),
         GraphDrainageNodeKind::LakeInlet => Some([252, 224, 66]),
         GraphDrainageNodeKind::LakeOutlet => Some([62, 113, 255]),
         GraphDrainageNodeKind::Sink => Some([128, 75, 178]),

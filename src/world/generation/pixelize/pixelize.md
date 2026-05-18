@@ -134,6 +134,12 @@ standing water는 source macro masks를 따른다. `ocean_mask` 또는 `lake_mas
 `MacroFieldSample`의 river valley/bed/water hint를 읽어 optional water hint로만 옮긴다. dry basin은
 water mask가 아니며 `water_y`를 만들지 않는다.
 
+River column classification starts from the heightfield river-water threshold, then area generation
+applies a small chunk-grid cleanup for concave river cusps. A near-threshold land column may be
+promoted to a river water hint only when it already has dense river neighbors and orthogonal support
+in the pixelized 8-neighborhood. This cleanup is stage-11 raster policy: it does not reinterpret graph
+topology, does not change source macro masks, and avoids filling ordinary convex outside corners.
+
 ---
 
 ## Runtime Cache
@@ -197,5 +203,8 @@ preview는 stage 11의 layout contract를 확인하는 표면이다. preview ren
   유지한다.
 - height resolve는 현재 `heightfield_column_from_sample`을 공유해 기존 heightfield compatibility
   vertical slice와 같은 `surface_y` / `water_y` 결과를 낸다.
+- area conversion includes a bounded concave-river-cusp cleanup after the parallel per-sample
+  conversion. It only promotes near-threshold river samples that are mostly surrounded by existing
+  river columns, preserving convex rounded banks and leaving source diagnostic strength intact.
 - 기존 `heightfield` 구현은 아직 `MacroFieldTile`을 직접 읽는 compatibility vertical slice다. 다음
   rewrite 단계에서는 `PixelizedChunkArea` / `PixelizedColumn`을 소비하도록 옮긴다.

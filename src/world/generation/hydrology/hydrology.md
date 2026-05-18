@@ -307,6 +307,9 @@ launch 구현은 아래의 보수적인 정책을 사용한다.
 - selected topology pruning의 마지막에는 ocean/coast reachability를 다시 계산한다. ordinary selected river는
   arbitrary sink, lake-local endpoint, disconnected open endpoint를 valid terminal로 취급하지 않는다.
   lake-bound feeder는 `LakeInlet` marker로 분류된 경우에만 명시 terminal로 유지된다.
+- coast-reaching selected river는 하구 terrain carve가 바다 쪽으로 이어질 수 있도록 hydrology topology
+  단계에서 non-lake ocean-owned edge 하나를 추가 selected segment로 연장할 수 있다. 이 연장은 river
+  mouth topology의 책임이며, water column 정책이나 heightfield-local fallback carve가 대신 만들면 안 된다.
 - selected/display discharge는 selected river-system path에서 downstream으로 줄어들지 않는다. 중간 segment의
   raw Q가 크거나 lake transition 때문에 local shape policy가 바뀌어도, downstream selected segment는
   최소 직전 canonical system Q를 이어받는다. raw Q는 별도 ledger로 보존한다.
