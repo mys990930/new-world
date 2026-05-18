@@ -4,9 +4,10 @@
 
 `perlin` owns optional small-scale heightfield relief for graph-first heightfield columns.
 
-It is a child of `heightfield`, not a macro terrain owner. It adds small deterministic block
-offsets inside the heightfield surface resolve. The default config is disabled, so existing
-heightfield generation and previews keep `micro_relief_blocks = 0` and river bed relief disabled.
+It is a child of `heightfield`, not a macro terrain owner. It adds optional small deterministic
+block offsets inside the heightfield surface resolve. The default config is disabled, so existing
+heightfield generation and previews keep `micro_relief_blocks = 0`; baseline river bed/bank
+variation, when present, is owned by `heightfield` itself rather than this optional Perlin layer.
 
 ## Contract
 
@@ -15,10 +16,16 @@ heightfield generation and previews keep `micro_relief_blocks = 0` and river bed
 - Preview-enabled defaults use about `8` blocks amplitude and clamp output to `10` blocks.
 - Preview-enabled relief is applied before contour-band resolve so the band source is less visibly
   stair-stepped.
-- Ocean and lake columns always receive `0` micro relief.
+- Lake columns and genuinely submerged ocean source columns receive `0` land micro relief.
+- Ocean-owned source terrain at sea level and in a shallow below-sea border band uses the same land
+  micro relief map as ordinary land, so the last sea-level border layer does not become an overly
+  clean line. The band is block-scale and derived from the configured Perlin max displacement
+  depth.
+- Ocean-owned source terrain above sea level also uses the ordinary land micro relief map.
 - Ocean columns may receive separate bounded bed relief when enabled. This offset applies only to
   the terrain bed, fades in away from the immediate shoreline, and never moves the sea-level water
-  surface.
+  surface. Sea-level or above-sea ocean-owned terrain receives no bed-relief water movement from
+  this pass, and ocean bed relief must not create a water column.
 - River columns keep `micro_relief_blocks = 0`, but preview-enabled config may add stronger
   bounded Perlin offsets to the river terrain bed and the adjacent river bank/shoulder field. River
   water surface height is calculated from the unperturbed bed so this pass does not own water

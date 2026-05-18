@@ -6,6 +6,7 @@ pub const DEFAULT_HEIGHTFIELD_PERLIN_OCTAVES: u8 = 4;
 pub const DEFAULT_HEIGHTFIELD_PERLIN_PERSISTENCE: f32 = 0.5;
 pub const DEFAULT_HEIGHTFIELD_PERLIN_LACUNARITY: f32 = 2.0;
 pub const DEFAULT_HEIGHTFIELD_PERLIN_MAX_ABS_BLOCKS: f32 = 10.0;
+const NEGATIVE_MACRO_HEIGHT_BLOCKS_PER_UNIT: f32 = 2048.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeightfieldPerlinPlacement {
@@ -69,7 +70,7 @@ pub fn micro_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinC
     if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
         return 0.0;
     }
-    if sample.ocean_mask > 0.5 || sample.lake_mask > 0.5 {
+    if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
         return 0.0;
     }
     if sample.river_valley_strength > 0.5 && sample.river_flow_hint > 0.0 {
@@ -107,7 +108,7 @@ pub fn river_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPer
     if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
         return 0.0;
     }
-    if sample.ocean_mask > 0.5 || sample.lake_mask > 0.5 {
+    if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
         return 0.0;
     }
     if sample.river_valley_strength <= 0.5 || sample.river_flow_hint <= 0.0 {
@@ -132,7 +133,7 @@ pub fn river_bank_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPe
     if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
         return 0.0;
     }
-    if sample.ocean_mask > 0.5 || sample.lake_mask > 0.5 {
+    if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
         return 0.0;
     }
     if sample.river_flow_hint <= 0.0 || sample.river_valley_strength <= 0.12 {
@@ -214,6 +215,15 @@ pub(super) fn octave_noise_2d(
     } else {
         (value / amplitude_sum).clamp(-1.0, 1.0)
     }
+}
+
+fn is_submerged_ocean_source(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> bool {
+    sample.ocean_mask > 0.5
+        && sample.combined_macro_height < -shallow_ocean_border_band_normalized(config)
+}
+
+fn shallow_ocean_border_band_normalized(config: HeightfieldPerlinConfig) -> f32 {
+    config.max_abs_blocks.max(0.0) / NEGATIVE_MACRO_HEIGHT_BLOCKS_PER_UNIT
 }
 
 fn perlin_2d(x: f32, z: f32, seed: u64, generator_version: u32, octave: u8) -> f32 {

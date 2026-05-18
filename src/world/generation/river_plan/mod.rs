@@ -8,16 +8,21 @@ use super::hydrology::{
 use super::macro_map::{GraphMacroMap, MacroLakeEdgeClass};
 
 pub const DEFAULT_RIVER_PLAN_TRUNK_FLOW: f32 = 1024.0;
+pub const DEFAULT_RIVER_PLAN_TYPICAL_CELL_WIDTH_BLOCKS: f32 = 200.0;
+pub const DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS: f32 =
+    DEFAULT_RIVER_PLAN_TYPICAL_CELL_WIDTH_BLOCKS;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RiverPlanConfig {
     pub trunk_flow_accumulation: f32,
+    pub downstream_water_width_blocks: f32,
 }
 
 impl Default for RiverPlanConfig {
     fn default() -> Self {
         Self {
             trunk_flow_accumulation: DEFAULT_RIVER_PLAN_TRUNK_FLOW,
+            downstream_water_width_blocks: DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
         }
     }
 }
@@ -207,7 +212,7 @@ pub fn build_river_plan(
         let mut raw_ledger = 0.0f32;
         let mut display_ledger = 0.0f32;
         let coefficient_seed = chain_id.0 ^ chain_ids.first().map(|id| id.0).unwrap_or_default();
-        let width_coefficient = 0.78 + stable_unit(coefficient_seed ^ 0x9e37_79b9) * 0.28;
+        let width_coefficient = 0.92 + stable_unit(coefficient_seed ^ 0x9e37_79b9) * 0.16;
         let depth_coefficient = 0.46 + stable_unit(coefficient_seed ^ 0x85eb_ca6b) * 0.20;
         let mut chain_plans = Vec::with_capacity(chain_ids.len());
 
@@ -606,6 +611,11 @@ fn validate_config(config: RiverPlanConfig) {
         config.trunk_flow_accumulation.is_finite() && config.trunk_flow_accumulation > 0.0,
         "river plan trunk flow must be finite and positive"
     );
+    assert!(
+        config.downstream_water_width_blocks.is_finite()
+            && config.downstream_water_width_blocks > 0.0,
+        "river plan downstream water width must be finite and positive"
+    );
 }
 
 fn reach_type_for_segment(
@@ -650,16 +660,24 @@ fn morphology_for_segment(
 ) -> SegmentMorphology {
     let ratio = flow_ratio(morphology_discharge_q, config);
     let q = morphology_discharge_q.max(1.0);
-    let hydraulic_width = width_coefficient * q.sqrt();
+    let absolute_width_ratio = ratio.clamp(0.0, 1.0).powf(0.58);
+    let hydraulic_width =
+        config.downstream_water_width_blocks * absolute_width_ratio * width_coefficient;
     let hydraulic_depth = depth_coefficient * q.powf(0.4);
     let (min_bed_width, max_bed_width, min_bed_depth, max_bed_depth, reach_min) = match reach_type {
-        RiverReachType::Headwater => (1.5, 5.0, 0.6, 1.8, 0.0),
-        RiverReachType::Upper => (2.5, 9.0, 0.8, 2.8, 0.04),
-        RiverReachType::Middle => (5.0, 24.0, 1.2, 4.8, 0.12),
-        RiverReachType::Lower => (18.0, 96.0, 3.0, 14.0, 0.28),
-        RiverReachType::Trunk => (24.0, 165.0, 4.0, 22.0, 0.45),
-        RiverReachType::LakeInlet => (2.5, 16.0, 0.8, 4.0, 0.04),
-        RiverReachType::LakeOutlet => (4.0, 28.0, 1.0, 5.0, 0.08),
+        RiverReachType::Headwater => (1.5, 6.0, 0.6, 1.8, 0.0),
+        RiverReachType::Upper => (5.0, 18.0, 0.8, 2.8, 0.04),
+        RiverReachType::Middle => (14.0, 72.0, 1.2, 4.8, 0.12),
+        RiverReachType::Lower => (55.0, 170.0, 3.0, 14.0, 0.28),
+        RiverReachType::Trunk => (
+            config.downstream_water_width_blocks * 0.60,
+            config.downstream_water_width_blocks * 1.30,
+            4.0,
+            22.0,
+            0.45,
+        ),
+        RiverReachType::LakeInlet => (4.0, 36.0, 0.8, 4.0, 0.04),
+        RiverReachType::LakeOutlet => (6.0, 52.0, 1.0, 5.0, 0.08),
     };
     let conservative_lake_scale = match reach_type {
         RiverReachType::LakeInlet | RiverReachType::LakeOutlet => 0.72,
@@ -675,8 +693,10 @@ fn morphology_for_segment(
         width_coefficient,
         depth_coefficient,
         velocity: (q / (hydraulic_width * hydraulic_depth).max(1.0)).max(0.0),
-        broad_valley_width_blocks: (bed_width_blocks * (2.8 + scaled * 4.2))
-            .clamp(min_bed_width * 3.0, 420.0),
+        broad_valley_width_blocks: (bed_width_blocks * (2.2 + scaled * 0.45)).clamp(
+            min_bed_width * 3.0,
+            config.downstream_water_width_blocks * 2.8,
+        ),
         broad_valley_depth_blocks: (bed_depth_blocks * (1.35 + scaled * 2.3))
             .clamp(min_bed_depth, 72.0),
         bed_width_blocks,
@@ -895,6 +915,31 @@ mod tests {
         assert!(upper.bed_width_blocks < middle.bed_width_blocks);
         assert!(middle.bed_width_blocks < floodplain.bed_width_blocks);
         assert!(floodplain.bed_width_blocks <= trunk.bed_width_blocks);
+    }
+
+    #[test]
+    fn default_trunk_water_width_targets_typical_cell_width_in_blocks() {
+        let (patch, macro_map, hydrology) = synthetic_inputs(
+            &[segment(1, 0, 1, 1024.0, GraphHydrologyRole::Trunk)],
+            &[
+                (0, GraphDrainageNodeKind::Source),
+                (1, GraphDrainageNodeKind::CoastOutlet),
+            ],
+            &[],
+        );
+
+        let plan = build_river_plan(&patch, &macro_map, &hydrology, RiverPlanConfig::default());
+        let trunk = plan.segment(GraphRiverSegmentId(1)).expect("trunk");
+
+        assert_eq!(
+            RiverPlanConfig::default().downstream_water_width_blocks,
+            DEFAULT_RIVER_PLAN_TYPICAL_CELL_WIDTH_BLOCKS
+        );
+        assert!(
+            (175.0..=225.0).contains(&trunk.bed_width_blocks),
+            "default downstream water width should trend toward the absolute 200-block target, got {}",
+            trunk.bed_width_blocks
+        );
     }
 
     #[test]

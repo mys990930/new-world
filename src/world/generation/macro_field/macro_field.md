@@ -214,9 +214,18 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
    - macro_field가 combined height에 반영하는 값은 단순 river valley strength다. 좁은 river bed,
      U/V 단면, cutbank/gravel 편향, 하구 fan은 이 단계에서 만들지 않는다.
-   - `river_valley_strength`는 downstream water/river mask가 읽는 0..1 공간 profile이다. 깊이 정보는
-     현재 단순 diagnostic hint로만 전달하며, 현실적인 단면 carve는 heightfield/water/surface 단계에서
-     다시 설계한다.
+   - `river_valley_strength`는 downstream water/river mask가 읽는 0..1 공간 profile이다. high-core
+     폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽고, broad shoulder는
+     `broad_valley_width_blocks`를 읽는다. raster 단계에서 Voronoi cell 크기를 다시 읽어 동적으로 폭을
+     재계산하지 않는다.
+   - 상류 broad-valley lowering은 land/broad valley가 과하게 파이지 않도록 낮은 Q에서 훨씬 얕게
+     적용한다. 이 조정은 combined macro height의 넓은 계곡 carve만 줄이며, heightfield가 읽는
+     river bed/water depth hint는 유지한다.
+   - selected river가 ocean-owned sample을 통과하면 river carve를 ocean mask로 끄지 않는다. 따라서
+     sea level보다 높은 ocean-owned mouth terrain도 하구에서 강바닥으로 깎이고, 이후 heightfield가
+     sea-level water surface와 mouth bed를 분리해 처리한다.
+   - 깊이 정보는 현재 단순 diagnostic hint로 전달하며, 현실적인 단면 carve는 heightfield/water/surface
+     단계에서 다시 설계한다.
 8. final cell context를 sample 위치에 맞춰 raster/cache한다.
    - final temperature, final hydration, hydrology role, water proximity, rain shadow, biome influence는
      stage 8에서 이미 resolve된 값이다.
@@ -244,9 +253,11 @@ elevation model을 설계한 뒤 재도입한다.
 heightfield/water surface composition이 이 값을 읽는다.
 
 Ocean은 lake flatten을 공유하지 않는다. `OceanBasin`/`CoastOcean` sample은 macro_map에서 넘어온
-음수 `macro_elevation`을 continental shelf -> continental slope -> ocean basin처럼 읽히는 S-curve
-bathymetry로 변환한다. 해수면에 매우 가까운 값은 고정 shallow plane으로 점프하지 않고 source depth에
-가깝게 유지되어 coast->sea y continuity를 보존한다. continental shelf는 좁게 유지하고, 그 뒤의 중간
+source `macro_elevation`을 그대로 시작점으로 읽는다. source가 `0` 이상이면 ocean-owned sample이라도
+terrain bed를 해수면 이하로 강제하지 않고 source height를 보존한다. 얕은 음수 source도 고정 shallow
+plane으로 점프하지 않고 signed source depth에 가깝게 유지되어 coast->sea y continuity를 보존한다.
+더 깊은 음수 source만 continental shelf -> continental slope -> ocean basin처럼 읽히는 S-curve
+bathymetry로 변환한다. continental shelf는 좁게 유지하고, 그 뒤의 중간
 음수 구간은 slope처럼 빠르게 깊어지며, 큰 음수 구간은 basin depth를 유지해야 한다. ocean combined
 height가 단일 얕은 값으로 눌리면 macro_map의 deep/shallow ocean 신호가 사라지므로 회귀다.
 
@@ -458,15 +469,17 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - ridge/coast influence는 selected guide edge의 canonical noisy curve를 tile source pixel로 rasterize한
   뒤 chamfer distance field로 만든다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
   canonical noisy curve를 anti-aliased corridor로 굽는다. corridor width와 bed-depth hint는 fixed radius나
-  flow hint만으로 재추정하지 않고 river plan의 `broad_valley_width_blocks`와 `bed_depth_blocks`를 읽는다.
+  flow hint만으로 재추정하지 않고 river plan의 absolute `bed_width_blocks`,
+  `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다.
   subpixel coverage 기반 valley strength, nearest distance, blended flow hint, 단순 bed/roughness/gravel
   diagnostic hint를 저장한다. 같은 connected river component 안의 overlapping broad strokes는
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
   corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
-  lowering이 과도하게 깊어지지 않도록 `0.018`이며, 낮은 flow에서는 이 값의 작은 일부만 적용한다. 실제
-  narrow bed depth는 combined height에 직접 과하게 새기지 않고 heightfield/water/surface stage가 읽는
-  hint로 남긴다.
+  lowering이 과도하게 깊어지지 않도록 `0.018`이며, 낮은 flow에서는 이 값의 매우 작은 일부만 적용한다.
+  기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
+  `640` blocks다. 실제 narrow bed depth는 combined height에 직접 과하게 새기지 않고
+  heightfield/water/surface stage가 읽는 hint로 남긴다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.

@@ -36,11 +36,14 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 
 - `PixelizedColumn`을 downstream heightfield / voxel-column cache로 변환한다.
 - pixelize가 보존한 `combined_macro_height`와 integer `surface_y`를 block-space surface policy로 연결한다.
-- ocean/lake mask에서 water level과 water column hint를 만든다.
+- lake mask와 sea level 아래 ocean bed에서 water level과 water column hint를 만든다.
 - river valley, river bed hint, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
 - raw `coast_mask`는 column data로만 보존한다. 현재 baseline에서 coast mask는 별도 heightfield
   terrain kind, water column, shallow shelf, shoreline bevel, land-side ramp를 만들지 않는다.
 - meso 값이 0임을 데이터와 문서에 명시한다.
+- selected river bed와 bank/shoulder에는 world-space deterministic relief를 기본 적용해 완전히 균일한
+  계단식 bed를 줄인다. 이 relief는 terrain bed만 움직이고 river/ocean/lake water surface continuity를
+  소유하거나 변경하지 않는다.
 - Perlin relief는 `HeightfieldPerlinConfig.enabled`일 때만 적용하며 기본값은 비활성화다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
@@ -223,13 +226,16 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 
 ## Water Policy
 
-- `ocean_mask > 0.5`이면 water level은 `sea_level_blocks`다.
+- `ocean_mask > 0.5`이면서 최종 terrain bed가 `sea_level_blocks` 아래이면 water level은
+  `sea_level_blocks`다. ocean-owned bed가 sea level 이상이면 ocean terrain kind와 source bed는
+  보존하지만 visible/active water column은 만들지 않는다.
 - `lake_mask > 0.5`이면 water level은 절대 `y = 0` 고정값이 아니라 lake source macro elevation보다
   몇 block 낮은 shoreline-compatible level로 둔다. lake bed가 충분히 깎이지 않은 edge column에서는
   terrain이 수면보다 높게 남을 수 있으며, heightfield가 모든 lake column을 수면 아래로 강제 평탄화하지
   않는다.
 - ocean column은 terrain bed와 water surface를 분리한다. connected ocean / ocean mask column의
-  source bed는 heightfield terrain bed로 직접 보존하고, `water_y`는 sea level `y = 0`으로 둔다.
+  source bed는 heightfield terrain bed로 직접 보존하고, bed가 sea level 아래일 때만 `water_y`는 sea
+  level `y = 0`으로 둔다.
   heightfield는 source bed가 sea level 이상으로 들어온 ocean column을 임의의 shallow fallback plane으로
   내리지 않는다. ocean source bed를 coast-adjacent sea level 근처에서 자연스럽게 이어지게 만드는 책임은
   앞 단계의 macro_field bathymetry가 갖는다. 기존처럼 terrain bed 자체를 `y = 0` 또는 단일 shallow
@@ -256,6 +262,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   않는다. 상류 수원부는 얕은 1-block 안팎 stream과 작은 V-cut 감각으로 시작하고, 하류로 갈수록 Q에
   비례해 더 깊은 bed와 더 큰 water depth를 허용한다. ocean visible water surface는 여전히 `y = 0`이지만,
   river bed는 하구에서도 sea level 아래로 패일 수 있다.
+  high-core river bed와 adjacent bank/shoulder에는 deterministic value-noise relief를 기본 적용한다.
+  bed relief는 water level 계산 뒤 terrain bed에만 들어가며, water depth 범위 안에서 clamp해 수면을
+  뚫거나 한 column 이웃 river water continuity를 깨지 않는다. ocean-owned 또는 lake-owned mouth column도
+  selected river bed hint가 있으면 같은 mouth carve를 적용하되 standing water surface는 그대로 유지한다.
   integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
   이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
   hydrology water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.
@@ -288,8 +298,9 @@ heightfield는 그 column output을 소비해야 한다. chunk fill은 graph/mac
 
 - 실제 `ChunkData` final fill이 아니다.
 - block color는 final material이 아니라 terrain meaning 확인용 diagnostic ramp다.
-- water/ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은 muted
-  gray/mauve 계열로 표시한다.
+- active water/submerged ocean은 muted blue, low land는 green-gray, high/ridge는 pale gray, dry basin은
+  muted gray/mauve 계열로 표시한다. ocean-owned terrain이라도 final bed가 sea level 이상이고 water
+  column이 없으면 preview terrain pass는 land ramp 색을 사용한다.
 - water/ocean/lake/river water는 지형/bed face를 먼저 그린 뒤 반투명 top/side overlay로 렌더한다.
   따라서 `y < 0` riverbed, lake bed, ocean bathymetry가 수면 아래에서도 진단 가능해야 한다.
 - 기본 preview는 offscreen 3D camera가 아니라 2D isometric projection을 직접 사용한다.
@@ -352,10 +363,13 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - preview metadata/stdout과 legend는 stage 11 pixelize handoff 여부와 source column count를 기록해야 한다.
 - preview metadata/stdout과 legend는 player diagnostic cube의 `1 x 1 x 4` block dimensions, 중앙 world
   position, bottom/top `y`, sampled column count를 기록해야 한다.
-- Perlin micro relief, ocean bed relief, river bed relief, river bank relief는 `--perlin` preview flag 또는
-  명시적으로 enabled config를 전달한 경우에만 보인다. 기본 preview와 기본 `HeightfieldConfig`에서는
-  `micro_relief_blocks = 0`이고 ocean/river bed 및 bank relief도 0이다. ocean bed relief는 terrain bed에만
-  적용하며 sea-level water surface는 움직이지 않는다.
+- Perlin micro relief와 ocean bed Perlin relief는 `--perlin` preview flag 또는 명시적으로 enabled
+  config를 전달한 경우에만 보인다. 기본 preview와 기본 `HeightfieldConfig`에서는
+  `micro_relief_blocks = 0`이다. 다만 selected river bed와 adjacent bank/shoulder의 deterministic
+  relief는 기본으로 켜져 있어 완전히 uniform한 river bed를 피한다. enabled config에서는 exact sea level
+  border, Perlin max displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상
+  ocean-owned dry terrain이 ordinary land와 같은 micro relief map을 사용한다. ocean bed relief는 sea
+  level 아래 terrain bed에만 적용하며 sea-level water surface는 움직이지 않는다.
 
 ---
 
@@ -364,7 +378,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 1. 같은 `PixelizedChunkArea`와 `HeightfieldConfig`는 같은 `HeightfieldTile`을 만든다.
 2. column count는 pixelized column count와 일치한다.
 3. 모든 height와 mask 값은 finite여야 한다.
-4. water mask가 있는 column은 water level hint를 가져야 한다.
+4. lake mask가 있는 column과 sea level 아래 ocean bed column은 water level hint를 가져야 한다.
 5. meso 값은 현재 항상 0이고, Perlin micro relief는 config가 disabled이면 항상 0이다.
 6. heightfield는 `pixelize` output을 source로 읽으며 graph/macro/hydrology/river-plan/final-cell-context/boundary를 직접 재해석하지 않는다.
 7. final column surface/water height는 integer block height로 snap되어야 한다.
@@ -376,10 +390,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 10. water-adjacent visible top은 bed가 아니라 해당 water surface와 비교해야 한다. ocean은 `y = 0`이고
     lake는 lake source elevation에서 derive한 water level이다. 순수 contour-step mode에서
     heightfield는 ocean shoreline bevel이나 land ring clamp를 적용하지 않는다.
-11. ocean visible water surface는 항상 `y = 0`이지만 ocean terrain bed는 source heightfield bed로
-    분리된다. connected ocean column을 `surface_y = 0`으로 clamp하거나 sea-level 이상 source를
-    heightfield-local shallow fallback plane으로 내리면 회귀다. coast-adjacent continuity와 shelf/slope/basin
-    depth는 macro_field bathymetry source가 제공해야 하며, heightfield는 그 source bed를 직접 보존한다.
+11. ocean visible water surface가 존재하면 항상 `y = 0`이지만 ocean terrain bed는 source heightfield
+    bed로 분리된다. connected ocean column을 `surface_y = 0`으로 clamp하거나 sea-level 이상 source를
+    heightfield-local shallow fallback plane으로 내리면 회귀다. sea-level 이상 ocean bed에는 water
+    column을 만들지 않는다. coast-adjacent continuity와 shelf/slope/basin depth는 macro_field
+    bathymetry source가 제공해야 하며, heightfield는 그 source bed를 직접 보존한다.
     ocean owner가 아닌 coast-mask negative land는 일반 non-water land처럼 `surface_y = 0`,
     `water_y = None`으로 남아야 한다. coast-connected near-zero positive land도 deterministic
     shallow-shelf variation 없이 ordinary contour snap을 따라야 한다.
@@ -405,7 +420,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     문제를 줄인다.
 17. Perlin micro relief는 seed, generator version, world-space x/z로만 결정되어야 하며 chunk-local
     random state나 병렬 실행 순서에 의존하면 안 된다.
-18. Ocean/lake micro relief는 항상 0이고, river column `micro_relief_blocks`도 river continuity 보호를
-    위해 0이다. 단, Perlin이 enabled이면 ocean terrain bed, river terrain bed, river bank/shoulder field에는
-    별도 bounded Perlin offset을 적용할 수 있다. bed offset은 water level 계산에 쓰는 기준 bed나 ocean
-    sea-level surface를 움직이지 않아야 한다.
+18. Lake와 genuinely submerged ocean source의 land micro relief는 0이고, river column
+    `micro_relief_blocks`도 river continuity 보호를 위해 0이다. exact sea level border, Perlin max
+    displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상 ocean-owned dry
+    terrain은 ordinary land와 같은 micro relief map을 사용한다. 단, Perlin이 enabled이면 sea level 아래
+    ocean terrain bed, river terrain bed, river bank/shoulder field에는 별도 bounded Perlin offset을 적용할
+    수 있다. bed offset은 water level 계산에 쓰는 기준 bed나 ocean sea-level surface를 움직이지 않아야 한다.
+19. 기본 deterministic river bed/bank relief는 water surface solve가 아니다. world-space x/z,
+    river strength/flow/roughness/gravel hint만 읽고 terrain bed/shoulder를 bounded offset으로 흔든다.
+    river water_y, ocean sea level, lake water level을 직접 바꾸면 회귀다.

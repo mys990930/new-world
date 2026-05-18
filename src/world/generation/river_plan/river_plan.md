@@ -137,13 +137,18 @@ segment를 trunk 단면으로 강제 승격하지 않는다. reach scale은 cano
 
 launch scale은 1 block = 0.5m 감각을 기준으로 한다. 상류/중류는 preview에서 과대하게 읽히지 않도록
 하류보다 훨씬 좁게 잡는다. 목표 감각은 middle bed/broad valley가 lower의 대략 절반 안팎, upper가
-middle의 대략 절반 안팎이다.
+middle의 대략 절반 안팎이다. downstream trunk water width는 raster 단계에서 cell 크기를 다시 읽어
+동적으로 정하지 않고, river_plan의 absolute block-scale target을 따른다. launch 기본값은 typical
+Voronoi cell width 약 `200` blocks에서 유도한 `downstream_water_width_blocks = 200`이며, trunk Q에
+도달한 selected river의 water/bed width가 이 절대 폭 주변으로 수렴해야 한다.
 
 - headwater: bed width roughly `1.5..5` blocks, bed depth roughly `0.6..1.8` blocks.
-- upper: bed width roughly `2.5..9` blocks, bed depth roughly `0.8..2.8` blocks.
-- middle: bed width roughly `5..24` blocks, bed depth roughly `1.2..4.8` blocks.
-- lower/trunk: bed width generally stays in the `18..165` block range; bed depth roughly
-  `3..22` blocks.
+- upper: bed width roughly `5..18` blocks, bed depth roughly `0.8..2.8` blocks.
+- middle: bed width roughly `14..72` blocks, bed depth roughly `1.2..4.8` blocks.
+- lower: bed width generally stays in the `55..170` block range; bed depth roughly
+  `3..14` blocks.
+- trunk: bed/water width generally trends around the `200` block absolute target, with deterministic
+  reach variation in roughly the `120..260` block range; bed depth roughly `4..22` blocks.
 - lake inlet/outlet은 canonical Q를 유지하되 lake reach type의 local shape bounds 때문에 ocean trunk처럼 과하게 커지지 않는다.
 
 ---
@@ -276,7 +281,7 @@ diagnostic overlay로 볼 수 있어야 한다.
   diagnostics를 제공한다. ordinary chain에서는 selected/display discharge와 morphology scale이 downstream으로
   줄어들지 않고, lake outlet chain은 inherited canonical Q에서 시작한다.
 - bed/broad valley/floodplain/roughness/gravel/cutbank 값은 reach type, chain-local canonical display discharge,
-  deterministic chain/reach coefficient에서 계산하는 보수적인 guide다. river mouth fan geometry와 final
+  absolute downstream water-width target, deterministic chain/reach coefficient에서 계산하는 보수적인 guide다. river mouth fan geometry와 final
   water surface solve는 현재 구현하지 않는다.
 - `RiverPlan.segment_endpoints`는 hydrology node position에서 온 `from_position`, `to_position`,
   `downstream_position`을 제공한다.

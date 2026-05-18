@@ -5,7 +5,9 @@ use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeKind};
 use super::boundary::{BoundaryCache, NoisyBoundaryCurve};
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
 use super::macro_map::{GraphMacroMap, MacroSite, MacroSurfaceKind};
-use super::river_plan::{RiverPlan, RiverSegmentPlan};
+use super::river_plan::{
+    DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan, RiverSegmentPlan,
+};
 
 const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 64.0;
 const MACRO_FIELD_SITE_BUCKET_BLOCKS: f32 = 256.0;
@@ -14,7 +16,7 @@ const MACRO_FIELD_SCALAR_INTERPOLATION_BUCKET_RADIUS: i32 = 4;
 const MACRO_FIELD_SCALAR_INTERPOLATION_DISTANCE_POWER: f32 = 1.45;
 pub const DEFAULT_MACRO_FIELD_SAMPLE_SPACING_BLOCKS: f32 = 32.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_RADIUS_BLOCKS: f32 = 256.0;
-pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 240.0;
+pub const DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS: f32 = 640.0;
 pub const DEFAULT_MACRO_FIELD_COAST_RADIUS_BLOCKS: f32 = 384.0;
 pub const DEFAULT_MACRO_FIELD_RIDGE_HEIGHT_SCALE: f32 = 0.0;
 pub const DEFAULT_MACRO_FIELD_RIVER_CARVE_SCALE: f32 = 0.018;
@@ -627,6 +629,7 @@ fn rasterize_influence_fields(
             edge: river.edge,
             points: &river.points,
             flow_hint: river.flow_hint,
+            water_width_blocks: river.water_width_blocks,
             valley_width_blocks: river.valley_width_blocks,
             bed_depth_blocks: river.bed_depth_blocks,
             component_id: 0,
@@ -680,6 +683,7 @@ struct RiverRasterSource<'a> {
     edge: VoronoiEdgeId,
     points: &'a [WorldPlanePoint],
     flow_hint: f32,
+    water_width_blocks: f32,
     valley_width_blocks: f32,
     bed_depth_blocks: f32,
     component_id: usize,
@@ -981,6 +985,7 @@ fn rasterize_segment_anti_aliased_stroke(
                 let valley_strength = river_valley_strength_for_distance(
                     subpixel_distance,
                     source.flow_hint,
+                    source.water_width_blocks,
                     source.valley_width_blocks,
                     radius_blocks,
                 );
@@ -1262,6 +1267,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                         edge: plan.edge,
                         points: curve.points.clone(),
                         flow_hint: flow_hint_from_plan(plan),
+                        water_width_blocks: plan.bed_width_blocks,
                         valley_width_blocks: plan.broad_valley_width_blocks,
                         bed_depth_blocks: plan.bed_depth_blocks,
                     })
@@ -1466,6 +1472,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                         position,
                         &river.points,
                         river.flow_hint,
+                        river.water_width_blocks,
                         river.valley_width_blocks,
                         river.bed_depth_blocks,
                         config.river_radius_blocks,
@@ -1496,6 +1503,7 @@ struct RiverCurveRef {
     edge: VoronoiEdgeId,
     points: Vec<WorldPlanePoint>,
     flow_hint: f32,
+    water_width_blocks: f32,
     valley_width_blocks: f32,
     bed_depth_blocks: f32,
 }
@@ -1827,8 +1835,7 @@ fn combine_macro_height(
     let ridge_raise = ridge_influence * config.ridge_height_scale;
     let river_carve = river_valley_strength
         * config.river_carve_scale
-        * lerp(0.14, 1.0, smoothstep01(river_flow_hint.clamp(0.0, 1.0)))
-        * (1.0 - ocean_mask);
+        * lerp(0.045, 1.0, smoothstep01(river_flow_hint.clamp(0.0, 1.0)));
     let mut height = macro_elevation + ridge_raise - river_carve;
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
@@ -1839,13 +1846,21 @@ fn combine_macro_height(
 }
 
 fn ocean_bathymetry_macro_height(source_height: f32) -> f32 {
-    let depth = (-source_height).max(0.0).clamp(0.0, 1.0);
-    let coast_adjacent = depth.min(0.018);
-    let shelf = smoothstep_range(0.018, 0.07, depth) * 0.05;
-    let slope = smoothstep_range(0.07, 0.42, depth) * 0.46;
-    let basin = smoothstep_range(0.42, 0.9, depth) * 0.49;
+    if source_height >= 0.0 {
+        return source_height;
+    }
 
-    -(coast_adjacent + shelf + slope + basin).clamp(0.0, 1.0)
+    let depth = (-source_height).max(0.0).clamp(0.0, 1.0);
+    if depth <= 0.08 {
+        return source_height;
+    }
+
+    let shallow_continuity = 0.08;
+    let shelf = smoothstep_range(0.08, 0.18, depth) * 0.04;
+    let slope = smoothstep_range(0.18, 0.52, depth) * 0.43;
+    let basin = smoothstep_range(0.52, 0.92, depth) * 0.45;
+
+    -(shallow_continuity + shelf + slope + basin).clamp(0.0, 1.0)
 }
 
 fn lake_bed_macro_height(
@@ -2150,7 +2165,8 @@ fn ridge_envelope(distance: f32, radius: f32) -> f32 {
 }
 
 fn flow_hint_from_plan(plan: &RiverSegmentPlan) -> f32 {
-    let width_t = ((plan.bed_width_blocks - 1.0) / (165.0 - 1.0)).clamp(0.0, 1.0);
+    let width_t =
+        (plan.bed_width_blocks / DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS).clamp(0.0, 1.0);
     let flow_t = ((plan.discharge_q + 1.0).ln() / (1024.0_f32 + 1.0).ln()).clamp(0.0, 1.0);
     width_t.max(flow_t * 0.85)
 }
@@ -2158,15 +2174,31 @@ fn flow_hint_from_plan(plan: &RiverSegmentPlan) -> f32 {
 fn river_valley_strength_for_distance(
     distance_blocks: f32,
     flow_hint: f32,
-    planned_width_blocks: f32,
+    planned_water_width_blocks: f32,
+    planned_valley_width_blocks: f32,
     configured_radius_blocks: f32,
 ) -> f32 {
-    let width = river_width_blocks(flow_hint, planned_width_blocks, configured_radius_blocks);
-    if !distance_blocks.is_finite() || distance_blocks >= width {
+    let water_radius = river_water_radius_blocks(
+        flow_hint,
+        planned_water_width_blocks,
+        configured_radius_blocks,
+    );
+    let valley_radius = river_width_blocks(
+        flow_hint,
+        planned_valley_width_blocks,
+        configured_radius_blocks,
+    )
+    .max(water_radius + 1.0);
+    if !distance_blocks.is_finite() || distance_blocks >= valley_radius {
         return 0.0;
     }
-    let t = (distance_blocks / width.max(f32::EPSILON)).clamp(0.0, 1.0);
-    (1.0 - smoothstep01(t)).powf(1.15)
+    if distance_blocks <= water_radius {
+        let t = (distance_blocks / water_radius.max(f32::EPSILON)).clamp(0.0, 1.0);
+        return lerp(1.0, 0.89, smoothstep01(t)).clamp(0.0, 1.0);
+    }
+    let t = ((distance_blocks - water_radius) / (valley_radius - water_radius).max(f32::EPSILON))
+        .clamp(0.0, 1.0);
+    (0.87 * (1.0 - smoothstep01(t)).powf(1.2)).clamp(0.0, 1.0)
 }
 
 fn river_width_blocks(
@@ -2179,6 +2211,22 @@ fn river_width_blocks(
     planned_width_blocks
         .max(fallback.min(18.0))
         .clamp(1.0, configured_radius_blocks)
+}
+
+fn river_water_radius_blocks(
+    flow_hint: f32,
+    planned_water_width_blocks: f32,
+    configured_radius_blocks: f32,
+) -> f32 {
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let fallback = lerp(
+        1.0,
+        DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS * 0.5,
+        flow_t,
+    );
+    (planned_water_width_blocks * 0.5)
+        .max(fallback.min(4.0))
+        .clamp(0.5, configured_radius_blocks)
 }
 
 fn river_depth_factor(flow_hint: f32) -> f32 {
@@ -2225,7 +2273,8 @@ fn river_morphology_sample(
     position: WorldPlanePoint,
     points: &[WorldPlanePoint],
     flow_hint: f32,
-    planned_width_blocks: f32,
+    planned_water_width_blocks: f32,
+    planned_valley_width_blocks: f32,
     planned_bed_depth_blocks: f32,
     configured_radius_blocks: f32,
 ) -> RiverMorphologySample {
@@ -2234,7 +2283,8 @@ fn river_morphology_sample(
     let valley_strength = river_valley_strength_for_distance(
         distance,
         flow_hint,
-        planned_width_blocks,
+        planned_water_width_blocks,
+        planned_valley_width_blocks,
         configured_radius_blocks,
     );
     let hints = river_hints_from_strength(valley_strength, flow_hint, planned_bed_depth_blocks);
@@ -2770,17 +2820,40 @@ mod tests {
     }
 
     #[test]
+    fn ocean_bathymetry_preserves_positive_coast_adjacent_source() {
+        let source = 0.018;
+        let bathymetry = ocean_bathymetry_macro_height(source);
+
+        assert_eq!(
+            bathymetry, source,
+            "ocean-owned positive source terrain should stay above sea level until heightfield water policy decides coverage"
+        );
+    }
+
+    #[test]
+    fn ocean_bathymetry_preserves_shallow_negative_source_continuity() {
+        for source in [-0.012, -0.04, -0.079] {
+            let bathymetry = ocean_bathymetry_macro_height(source);
+
+            assert_eq!(
+                bathymetry, source,
+                "shallow ocean source should continue the signed source field without shelf snapping"
+            );
+        }
+    }
+
+    #[test]
     fn ocean_bathymetry_uses_narrow_shelf_before_slope() {
         let near_coast = ocean_bathymetry_macro_height(-0.03);
         let shelf_edge = ocean_bathymetry_macro_height(-0.08);
-        let slope = ocean_bathymetry_macro_height(-0.32);
+        let slope = ocean_bathymetry_macro_height(-0.42);
 
         assert!(
             shelf_edge < near_coast - 0.025,
             "shelf should narrow quickly after the coast: near={near_coast} shelf_edge={shelf_edge}"
         );
         assert!(
-            slope < shelf_edge - 0.25,
+            slope < shelf_edge - 0.2,
             "continental slope should deepen soon after the narrowed shelf: shelf_edge={shelf_edge} slope={slope}"
         );
     }
@@ -2931,6 +3004,39 @@ mod tests {
         assert_eq!(
             config.river_carve_scale, 0.018,
             "default broad-valley carve should stay block-scale and leave bed depth to heightfield"
+        );
+    }
+
+    #[test]
+    fn upstream_broad_valley_carve_is_shallow_but_keeps_river_bed_hint() {
+        let config = test_tile_config();
+        let base = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
+        let upstream = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.02, config);
+        let downstream = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, config);
+        let hints = river_hints_from_strength(1.0, 0.02, 1.6);
+
+        assert!(
+            base - upstream < config.river_carve_scale * 0.07,
+            "headwater broad-valley carve should be visibly shallower than the water/bed hint: base={base} upstream={upstream}"
+        );
+        assert!(
+            downstream < upstream - config.river_carve_scale * 0.8,
+            "downstream broad-valley carve should still scale up with Q: upstream={upstream} downstream={downstream}"
+        );
+        assert!(
+            hints.bed_depth_hint > 0.0,
+            "shallower broad land carve must not remove the selected river bed/water depth hint"
+        );
+    }
+
+    #[test]
+    fn ocean_owned_river_mouth_carve_can_cut_positive_source_below_sea_level() {
+        let config = test_tile_config();
+        let mouth = combine_macro_height(0.01, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, config);
+
+        assert!(
+            mouth < 0.0,
+            "selected river mouth carve should cut through ocean-owned above-sea terrain: {mouth}"
         );
     }
 
@@ -3513,7 +3619,7 @@ mod tests {
     }
 
     #[test]
-    fn river_parallel_independent_corridors_do_not_soft_union_into_one_owner() {
+    fn river_parallel_independent_corridors_do_not_union_into_one_owner() {
         let weak = test_noisy_curve(
             321,
             vec![
@@ -3624,11 +3730,39 @@ mod tests {
     }
 
     #[test]
+    fn downstream_river_high_core_uses_absolute_plan_water_width() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let flow = flow_hint(1024.0);
+        let water_width = DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS;
+        let valley_width = 520.0;
+        let inside =
+            river_valley_strength_for_distance(99.0, flow, water_width, valley_width, radius);
+        let outside =
+            river_valley_strength_for_distance(106.0, flow, water_width, valley_width, radius);
+
+        assert!(
+            inside >= 0.88,
+            "downstream high-core width should reach about the 200-block absolute target: {inside}"
+        );
+        assert!(
+            outside < 0.88,
+            "samples beyond the absolute water-width target should fall into the broad valley shoulder: {outside}"
+        );
+    }
+
+    #[test]
     fn river_valley_uses_flow_scaled_width() {
         let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
         let distance = radius * 0.45;
-        let headwater = river_valley_strength_for_distance(distance, flow_hint(12.0), 4.0, radius);
-        let trunk = river_valley_strength_for_distance(distance, flow_hint(1024.0), 180.0, radius);
+        let headwater =
+            river_valley_strength_for_distance(distance, flow_hint(12.0), 4.0, 12.0, radius);
+        let trunk = river_valley_strength_for_distance(
+            distance,
+            flow_hint(1024.0),
+            DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
+            520.0,
+            radius,
+        );
 
         assert!(
             trunk > headwater,
@@ -4819,6 +4953,11 @@ mod tests {
             edge: curve.edge,
             points: &curve.points,
             flow_hint,
+            water_width_blocks: lerp(
+                1.5,
+                DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
+                flow_hint.clamp(0.0, 1.0),
+            ),
             valley_width_blocks: lerp(4.0, 180.0, flow_hint.clamp(0.0, 1.0)),
             bed_depth_blocks: lerp(1.5, 18.0, flow_hint.clamp(0.0, 1.0)),
             component_id: 0,
@@ -4844,13 +4983,15 @@ mod tests {
     fn river_valley_strength_for_distance(
         distance_blocks: f32,
         flow_hint: f32,
-        planned_width_blocks: f32,
+        planned_water_width_blocks: f32,
+        planned_valley_width_blocks: f32,
         configured_radius_blocks: f32,
     ) -> f32 {
         super::river_valley_strength_for_distance(
             distance_blocks,
             flow_hint,
-            planned_width_blocks,
+            planned_water_width_blocks,
+            planned_valley_width_blocks,
             configured_radius_blocks,
         )
     }
