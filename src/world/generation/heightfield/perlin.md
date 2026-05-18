@@ -30,6 +30,9 @@ variation, when present, is owned by `heightfield` itself rather than this optio
   bounded Perlin offsets to the river terrain bed and the adjacent river bank/shoulder field. River
   water surface height is calculated from the unperturbed bed so this pass does not own water
   continuity.
+- River bank/shoulder Perlin is gated to the same local responsibility as deterministic
+  heightfield bank relief: finite selected-river distance plus a near-bank valley-strength band.
+  It must not add broad post-contour noise to the surrounding macro valley.
 - Land, ridge, and dry basin columns may receive relief.
 
 ## Non-Goals

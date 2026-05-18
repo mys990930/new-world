@@ -136,7 +136,8 @@ pub fn river_bank_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPe
     if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
         return 0.0;
     }
-    if sample.river_flow_hint <= 0.0 || sample.river_valley_strength <= 0.12 {
+    let bank_factor = river_bank_relief_factor(sample);
+    if bank_factor <= f32::EPSILON {
         return 0.0;
     }
 
@@ -148,7 +149,8 @@ pub fn river_bank_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPe
     let amplitude = (config.amplitude_blocks * (0.55 + rough_t * 0.45 + gravel_t * 0.35))
         .min(config.max_abs_blocks * 1.15)
         .max(0.0)
-        * shoulder_t;
+        * shoulder_t
+        * bank_factor;
     if amplitude <= f32::EPSILON {
         return 0.0;
     }
@@ -224,6 +226,17 @@ fn is_submerged_ocean_source(sample: &MacroFieldSample, config: HeightfieldPerli
 
 fn shallow_ocean_border_band_normalized(config: HeightfieldPerlinConfig) -> f32 {
     config.max_abs_blocks.max(0.0) / NEGATIVE_MACRO_HEIGHT_BLOCKS_PER_UNIT
+}
+
+fn river_bank_relief_factor(sample: &MacroFieldSample) -> f32 {
+    let valley = sample.river_valley_strength.clamp(0.0, 1.0);
+    if sample.river_flow_hint <= 0.0 || !sample.river_distance_blocks.is_finite() {
+        return 0.0;
+    }
+
+    let strength_gate = smoothstep01((valley - 0.34) / 0.18);
+    let local_distance_gate = 1.0 - smoothstep01((sample.river_distance_blocks - 64.0) / 48.0);
+    (strength_gate * local_distance_gate).clamp(0.0, 1.0)
 }
 
 fn perlin_2d(x: f32, z: f32, seed: u64, generator_version: u32, octave: u8) -> f32 {

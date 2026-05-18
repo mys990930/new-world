@@ -170,6 +170,10 @@ macro field의 `combined_macro_height`는 강바닥을 깊게 파서 river shape
 약한 valley morphology를 보여주고, 실제 river bed와 visible water는 heightfield/water/surface 단계에서
 별도 hint로 확정한다.
 
+Low-flow reach의 broad valley는 물/bed depth를 줄이는 방식보다 폭을 좁히는 방식으로 조정한다.
+Headwater/upper land carve는 `bed_width_blocks` 주변의 좁은 shoulder로 유지하고, water depth hint와
+`bed_depth_blocks`는 heightfield/water 단계가 계속 읽을 수 있게 보존한다.
+
 ---
 
 ## Geometry Policy
@@ -283,6 +287,8 @@ diagnostic overlay로 볼 수 있어야 한다.
 - bed/broad valley/floodplain/roughness/gravel/cutbank 값은 reach type, chain-local canonical display discharge,
   absolute downstream water-width target, deterministic chain/reach coefficient에서 계산하는 보수적인 guide다. river mouth fan geometry와 final
   water surface solve는 현재 구현하지 않는다.
+- low-flow broad valley multiplier는 water/bed width 근처에 머무는 좁은 land-carve shoulder를 우선한다.
+  즉 상류 land carve 문제는 주로 shallower carve가 아니라 narrower carve로 해결한다.
 - `RiverPlan.segment_endpoints`는 hydrology node position에서 온 `from_position`, `to_position`,
   `downstream_position`을 제공한다.
 - `macro_field`는 `RiverPlan`을 selected river edge source와 flow hint source로 소비하지만, plan의

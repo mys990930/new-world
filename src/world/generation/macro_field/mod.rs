@@ -33,6 +33,8 @@ pub const DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY: u32 = 5;
 const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const RIDGE_FIELD_SOURCE_MIN_RIDGENESS: f32 = 0.44;
 const ISOLATED_OCEAN_FRAGMENT_MAX_BLOCK_AREA: f32 = 512.0;
+const RIVER_CONCAVE_JOIN_MIN_ANGLE_RADIANS: f32 = 0.261_799_4;
+const RIVER_CONCAVE_JOIN_MAX_ANGLE_RADIANS: f32 = 2.617_993_8;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldTileConfig {
@@ -689,6 +691,18 @@ struct RiverRasterSource<'a> {
     component_id: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RiverRasterJoin {
+    vertex: WorldPlanePoint,
+    ray_a: WorldPlanePoint,
+    ray_b: WorldPlanePoint,
+    flow_hint: f32,
+    water_width_blocks: f32,
+    valley_width_blocks: f32,
+    bed_depth_blocks: f32,
+    component_id: usize,
+}
+
 fn assign_river_raster_components(sources: &mut [RiverRasterSource<'_>]) {
     let mut parent = (0..sources.len()).collect::<Vec<_>>();
     for left in 0..sources.len() {
@@ -712,6 +726,106 @@ fn assign_river_raster_components(sources: &mut [RiverRasterSource<'_>]) {
     }
 }
 
+fn build_river_raster_joins(sources: &[RiverRasterSource<'_>]) -> Vec<RiverRasterJoin> {
+    let mut joins = Vec::new();
+    for source in sources {
+        for points in source.points.windows(3) {
+            push_river_raster_join(
+                &mut joins,
+                points[1],
+                vector_between(points[1], points[0]),
+                vector_between(points[1], points[2]),
+                *source,
+                *source,
+            );
+        }
+    }
+
+    for left in 0..sources.len() {
+        for right in left + 1..sources.len() {
+            if sources[left].component_id != sources[right].component_id {
+                continue;
+            }
+            for left_endpoint in river_source_endpoint_rays(sources[left]) {
+                for right_endpoint in river_source_endpoint_rays(sources[right]) {
+                    if squared_distance(left_endpoint.vertex, right_endpoint.vertex)
+                        <= river_endpoint_epsilon_squared()
+                    {
+                        push_river_raster_join(
+                            &mut joins,
+                            midpoint(left_endpoint.vertex, right_endpoint.vertex),
+                            left_endpoint.ray,
+                            right_endpoint.ray,
+                            sources[left],
+                            sources[right],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    joins
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RiverEndpointRay {
+    vertex: WorldPlanePoint,
+    ray: WorldPlanePoint,
+}
+
+fn river_source_endpoint_rays(source: RiverRasterSource<'_>) -> Vec<RiverEndpointRay> {
+    match source.points {
+        [] | [_] => Vec::new(),
+        points => {
+            let mut rays = Vec::with_capacity(2);
+            rays.push(RiverEndpointRay {
+                vertex: points[0],
+                ray: vector_between(points[0], points[1]),
+            });
+            rays.push(RiverEndpointRay {
+                vertex: points[points.len() - 1],
+                ray: vector_between(points[points.len() - 1], points[points.len() - 2]),
+            });
+            rays
+        }
+    }
+}
+
+fn push_river_raster_join(
+    joins: &mut Vec<RiverRasterJoin>,
+    vertex: WorldPlanePoint,
+    ray_a: WorldPlanePoint,
+    ray_b: WorldPlanePoint,
+    left: RiverRasterSource<'_>,
+    right: RiverRasterSource<'_>,
+) {
+    let Some(angle) = smaller_angle_between(ray_a, ray_b) else {
+        return;
+    };
+    if !(RIVER_CONCAVE_JOIN_MIN_ANGLE_RADIANS..=RIVER_CONCAVE_JOIN_MAX_ANGLE_RADIANS)
+        .contains(&angle)
+    {
+        return;
+    }
+
+    joins.push(RiverRasterJoin {
+        vertex,
+        ray_a,
+        ray_b,
+        flow_hint: left.flow_hint.max(right.flow_hint),
+        water_width_blocks: left.water_width_blocks.max(right.water_width_blocks),
+        valley_width_blocks: left.valley_width_blocks.max(right.valley_width_blocks),
+        bed_depth_blocks: left.bed_depth_blocks.max(right.bed_depth_blocks),
+        component_id: left.component_id,
+    });
+}
+
+fn river_endpoint_epsilon_squared() -> f32 {
+    const ENDPOINT_EPSILON_BLOCKS: f32 = 0.01;
+    ENDPOINT_EPSILON_BLOCKS * ENDPOINT_EPSILON_BLOCKS
+}
+
 fn river_sources_touch(left: RiverRasterSource<'_>, right: RiverRasterSource<'_>) -> bool {
     let Some(left_start) = left.points.first() else {
         return false;
@@ -725,8 +839,6 @@ fn river_sources_touch(left: RiverRasterSource<'_>, right: RiverRasterSource<'_>
     let Some(right_end) = right.points.last() else {
         return false;
     };
-    const ENDPOINT_EPSILON_BLOCKS: f32 = 0.01;
-    let threshold = ENDPOINT_EPSILON_BLOCKS * ENDPOINT_EPSILON_BLOCKS;
     [
         (*left_start, *right_start),
         (*left_start, *right_end),
@@ -734,7 +846,7 @@ fn river_sources_touch(left: RiverRasterSource<'_>, right: RiverRasterSource<'_>
         (*left_end, *right_end),
     ]
     .into_iter()
-    .any(|(a, b)| squared_distance(a, b) <= threshold)
+    .any(|(a, b)| squared_distance(a, b) <= river_endpoint_epsilon_squared())
 }
 
 fn union_component(parent: &mut [usize], left: usize, right: usize) {
@@ -852,6 +964,7 @@ fn rasterize_curve_anti_aliased_polyline_field(
 
     let mut sources = sources.to_vec();
     assign_river_raster_components(&mut sources);
+    let joins = build_river_raster_joins(&sources);
 
     let width = config.width as usize;
     let height = config.height as usize;
@@ -887,6 +1000,20 @@ fn rasterize_curve_anti_aliased_polyline_field(
             );
         }
     }
+    apply_river_concave_join_clamps(
+        &joins,
+        &mut distance_blocks,
+        &mut river_valley_strength,
+        &river_owner_component,
+        &mut river_bed_depth_hint,
+        &mut river_bank_roughness_hint,
+        &mut river_gravel_hint,
+        &mut river_cutbank_hint,
+        width,
+        height,
+        config,
+        radius_blocks,
+    );
 
     let source_pixel_count = river_valley_strength
         .iter()
@@ -913,6 +1040,94 @@ fn rasterize_curve_anti_aliased_polyline_field(
         river_gravel_hint,
         river_cutbank_hint,
         source_pixel_count,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_river_concave_join_clamps(
+    joins: &[RiverRasterJoin],
+    distance_blocks: &mut [f32],
+    river_valley_strength: &mut [f32],
+    river_owner_component: &[usize],
+    river_bed_depth_hint: &mut [f32],
+    river_bank_roughness_hint: &mut [f32],
+    river_gravel_hint: &mut [f32],
+    river_cutbank_hint: &mut [f32],
+    width: usize,
+    height: usize,
+    config: MacroFieldTileConfig,
+    radius_blocks: f32,
+) {
+    if joins.is_empty() {
+        return;
+    }
+
+    let spacing = config.sample_spacing_blocks;
+    let aa_margin = spacing * 0.75;
+    for join in joins {
+        let water_radius =
+            river_water_radius_blocks(join.flow_hint, join.water_width_blocks, radius_blocks);
+        let valley_radius =
+            river_width_blocks(join.flow_hint, join.valley_width_blocks, radius_blocks)
+                .max(water_radius + 1.0);
+        let min_x = ((join.vertex.x - valley_radius - aa_margin - config.origin.x) / spacing)
+            .floor()
+            .max(0.0) as usize;
+        let max_x = ((join.vertex.x + valley_radius + aa_margin - config.origin.x) / spacing)
+            .ceil()
+            .min((width.saturating_sub(1)) as f32) as usize;
+        let min_z = ((join.vertex.z - valley_radius - aa_margin - config.origin.z) / spacing)
+            .floor()
+            .max(0.0) as usize;
+        let max_z = ((join.vertex.z + valley_radius + aa_margin - config.origin.z) / spacing)
+            .ceil()
+            .min((height.saturating_sub(1)) as f32) as usize;
+        if min_x > max_x || min_z > max_z {
+            continue;
+        }
+
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
+                let global_index = z * width + x;
+                if river_owner_component[global_index] != join.component_id
+                    || river_valley_strength[global_index] <= 0.0
+                {
+                    continue;
+                }
+                let position = config.sample_position(global_index);
+                if !point_in_smaller_join_wedge(position, join.vertex, join.ray_a, join.ray_b) {
+                    continue;
+                }
+
+                let distance = squared_distance(position, join.vertex).sqrt();
+                let joined_strength = river_valley_strength_for_distance(
+                    distance,
+                    join.flow_hint,
+                    join.water_width_blocks,
+                    join.valley_width_blocks,
+                    radius_blocks,
+                );
+                if joined_strength >= river_valley_strength[global_index] {
+                    continue;
+                }
+
+                let hints = river_hints_from_strength(
+                    joined_strength,
+                    join.flow_hint,
+                    join.bed_depth_blocks,
+                );
+                river_valley_strength[global_index] = joined_strength;
+                distance_blocks[global_index] = distance_blocks[global_index].max(distance);
+                river_bed_depth_hint[global_index] =
+                    river_bed_depth_hint[global_index].min(hints.bed_depth_hint);
+                river_bank_roughness_hint[global_index] =
+                    river_bank_roughness_hint[global_index].min(hints.bank_roughness_hint);
+                river_gravel_hint[global_index] =
+                    river_gravel_hint[global_index].min(hints.gravel_hint);
+                river_cutbank_hint[global_index] =
+                    river_cutbank_hint[global_index].min(hints.cutbank_hint);
+            }
+        }
     }
 }
 
@@ -1835,7 +2050,7 @@ fn combine_macro_height(
     let ridge_raise = ridge_influence * config.ridge_height_scale;
     let river_carve = river_valley_strength
         * config.river_carve_scale
-        * lerp(0.045, 1.0, smoothstep01(river_flow_hint.clamp(0.0, 1.0)));
+        * lerp(0.12, 1.0, smoothstep01(river_flow_hint.clamp(0.0, 1.0)));
     let mut height = macro_elevation + ridge_raise - river_carve;
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
@@ -2362,6 +2577,54 @@ fn squared_distance(a: WorldPlanePoint, b: WorldPlanePoint) -> f32 {
     let dx = a.x - b.x;
     let dz = a.z - b.z;
     dx * dx + dz * dz
+}
+
+fn midpoint(a: WorldPlanePoint, b: WorldPlanePoint) -> WorldPlanePoint {
+    WorldPlanePoint::new((a.x + b.x) * 0.5, (a.z + b.z) * 0.5)
+}
+
+fn vector_between(origin: WorldPlanePoint, point: WorldPlanePoint) -> WorldPlanePoint {
+    WorldPlanePoint::new(point.x - origin.x, point.z - origin.z)
+}
+
+fn smaller_angle_between(a: WorldPlanePoint, b: WorldPlanePoint) -> Option<f32> {
+    let a_len2 = a.x * a.x + a.z * a.z;
+    let b_len2 = b.x * b.x + b.z * b.z;
+    if a_len2 <= f32::EPSILON || b_len2 <= f32::EPSILON {
+        return None;
+    }
+    let dot = a.x * b.x + a.z * b.z;
+    let cross = a.x * b.z - a.z * b.x;
+    Some(cross.atan2(dot).abs())
+}
+
+fn point_in_smaller_join_wedge(
+    point: WorldPlanePoint,
+    vertex: WorldPlanePoint,
+    ray_a: WorldPlanePoint,
+    ray_b: WorldPlanePoint,
+) -> bool {
+    let point_ray = vector_between(vertex, point);
+    let point_len2 = point_ray.x * point_ray.x + point_ray.z * point_ray.z;
+    if point_len2 <= f32::EPSILON {
+        return false;
+    }
+
+    let mut start_angle = ray_a.z.atan2(ray_a.x);
+    let mut end_angle = ray_b.z.atan2(ray_b.x);
+    let mut wedge = positive_angle_delta(start_angle, end_angle);
+    if wedge > std::f32::consts::PI {
+        std::mem::swap(&mut start_angle, &mut end_angle);
+        wedge = positive_angle_delta(start_angle, end_angle);
+    }
+
+    let point_angle = point_ray.z.atan2(point_ray.x);
+    positive_angle_delta(start_angle, point_angle) <= wedge + 0.000_1
+}
+
+fn positive_angle_delta(start: f32, end: f32) -> f32 {
+    let tau = std::f32::consts::PI * 2.0;
+    (end - start).rem_euclid(tau)
 }
 
 fn curve_bucket(point: WorldPlanePoint) -> (i32, i32) {
@@ -3008,16 +3271,25 @@ mod tests {
     }
 
     #[test]
-    fn upstream_broad_valley_carve_is_shallow_but_keeps_river_bed_hint() {
+    fn upstream_broad_valley_carve_is_narrow_but_keeps_river_bed_hint() {
         let config = test_tile_config();
         let base = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
         let upstream = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.02, config);
         let downstream = combine_macro_height(0.36, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, config);
+        let low_flow = 0.02;
+        let inside_narrow_valley =
+            river_valley_strength_for_distance(3.0, low_flow, 4.0, 6.0, config.river_radius_blocks);
+        let outside_narrow_valley =
+            river_valley_strength_for_distance(9.0, low_flow, 4.0, 6.0, config.river_radius_blocks);
         let hints = river_hints_from_strength(1.0, 0.02, 1.6);
 
         assert!(
-            base - upstream < config.river_carve_scale * 0.07,
-            "headwater broad-valley carve should be visibly shallower than the water/bed hint: base={base} upstream={upstream}"
+            base - upstream >= config.river_carve_scale * 0.10,
+            "headwater center carve should stay meaningful while width is narrowed: base={base} upstream={upstream}"
+        );
+        assert!(
+            inside_narrow_valley > 0.0 && outside_narrow_valley == 0.0,
+            "low-flow land carve should narrow by radius/profile instead of mostly reducing depth: inside={inside_narrow_valley} outside={outside_narrow_valley}"
         );
         assert!(
             downstream < upstream - config.river_carve_scale * 0.8,
@@ -3025,7 +3297,7 @@ mod tests {
         );
         assert!(
             hints.bed_depth_hint > 0.0,
-            "shallower broad land carve must not remove the selected river bed/water depth hint"
+            "narrower broad land carve must not remove the selected river bed/water depth hint"
         );
     }
 
@@ -3509,6 +3781,82 @@ mod tests {
             field.river_valley_strength[overlap_inside],
             field.river_valley_strength[horizontal_shoulder],
             field.river_valley_strength[vertical_shoulder]
+        );
+    }
+
+    #[test]
+    fn river_connected_concave_join_uses_rounded_profile_not_mitered_triangle() {
+        let left = test_noisy_curve(
+            331,
+            vec![
+                WorldPlanePoint::new(16.0, 64.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            ],
+        );
+        let right = test_noisy_curve(
+            332,
+            vec![
+                WorldPlanePoint::new(64.0, 64.0),
+                WorldPlanePoint::new(64.0, 112.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 9, 16.0);
+        let left_source = test_river_source(&left, 0.25);
+        let right_source = test_river_source(&right, 0.25);
+        let field =
+            rasterize_curve_anti_aliased_polyline_field(&[left_source, right_source], config, 64.0);
+        let concave_diagonal = 6 * 9 + 2;
+        let rounded_join_strength = river_valley_strength_for_distance(
+            squared_distance(
+                WorldPlanePoint::new(32.0, 96.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            )
+            .sqrt(),
+            left_source.flow_hint,
+            left_source.water_width_blocks,
+            left_source.valley_width_blocks,
+            64.0,
+        );
+
+        assert!(
+            field.river_valley_strength[concave_diagonal] <= rounded_join_strength + 0.03,
+            "connected concave join should clamp the diagonal miter cusp to the rounded join profile: got={} rounded={}",
+            field.river_valley_strength[concave_diagonal],
+            rounded_join_strength
+        );
+    }
+
+    #[test]
+    fn river_internal_concave_polyline_join_uses_rounded_profile_not_mitered_triangle() {
+        let curve = test_noisy_curve(
+            333,
+            vec![
+                WorldPlanePoint::new(16.0, 64.0),
+                WorldPlanePoint::new(64.0, 64.0),
+                WorldPlanePoint::new(64.0, 112.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 9, 16.0);
+        let source = test_river_source(&curve, 0.25);
+        let field = rasterize_curve_anti_aliased_polyline_field(&[source], config, 64.0);
+        let concave_diagonal = 6 * 9 + 2;
+        let rounded_join_strength = river_valley_strength_for_distance(
+            squared_distance(
+                WorldPlanePoint::new(32.0, 96.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            )
+            .sqrt(),
+            source.flow_hint,
+            source.water_width_blocks,
+            source.valley_width_blocks,
+            64.0,
+        );
+
+        assert!(
+            field.river_valley_strength[concave_diagonal] <= rounded_join_strength + 0.03,
+            "internal concave polyline vertex should not leave a triangular miter cusp: got={} rounded={}",
+            field.river_valley_strength[concave_diagonal],
+            rounded_join_strength
         );
     }
 

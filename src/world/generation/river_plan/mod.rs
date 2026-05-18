@@ -693,7 +693,7 @@ fn morphology_for_segment(
         width_coefficient,
         depth_coefficient,
         velocity: (q / (hydraulic_width * hydraulic_depth).max(1.0)).max(0.0),
-        broad_valley_width_blocks: (bed_width_blocks * (2.2 + scaled * 0.45)).clamp(
+        broad_valley_width_blocks: (bed_width_blocks * (1.35 + scaled * 1.30)).clamp(
             min_bed_width * 3.0,
             config.downstream_water_width_blocks * 2.8,
         ),
@@ -939,6 +939,33 @@ mod tests {
             (175.0..=225.0).contains(&trunk.bed_width_blocks),
             "default downstream water width should trend toward the absolute 200-block target, got {}",
             trunk.bed_width_blocks
+        );
+    }
+
+    #[test]
+    fn low_flow_broad_valley_width_stays_close_to_water_width() {
+        let (patch, macro_map, hydrology) = synthetic_inputs(
+            &[segment(1, 0, 1, 4.0, GraphHydrologyRole::Headwater)],
+            &[
+                (0, GraphDrainageNodeKind::Source),
+                (1, GraphDrainageNodeKind::CoastOutlet),
+            ],
+            &[],
+        );
+
+        let plan = build_river_plan(&patch, &macro_map, &hydrology, RiverPlanConfig::default());
+        let headwater = plan.segment(GraphRiverSegmentId(1)).expect("headwater");
+
+        assert_eq!(headwater.reach_type, RiverReachType::Headwater);
+        assert!(
+            headwater.broad_valley_width_blocks <= headwater.bed_width_blocks * 1.65,
+            "low-flow land carve should be narrow around the water/bed width: bed={} broad={}",
+            headwater.bed_width_blocks,
+            headwater.broad_valley_width_blocks
+        );
+        assert!(
+            headwater.bed_depth_blocks > 0.0,
+            "narrowing broad-valley land carve must preserve bed/water depth hints"
         );
     }
 

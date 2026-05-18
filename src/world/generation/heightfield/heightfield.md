@@ -43,7 +43,9 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 - meso 값이 0임을 데이터와 문서에 명시한다.
 - selected river bed와 bank/shoulder에는 world-space deterministic relief를 기본 적용해 완전히 균일한
   계단식 bed를 줄인다. 이 relief는 terrain bed만 움직이고 river/ocean/lake water surface continuity를
-  소유하거나 변경하지 않는다.
+  소유하거나 변경하지 않는다. bank/shoulder relief는 selected river 주변의 finite distance와 strong
+  near-bank valley signal이 있는 좁은 band에만 적용하며, broad valley 주변 지형을 macro noise처럼
+  흔들면 안 된다.
 - Perlin relief는 `HeightfieldPerlinConfig.enabled`일 때만 적용하며 기본값은 비활성화다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
@@ -262,10 +264,17 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   않는다. 상류 수원부는 얕은 1-block 안팎 stream과 작은 V-cut 감각으로 시작하고, 하류로 갈수록 Q에
   비례해 더 깊은 bed와 더 큰 water depth를 허용한다. ocean visible water surface는 여전히 `y = 0`이지만,
   river bed는 하구에서도 sea level 아래로 패일 수 있다.
+  ocean-owned 또는 lake-owned mouth column은 ordinary river-water threshold보다 낮은 raster strength로
+  들어와도 selected river `bed_depth_hint`가 남아 있으면 standing-water surface와 terrain bed를 분리해
+  mouth bed carve를 적용한다. 이 예외는 water ownership을 새로 만들지 않고, 이미 전달된 selected river
+  bed hint를 terrain bed에만 적용한다.
   high-core river bed와 adjacent bank/shoulder에는 deterministic value-noise relief를 기본 적용한다.
   bed relief는 water level 계산 뒤 terrain bed에만 들어가며, water depth 범위 안에서 clamp해 수면을
   뚫거나 한 column 이웃 river water continuity를 깨지 않는다. ocean-owned 또는 lake-owned mouth column도
   selected river bed hint가 있으면 같은 mouth carve를 적용하되 standing water surface는 그대로 유지한다.
+  adjacent bank/shoulder relief는 broad river valley guide 전체가 아니라 finite river distance 안의
+  near-bank band에만 들어간다. 낮은 `river_valley_strength`가 남아 있는 넓은 주변 지형은 macro_field의
+  broad-valley lowering만 보존하고 heightfield-local noise를 추가하지 않는다.
   integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
   이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
   hydrology water surface solve가 아니라 stage 12 vertical slice용 안전 장치다.
@@ -428,4 +437,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     수 있다. bed offset은 water level 계산에 쓰는 기준 bed나 ocean sea-level surface를 움직이지 않아야 한다.
 19. 기본 deterministic river bed/bank relief는 water surface solve가 아니다. world-space x/z,
     river strength/flow/roughness/gravel hint만 읽고 terrain bed/shoulder를 bounded offset으로 흔든다.
-    river water_y, ocean sea level, lake water level을 직접 바꾸면 회귀다.
+    river water_y, ocean sea level, lake water level을 직접 바꾸면 회귀다. bank/shoulder offset은 finite
+    selected-river distance와 near-bank valley strength gate를 통과해야 하며, broad surrounding valley
+    terrain에 post-contour noise를 더하면 회귀다.

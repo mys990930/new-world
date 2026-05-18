@@ -19,10 +19,10 @@ pub const DEFAULT_HEIGHTFIELD_RIVER_CONTOUR_MIN_GAP_BLOCKS: f32 = 0.0;
 pub const DEFAULT_HEIGHTFIELD_CONTOUR_BAND_SMOOTHING: f32 = 0.0;
 
 pub use perlin::{
-    HeightfieldPerlinConfig, HeightfieldPerlinPlacement,
     DEFAULT_HEIGHTFIELD_PERLIN_AMPLITUDE_BLOCKS, DEFAULT_HEIGHTFIELD_PERLIN_BASE_SCALE_BLOCKS,
     DEFAULT_HEIGHTFIELD_PERLIN_LACUNARITY, DEFAULT_HEIGHTFIELD_PERLIN_MAX_ABS_BLOCKS,
     DEFAULT_HEIGHTFIELD_PERLIN_OCTAVES, DEFAULT_HEIGHTFIELD_PERLIN_PERSISTENCE,
+    HeightfieldPerlinConfig, HeightfieldPerlinPlacement,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -223,9 +223,14 @@ pub fn heightfield_column_from_sample(
         resolve_contour_band_height(contour_source_height_blocks, contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
-    let has_river_bed_hint = sample.river_valley_strength >= config.river_water_threshold
+    let has_core_river_hint = sample.river_valley_strength >= config.river_water_threshold
         && sample.river_flow_hint > 0.0;
-    let is_river_hint = has_river_bed_hint && !is_ocean && !is_lake;
+    let has_standing_water_mouth_bed_hint = (is_ocean || is_lake)
+        && sample.river_flow_hint > 0.0
+        && sample.river_bed_depth_hint > 0.0
+        && sample.river_valley_strength >= config.river_water_threshold * 0.5;
+    let has_river_bed_hint = has_core_river_hint || has_standing_water_mouth_bed_hint;
+    let is_river_hint = has_core_river_hint && !is_ocean && !is_lake;
     let river_bed_depth_blocks = if has_river_bed_hint {
         river_bed_depth_blocks(sample)
     } else {
@@ -258,15 +263,12 @@ pub fn heightfield_column_from_sample(
     } else {
         0.0
     };
-    let river_bank_relief_blocks = if !is_river_hint
-        && !is_ocean
-        && !is_lake
-        && sample.river_flow_hint > 0.0
-        && sample.river_valley_strength > config.river_water_threshold * 0.18
-    {
-        (deterministic_river_bank_variation_blocks(sample)
+    let river_bank_relief_blocks = if !is_river_hint && !is_ocean && !is_lake {
+        let bank_factor = river_bank_relief_factor(sample, config);
+        ((deterministic_river_bank_variation_blocks(sample)
             + perlin::river_bank_relief_blocks(sample, config.perlin))
-        .clamp(-14.0, 14.0)
+            * bank_factor)
+            .clamp(-4.0, 4.0)
     } else {
         0.0
     };
@@ -411,23 +413,43 @@ fn deterministic_river_bed_variation_blocks(sample: &MacroFieldSample) -> f32 {
 fn deterministic_river_bank_variation_blocks(sample: &MacroFieldSample) -> f32 {
     let valley = sample.river_valley_strength.clamp(0.0, 1.0);
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
-    if valley <= 0.0 || flow <= 0.0 {
+    if valley < 0.34
+        || flow <= 0.0
+        || !sample.river_distance_blocks.is_finite()
+        || sample.river_distance_blocks > 112.0
+    {
         return 0.0;
     }
 
     let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
     let gravel = sample.river_gravel_hint.clamp(0.0, 1.0);
     let bank = (1.0 - valley).clamp(0.0, 1.0);
-    let shoulder = (bank * 1.6).clamp(0.0, 1.0);
-    let broad = heightfield_value_noise_2d(sample.position, 47.0, 0xBA11_0001);
+    let shoulder = (bank * 1.25).clamp(0.0, 1.0);
+    let broad = heightfield_value_noise_2d(sample.position, 17.0, 0xBA11_0001);
     let medium = heightfield_value_noise_2d(
         WorldPlanePoint::new(sample.position.x - 23.0, sample.position.z + 11.0),
-        19.0,
+        7.0,
         0xBA11_0002,
     );
     let amplitude = (0.45 + rough * 1.4 + gravel * 0.55) * shoulder * (1.0 - flow * 0.22);
 
     (broad * 0.6 + medium * 0.4).clamp(-1.0, 1.0) * amplitude
+}
+
+fn river_bank_relief_factor(sample: &MacroFieldSample, config: HeightfieldConfig) -> f32 {
+    let valley = sample.river_valley_strength.clamp(0.0, 1.0);
+    let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    if flow <= 0.0 || !sample.river_distance_blocks.is_finite() {
+        return 0.0;
+    }
+
+    let near_bank_min = config.river_water_threshold * 0.38;
+    let near_bank_full = config.river_water_threshold * 0.58;
+    let strength_gate =
+        smoothstep01((valley - near_bank_min) / (near_bank_full - near_bank_min).max(f32::EPSILON));
+    let local_distance_gate = 1.0 - smoothstep01((sample.river_distance_blocks - 64.0) / 48.0);
+
+    (strength_gate * local_distance_gate).clamp(0.0, 1.0)
 }
 
 fn lake_water_level_blocks(sample: &MacroFieldSample, config: HeightfieldConfig) -> f32 {
@@ -1065,7 +1087,8 @@ mod tests {
     #[test]
     fn enabled_perlin_can_perturb_river_bank_surface() {
         let mut sample = sample(91.0, -37.0, 0.18, 0.0, 0.0, 0.0, 0.0);
-        sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.45;
+        sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
+        sample.river_distance_blocks = 36.0;
         sample.river_flow_hint = 0.68;
         sample.river_bank_roughness_hint = 0.9;
         sample.river_gravel_hint = 0.65;
@@ -1547,23 +1570,25 @@ mod tests {
         assert!(tile.stats.ocean_column_count > 0);
         assert!(tile.stats.lake_column_count > 0);
         assert!(tile.stats.water_column_count > 0);
-        assert!(tile
-            .columns
-            .iter()
-            .filter(
-                |column| matches!(column.terrain_kind, HeightfieldTerrainKind::Lake)
-                    || (matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
-                        && column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
-            )
-            .all(|column| column.water_level_blocks.is_some()));
-        assert!(tile
-            .columns
-            .iter()
-            .filter(
-                |column| matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
-                    && column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
-            )
-            .all(|column| column.water_level_blocks.is_none()));
+        assert!(
+            tile.columns
+                .iter()
+                .filter(
+                    |column| matches!(column.terrain_kind, HeightfieldTerrainKind::Lake)
+                        || (matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
+                            && column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+                )
+                .all(|column| column.water_level_blocks.is_some())
+        );
+        assert!(
+            tile.columns
+                .iter()
+                .filter(
+                    |column| matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
+                        && column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                )
+                .all(|column| column.water_level_blocks.is_none())
+        );
     }
 
     #[test]
@@ -1691,16 +1716,17 @@ mod tests {
             tile.stats.max_ocean_visible_surface_blocks,
             DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
         );
-        assert!(tile
-            .columns
-            .iter()
-            .filter(|column| matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean))
-            .all(|column| {
-                column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
-                    && column.water_level_blocks == Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
-                    && column.visible_surface_height_blocks()
-                        == DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
-            }));
+        assert!(
+            tile.columns
+                .iter()
+                .filter(|column| matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean))
+                .all(|column| {
+                    column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                        && column.water_level_blocks == Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+                        && column.visible_surface_height_blocks()
+                            == DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS
+                })
+        );
     }
 
     #[test]
@@ -1968,7 +1994,8 @@ mod tests {
     #[test]
     fn deterministic_river_bank_variation_is_available_by_default() {
         let mut bank = sample_with_river(41.0, 19.0, 0.24, 0.42);
-        bank.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.35;
+        bank.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
+        bank.river_distance_blocks = 32.0;
         bank.river_bank_roughness_hint = 0.90;
         bank.river_gravel_hint = 0.60;
 
@@ -1976,6 +2003,51 @@ mod tests {
             deterministic_river_bank_variation_blocks(&bank),
             0.0,
             "river shoulders should have deterministic default relief even when optional Perlin is disabled"
+        );
+    }
+
+    #[test]
+    fn broad_river_surroundings_do_not_get_default_bank_noise() {
+        let mut broad = sample_with_river(160.0, 24.0, 0.24, 0.62);
+        broad.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.22;
+        broad.river_distance_blocks = 176.0;
+        broad.river_bank_roughness_hint = 1.0;
+        broad.river_gravel_hint = 1.0;
+        let mut plain = broad;
+        plain.river_valley_strength = 0.0;
+        plain.river_distance_blocks = f32::INFINITY;
+        plain.river_flow_hint = 0.0;
+
+        let broad_column = heightfield_column_from_sample(&broad, HeightfieldConfig::default());
+        let plain_column = heightfield_column_from_sample(&plain, HeightfieldConfig::default());
+
+        assert_eq!(
+            deterministic_river_bank_variation_blocks(&broad),
+            0.0,
+            "broad surrounding valley should not receive deterministic bank relief"
+        );
+        assert_eq!(
+            broad_column.surface_y, plain_column.surface_y,
+            "broad surrounding terrain should keep the same contour surface as non-river land"
+        );
+    }
+
+    #[test]
+    fn preview_perlin_does_not_reintroduce_broad_river_bank_noise() {
+        let config = HeightfieldConfig {
+            perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
+            ..HeightfieldConfig::default()
+        };
+        let mut broad = sample_with_river(192.0, -48.0, 0.31, 0.74);
+        broad.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.25;
+        broad.river_distance_blocks = 160.0;
+        broad.river_bank_roughness_hint = 1.0;
+        broad.river_gravel_hint = 1.0;
+
+        assert_eq!(
+            perlin::river_bank_relief_blocks(&broad, config.perlin),
+            0.0,
+            "optional Perlin bank relief must stay local to the selected river bank"
         );
     }
 
@@ -2036,6 +2108,33 @@ mod tests {
             column.visible_surface_height_blocks(),
             DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
             "visible standing-water top remains the sea surface, not the carved bed"
+        );
+    }
+
+    #[test]
+    fn selected_river_mouth_bed_hint_cuts_above_sea_ocean_owned_column() {
+        let mut mouth = sample_with_river(0.0, 0.0, 0.004, 0.96);
+        mouth.ocean_mask = 1.0;
+        mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.65;
+        mouth.river_bed_depth_hint = 0.82;
+        mouth.river_bank_roughness_hint = 0.2;
+
+        let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+        assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Ocean);
+        assert_eq!(
+            column.water_level_blocks,
+            Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS),
+            "ocean/coast water policy should keep sea-level standing water once the bed is carved"
+        );
+        assert!(
+            column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+            "selected mouth bed hint should carve above-sea ocean-owned terrain below y=0: {}",
+            column.surface_height_blocks
+        );
+        assert!(
+            column.river_bed_depth_blocks > 0.0,
+            "heightfield should preserve selected mouth bed-depth diagnostics"
         );
     }
 
