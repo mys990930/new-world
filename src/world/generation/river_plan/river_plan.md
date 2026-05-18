@@ -131,8 +131,9 @@ river plan은 모든 selected river를 하나의 `river_valley_strength`로 취�
 
 하류일수록 broad valley width, bed width, bed depth, floodplain width가 커져야 한다. 상류와 하류가
 같은 폭과 깊이를 가지면 회귀다.
-hydrology role의 `Floodplain`은 `Trunk`보다 큰 downstream reach 의미이므로, river_plan에서는 `Trunk`
-reach type으로 분류해 더 큰 Q가 더 작은 morphology로 줄어드는 일을 막는다.
+hydrology role의 `Trunk`/`Floodplain` label은 topology/diagnostic hint일 뿐, river_plan에서는 낮은 Q
+segment를 trunk 단면으로 강제 승격하지 않는다. reach scale은 canonical display Q와 chain progress를
+우선하며, 더 큰 Q가 더 작은 morphology로 줄어드는 일만 막는다.
 
 launch scale은 1 block = 0.5m 감각을 기준으로 한다. 상류/중류는 preview에서 과대하게 읽히지 않도록
 하류보다 훨씬 좁게 잡는다. 목표 감각은 middle bed/broad valley가 lower의 대략 절반 안팎, upper가
@@ -269,8 +270,8 @@ diagnostic overlay로 볼 수 있어야 한다.
   discharge monotonicity, lake transition Q propagation을 제공하므로, river_plan은 selected segment를 다시 제거하거나 river path를 새로
   고르지 않는다.
 - adjacent segment가 같은 reach type이면 하나의 reach로 묶인다. reach type은 canonical display flow, raw flow,
-  hydrology role, terminal role, chain downstream position을 함께 읽으며, `Floodplain` hydrology role은
-  `Trunk` reach보다 작게 분류하지 않는다.
+  terminal role, chain downstream position을 함께 읽으며, hydrology role label만으로 낮은 Q segment를
+  `Trunk` reach로 만들지 않는다.
 - `upstream_area`, `tributary_flow`, `discharge_q`, `morphology_discharge_q` field는 chain-local ledger와
   diagnostics를 제공한다. ordinary chain에서는 selected/display discharge와 morphology scale이 downstream으로
   줄어들지 않고, lake outlet chain은 inherited canonical Q에서 시작한다.

@@ -1011,8 +1011,10 @@ fn rasterize_segment_anti_aliased_stroke(
             if current_component == source.component_id && current_distance.is_finite() {
                 distance_blocks[global_index] =
                     distance_blocks[global_index].min(closest_subpixel_distance);
-                river_valley_strength[global_index] =
-                    soft_union_strength(river_valley_strength[global_index], anti_aliased_strength);
+                river_valley_strength[global_index] = component_union_strength(
+                    river_valley_strength[global_index],
+                    anti_aliased_strength,
+                );
                 river_bed_depth_hint[global_index] =
                     river_bed_depth_hint[global_index].max(bed_hint);
                 river_bank_roughness_hint[global_index] =
@@ -1037,10 +1039,10 @@ fn rasterize_segment_anti_aliased_stroke(
     }
 }
 
-fn soft_union_strength(existing: f32, incoming: f32) -> f32 {
+fn component_union_strength(existing: f32, incoming: f32) -> f32 {
     let existing = existing.clamp(0.0, 1.0);
     let incoming = incoming.clamp(0.0, 1.0);
-    (1.0 - (1.0 - existing) * (1.0 - incoming)).clamp(0.0, 1.0)
+    existing.max(incoming)
 }
 
 fn rasterize_curve_sources(
@@ -3358,7 +3360,7 @@ mod tests {
     }
 
     #[test]
-    fn river_connected_broad_stroke_overlap_uses_soft_union_without_cusp() {
+    fn river_connected_broad_stroke_overlap_keeps_join_without_bulging() {
         let left = test_noisy_curve(
             301,
             vec![
@@ -3389,8 +3391,15 @@ mod tests {
             .min(field.river_valley_strength[vertical_shoulder]);
 
         assert!(
-            field.river_valley_strength[overlap_inside] >= weakest_shoulder * 0.95,
-            "connected broad stroke overlap should not leave a pointed weak cusp: overlap={} shoulder_h={} shoulder_v={}",
+            field.river_valley_strength[overlap_inside] >= weakest_shoulder * 0.78,
+            "connected broad stroke overlap should keep a readable join: overlap={} shoulder_h={} shoulder_v={}",
+            field.river_valley_strength[overlap_inside],
+            field.river_valley_strength[horizontal_shoulder],
+            field.river_valley_strength[vertical_shoulder]
+        );
+        assert!(
+            field.river_valley_strength[overlap_inside] <= weakest_shoulder + 0.04,
+            "connected broad stroke overlap should not round/bulge the join: overlap={} shoulder_h={} shoulder_v={}",
             field.river_valley_strength[overlap_inside],
             field.river_valley_strength[horizontal_shoulder],
             field.river_valley_strength[vertical_shoulder]

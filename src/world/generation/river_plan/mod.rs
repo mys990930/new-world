@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::graph::{VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::hydrology::{
-    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph, GraphHydrologyRole,
-    GraphRiverSegment, GraphRiverSegmentId,
+    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph, GraphRiverSegment,
+    GraphRiverSegmentId,
 };
 use super::macro_map::{GraphMacroMap, MacroLakeEdgeClass};
 
@@ -626,19 +626,12 @@ fn reach_type_for_segment(
     {
         return RiverReachType::LakeOutlet;
     }
-    if matches!(
-        segment.role,
-        GraphHydrologyRole::Trunk | GraphHydrologyRole::Floodplain
-    ) {
-        return RiverReachType::Trunk;
-    }
-
     let ratio = flow_ratio(segment.flow_accumulation, config).max(chain_progress * 0.06);
-    if ratio >= 0.75 {
+    if ratio >= 0.70 {
         RiverReachType::Trunk
-    } else if ratio >= 0.35 {
+    } else if ratio >= 0.30 {
         RiverReachType::Lower
-    } else if ratio >= 0.12 {
+    } else if ratio >= 0.10 {
         RiverReachType::Middle
     } else if ratio >= 0.035 {
         RiverReachType::Upper
@@ -744,7 +737,7 @@ mod tests {
         GraphBaseFields, GraphRegionCoord, VoronoiCorner, VoronoiCornerId, VoronoiEdge,
         VoronoiSiteId,
     };
-    use crate::world::generation::hydrology::{GraphDrainageNode, WatershedId};
+    use crate::world::generation::hydrology::{GraphDrainageNode, GraphHydrologyRole, WatershedId};
     use crate::world::generation::macro_map::{MacroEdge, MacroEdgeGuide};
 
     #[test]
@@ -896,7 +889,7 @@ mod tests {
         assert_eq!(headwater.reach_type, RiverReachType::Headwater);
         assert_eq!(upper.reach_type, RiverReachType::Upper);
         assert_eq!(middle.reach_type, RiverReachType::Middle);
-        assert_eq!(floodplain.reach_type, RiverReachType::Trunk);
+        assert_eq!(floodplain.reach_type, RiverReachType::Lower);
         assert_eq!(trunk.reach_type, RiverReachType::Trunk);
         assert!(headwater.bed_width_blocks < upper.bed_width_blocks);
         assert!(upper.bed_width_blocks < middle.bed_width_blocks);
@@ -905,7 +898,7 @@ mod tests {
     }
 
     #[test]
-    fn floodplain_role_cannot_shrink_below_lower_q_trunk() {
+    fn morphology_scale_follows_q_more_than_hydrology_role_label() {
         let (patch, macro_map, hydrology) = synthetic_inputs(
             &[
                 segment(1, 0, 1, 120.0, GraphHydrologyRole::Trunk),
@@ -922,8 +915,8 @@ mod tests {
         let trunk = plan.segment(GraphRiverSegmentId(1)).expect("trunk");
         let floodplain = plan.segment(GraphRiverSegmentId(2)).expect("floodplain");
 
-        assert_eq!(trunk.reach_type, RiverReachType::Trunk);
-        assert_eq!(floodplain.reach_type, RiverReachType::Trunk);
+        assert_eq!(trunk.reach_type, RiverReachType::Middle);
+        assert_eq!(floodplain.reach_type, RiverReachType::Lower);
         assert!(floodplain.discharge_q >= trunk.discharge_q);
         assert!(floodplain.bed_width_blocks >= trunk.bed_width_blocks);
         assert!(floodplain.broad_valley_width_blocks >= trunk.broad_valley_width_blocks);

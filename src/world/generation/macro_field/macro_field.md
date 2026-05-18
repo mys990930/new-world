@@ -155,10 +155,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
    - river anti-aliased bake는 selected river segment의 canonical curve 선분들을 굽고, endpoint를
-     공유하는 river source들을 하나의 connected raster component로 묶는다. 같은 component 안에서는
-     valley strength를 soft union으로 합성해 bend/joint와 broad stroke overlap에서 pointed cusp나
-     원형 blob chain이 생기지 않게 한다. 서로 endpoint를 공유하지 않는 가까운 river component끼리는
-     nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은 corridor로 합쳐지지 않게 한다.
+     공유하는 river source들을 하나의 connected raster component로 묶는다. 같은 component 안에서도
+     overlap strength를 additive하게 키우지 않고 component-local max/nearest ownership으로 합성해
+     bend/joint 주변의 pointed cusp를 줄이되 원형 blob처럼 부풀지 않게 한다. 서로 endpoint를 공유하지
+     않는 가까운 river component끼리는 nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은
+     corridor로 합쳐지지 않게 한다.
 3. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
@@ -460,9 +461,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   flow hint만으로 재추정하지 않고 river plan의 `broad_valley_width_blocks`와 `bed_depth_blocks`를 읽는다.
   subpixel coverage 기반 valley strength, nearest distance, blended flow hint, 단순 bed/roughness/gravel
   diagnostic hint를 저장한다. 같은 connected river component 안의 overlapping broad strokes는
-  soft union으로 strength/hint를 합성하지만, 다른 component가 이미 더 가까운 sample은 덮어쓰지 않는다.
-  이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob corridor로 병합하지 않기
-  위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
+  component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
+  sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
+  corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
   lowering이 과도하게 깊어지지 않도록 `0.018`이며, 낮은 flow에서는 이 값의 작은 일부만 적용한다. 실제
   narrow bed depth는 combined height에 직접 과하게 새기지 않고 heightfield/water/surface stage가 읽는
   hint로 남긴다.

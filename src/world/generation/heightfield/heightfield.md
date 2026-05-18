@@ -249,7 +249,8 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 - 일반 land에는 인접 column 기준 final surface ceiling, ocean shoreline bevel, land-side coast ramp를
   적용하지 않는다. 호수 bed/water 정책은 lake mask 내부에서만 처리한다.
 - river water hint를 shoreline ocean/lake ramp 기준으로 사용하지 않는다.
-- `river_valley_strength >= river_water_threshold`이거나 river bed hint가 충분한 column은 `River` hint가 될 수 있다.
+- `river_valley_strength >= river_water_threshold`인 high-core column은 `River` hint가 될 수 있다.
+  기본 threshold는 broad valley shoulder가 곧바로 물/강바닥으로 승격되지 않도록 높게 유지한다.
   river column은 macro_field의 bed-depth hint를 읽어 terrain bed를 water surface와 분리한다. 이 hint는
   river plan의 Q 기반 `bed_depth_blocks`에서 온 값이므로 heightfield가 다시 임의의 큰 상수로 증폭하지
   않는다. 상류 수원부는 얕은 1-block 안팎 stream과 작은 V-cut 감각으로 시작하고, 하류로 갈수록 Q에

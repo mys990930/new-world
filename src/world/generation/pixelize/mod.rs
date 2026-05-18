@@ -461,7 +461,7 @@ mod tests {
             PixelizeConfig::default(),
         );
         let river = pixelized_column_from_macro_sample(
-            &river_sample(2, 0, 0.10, 0.75),
+            &river_sample(2, 0, 0.10, 0.90),
             PixelizeConfig::default(),
         );
         let land = pixelized_column_from_macro_sample(
