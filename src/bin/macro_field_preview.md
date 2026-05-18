@@ -105,20 +105,23 @@ of giving every tile its own artificial low and high.
 5. Solve selected hydrology through `solve_hydrology(...)`.
 6. Apply the post-hydrology selected-headwater hydration floor to final biome cells.
 7. Generate canonical noisy boundaries through `generate_noisy_boundaries(...)`.
-8. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
+8. The graph/macro/hydrology/boundary/river-plan setup is wired through the bin-only
+   `common::generation_preview_context` helper, which only calls the same world-owned generation APIs
+   in this documented order and does not own terrain policy.
+9. Build a `MacroFieldTile` through `generate_macro_field_tile(...)`. The tile samples:
   - noisy-boundary owner/mask selection while preserving the selected owner macro elevation,
   - ridge candidate noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - coast noisy curves through a tile-local source-pixel/chamfer influence raster pass,
   - selected hydrology river noisy curves through a tile-local anti-aliased thick polyline bake
     that stores smooth valley coverage, nearest-segment distance, and blended display flow.
-9. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
+10. Extract optional contour diagnostics from the world-owned `MacroFieldTile` combined height:
    effective `combined_macro_height -0.5..1.0 -> -1024..2048 blocks`, with the central
    `-0.25..0.75` interest range mapping to `-512..1536 blocks`.
-9. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
-10. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
+11. Render the world-owned `MacroFieldTile` in parallel over the image sample grid.
+12. Render the requested channel or all channels with a compact legend, canonical noisy Voronoi edge
    overlay, a thicker standing-water/terrain boundary overlay on `macro`, `combined`, and `lit`,
    selected river source ring markers, a scale bar, a compass overlay, and a thin macro-field cache tile grid.
-11. Encode PNG metadata in `new-world-preview-header`.
+13. Encode PNG metadata in `new-world-preview-header`.
 
 ## Integration Note
 
@@ -133,6 +136,10 @@ generate_macro_field_tile(...)
 ```
 
 and renders that world-owned tile into diagnostic 2D fields.
+
+Generic pixel blending, text, line, panel, ring, and scale-bar drawing primitives are shared from
+`src/bin/common/preview_draw.rs`; channel colors, legend labels, overlay ordering, marker policy,
+metadata, and CLI behavior stay local to this binary.
 
 ## Metadata
 
@@ -155,7 +162,8 @@ Each PNG contains:
   bar length
 - contour step, major interval, min/max level, level count, segment count, height color ramp, and overlay flag
 - selected river source marker mainstem/tributary/drawn counts; markers are emitted only for
-  source nodes with no selected incoming segment, so interior river corners are not drawn as sources
+  `GraphDrainageNodeKind::Source` nodes with an outgoing selected segment and no selected incoming
+  segment, so interior river corners and disconnected source nodes are not drawn as sources
 - lit raw gradient stats, smoothed-normal gradient stats, and broad hillshade brightness
   min/average/max/stddev
 - channel meaning notes for macro, mask, ridge, river, combined, contour, and lit outputs
@@ -185,6 +193,13 @@ Each PNG contains:
   faint reference overlay so the field value stays visually dominant. The cache grid is diagnostic
   only: it should reveal cache boundaries without implying that terrain height is normalized
   independently inside each tile.
+- Legend overlay keys use `EDGE` for the faint dark canonical noisy Voronoi boundary reference,
+  `RIV` for the cyan/blue selected river centerline, `SRC M` for bright cyan/white mainstem source
+  rings, `SRC T` for amber/yellow tributary source rings, `WATER` for the yellow/orange
+  standing-water boundary where present, and `GRID` for the macro-field cache tile grid.
+- The many bright rings in the default overview are selected river source markers. They are preview
+  overlay diagnostics for `GraphDrainageNodeKind::Source` nodes in the large 32768-block footprint,
+  not lake/debug markers and not a change to macro or hydrology generation semantics.
 - `lit` uses an even fainter Voronoi edge overlay than the other channels. Its first job is to show
   broad white-material hillshade, so graph edges there are only a barely visible registration aid.
 - The scale bar is drawn on every channel so the world footprint can be read without checking

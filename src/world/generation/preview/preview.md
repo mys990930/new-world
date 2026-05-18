@@ -73,6 +73,10 @@
 한 폴더에 모으는 orchestration binary다. suite output은 stage별 source of truth가 아니며, 각 PNG의
 의미와 metadata 계약은 호출된 child preview binary 문서가 소유한다.
 
+`src/bin/common` may share preview-binary drawing and thin stage setup helpers, but those helpers are
+bin adapter code only. They do not own generation policy, channel semantics, CLI contracts, filenames,
+or PNG metadata key names.
+
 ---
 
 ## `graph_voronoi_preview` CLI 계약
@@ -248,6 +252,9 @@
   nearest-site lake fill 경계와 corner surface 기준이 어긋나도 selected river가 lake boundary/internal/
   adjacent edge 위에 그려지면 회귀다.
 - 픽셀 sampling과 PNG encoding은 preview binary 책임이다.
+- 구현은 `src/bin/common/preview_draw.rs`의 공용 RGB drawing primitives를 사용할 수 있지만, macro-map
+  fill palette, selected hydrology marker/arrow policy, metadata/stdout, CLI/output naming, graph
+  padding과 stats setup은 `macro_map_preview`가 계속 소유한다.
 
 ---
 
@@ -340,6 +347,10 @@ renderer/GPU 계약을 만들지 않는다.
 - 각 PNG는 작은 legend overlay를 가진다. gradient channel은 color bar와 low/high 의미를 표시하고,
   mask channel은 ocean/lake/dry/coast/land key를 서로 구분되는 색으로 표시한다. lit heightfield는 height range와 light
   direction만 표시한다. contour channel은 minor/major/sea-level key와 contour step/major spacing을 표시한다.
+  공통 overlay key는 faint dark/noisy `EDGE` = canonical noisy Voronoi boundary reference,
+  cyan/blue `RIV` = selected river centerline, bright cyan/white `SRC M` = mainstem source marker,
+  amber/yellow `SRC T` = tributary source marker, yellow/orange `WATER` = standing-water boundary
+  overlay가 표시되는 channel의 water/terrain boundary, `GRID` = macro-field cache tile grid를 뜻한다.
 - 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
   같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
 - 모든 `macro_field_preview` channel은 stage 9 `BoundaryCache`의 canonical noisy Voronoi graph edge
@@ -357,7 +368,9 @@ renderer/GPU 계약을 만들지 않는다.
   selected path가 confluence에 먼저 닿으면 tributary source amber/yellow ring, coast/lake terminal에
   먼저 닿으면 mainstem source bright cyan/white ring으로 그린다. marker는 legend, scale bar, compass
   아래 layer에 있어야 하며 metadata/stdout은 mainstem source marker 수, tributary source marker 수,
-  실제 viewport 안에 그려진 marker 수를 기록한다.
+  실제 viewport 안에 그려진 marker 수를 기록한다. marker selection은
+  `GraphDrainageNodeKind::Source`이면서 outgoing selected segment가 있고 selected incoming segment가
+  없는 node로 제한되며, default `32768` block overview에서는 이 source marker가 많이 보일 수 있다.
 - `lit` channel은 broad hillshade가 우선 읽혀야 하므로 다른 channel보다 더 희미한 Voronoi edge
   overlay를 사용한다. lit에서 edge가 조명/고저차보다 먼저 보이면 회귀다.
 - `macro`, `combined`, `lit` channel은 sampled macro field에서 ocean/lake water와 terrain이 맞닿는

@@ -9,19 +9,18 @@ use image::RgbImage;
 use rayon::prelude::*;
 
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
-    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, GraphRegionCoord, MacroFieldTile,
-    MacroFieldTileConfig, MacroMapConfig, PixelizeConfig, PixelizedChunkArea, PixelizedColumn,
-    PixelizedTerrainKind, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
-    WorldPlanePoint, apply_headwater_source_hydration_to_biomes, build_river_plan,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
-    generate_pixelized_chunk_area, generate_voronoi_graph_patch, graph_region_for_world_block,
-    solve_hydrology,
+    BoundaryCache, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionArea,
+    MacroFieldTile, MacroFieldTileConfig, MacroMapConfig, PixelizeConfig, PixelizedChunkArea,
+    PixelizedColumn, PixelizedTerrainKind, WorldPlanePoint, generate_macro_field_tile,
+    generate_pixelized_chunk_area, graph_region_for_world_block,
 };
 use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 mod common;
 
+use common::generation_preview_context::{
+    CommonPreviewWorld, PreviewStageInput, build_common_preview_world,
+};
 use common::preview_compass::draw_compass_rgb;
 
 const DEFAULT_STAGE: &str = "pixelize";
@@ -316,14 +315,6 @@ impl MapViewport {
     fn local_y(self, y: u32) -> u32 {
         y - self.y
     }
-}
-
-#[derive(Debug, Clone)]
-struct PreviewGenerationInputs {
-    patch: VoronoiGraphPatch,
-    macro_map: GraphMacroMap,
-    hydrology: GraphHydrologyGraph,
-    boundary: BoundaryCache,
 }
 
 #[derive(Debug, Clone)]
@@ -644,56 +635,22 @@ fn build_generation_inputs(
     config: &PreviewConfig,
     window: PreviewWindow,
     graph_area: GraphRegionArea,
-) -> Result<PreviewGenerationInputs, Box<dyn Error>> {
-    let center_region = graph_region_for_world_block(
-        window.center_world_x,
-        window.center_world_z,
-        config.region_size_blocks,
-    );
-    let padding_regions = required_padding_regions(center_region, graph_area)?;
-    let graph_config = VoronoiGraphConfig {
-        seed: meta.seed,
-        generator_version: meta.generator_version,
-        region_size_blocks: config.region_size_blocks,
-        site_spacing_blocks: config.site_spacing_blocks,
-        padding_regions,
-    };
-    let patch = generate_voronoi_graph_patch(VoronoiGraphPatchRequest::new(
-        graph_config,
-        window.center_world_x,
-        window.center_world_z,
-    ));
-    if patch.sites.is_empty() {
-        return Err(cli_error("generated graph patch did not contain sites"));
-    }
-
-    let mut macro_map = generate_macro_map(
-        &patch,
-        MacroMapConfig {
+) -> Result<CommonPreviewWorld, Box<dyn Error>> {
+    build_common_preview_world(
+        meta,
+        PreviewStageInput {
+            center_world_x: window.center_world_x,
+            center_world_z: window.center_world_z,
+            region_size_blocks: config.region_size_blocks,
+            site_spacing_blocks: config.site_spacing_blocks,
             land_bias: config.land_bias,
-            ..MacroMapConfig::new(meta.seed, meta.generator_version)
+            graph_area,
         },
-    );
-    let hydrology = solve_hydrology(&patch, &macro_map, Default::default());
-    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
-    let boundary = generate_noisy_boundaries(
-        &patch,
-        &macro_map,
-        BoundaryConfig::new(meta.seed, meta.generator_version),
-    );
-
-    Ok(PreviewGenerationInputs {
-        patch,
-        macro_map,
-        hydrology,
-        boundary,
-    })
+    )
+    .map_err(cli_error)
 }
 
-fn build_macro_field_tile(
-    window: PreviewWindow,
-    inputs: &PreviewGenerationInputs,
-) -> MacroFieldTile {
+fn build_macro_field_tile(window: PreviewWindow, inputs: &CommonPreviewWorld) -> MacroFieldTile {
     let sample_spacing = 1.0;
     let config = MacroFieldTileConfig::new(
         window.min_world_x as f32,
@@ -703,16 +660,10 @@ fn build_macro_field_tile(
         sample_spacing,
     );
 
-    let river_plan = build_river_plan(
-        &inputs.patch,
-        &inputs.macro_map,
-        &inputs.hydrology,
-        Default::default(),
-    );
     generate_macro_field_tile(
         &inputs.patch,
         &inputs.macro_map,
-        &river_plan,
+        &inputs.river_plan,
         &inputs.boundary,
         config,
     )
@@ -1102,20 +1053,6 @@ fn output_path_for_config(config: &PreviewConfig) -> PathBuf {
             }
         },
     )
-}
-
-fn required_padding_regions(
-    center: GraphRegionCoord,
-    area: GraphRegionArea,
-) -> Result<u32, Box<dyn Error>> {
-    let dx = (center.x - area.min.x)
-        .abs()
-        .max((area.max.x - center.x).abs());
-    let dz = (center.z - area.min.z)
-        .abs()
-        .max((area.max.z - center.z).abs());
-    u32::try_from(dx.max(dz).saturating_add(1))
-        .map_err(|_| cli_error("pixelize preview padding overflowed"))
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {

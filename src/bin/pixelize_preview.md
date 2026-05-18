@@ -10,6 +10,10 @@ field inputs through public `world::generation` APIs, then delegates chunk-align
 the `pixelize` API. It does not reinterpret graph topology, hydrology, noisy boundary ownership, or
 height policy in the binary.
 
+The repeated graph/macro/hydrology/boundary/river-plan setup is called through
+`src/bin/common/generation_preview_context.rs`, a bin-only helper that preserves the same public
+world API order and does not own terrain semantics.
+
 ## CLI
 
 ```bash
@@ -70,8 +74,9 @@ The binary builds inputs in this order:
 3. `solve_hydrology`
 4. `apply_headwater_source_hydration_to_biomes`
 5. `generate_noisy_boundaries`
-6. `generate_macro_field_tile`
-7. `generate_pixelized_chunk_area`
+6. `build_river_plan`
+7. `generate_macro_field_tile`
+8. `generate_pixelized_chunk_area`
 
 The macro field tile is sampled at one block spacing over the requested inclusive chunk area.
 

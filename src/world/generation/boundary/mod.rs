@@ -13,8 +13,9 @@ pub const DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS: f32 = 160.0;
 pub const DEFAULT_BOUNDARY_MAX_EDGE_FRACTION: f32 = 0.38;
 pub const DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION: f32 = 0.48;
 pub const DEFAULT_BOUNDARY_DISPLACEMENT_SMOOTHING_PASSES: usize = 5;
-pub const DEFAULT_BOUNDARY_MAX_LOCAL_TURN_DEGREES: f32 = 75.0;
-pub const DEFAULT_BOUNDARY_ANGLE_RELAXATION_PASSES: usize = 6;
+pub const DEFAULT_BOUNDARY_MAX_LOCAL_TURN_DEGREES: f32 = 60.0;
+pub const DEFAULT_BOUNDARY_ANGLE_RELAXATION_PASSES: usize = 10;
+pub const DEFAULT_BOUNDARY_FAIRING_PASSES: usize = 2;
 pub const DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS: f32 = 1.0;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
@@ -388,10 +389,36 @@ fn noisy_midpoint_curve(
     }
 
     relax_local_turn_angles(&mut points, guard, max_local_turn_degrees);
+    fair_boundary_points(&mut points, start, end, guard);
+    reinforce_visible_curve_displacement(&mut points, start, end, guard, seed, lateral_limit);
+    relax_local_turn_angles(&mut points, guard, max_local_turn_degrees);
+    fair_boundary_points(&mut points, start, end, guard);
     reinforce_visible_curve_displacement(&mut points, start, end, guard, seed, lateral_limit);
     relax_local_turn_angles(&mut points, guard, max_local_turn_degrees);
 
     points
+}
+
+fn fair_boundary_points(
+    points: &mut [WorldPlanePoint],
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    guard: BoundaryGuard,
+) {
+    if points.len() <= 3 {
+        return;
+    }
+
+    let last = points.len() - 1;
+    for _ in 0..DEFAULT_BOUNDARY_FAIRING_PASSES {
+        let previous = points.to_vec();
+        for index in 1..last {
+            let neighbor_average = lerp_point(previous[index - 1], previous[index + 1], 0.5);
+            points[index] = guard.clamp(lerp_point(previous[index], neighbor_average, 0.18));
+        }
+        points[0] = start;
+        points[last] = end;
+    }
 }
 
 fn reinforce_visible_curve_displacement(
@@ -959,6 +986,7 @@ mod tests {
     fn noisy_curves_limit_meaningful_local_turn_angles() {
         let (patch, macro_map) = test_inputs(42, 0, 0);
         let config = BoundaryConfig::new(42, 11);
+        assert_eq!(config.max_local_turn_degrees, 60.0);
         let boundary = generate_noisy_boundaries(&patch, &macro_map, config);
         let mut checked = 0;
 

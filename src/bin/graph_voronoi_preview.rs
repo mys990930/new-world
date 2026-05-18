@@ -21,6 +21,7 @@ use new_world::world::generation::{
 mod common;
 
 use common::preview_compass::draw_compass_rgb;
+use common::preview_draw::{blend_pixel_i32, blend_rect, draw_text, set_pixel, text_width};
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
@@ -1313,31 +1314,6 @@ fn fill_rect(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, colo
     }
 }
 
-fn blend_rect(
-    image: &mut RgbImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    color: [u8; 3],
-    amount: f32,
-) {
-    let max_x = (x + width).min(image.width());
-    let max_y = (y + height).min(image.height());
-    for py in y..max_y {
-        for px in x..max_x {
-            blend_pixel(image, px, py, color, amount);
-        }
-    }
-}
-
-fn blend_pixel_i32(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3], amount: f32) {
-    if x < 0 || y < 0 {
-        return;
-    }
-    blend_pixel(image, x as u32, y as u32, color, amount);
-}
-
 fn draw_gradient_bar(
     image: &mut RgbImage,
     mode: PreviewMode,
@@ -1355,101 +1331,6 @@ fn draw_gradient_bar(
             set_pixel(image, px, py, gradient_color_for_mode(mode, t));
         }
     }
-}
-
-#[allow(dead_code)]
-fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3], scale: u32) {
-    let mut cursor_x = x;
-    for ch in text.chars() {
-        draw_char(image, cursor_x, y, ch, color, scale);
-        cursor_x = cursor_x.saturating_add(4 * scale);
-    }
-}
-
-fn draw_char(image: &mut RgbImage, x: u32, y: u32, ch: char, color: [u8; 3], scale: u32) {
-    let glyph = glyph_3x5(ch);
-    for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..3 {
-            if (bits >> (2 - col)) & 1 == 0 {
-                continue;
-            }
-            for sy in 0..scale {
-                for sx in 0..scale {
-                    let px = x + col * scale + sx;
-                    let py = y + row as u32 * scale + sy;
-                    blend_pixel(image, px, py, color, 0.95);
-                }
-            }
-        }
-    }
-}
-
-fn text_width(text: &str, scale: u32) -> u32 {
-    text.chars().count() as u32 * 4 * scale
-}
-
-fn glyph_3x5(ch: char) -> [u8; 5] {
-    match ch {
-        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
-        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
-        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
-        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
-        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
-        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
-        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
-        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
-        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
-        'J' => [0b001, 0b001, 0b001, 0b101, 0b010],
-        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
-        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
-        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
-        'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
-        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
-        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
-        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
-        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
-        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
-        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
-        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
-        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
-        'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
-        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
-        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
-        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
-        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
-        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
-        '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
-        '3' => [0b110, 0b001, 0b010, 0b001, 0b110],
-        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
-        '5' => [0b111, 0b100, 0b110, 0b001, 0b110],
-        '6' => [0b011, 0b100, 0b110, 0b101, 0b010],
-        '7' => [0b111, 0b001, 0b010, 0b010, 0b010],
-        '8' => [0b010, 0b101, 0b010, 0b101, 0b010],
-        '9' => [0b010, 0b101, 0b011, 0b001, 0b110],
-        '-' => [0b000, 0b000, 0b111, 0b000, 0b000],
-        '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
-        _ => [0b000, 0b000, 0b000, 0b000, 0b000],
-    }
-}
-
-fn blend_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3], amount: f32) {
-    if x >= image.width() || y >= image.height() {
-        return;
-    }
-    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
-    let pixels: &mut [u8] = image.as_mut();
-    let base = [pixels[index], pixels[index + 1], pixels[index + 2]];
-    let blended = blend(base, color, amount);
-    pixels[index..index + 3].copy_from_slice(&blended);
-}
-
-fn set_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3]) {
-    if x >= image.width() || y >= image.height() {
-        return;
-    }
-    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
-    let pixels: &mut [u8] = image.as_mut();
-    pixels[index..index + 3].copy_from_slice(&color);
 }
 
 fn write_png_with_metadata(

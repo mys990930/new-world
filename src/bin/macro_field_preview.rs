@@ -9,24 +9,26 @@ use image::RgbImage;
 use rayon::prelude::*;
 
 use new_world::world::generation::{
-    BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
-    GraphHydrologyGraph, GraphHydrologyRole, GraphMacroMap, GraphRegionArea, GraphRegionCoord,
-    GraphRiverSegment, HydrologyConfig, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS, MacroFieldContourSet,
-    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    BoundaryCache, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+    DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode,
+    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph, GraphMacroMap,
+    GraphRegionArea, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    MacroFieldContourSet, MacroFieldSample as CoreMacroFieldSample,
+    MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, RiverPlan, RiverReachType,
-    VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest, WatershedId, WorldPlanePoint,
-    apply_headwater_source_hydration_to_biomes, build_river_plan, extract_macro_field_contours,
-    generate_macro_field_tile, generate_macro_map, generate_noisy_boundaries,
-    generate_voronoi_graph_patch, graph_region_for_world_block, solve_hydrology,
+    VoronoiGraphPatch, WorldPlanePoint, extract_macro_field_contours, generate_macro_field_tile,
+    graph_region_for_world_block,
 };
 use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 mod common;
 
+use common::generation_preview_context::{PreviewStageInput, build_common_preview_world};
 use common::preview_compass::draw_compass_rgb;
+use common::preview_draw::{
+    blend_pixel, blend_pixel_i32, blend_rect, draw_circle_ring, draw_pixel_line,
+    draw_pixel_line_with_radius, draw_scale_bar_line, draw_text, set_pixel, text_width,
+};
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
@@ -54,7 +56,7 @@ const RIVER_CENTERLINE_MAIN_COLOR: [u8; 3] = [12, 238, 255];
 const RIVER_CENTERLINE_TRIBUTARY_COLOR: [u8; 3] = [74, 168, 255];
 const RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.88;
 const LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT: f32 = 0.62;
-const RIVER_MAIN_SOURCE_MARKER_COLOR: [u8; 3] = [232, 255, 255];
+const RIVER_MAIN_SOURCE_MARKER_COLOR: [u8; 3] = [118, 246, 255];
 const RIVER_TRIBUTARY_SOURCE_MARKER_COLOR: [u8; 3] = [255, 196, 42];
 const RIVER_SOURCE_MARKER_OVERLAY_AMOUNT: f32 = 0.94;
 const RIVER_SOURCE_MARKER_RADIUS_PX: i32 = 5;
@@ -633,6 +635,7 @@ impl PreviewHeader {
                 self.river_source_marker_tributary_count,
                 self.river_source_marker_drawn_count
             ),
+            "river_source_marker_selection=GraphDrainageNodeKind_Source_with_outgoing_selected_segment_and_no_selected_incoming_segment".to_string(),
             format!(
                 "river_centerline_overlay_style=main_{:02x}{:02x}{:02x}_tributary_{:02x}{:02x}{:02x}_amount_{:.3}_lit_amount_{:.3}",
                 RIVER_CENTERLINE_MAIN_COLOR[0],
@@ -998,7 +1001,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         LIT_RIVER_CENTERLINE_OVERLAY_AMOUNT
     );
     println!(
-        "river source markers: mainstem {}, tributary {}, drawn {}",
+        "river source markers: mainstem {}, tributary {}, drawn {}; selection Source nodes with outgoing selected segment and no selected incoming segment",
         river_source_markers.mainstem_source_count,
         river_source_markers.tributary_source_count,
         river_source_markers.drawn_marker_count
@@ -1243,61 +1246,28 @@ fn build_preview_world(
     config: &PreviewConfig,
     graph_area: GraphRegionArea,
 ) -> Result<PreviewWorld, Box<dyn Error>> {
-    let center_region =
-        graph_region_for_world_block(config.center_x, config.center_z, config.region_size_blocks);
-    let padding_regions = required_padding_regions(center_region, graph_area)?;
-    let graph_config = VoronoiGraphConfig {
-        seed: meta.seed,
-        generator_version: meta.generator_version,
-        region_size_blocks: config.region_size_blocks,
-        site_spacing_blocks: config.site_spacing_blocks,
-        padding_regions,
-    };
-    let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
-    let patch = generate_voronoi_graph_patch(request);
-    if patch.sites.is_empty() {
-        return Err(cli_error("generated graph patch did not contain sites"));
-    }
-
-    let mut macro_map = generate_macro_map(
-        &patch,
-        MacroMapConfig {
+    let common = build_common_preview_world(
+        meta,
+        PreviewStageInput {
+            center_world_x: config.center_x,
+            center_world_z: config.center_z,
+            region_size_blocks: config.region_size_blocks,
+            site_spacing_blocks: config.site_spacing_blocks,
             land_bias: config.land_bias,
-            ..MacroMapConfig::new(meta.seed, meta.generator_version)
+            graph_area,
         },
-    );
-    let hydrology = solve_hydrology(&patch, &macro_map, HydrologyConfig::default());
-    apply_headwater_source_hydration_to_biomes(&patch, &mut macro_map, &hydrology);
-    let boundary = generate_noisy_boundaries(
-        &patch,
-        &macro_map,
-        BoundaryConfig::new(meta.seed, meta.generator_version),
-    );
-    let river_plan = build_river_plan(&patch, &macro_map, &hydrology, Default::default());
-    let river_segment_count = hydrology.segments.len();
+    )
+    .map_err(cli_error)?;
+    let river_segment_count = common.hydrology.segments.len();
 
     Ok(PreviewWorld {
-        patch,
-        macro_map,
-        boundary,
-        hydrology,
-        river_plan,
+        patch: common.patch,
+        macro_map: common.macro_map,
+        boundary: common.boundary,
+        hydrology: common.hydrology,
+        river_plan: common.river_plan,
         river_segment_count,
     })
-}
-
-fn required_padding_regions(
-    center: GraphRegionCoord,
-    area: GraphRegionArea,
-) -> Result<u32, Box<dyn Error>> {
-    let dx = (center.x - area.min.x)
-        .abs()
-        .max((area.max.x - center.x).abs());
-    let dz = (center.z - area.min.z)
-        .abs()
-        .max((area.max.z - center.z).abs());
-    u32::try_from(dx.max(dz).saturating_add(1))
-        .map_err(|_| cli_error("macro field preview padding overflowed"))
 }
 
 fn rasterize_macro_field(
@@ -1523,6 +1493,7 @@ fn river_source_marker_overlay_stats(
         .iter()
         .filter(|node| node.kind == GraphDrainageNodeKind::Source)
         .filter(|node| !incoming.contains(&node.id))
+        .filter(|node| outgoing.contains_key(&node.id))
         .filter_map(|node| {
             let kind = classify_source_marker(node.id, &outgoing, &nodes)?;
             Some(RiverSourceMarker {
@@ -1995,28 +1966,6 @@ fn draw_scale_bar_overlay(image: &mut RgbImage, _window: PreviewWindow, stats: S
     );
 }
 
-fn draw_scale_bar_line(
-    image: &mut RgbImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    color: [u8; 3],
-    amount: f32,
-) {
-    for px in x..=(x + width).min(image.width().saturating_sub(1)) {
-        blend_pixel(image, px, y, color, amount);
-        blend_pixel(image, px, y + 1, color, amount);
-    }
-    for tick_x in [x, (x + width).min(image.width().saturating_sub(1))] {
-        for py in y.saturating_sub(3)..=(y + 4).min(image.height().saturating_sub(1)) {
-            blend_pixel(image, tick_x, py, color, amount);
-            if tick_x + 1 < image.width() {
-                blend_pixel(image, tick_x + 1, py, color, amount);
-            }
-        }
-    }
-}
-
 fn scale_bar_label(length_blocks: f32) -> String {
     if length_blocks >= 1024.0 {
         format!("{}K BLOCKS", (length_blocks / 1024.0).round() as u32)
@@ -2086,106 +2035,6 @@ fn clip_axis(p: f32, q: f32, t0: &mut f32, t1: &mut f32) -> bool {
         }
     }
     true
-}
-
-fn draw_pixel_line(
-    image: &mut RgbImage,
-    start_x: i32,
-    start_y: i32,
-    end_x: i32,
-    end_y: i32,
-    color: [u8; 3],
-    amount: f32,
-) {
-    let mut x = start_x;
-    let mut y = start_y;
-    let dx = (end_x - start_x).abs();
-    let dy = -(end_y - start_y).abs();
-    let sx = if start_x < end_x { 1 } else { -1 };
-    let sy = if start_y < end_y { 1 } else { -1 };
-    let mut error = dx + dy;
-
-    loop {
-        if x >= 0 && y >= 0 {
-            blend_pixel(image, x as u32, y as u32, color, amount);
-        }
-        if x == end_x && y == end_y {
-            break;
-        }
-        let e2 = 2 * error;
-        if e2 >= dy {
-            error += dy;
-            x += sx;
-        }
-        if e2 <= dx {
-            error += dx;
-            y += sy;
-        }
-    }
-}
-
-fn draw_pixel_line_with_radius(
-    image: &mut RgbImage,
-    start_x: i32,
-    start_y: i32,
-    end_x: i32,
-    end_y: i32,
-    color: [u8; 3],
-    amount: f32,
-    radius: i32,
-) {
-    if radius <= 0 {
-        draw_pixel_line(image, start_x, start_y, end_x, end_y, color, amount);
-        return;
-    }
-
-    let radius_sq = radius * radius;
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            if dx * dx + dy * dy > radius_sq {
-                continue;
-            }
-            let offset_amount = if dx == 0 && dy == 0 {
-                amount
-            } else {
-                amount * 0.62
-            };
-            draw_pixel_line(
-                image,
-                start_x + dx,
-                start_y + dy,
-                end_x + dx,
-                end_y + dy,
-                color,
-                offset_amount,
-            );
-        }
-    }
-}
-
-fn draw_circle_ring(
-    image: &mut RgbImage,
-    center_x: i32,
-    center_y: i32,
-    radius: i32,
-    ring_width: i32,
-    color: [u8; 3],
-    amount: f32,
-) {
-    let outer = radius.max(1);
-    let inner = (outer - ring_width.max(1)).max(0);
-    let outer_sq = outer * outer;
-    let inner_sq = inner * inner;
-
-    for y in -outer..=outer {
-        for x in -outer..=outer {
-            let distance_sq = x * x + y * y;
-            if distance_sq > outer_sq || distance_sq < inner_sq {
-                continue;
-            }
-            blend_pixel_i32(image, center_x + x, center_y + y, color, amount);
-        }
-    }
 }
 
 fn draw_vertical_line(image: &mut RgbImage, x: u32, color: [u8; 3], amount: f32) {
@@ -2578,11 +2427,11 @@ fn draw_legend_overlay(
     let margin = 8 * scale;
     let panel_width = (164 * scale).min(image.width());
     let panel_height_units = if channel == PreviewChannel::Mask {
-        76
+        106
     } else if channel == PreviewChannel::Contour {
-        72
+        102
     } else {
-        60
+        90
     };
     let panel_height = (panel_height_units * scale).min(image.height());
     let x = margin.min(image.width().saturating_sub(panel_width));
@@ -2622,18 +2471,22 @@ fn draw_legend_overlay(
         scale,
     );
 
+    let mut key_y = bar_y + bar_height + 17 * scale;
     if channel == PreviewChannel::Mask {
-        draw_mask_legend_keys(image, bar_x, bar_y + bar_height + 17 * scale, scale);
+        draw_mask_legend_keys(image, bar_x, key_y, scale);
+        key_y += 15 * scale;
     } else if channel == PreviewChannel::Contour {
         draw_contour_legend_keys(
             image,
             bar_x,
-            bar_y + bar_height + 17 * scale,
+            key_y,
             scale,
             contour_step_blocks,
             contour_major_every,
         );
+        key_y += 27 * scale;
     }
+    draw_overlay_legend_keys(image, bar_x, key_y, scale, channel);
     draw_text(
         image,
         bar_x,
@@ -2646,6 +2499,132 @@ fn draw_legend_overlay(
             window.sample_spacing_blocks()
         ),
         [196, 205, 194],
+        scale,
+    );
+}
+
+fn draw_overlay_legend_keys(
+    image: &mut RgbImage,
+    x: u32,
+    y: u32,
+    scale: u32,
+    channel: PreviewChannel,
+) {
+    let row_gap = 12 * scale;
+    let mut cursor_x = x;
+    draw_scale_bar_line(
+        image,
+        cursor_x,
+        y + 3 * scale,
+        10 * scale,
+        GRAPH_EDGE_OVERLAY_COLOR,
+        GRAPH_EDGE_OVERLAY_AMOUNT.max(0.18),
+    );
+    draw_text(
+        image,
+        cursor_x + 13 * scale,
+        y,
+        "EDGE",
+        [218, 224, 212],
+        scale,
+    );
+    cursor_x += 33 * scale;
+
+    draw_scale_bar_line(
+        image,
+        cursor_x,
+        y + 3 * scale,
+        10 * scale,
+        RIVER_CENTERLINE_MAIN_COLOR,
+        0.9,
+    );
+    draw_text(
+        image,
+        cursor_x + 13 * scale,
+        y,
+        "RIV",
+        [218, 224, 212],
+        scale,
+    );
+    cursor_x += 30 * scale;
+
+    draw_circle_ring(
+        image,
+        (cursor_x + 4 * scale) as i32,
+        (y + 3 * scale) as i32,
+        (3 * scale).max(3) as i32,
+        scale.max(1) as i32,
+        RIVER_MAIN_SOURCE_MARKER_COLOR,
+        0.95,
+    );
+    draw_text(
+        image,
+        cursor_x + 10 * scale,
+        y,
+        "SRC M",
+        [218, 224, 212],
+        scale,
+    );
+    cursor_x += 42 * scale;
+
+    draw_circle_ring(
+        image,
+        (cursor_x + 4 * scale) as i32,
+        (y + 3 * scale) as i32,
+        (3 * scale).max(3) as i32,
+        scale.max(1) as i32,
+        RIVER_TRIBUTARY_SOURCE_MARKER_COLOR,
+        0.95,
+    );
+    draw_text(
+        image,
+        cursor_x + 10 * scale,
+        y,
+        "SRC T",
+        [218, 224, 212],
+        scale,
+    );
+
+    let second_y = y + row_gap;
+    let mut second_x = x;
+    if matches!(
+        channel,
+        PreviewChannel::MacroElevation
+            | PreviewChannel::CombinedMacroHeight
+            | PreviewChannel::LitHeightfield
+    ) {
+        draw_scale_bar_line(
+            image,
+            second_x,
+            second_y + 3 * scale,
+            10 * scale,
+            WATER_BOUNDARY_OVERLAY_COLOR,
+            0.9,
+        );
+        draw_text(
+            image,
+            second_x + 13 * scale,
+            second_y,
+            "WATER",
+            [218, 224, 212],
+            scale,
+        );
+        second_x += 45 * scale;
+    }
+    draw_scale_bar_line(
+        image,
+        second_x,
+        second_y + 3 * scale,
+        10 * scale,
+        [156, 174, 188],
+        TILE_GRID_OVERLAY_AMOUNT.max(0.22),
+    );
+    draw_text(
+        image,
+        second_x + 13 * scale,
+        second_y,
+        "GRID",
+        [218, 224, 212],
         scale,
     );
 }
@@ -2772,102 +2751,6 @@ fn draw_gradient_bar(
     }
 }
 
-fn blend_rect(
-    image: &mut RgbImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    color: [u8; 3],
-    amount: f32,
-) {
-    let max_x = (x + width).min(image.width());
-    let max_y = (y + height).min(image.height());
-    for py in y..max_y {
-        for px in x..max_x {
-            blend_pixel(image, px, py, color, amount);
-        }
-    }
-}
-
-fn draw_text(image: &mut RgbImage, x: u32, y: u32, text: &str, color: [u8; 3], scale: u32) {
-    let mut cursor_x = x;
-    for ch in text.chars() {
-        draw_char(image, cursor_x, y, ch, color, scale);
-        cursor_x = cursor_x.saturating_add(4 * scale);
-    }
-}
-
-fn draw_char(image: &mut RgbImage, x: u32, y: u32, ch: char, color: [u8; 3], scale: u32) {
-    let glyph = glyph_3x5(ch);
-    for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..3 {
-            if (bits >> (2 - col)) & 1 == 0 {
-                continue;
-            }
-            for sy in 0..scale {
-                for sx in 0..scale {
-                    blend_pixel(
-                        image,
-                        x + col * scale + sx,
-                        y + row as u32 * scale + sy,
-                        color,
-                        0.95,
-                    );
-                }
-            }
-        }
-    }
-}
-
-fn text_width(text: &str, scale: u32) -> u32 {
-    text.chars().count() as u32 * 4 * scale
-}
-
-fn glyph_3x5(ch: char) -> [u8; 5] {
-    match ch {
-        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
-        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
-        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
-        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
-        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
-        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
-        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
-        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
-        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
-        'J' => [0b001, 0b001, 0b001, 0b101, 0b010],
-        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
-        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
-        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
-        'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
-        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
-        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
-        'Q' => [0b010, 0b101, 0b101, 0b111, 0b011],
-        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
-        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
-        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
-        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
-        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
-        'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
-        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
-        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
-        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
-        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
-        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
-        '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
-        '3' => [0b110, 0b001, 0b010, 0b001, 0b110],
-        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
-        '5' => [0b111, 0b100, 0b110, 0b001, 0b110],
-        '6' => [0b011, 0b100, 0b110, 0b101, 0b010],
-        '7' => [0b111, 0b001, 0b010, 0b010, 0b010],
-        '8' => [0b010, 0b101, 0b010, 0b101, 0b010],
-        '9' => [0b010, 0b101, 0b011, 0b001, 0b110],
-        '-' => [0b000, 0b000, 0b111, 0b000, 0b000],
-        '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
-        _ => [0b000, 0b000, 0b000, 0b000, 0b000],
-    }
-}
-
 fn write_png_with_metadata(
     image: &RgbImage,
     output: &Path,
@@ -2893,33 +2776,6 @@ fn write_png_with_metadata(
     let mut png_writer = encoder.write_header()?;
     png_writer.write_image_data(image.as_raw())?;
     Ok(())
-}
-
-fn blend_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3], amount: f32) {
-    if x >= image.width() || y >= image.height() {
-        return;
-    }
-    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
-    let pixels: &mut [u8] = image.as_mut();
-    let base = [pixels[index], pixels[index + 1], pixels[index + 2]];
-    let blended = blend(base, color, amount);
-    pixels[index..index + 3].copy_from_slice(&blended);
-}
-
-fn blend_pixel_i32(image: &mut RgbImage, x: i32, y: i32, color: [u8; 3], amount: f32) {
-    if x < 0 || y < 0 {
-        return;
-    }
-    blend_pixel(image, x as u32, y as u32, color, amount);
-}
-
-fn set_pixel(image: &mut RgbImage, x: u32, y: u32, color: [u8; 3]) {
-    if x >= image.width() || y >= image.height() {
-        return;
-    }
-    let index = ((y as usize * image.width() as usize) + x as usize) * 3;
-    let pixels: &mut [u8] = image.as_mut();
-    pixels[index..index + 3].copy_from_slice(&color);
 }
 
 fn blend(base: [u8; 3], tint: [u8; 3], amount: f32) -> [u8; 3] {
@@ -2979,9 +2835,10 @@ fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
 mod tests {
     use super::*;
     use new_world::world::generation::{
-        BoundaryAnchors, BoundaryGuard, BoundaryProfile, GraphRiverSegmentId,
-        MacroFieldContourLevel, MacroFieldContourSegment, NoisyBoundaryCurve, RiverChainId,
-        RiverReachId, RiverSegmentPlan, VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId,
+        BoundaryAnchors, BoundaryGuard, BoundaryProfile, GraphHydrologyRole, GraphRiverSegment,
+        GraphRiverSegmentId, MacroFieldContourLevel, MacroFieldContourSegment, NoisyBoundaryCurve,
+        RiverChainId, RiverReachId, RiverSegmentPlan, VoronoiCornerId, VoronoiEdgeId,
+        VoronoiSiteId, WatershedId,
     };
 
     fn test_config() -> PreviewConfig {
@@ -3064,6 +2921,42 @@ mod tests {
         );
 
         assert_ne!(image.as_raw(), &before);
+    }
+
+    #[test]
+    fn legend_overlay_includes_marker_and_overlay_keys() {
+        let mut image = RgbImage::from_pixel(360, 220, image::Rgb([4, 5, 6]));
+
+        draw_legend_overlay(
+            &mut image,
+            PreviewChannel::CombinedMacroHeight,
+            PreviewWindow {
+                center_x: 0.0,
+                center_z: 0.0,
+                width: 360,
+                height: 220,
+                world_span_x: 1024.0,
+                world_span_z: 512.0,
+            },
+            &test_config(),
+            DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
+            DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+        );
+
+        assert!(
+            image
+                .as_raw()
+                .chunks_exact(3)
+                .any(|pixel| { pixel[0] > 80 && pixel[1] > 190 && pixel[2] > 200 }),
+            "legend should include the bright cyan mainstem source marker key"
+        );
+        assert!(
+            image
+                .as_raw()
+                .chunks_exact(3)
+                .any(|pixel| { pixel[0] > 200 && pixel[1] > 140 && pixel[2] < 90 }),
+            "legend should include the amber tributary source marker key"
+        );
     }
 
     #[test]
@@ -3198,6 +3091,33 @@ mod tests {
         assert_eq!(stats.mainstem_source_count, 1);
         assert_eq!(stats.tributary_source_count, 1);
         assert_eq!(stats.drawn_marker_count, 2);
+    }
+
+    #[test]
+    fn river_source_marker_stats_ignore_disconnected_sources() {
+        let hydrology = GraphHydrologyGraph {
+            nodes: vec![test_drainage_node(
+                1,
+                GraphDrainageNodeKind::Source,
+                0.0,
+                0.0,
+            )],
+            ..GraphHydrologyGraph::default()
+        };
+        let window = PreviewWindow {
+            center_x: 0.0,
+            center_z: 0.0,
+            width: 64,
+            height: 64,
+            world_span_x: 64.0,
+            world_span_z: 64.0,
+        };
+
+        let stats = river_source_marker_overlay_stats(window, &hydrology);
+
+        assert_eq!(stats.mainstem_source_count, 0);
+        assert_eq!(stats.tributary_source_count, 0);
+        assert_eq!(stats.drawn_marker_count, 0);
     }
 
     #[test]

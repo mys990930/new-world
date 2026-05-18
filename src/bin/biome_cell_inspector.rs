@@ -5,7 +5,6 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use new_world::world::WorldMeta;
 use new_world::world::generation::{
     BoundaryCache, BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
     GraphBiomeCell, GraphBiomeKind, GraphBiomeWaterRole, GraphDrainageNodeKind,
@@ -16,6 +15,7 @@ use new_world::world::generation::{
     generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
     solve_hydrology,
 };
+use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 const DEFAULT_WIDTH: u32 = 1400;
 const DEFAULT_HEIGHT: u32 = 900;
@@ -404,7 +404,13 @@ fn render_html(
             html_escape(biome_label(biome_site.biome)),
             macro_site.surface_kind
         ));
-        details.push(site_detail_json(site.id, macro_site, biome_site, stats));
+        details.push(site_detail_json(
+            site.id,
+            site.position,
+            macro_site,
+            biome_site,
+            stats,
+        ));
     }
 
     let overlays = render_overlays(window, graph);
@@ -683,13 +689,22 @@ fn river_width(flow: f32) -> i32 {
 
 fn site_detail_json(
     id: VoronoiSiteId,
+    position: WorldPlanePoint,
     macro_site: MacroSite,
     biome_site: GraphBiomeCell,
     overlay: SiteOverlayStats,
 ) -> String {
     let context = biome_site.context;
+    let center_x = position.x.floor() as i32;
+    let center_z = position.z.floor() as i32;
+    let center_chunk = cell_center_chunk(position);
     let fields = [
         ("site", id.0.to_string()),
+        ("cell_center", format!("({}, {})", center_x, center_z)),
+        (
+            "center_chunk",
+            format!("({}, {})", center_chunk.0, center_chunk.1),
+        ),
         ("biome", biome_label(biome_site.biome).to_string()),
         ("macro_surface", format!("{:?}", macro_site.surface_kind)),
         (
@@ -742,6 +757,13 @@ fn site_detail_json(
             .map(|(key, value)| format!("\"{}\":\"{}\"", json_escape(key), json_escape(&value)))
             .collect::<Vec<_>>()
             .join(",")
+    )
+}
+
+fn cell_center_chunk(position: WorldPlanePoint) -> (i32, i32) {
+    (
+        (position.x.floor() as i32).div_euclid(CHUNK_EDGE_I32),
+        (position.z.floor() as i32).div_euclid(CHUNK_EDGE_I32),
     )
 }
 
@@ -1057,6 +1079,8 @@ mod tests {
 
         assert!(html.contains("CELL_DETAILS"));
         assert!(html.contains("class=\"cell\""));
+        assert!(html.contains("cell_center"));
+        assert!(html.contains("center_chunk"));
         assert!(html.contains("macro_surface"));
         assert!(html.contains("water_role"));
         assert!(html.contains("temperature"));
@@ -1072,6 +1096,18 @@ mod tests {
         assert!(html.contains("stroke-width:0.38"));
         assert!(html.contains("stroke-width:1.1"));
         assert!(html.contains("if (active) active.classList.remove('active')"));
+    }
+
+    #[test]
+    fn cell_center_chunk_uses_world_chunk_flooring() {
+        assert_eq!(
+            cell_center_chunk(WorldPlanePoint { x: 32.0, z: -0.1 }),
+            (1, -1)
+        );
+        assert_eq!(
+            cell_center_chunk(WorldPlanePoint { x: -0.1, z: -32.0 }),
+            (-1, -1)
+        );
     }
 
     #[test]

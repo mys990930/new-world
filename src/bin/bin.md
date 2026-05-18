@@ -9,6 +9,10 @@
   orientation: image top is north (N), right is east (E), bottom is south (S), and left is west (W).
   Quarter-view previews may project the compass through their current camera/quarter transform; see
   the binary-specific docs.
+- Preview binaries may share bin-local helpers under `src/bin/common` for drawing primitives,
+  compass overlays, and thin graph-first preview setup. These helpers preserve each binary's CLI,
+  filenames, metadata keys, and stage-specific rendering meaning; world generation semantics remain
+  owned by `world::generation`.
 
 ## Current Index
 
@@ -243,7 +247,7 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
     tuning.
   - Auto output names include quarter and chunk radius suffixes such as `s42_cx0_cz0_q0_r4.png`.
     Explicit `--output` paths are respected exactly.
-  - Meso feature and Perlin micro relief are currently stubbed to zero.
+  - Meso feature is currently stubbed to zero. Perlin micro relief is available with `--perlin`.
   - See [heightfield_preview.md](./heightfield_preview.md).
 
 ## macro_field_preview
@@ -322,6 +326,8 @@ cargo run --bin macro_map_preview -- 42 0 0 --width 640 --height 360 --output ta
 
 - Notes:
   - The binary builds a Voronoi graph patch, then calls `new_world::world::generation::generate_macro_map(...)`.
+  - Generic RGB drawing primitives come from `src/bin/common/preview_draw.rs`; macro-map colors,
+    hydrology marker policy, metadata, CLI, and generation setup remain local to this binary.
   - See [macro_map_preview.md](./macro_map_preview.md).
 
 ## meso_preview

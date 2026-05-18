@@ -160,10 +160,6 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      bend/joint 주변의 pointed cusp를 줄이되 원형 blob처럼 부풀지 않게 한다. 서로 endpoint를 공유하지
      않는 가까운 river component끼리는 nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은
      corridor로 합쳐지지 않게 한다.
-   - connected river source나 noisy polyline 내부 vertex가 만드는 concave join은 segment별 distance
-     miter를 그대로 쓰지 않고, join wedge 안에서 vertex-distance 기반 rounded profile로 local clamp한다.
-     이 처리는 concave bank의 triangular cusp만 줄이며 전체 river curve를 smoothing하거나 독립 하천을
-     합치지 않는다.
 3. 먼저 nearest macro site를 찾되, sample point가 canonical noisy boundary curve의 blend radius 안에
    있으면 해당 curve의 양쪽 site를 읽어 noisy curve 기준 owner를 다시 고른다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
@@ -479,9 +475,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   diagnostic hint를 저장한다. 같은 connected river component 안의 overlapping broad strokes는
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
-  corridor로 병합하지 않기 위한 launch-scope guard다. 연결 endpoint와 내부 polyline vertex의 concave
-  wedge에서는 rounded join profile로 strength/hint를 local clamp해 noisy boundary bend의 triangular
-  miter cusp가 broad valley carve로 들어가지 않게 한다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
+  corridor로 병합하지 않기 위한 launch-scope guard다. 기본 `river_carve_scale`은 shared block-height domain에서 broad-valley
   lowering이 과도하게 깊어지지 않도록 `0.018`이다. 낮은 flow에서는 carve depth를 주로 죽이지 않고,
   river_plan의 좁은 broad-valley width와 raster profile로 land carve 범위를 줄인다.
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록

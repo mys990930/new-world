@@ -1911,6 +1911,7 @@ fn shade_rgba(color: [u8; 4], amount: f32) -> [u8; 4] {
 fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
     let t = ((column.combined_macro_height + 0.75) / 2.0).clamp(0.0, 1.0);
     let mut color = match column.terrain_kind {
+        HeightfieldTerrainKind::Ocean if is_dry_ocean_terrain(column) => combined_terrain_ramp(t),
         HeightfieldTerrainKind::Ocean => rgb8([45, 78, 102]),
         HeightfieldTerrainKind::Lake => rgb8([55, 100, 124]),
         HeightfieldTerrainKind::River => rgb8([63, 109, 122]),
@@ -1924,6 +1925,12 @@ fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
         *channel = (*channel * (0.86 + altitude * 0.20)).clamp(0.0, 1.0);
     }
     color
+}
+
+fn is_dry_ocean_terrain(column: HeightfieldColumn) -> bool {
+    matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
+        && column.water_level_blocks.is_none()
+        && column.surface_height_blocks >= 0.0
 }
 
 fn water_color_raw(column: HeightfieldColumn) -> [f32; 4] {
@@ -3319,6 +3326,47 @@ mod tests {
         assert_ne!(
             water_image.rgba, dry_image.rgba,
             "water overlay should change pixels without replacing the terrain bed pass"
+        );
+    }
+
+    #[test]
+    fn ocean_owned_above_sea_preview_uses_land_ramp_color() {
+        let mut column = height_column(0.0, 0.0, 12.0, HeightfieldTerrainKind::Ocean);
+        column.water_level_blocks = None;
+        column.water_y = None;
+        column.combined_macro_height = 0.20;
+        column.ocean_mask = 1.0;
+
+        assert!(is_dry_ocean_terrain(column));
+        assert_eq!(
+            terrain_color_rgba(column),
+            f32_color_to_rgba(terrain_color_raw(HeightfieldColumn {
+                terrain_kind: HeightfieldTerrainKind::Land,
+                ..column
+            })),
+            "dry ocean-owned terrain should preview with the land ramp, not blue water/ocean color"
+        );
+    }
+
+    #[test]
+    fn submerged_ocean_preview_keeps_ocean_bed_color() {
+        let mut submerged = height_column(0.0, 0.0, -8.0, HeightfieldTerrainKind::Ocean);
+        submerged.ocean_mask = 1.0;
+        submerged.combined_macro_height = -0.01;
+        submerged.water_level_blocks = Some(0.0);
+        submerged.water_y = Some(0);
+        let mut dry_same_owner = submerged;
+        dry_same_owner.surface_height_blocks = 8.0;
+        dry_same_owner.surface_y = 8;
+        dry_same_owner.combined_macro_height = 0.01;
+        dry_same_owner.water_level_blocks = None;
+        dry_same_owner.water_y = None;
+
+        assert!(!is_dry_ocean_terrain(submerged));
+        assert_ne!(
+            terrain_color_rgba(submerged),
+            terrain_color_rgba(dry_same_owner),
+            "submerged ocean bed should remain visually distinct from dry land-like ocean terrain"
         );
     }
 

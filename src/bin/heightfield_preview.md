@@ -20,7 +20,7 @@
   - `--chunk-radius <i32>`: square chunk radius around the positional center chunk. When set, this
     overrides the preview footprint derived from `--world-span-blocks`; width/height only control
     image resolution.
-  - `--columns-x <u32>`: sampled heightfield columns across X. Free-window mode defaults to `768`;
+  - `--columns-x <u32>`: sampled heightfield columns across X. Free-window mode defaults to `1024`;
     `--chunk-radius` mode defaults to `(2r+1) * 32`.
   - `--columns-z <u32>`: sampled heightfield columns across Z, default derived from aspect unless
     `--chunk-radius` is set, in which case it defaults to `columns-x` for a square sample grid.
@@ -78,7 +78,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `-0.25..0.75`는 `-512..1536 blocks`로 읽는다. preview에서 같은 Y 값을 다시 낮춰 그리면 중복
   압축이다.
 - Horizontal density is a direct column-count contract. In free-window mode the default X column
-  count is `768`; Z is derived from the image aspect unless `--columns-z` is provided. In
+  count is `1024`; Z is derived from the image aspect unless `--columns-z` is provided. In
   `--chunk-radius` mode, the default grid uses `32` columns per chunk on each axis, so a radius
   `r` covers `(2r+1) * 32` columns per axis unless `--columns-x`/`--columns-z` explicitly override
   the final count. Sea level, contour step, surface `y`, and river water `y` are resolved in the
@@ -97,10 +97,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   filled top/visible side faces, the player diagnostic cube, and separate world/grid reference
   overlays.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
-  - muted blue water/ocean
+  - muted blue active water/submerged ocean
   - subdued green-gray low land
   - pale gray high/ridge
   - muted gray/mauve dry basin
+- Ocean-owned dry terrain above sea level uses the same land ramp as ordinary land. If it renders
+  blue, the issue is preview coloring, not heightfield water generation.
 - Water boxes come from heightfield water hints, not final fluid simulation. They are rendered as
   translucent top and visible side faces immediately after their own terrain/bed column inside the
   same projected painter pass. Rendering all water after all terrain is a regression because far
@@ -114,15 +116,15 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Heightfield columns are resolved to contour bands before water/shore constraints. The raw block
   height from `combined_macro_height` remains stored for diagnostics, but final land surface does
   not directly use the continuous scalar. Default contour step is `1` block, and both general land
-  and river corridors use a `1` block minimum raw gap. The visible result still uses integer
-  terraces, but a raw one-block interval alone does not open a new visible height; with the default
-  `step + min_gap` stride, raw height advances by 2 blocks per visible 1-block terrace. This is not
-  contour-line reconstruction; it is scalar-to-band quantization in the same block-height domain as
-  the contour preview.
+  and river corridors use a `0` block minimum raw gap. The visible result uses integer terraces
+  where each raw one-block interval opens the next 1-block terrace. This is not contour-line
+  reconstruction; it is scalar-to-band quantization in the same block-height domain as the contour
+  preview.
 - `--perlin` uses heightfield-owned deterministic world-space fBM micro relief before contour-band
   resolve, then snaps the perturbed source to integer block height. The preview-enabled default is
-  noticeable but bounded, around `8` blocks amplitude with a `10` block clamp. Ocean/lake columns
-  keep `0` micro relief, and river columns currently keep `0` to preserve continuity.
+  noticeable but bounded, around `8` blocks amplitude with a `10` block clamp. Lake and submerged
+  ocean source columns keep `0` land micro relief, river columns currently keep `0` to preserve
+  continuity, and ocean-owned dry terrain above sea level uses the same micro relief map as land.
 - River columns receive an integer preliminary water height. Before preview, neighboring river or
   standing-water surfaces clamp river water so adjacent river-water steps descend by at most one
   block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.

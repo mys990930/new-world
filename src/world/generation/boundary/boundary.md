@@ -142,7 +142,7 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
   고정해 graph anchor와 adjacent patch stability를 보존하면서, interior의 좁은 corner spike와
   clustered angular bend를 더 적극적으로 완화한다.
 - smoothing 뒤 displacement delta를 제한해 adjacent sample이 급격히 꺾이지 않게 한다. 기본 local
-  turn cap은 75도이며, 의미 있는 interior segment가 90도에 가까운 V자나 right-angle corner로 보이면
+  turn cap은 60도이며, 의미 있는 interior segment가 90도에 가까운 V자나 right-angle corner로 보이면
   회귀다.
 - smoothing 뒤 전체 displacement가 너무 작아진 edge에는 single broad bend를 소량 보강한다. 이
   보강은 visible displacement floor를 지키기 위한 저주파 shape이며, jagged local detail을 다시
@@ -153,9 +153,11 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
   더 크게 요동할 수 있다.
 - noisy point는 edge normal 방향으로 흔들되 guard 영역으로 clamp한다. 한쪽 normal 방향이 guard에
   눌려 직선으로 붕괴하면 반대 방향 후보를 사용해 유효한 perpendicular displacement를 유지한다.
-- guard clamp 이후에도 작은 deterministic relaxation pass를 수행해 endpoint와 guard containment를
-  보존하면서 interior local turn angle을 기본 cap 아래로 낮춘다. 너무 짧은 degenerate segment는 angle
-  검증과 relaxation에서 제외할 수 있다.
+- guard clamp 이후에도 deterministic relaxation과 가벼운 fairing pass를 수행해 endpoint와 guard
+  containment를 보존하면서 interior local turn angle을 기본 cap 아래로 낮추고, 좁은 angular kink를
+  broad wave-like curve로 완화한다. fairing은 interior point를 이웃 평균 쪽으로 작게 당긴 뒤 guard로
+  다시 clamp하고 endpoint를 원본 corner로 재고정한다. 너무 짧은 degenerate segment는 angle 검증과
+  relaxation에서 제외할 수 있다.
 - endpoint는 항상 원본 corner 위치를 유지한다.
 - 기본 subdivision level은 6이며 curve당 65개의 point를 만든다. 점 수는 raw topology를 바꾸는
   것이 아니라 preview/heightfield가 더 부드러운 곡선을 샘플할 수 있게 하는 geometry layer다.
@@ -238,7 +240,7 @@ curve가 없으므로 boundary stats의 책임이 아니다. river/lake 접촉 �
   구현은 평균 second-difference를 강하게 제한해 톱니형 polyline 회귀를 잡는다.
 - local sharpness: 평균 roughness가 낮아도 일부 point에 pointy corner spike가 생기면 회귀다. 구현은
   normal displacement second-difference의 high-percentile과 maximum을 낮은 threshold로 함께 테스트한다.
-- angle limit: 의미 있는 interior vertex의 local turn angle은 기본 cap인 75도 아래여야 하며, 90도
+- angle limit: 의미 있는 interior vertex의 local turn angle은 기본 cap인 60도 아래여야 하며, 90도
   이상 right-angle/V-shape corner는 회귀다. 너무 짧은 degenerate segment는 angle assertion에서 제외할 수 있다.
 - no duplicate river curve: hydrology selected segment가 boundary curve 수를 늘리면 안 된다.
 - lake constraint: lake edge에도 canonical noisy curve는 있지만 selected river segment는 해당 edge를
