@@ -267,10 +267,13 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   들어와도 finite river distance와 selected river `bed_depth_hint`가 남아 있으면 standing-water surface와
   terrain bed를 분리해 mouth bed carve를 적용한다. 이 예외는 water ownership을 새로 만들지 않고, 이미
   전달된 selected river bed hint를 terrain bed에만 적용한다.
-  high-core river bed와 adjacent bank/shoulder에는 deterministic value-noise relief를 기본 적용한다.
-  bed relief는 water level 계산 뒤 terrain bed에만 들어가며, water depth 범위 안에서 clamp해 수면을
-  뚫거나 한 column 이웃 river water continuity를 깨지 않는다. ocean-owned 또는 lake-owned mouth column도
-  selected river bed hint가 있으면 같은 mouth carve를 적용하되 standing water surface는 그대로 유지한다.
+  high-core river bed와 adjacent bank/shoulder에는 deterministic multi-scale value-noise relief를 기본
+  적용한다. bed relief는 broad/medium/small scale noise와 약한 longitudinal ripple을 섞어 1-block snap
+  이후에도 완전히 일률적인 ramp가 되지 않게 하며, downcut 폭은 river bed depth, flow, roughness, gravel
+  hint에 비례하는 bounded range 안으로 제한한다. 이 relief는 water level 계산 뒤 terrain bed에만
+  들어가며, water depth 범위 안에서 clamp해 수면을 뚫거나 한 column 이웃 river water continuity를 깨지
+  않는다. ocean-owned 또는 lake-owned mouth column도 selected river bed hint가 있으면 같은 mouth carve를
+  적용하되 standing water surface는 그대로 유지한다.
   adjacent bank/shoulder relief는 broad river valley guide 전체가 아니라 finite river distance 안의
   near-bank band에만 들어간다. 낮은 `river_valley_strength`가 남아 있는 넓은 주변 지형은 macro_field의
   broad-valley lowering만 보존하고 heightfield-local noise를 추가하지 않는다.
@@ -374,7 +377,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 - Perlin micro relief와 ocean bed Perlin relief는 `--perlin` preview flag 또는 명시적으로 enabled
   config를 전달한 경우에만 보인다. 기본 preview와 기본 `HeightfieldConfig`에서는
   `micro_relief_blocks = 0`이다. 다만 selected river bed와 adjacent bank/shoulder의 deterministic
-  relief는 기본으로 켜져 있어 완전히 uniform한 river bed를 피한다. enabled config에서는 exact sea level
+  multi-scale relief는 기본으로 켜져 있어 완전히 uniform한 river bed나 일정한 ramp-shaped bed를 피한다.
+  enabled config에서는 exact sea level
   border, Perlin max displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상
   ocean-owned dry terrain이 ordinary land와 같은 micro relief map을 사용한다. ocean bed relief는 sea
   level 아래 terrain bed에만 적용하며 sea-level water surface는 움직이지 않는다.

@@ -255,8 +255,8 @@ pub fn heightfield_column_from_sample(
         0.0
     };
     let river_bed_variation_blocks = if has_river_bed_hint {
-        let flow = sample.river_flow_hint.clamp(0.0, 1.0);
-        let downcut_limit = river_bed_depth_blocks * 0.15 * smoothstep01((flow - 0.10) / 0.30);
+        let downcut_limit =
+            river_bed_downcut_variation_limit_blocks(sample, river_bed_depth_blocks);
         deterministic_river_bed_variation_blocks(sample).clamp(
             -downcut_limit,
             (river_water_depth_blocks(sample) - 1.0).max(0.0),
@@ -392,23 +392,57 @@ fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
 fn deterministic_river_bed_variation_blocks(sample: &MacroFieldSample) -> f32 {
     let valley = sample.river_valley_strength.clamp(0.0, 1.0);
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
-    if valley <= 0.0 || flow <= 0.0 {
+    if valley <= 0.0 || flow < 0.12 {
         return 0.0;
     }
 
     let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
     let gravel = sample.river_gravel_hint.clamp(0.0, 1.0);
-    let broad = heightfield_value_noise_2d(sample.position, 31.0, 0xB4D0_0001);
-    let small = heightfield_value_noise_2d(
+    let cutbank = sample.river_cutbank_hint.clamp(0.0, 1.0);
+    let bed_depth = river_bed_depth_blocks(sample);
+    let broad = heightfield_value_noise_2d(sample.position, 47.0, 0xB4D0_0001);
+    let medium = heightfield_value_noise_2d(
         WorldPlanePoint::new(sample.position.x + 17.0, sample.position.z - 29.0),
-        13.0,
+        19.0,
         0xB4D0_0002,
     );
-    let flow_scale = lerp(0.25, 1.0, smoothstep01(flow));
-    let amplitude =
-        (0.35 + rough * 0.75 + gravel * 0.45) * (1.12 - flow * 0.32) * valley * flow_scale;
+    let small = heightfield_value_noise_2d(
+        WorldPlanePoint::new(sample.position.x - 5.0, sample.position.z + 41.0),
+        7.0,
+        0xB4D0_0003,
+    );
+    let longitudinal = river_bed_longitudinal_ripple(sample.position);
+    let flow_scale = lerp(0.45, 1.0, smoothstep01(flow));
+    let amplitude = (0.75 + rough * 1.15 + gravel * 0.7 + cutbank * 0.45)
+        * (1.05 - flow * 0.22)
+        * valley
+        * flow_scale
+        * (0.75 + bed_depth.sqrt() * 0.18);
 
-    (broad * 0.68 + small * 0.32).clamp(-1.0, 1.0) * amplitude
+    (broad * 0.42 + medium * 0.34 + small * 0.16 + longitudinal * 0.08).clamp(-1.0, 1.0) * amplitude
+}
+
+fn river_bed_downcut_variation_limit_blocks(
+    sample: &MacroFieldSample,
+    river_bed_depth_blocks: f32,
+) -> f32 {
+    let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
+    let gravel = sample.river_gravel_hint.clamp(0.0, 1.0);
+    let flow_gate = smoothstep01((flow - 0.04) / 0.24);
+    let fraction = (0.18 + flow * 0.16 + rough * 0.08 + gravel * 0.08).clamp(0.12, 0.48);
+    let visible_floor = lerp(0.45, 1.35, flow_gate);
+
+    (river_bed_depth_blocks * fraction * flow_gate)
+        .max((visible_floor * flow_gate).min(river_bed_depth_blocks * 0.45))
+        .min(river_bed_depth_blocks * 0.52)
+}
+
+fn river_bed_longitudinal_ripple(position: WorldPlanePoint) -> f32 {
+    let diagonal = (position.x * 0.071 + position.z * 0.041).sin();
+    let counter = (position.x * -0.037 + position.z * 0.083).sin();
+
+    (diagonal * 0.65 + counter * 0.35).clamp(-1.0, 1.0)
 }
 
 fn deterministic_river_bank_variation_blocks(sample: &MacroFieldSample) -> f32 {
@@ -1997,6 +2031,31 @@ mod tests {
         assert_eq!(
             left_column.water_y, right_column.water_y,
             "bed variation must not perturb the river water surface"
+        );
+    }
+
+    #[test]
+    fn river_bed_variation_survives_integer_snap_across_bed_samples() {
+        let config = HeightfieldConfig::default();
+        let mut base = sample_with_river(0.0, 0.0, 0.20, 0.72);
+        base.river_bed_depth_hint = 0.42;
+        base.river_bank_roughness_hint = 0.90;
+        base.river_gravel_hint = 0.70;
+        base.river_cutbank_hint = 0.55;
+
+        let surfaces = [0.0, 11.0, 23.0, 37.0, 52.0, 71.0]
+            .into_iter()
+            .map(|x| {
+                let mut sample = base;
+                sample.position = WorldPlanePoint::new(x, -91.0);
+                heightfield_column_from_sample(&sample, config).surface_y
+            })
+            .collect::<Vec<_>>();
+        let first = surfaces[0];
+
+        assert!(
+            surfaces.iter().any(|surface| *surface != first),
+            "river bed variation should be strong enough to survive 1-block snapping: {surfaces:?}"
         );
     }
 
