@@ -92,7 +92,9 @@ constraint parameter에 반영한다.
 - `Lake`: lake boundary/internal/lake-adjacent edge profile
 - `Ridge`: ridge guide가 붙은 edge, heightfield ridge envelope가 읽을 더 sharp한 profile
 - `Fault`: fault guide가 붙은 edge, lateral noise는 낮고 discontinuity hint를 유지하는 profile
-- `LandSeam`: land-owned surface kind가 바뀌는 낮은 amplitude seam
+- `LandSeam`: land-owned surface kind가 바뀌는 낮은 amplitude seam. `CoastLand`/`CoastIsland`와
+  inland land surface kind 사이처럼 재질 경계만 필요한 coast-adjacent land seam도 여기에 포함한다.
+  macro_map의 explicit coast guide가 붙은 shoreline edge만 `Coast` profile 우선순위를 가진다.
 
 profile 우선순위는 launch 기준으로 `Coast > Lake > Ridge > Fault > LandSeam > Ordinary`다. 한 edge에
 여러 semantic guide가 붙을 수 있어도 canonical curve는 하나이며, 필요하면 이후 stage가 같은 curve를
@@ -178,7 +180,9 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
   것이 아니라 preview/heightfield가 더 부드러운 곡선을 샘플할 수 있게 하는 geometry layer다.
 - amplitude profile 값은 edge/site local scale에 곱해지는 비율이며, launch 기본값은 4K preview에서도
   식별 가능한 최소 world-space displacement를 보장하기 위해 30 block의 최소 visible amplitude floor를
-  가진다. 단, 아주 짧은 degenerate edge는 edge length/site span 기반 clamp가 우선한다.
+  가진다. 단, 아주 짧은 degenerate edge는 edge length/site span 기반 clamp가 우선한다. material owner
+  handoff 폭은 canonical curve amplitude를 낮춰 제어하지 않고, `macro_field` owner sampling의
+  profile별 radius cap이 제어한다.
 - amplitude는 edge length와 site span 대비 과도하게 커지지 않도록 clamp하고, launch 기본값에서는
   160 block의 절대 상한을 둔다.
 
@@ -196,6 +200,9 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
 - 4K 기본 preview(`32768` block span, `3840` px width)는 1px이 약 8.53 block이다.
 - 기본 curve 평균 amplitude는 여러 profile을 합쳐 대략 수십 block 단위여야 하며, 평균 visible
   perpendicular displacement가 4K에서 약 2px 이상으로 드러나야 한다.
+- land seam도 canonical noisy boundary geometry에서는 visible curve여야 한다. surface/material owner
+  handoff가 broad cell-scale material patch를 만들지 않아야 한다는 제약은 `macro_field` owner-side
+  radius cap과 `surface_plan`의 block-scale mix pass가 맡는다.
 - `BoundaryStats`는 평균/최대 amplitude block, 평균/최대 perpendicular displacement block,
   nearly-straight curve count를 기록한다. nearly-straight는 의미 있는 길이의 edge가 guard/clamp나
   잘못된 noise 합성 때문에 거의 직선으로 남은 경우를 찾는 회귀 계측이다.

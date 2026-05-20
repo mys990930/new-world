@@ -425,8 +425,6 @@ fn is_land_seam(edge: MacroEdge, macro_sites: &HashMap<VoronoiSiteId, MacroSite>
     a.surface_kind != b.surface_kind
         && a.surface_kind.is_land_owned()
         && b.surface_kind.is_land_owned()
-        && !a.surface_kind.is_coast()
-        && !b.surface_kind.is_coast()
 }
 
 fn noisy_midpoint_curve(
@@ -919,11 +917,12 @@ fn unit_f32(value: u64) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::graph::{
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
-        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphRegionCoord,
+        VoronoiGraphConfig, VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
-        MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig, generate_macro_map,
+        MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig, MacroSite, MacroSurfaceKind,
+        generate_macro_map,
     };
 
     #[test]
@@ -1187,6 +1186,50 @@ mod tests {
     }
 
     #[test]
+    fn coast_adjacent_land_surface_changes_use_land_seam_profile() {
+        let edge = test_macro_edge(1, VoronoiSiteId(10), VoronoiSiteId(11));
+        let macro_sites = HashMap::from([
+            (
+                VoronoiSiteId(10),
+                test_macro_site(VoronoiSiteId(10), MacroSurfaceKind::CoastLand),
+            ),
+            (
+                VoronoiSiteId(11),
+                test_macro_site(VoronoiSiteId(11), MacroSurfaceKind::Continent),
+            ),
+        ]);
+
+        assert_eq!(
+            boundary_profile(edge, &macro_sites),
+            BoundaryProfile::LandSeam,
+            "land-owned coast/inland material seams should use the narrow noisy land seam profile"
+        );
+    }
+
+    #[test]
+    fn land_seam_visible_amplitude_remains_preview_visible() {
+        let config = BoundaryConfig::new(42, 11);
+        let start = WorldPlanePoint::new(0.0, 0.0);
+        let end = WorldPlanePoint::new(256.0, 0.0);
+        let site_a = WorldPlanePoint::new(128.0, -128.0);
+        let site_b = WorldPlanePoint::new(128.0, 128.0);
+
+        let land_seam_amplitude = visible_amplitude_blocks(
+            start,
+            end,
+            site_a,
+            site_b,
+            amplitude_for_profile(BoundaryProfile::LandSeam, config),
+            config,
+        );
+
+        assert!(
+            land_seam_amplitude >= config.min_visible_amplitude_blocks,
+            "land seam boundary geometry should stay visibly noisy; material owner radius is capped downstream"
+        );
+    }
+
+    #[test]
     fn adjacent_patch_overlap_keeps_internal_boundary_curves_stable() {
         let (left_patch, left_macro) = test_inputs(77, 0, 0);
         let (right_patch, right_macro) = test_inputs(77, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, 0);
@@ -1259,6 +1302,47 @@ mod tests {
             .filter(|curve| edges.contains(&curve.edge))
             .map(|curve| (curve.edge, curve.points.clone()))
             .collect()
+    }
+
+    fn test_macro_edge(id: u64, site_a: VoronoiSiteId, site_b: VoronoiSiteId) -> MacroEdge {
+        MacroEdge {
+            id: VoronoiEdgeId(id),
+            sites: [site_a, site_b],
+            corners: [VoronoiCornerId(id + 100), VoronoiCornerId(id + 101)],
+            guide: MacroEdgeGuide {
+                is_coast: false,
+                is_ridge_candidate: false,
+                is_river_candidate: false,
+                is_fault_candidate: false,
+                coastness: 0.0,
+                mountainness: 0.0,
+                ridgeness: 0.0,
+                signed_elevation_gradient: 0.0,
+                drainage_divide_potential: 0.0,
+                river_potential: 0.0,
+            },
+            lake_class: MacroLakeEdgeClass::NonLake,
+        }
+    }
+
+    fn test_macro_site(id: VoronoiSiteId, surface_kind: MacroSurfaceKind) -> MacroSite {
+        MacroSite {
+            id,
+            owner_region: GraphRegionCoord { x: 0, z: 0 },
+            position: WorldPlanePoint::new(0.0, 0.0),
+            surface_kind,
+            continent: None,
+            ocean_basin: None,
+            signed_macro_elevation: 0.0,
+            continentality: 0.0,
+            coastness: 0.0,
+            distance_to_coast_blocks: 0.0,
+            distance_to_continent_core_blocks: 0.0,
+            distance_to_ocean_basin_blocks: 0.0,
+            mountainness: 0.0,
+            ridgeness: 0.0,
+            basinness: 0.0,
+        }
     }
 
     fn average_normal_second_difference(curve: &NoisyBoundaryCurve) -> f32 {

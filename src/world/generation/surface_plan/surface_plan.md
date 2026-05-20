@@ -191,9 +191,12 @@ visible material boundary는 hard owner 경계를 그대로 따라가면 안 된
 launch 구현의 material breakup은 noisy owner region을 다시 넓은 straight patch로 뒤집지 않는다. 먼저
 `boundary_mix_radius_blocks = 0`인 base resolve가 각 column의 noisy-owner policy material을 정하고,
 그 뒤 기본 radius `1` block, strength `28%`의 bounded local mix pass가 직교 인접한 다른 material을
-deterministic하게 일부 column만 빌려온다. 대각선으로만 닿는 material은 건너뛰지 않으므로 corner에서
-사각형 침범이 생기면 회귀다. 따라서 final top material이 base resolve와 다를 수 있는 범위는 이 local
-mix radius 안쪽뿐이다.
+deterministic하게 일부 column만 빌려온다. 단, macro owner site metadata가 있는 area resolve에서는 이
+local mix가 서로 다른 owner site 사이를 넘지 않는다. block-scale breakup은 같은 noisy-owner region
+안에서만 허용되고, 서로 다른 material region의 실제 경계는 upstream `macro_field`가 넘긴 noisy owner
+handoff를 따른다. 대각선으로만 닿는 material은 건너뛰지 않으므로 corner에서 사각형 침범이 생기면
+회귀다. 따라서 final top material이 base resolve와 다를 수 있는 범위는 이 local mix radius 안쪽이며,
+owner site가 같은 column neighbor에서 온 경우뿐이다.
 
 ---
 
@@ -373,7 +376,10 @@ priority를 함께 보고 실제 block을 배치한다.
 - `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `1`이고
   `boundary_mix_strength_percent`는 `28`이다. 기본 surface plan
   preview/generation path는 noisy-owner base material을 먼저 resolve한 뒤, 이 작은 radius 안에서만
-  Minecraft-style block-scale neighbor material breakup을 적용한다.
+  Minecraft-style block-scale neighbor material breakup을 적용한다. `MacroFieldTile` metadata가 연결된
+  path에서는 이 pass가 `MacroFieldSample.nearest_site`를 함께 읽어 서로 다른 macro owner site 사이의
+  material copy를 금지한다. 따라서 visual boundary overlay와 owner/material handoff는 분리될 수 있지만,
+  local material mix가 owner handoff 밖으로 별도 침범 영역을 만들면 회귀다.
 - seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
   noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
