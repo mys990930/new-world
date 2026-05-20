@@ -1,7 +1,7 @@
 id = 41
 key = "mediterranean_olive_leaves"
 solid = true
-opaque = true
+opaque = false
 render = "cube"
 material = "foliage"
 top = "mediterranean_olive_leaves"

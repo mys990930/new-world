@@ -1,7 +1,7 @@
 id = 43
 key = "swamp_cypress_leaves"
 solid = true
-opaque = true
+opaque = false
 render = "cube"
 material = "foliage"
 top = "swamp_cypress_leaves"

@@ -307,17 +307,22 @@ fn build_boreal_taiga_conifer(
 
     for y in 3..=height {
         let distance_from_top = height - y;
-        let mut radius = if distance_from_top <= 1 {
-            1
-        } else {
-            1 + distance_from_top / 5
-        };
-        radius = radius.clamp(1, 4);
-        if y % 3 == 0 && distance_from_top > 4 {
+        if distance_from_top > 2 && y % 3 != 0 {
+            if y % 3 == 1 && distance_from_top > 7 {
+                add_conifer_layer(builder, rng, y, 1, palette.leaves);
+            }
+            continue;
+        }
+
+        let mut radius = 1 + distance_from_top / 4;
+        if y % 6 == 0 && distance_from_top > 5 {
             radius += 1;
         }
-        radius = radius.clamp(1, 5);
+        radius = radius.clamp(1, 6);
         add_conifer_layer(builder, rng, y, radius, palette.leaves);
+        if radius > 2 && distance_from_top > 4 {
+            add_conifer_layer(builder, rng, y + 1, radius - 2, palette.leaves);
+        }
     }
 
     builder.put([0, height + 1, 0], palette.leaves, TreeVoxelRole::Leaf);

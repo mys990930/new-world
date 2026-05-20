@@ -1194,9 +1194,12 @@ mod tests {
             lake_mask,
             dry_basin_mask,
             ridge_influence,
+            river_core_strength: 0.0,
+            river_shoulder_strength: 0.0,
             river_valley_strength: 0.0,
             river_distance_blocks: f32::INFINITY,
             river_flow_hint: 0.0,
+            river_longitudinal_blocks: 0.0,
             river_bed_depth_hint: 0.0,
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
@@ -1225,6 +1228,8 @@ mod tests {
         river_flow_hint: f32,
     ) -> MacroFieldSample {
         let mut sample = sample(world_x, world_z, combined_macro_height, 0.0, 0.0, 0.0, 0.0);
+        sample.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
+        sample.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
         sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
         sample.river_flow_hint = river_flow_hint;
         sample

@@ -17,9 +17,8 @@ Options:
 
 - `--center-chunk-x <i32>` or `--cx <i32>`: center chunk X, default `0`.
 - `--center-chunk-z <i32>` or `--cz <i32>`: center chunk Z, default `0`.
-- `--radius <i32>` or `--r <i32>`: positive chunk-radius for zoom/pixelize/heightfield previews, default `8`.
-  `0` is allowed for one-chunk smoke runs; because `macro_field_preview --chunk-radius` needs a
-  nonzero span, step 05 uses `1` internally while pixelize and heightfield still receive `0`.
+- `--radius <i32>` or `--r <i32>`: non-negative chunk radius for zoom/pixelize/heightfield previews, default `8`.
+  `0` is allowed for one-chunk smoke runs.
 - `--output <path>`: output directory, default
   `target/generation-preview-suite/s<seed>_cx<cx>_cz<cz>_r<r>`.
 - `--overview-width <u32>` / `--overview-height <u32>`: graph/macro overview image size, default
@@ -58,10 +57,9 @@ world_x = center_chunk_x * CHUNK_EDGE + CHUNK_EDGE / 2
 world_z = center_chunk_z * CHUNK_EDGE + CHUNK_EDGE / 2
 ```
 
-- `pixelize_preview` and `heightfield_preview` receive chunk coordinates directly.
-- This applies to graph, macro map, biome map, and macro field overview children.
-- The zoomed `macro_field_preview` receives the converted world-block center plus
-  `--chunk-radius <r>`. For `r = 0` smoke runs this child-only value is clamped to `1`.
+- `macro_map_preview`, `macro_field_preview`, `pixelize_preview`, and `heightfield_preview` receive chunk coordinates directly.
+- Graph and biome map overview children receive the converted world-block center.
+- Steps 03 and 05 use a fixed large macro overview radius; step 06 receives the suite radius exactly.
 
 ## Child Binaries
 
@@ -83,8 +81,8 @@ preview binaries already exist.
 2. `graph_voronoi_preview --mode elevation`
 3. `macro_map_preview`
 4. `biome_map_preview`
-5. `macro_field_preview --channel combined --contours --contour-step 8`
-6. `macro_field_preview --channel combined --contours --contour-step 8 --chunk-radius <r>`
+5. `macro_field_preview <seed> <cx> <cz> <overview-r> --channel combined --contours --contour-step 8`
+6. `macro_field_preview <seed> <cx> <cz> <r> --channel combined --contours --contour-step 8`
 7. `pixelize_preview <seed> <cx> <cz> <r>`
 8. `heightfield_preview <seed> <cx> <cz> --chunk-radius <r>`
 

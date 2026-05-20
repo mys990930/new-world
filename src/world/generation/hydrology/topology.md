@@ -15,10 +15,9 @@
 - `LakeInlet`과 `LakeOutlet` marker가 land-side endpoint에만 생기도록 정리한다.
 - selected graph의 multi-incoming/shared-corner 충돌을 정리하되, 두 incoming이 하나의 outgoing으로
   합류하는 정상 confluence는 보존한다.
-- coast-reaching selected river mouth를 non-lake ocean-owned edge 하나만큼 연장해 downstream stage가
-  하구를 실제 바다 안쪽까지 carve할 수 있게 한다.
-  이 연장 edge가 endpoint corner 기준 ocean/non-ocean transition이면 macro_map이 같은 edge를 coast
-  guide로 분류해야 하며, topology는 별도 river-mouth boundary curve를 만들지 않는다.
+- coast-reaching selected river는 land/coast terminal endpoint에서 종료한다.
+  topology는 non-lake ocean-owned edge를 추가 selected segment로 연장하지 않으며, downstream stage가
+  하구 표현을 만들더라도 selected hydrology topology 밖의 heightfield-local 처리로 다룬다.
 - 서로 다른 corner index가 같은 Voronoi corner id로 materialize되는 경우에도 public selected graph는
   그 corner id에서 하나의 downstream selected continuation만 갖도록 정리한다.
 - graph corner id가 달라도 같은 world-space 위치에 겹쳐 보이는 selected endpoint group은 하나의
@@ -76,7 +75,6 @@
 
 현재 구현은 `src/world/generation/hydrology/topology.rs` 안에 있다.
 
-- `extend_selected_river_mouths_one_ocean_edge`
 - `enforce_lake_contact_topology`
 - `remove_invalid_terminal_intersections`
 - `prune_multi_incoming_selected_branches`

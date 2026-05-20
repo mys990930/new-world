@@ -608,7 +608,10 @@ async fn create_backend(
     });
     let shadow_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderer_shadow_pipeline_layout"),
-        bind_group_layouts: &[Some(&shadow_pass_bind_group_layout)],
+        bind_group_layouts: &[
+            Some(&shadow_pass_bind_group_layout),
+            Some(&block_texture_bind_group_layout),
+        ],
         immediate_size: 0,
     });
     let sun_overlay_pipeline_layout =
@@ -749,7 +752,12 @@ async fn create_backend(
             },
         }),
         multisample: wgpu::MultisampleState::default(),
-        fragment: None,
+        fragment: Some(wgpu::FragmentState {
+            module: &shadow_depth_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[],
+        }),
         multiview_mask: None,
         cache: None,
     });

@@ -30,6 +30,7 @@ pub struct TextureTileDef {
 pub enum BlockRenderKind {
     Empty,
     Cube,
+    FoliageCross,
 }
 
 #[repr(u32)]
@@ -92,6 +93,10 @@ impl Eq for BlockDef {}
 impl BlockDef {
     pub fn is_rendered_cube(&self) -> bool {
         matches!(self.render_kind, BlockRenderKind::Cube)
+    }
+
+    pub fn is_rendered_foliage_cross(&self) -> bool {
+        matches!(self.render_kind, BlockRenderKind::FoliageCross)
     }
 
     pub fn is_opaque(&self) -> bool {
@@ -197,11 +202,12 @@ impl BlockRegistry {
             let render_kind = match block.render {
                 ManifestRenderKind::Empty => BlockRenderKind::Empty,
                 ManifestRenderKind::Cube => BlockRenderKind::Cube,
+                ManifestRenderKind::FoliageCross => BlockRenderKind::FoliageCross,
             };
 
             let face_textures = match render_kind {
                 BlockRenderKind::Empty => FaceTextureSet::WHITE,
-                BlockRenderKind::Cube => FaceTextureSet {
+                BlockRenderKind::Cube | BlockRenderKind::FoliageCross => FaceTextureSet {
                     top: lookup_texture(&textures_by_key, &block.top)?,
                     bottom: lookup_texture(&textures_by_key, &block.bottom)?,
                     side: lookup_texture(&textures_by_key, &block.side)?,
@@ -430,6 +436,7 @@ pub struct ManifestTextureDef {
 pub enum ManifestRenderKind {
     Empty,
     Cube,
+    FoliageCross,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -538,5 +545,23 @@ mod tests {
                 .surface_height(),
             0.9
         );
+        let leaves = registry
+            .block(
+                registry
+                    .block_id("temperate_deciduous_leaves")
+                    .expect("tree leaves should exist"),
+            )
+            .expect("tree leaves definition should exist");
+        assert!(leaves.is_rendered_cube());
+        assert!(!leaves.is_opaque());
+        let vine = registry
+            .block(
+                registry
+                    .block_id("swamp_cypress_vine")
+                    .expect("tree vine should exist"),
+            )
+            .expect("tree vine definition should exist");
+        assert!(vine.is_rendered_foliage_cross());
+        assert!(!vine.is_opaque());
     }
 }

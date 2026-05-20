@@ -1,7 +1,7 @@
 id = 35
 key = "boreal_taiga_conifer_leaves"
 solid = true
-opaque = true
+opaque = false
 render = "cube"
 material = "foliage"
 top = "boreal_taiga_conifer_leaves"

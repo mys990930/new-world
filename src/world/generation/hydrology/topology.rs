@@ -2,77 +2,12 @@ use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
 use super::super::graph::{VoronoiCornerId, VoronoiEdgeId};
-use super::super::macro_map::{MacroEdge, MacroSurfaceKind};
+use super::super::macro_map::MacroEdge;
 use super::routing::CornerNeighbor;
 use super::types::{
     GraphDrainageNodeKind, GraphHydrologyTopologyStats, GraphLocalMinimumResolution,
     HydrologyConfig, LakeContactTopology, LakeTerminalPolicy,
 };
-
-pub(super) fn extend_selected_river_mouths_one_ocean_edge(
-    selected: &mut [bool],
-    downstream: &mut [Option<usize>],
-    downstream_edges: &mut [Option<VoronoiEdgeId>],
-    terminals: &[bool],
-    resolutions: &[GraphLocalMinimumResolution],
-    corner_surface_kinds: &[Option<MacroSurfaceKind>],
-    lake_candidates: &[bool],
-    adjacency: &[Vec<CornerNeighbor>],
-    edge_map: &HashMap<VoronoiEdgeId, MacroEdge>,
-) -> usize {
-    let mut incoming_selected = vec![0_u32; selected.len()];
-    let mut outgoing_selected = vec![0_u32; selected.len()];
-    for (index, is_selected) in selected.iter().copied().enumerate() {
-        if !is_selected {
-            continue;
-        }
-        outgoing_selected[index] = outgoing_selected[index].saturating_add(1);
-        if let Some(target) = downstream[index] {
-            incoming_selected[target] = incoming_selected[target].saturating_add(1);
-        }
-    }
-
-    let mut extended = 0usize;
-    for index in 0..selected.len() {
-        if incoming_selected[index] == 0
-            || outgoing_selected[index] > 0
-            || !(terminals[index] || resolutions[index] == GraphLocalMinimumResolution::OceanOutlet)
-            || lake_candidates[index]
-        {
-            continue;
-        }
-
-        let Some(candidate) = adjacency[index]
-            .iter()
-            .copied()
-            .filter(|neighbor| {
-                !lake_candidates[neighbor.index]
-                    && !edge_map
-                        .get(&neighbor.edge)
-                        .is_some_and(|edge| edge.lake_class.excludes_selected_river())
-                    && corner_surface_kinds
-                        .get(neighbor.index)
-                        .copied()
-                        .flatten()
-                        .is_some_and(MacroSurfaceKind::is_ocean_owned)
-            })
-            .min_by(|left, right| {
-                left.index
-                    .cmp(&right.index)
-                    .then_with(|| left.edge.0.cmp(&right.edge.0))
-            })
-        else {
-            continue;
-        };
-
-        downstream[index] = Some(candidate.index);
-        downstream_edges[index] = Some(candidate.edge);
-        selected[index] = true;
-        extended += 1;
-    }
-
-    extended
-}
 
 pub(super) fn resolve_lake_contact_topology(
     downstream: &mut [Option<usize>],

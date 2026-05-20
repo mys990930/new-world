@@ -1,8 +1,8 @@
 id = 51
 key = "tropical_rainforest_jungle_vine"
 solid = true
-opaque = true
-render = "cube"
+opaque = false
+render = "foliage_cross"
 material = "foliage"
 top = "tropical_rainforest_jungle_vine"
 bottom = "tropical_rainforest_jungle_vine"

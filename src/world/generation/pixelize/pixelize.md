@@ -2,15 +2,15 @@
 
 ## 역할
 
-`pixelize`는 graph-first generator의 11단계인 chunk pixelize 계약을 소유한다.
+`pixelize`는 graph-first generator의 12단계인 chunk pixelize 계약을 소유한다.
 
-이 단계는 stage 10 `macro_field`가 만든 `MacroFieldTile`을 읽어, 청크 경계에 정렬된
+이 단계는 stage 11 `macro_field`가 만든 `MacroFieldTile`을 읽어, 청크 경계에 정렬된
 `1 world block = 1 pixel = 1 voxel column` 해상도의 resolved column cache로 바꾼다. 즉
 `macro_field`가 graph-derived source field cache라면, `pixelize`는 그 field를 chunk/window 단위
 column layout으로 확정하는 첫 단계다.
 
-`pixelize`는 graph topology, hydrology, noisy boundary, river plan을 다시 해석하지 않는다. 모든 macro
-의미는 입력 `MacroFieldSample`에 이미 들어 있어야 하며, 이 단계는 그 값을 column 좌표계와 integer
+`pixelize`는 graph topology, hydrology, noisy boundary, river plan, meso feature geometry를 다시 해석하지 않는다. 모든 macro
+의미와 meso contribution은 입력 `MacroFieldSample`에 이미 들어 있어야 하며, 이 단계는 그 값을 column 좌표계와 integer
 surface/water hint로 옮긴다.
 
 ---
@@ -21,7 +21,7 @@ surface/water hint로 옮긴다.
 - `MacroFieldTile` sample을 world/chunk/local 좌표가 있는 `PixelizedColumn`으로 변환
 - `combined_macro_height`를 shared block-height domain으로 읽어 integer `surface_y`를 resolve
 - ocean/lake/river hint에서 optional integer `water_y`를 만든다
-- terrain kind hint와 source macro masks를 downstream stage가 잃지 않도록 보존
+- terrain kind hint, source macro masks, meso-baked source channel을 downstream stage가 잃지 않도록 보존
 - `MacroFieldTile`의 `sample_spacing_blocks = 1.0` handoff를 runtime/cache 계약으로 고정
 - deterministic parallel conversion을 허용하되 output order는 chunk/local/world index 기준으로 안정화
 
@@ -31,7 +31,7 @@ surface/water hint로 옮긴다.
 
 - Voronoi graph 생성 또는 nearest site 재탐색
 - macro ownership, hydrology, river reach morphology, noisy boundary 판정
-- meso feature 또는 Perlin micro relief 생성
+- meso feature 해석 또는 Perlin micro relief 생성
 - biome/material/surface policy resolve
 - final `ChunkData` voxel fill
 - preview PNG encoding 또는 renderer/GPU 리소스 생성
@@ -40,7 +40,7 @@ surface/water hint로 옮긴다.
 
 ## 공개 API
 
-현재 public shape는 stage 11의 chunk-aligned column cache를 노출한다.
+현재 public shape는 stage 12의 chunk-aligned column cache를 노출한다.
 
 ```rust
 PixelizeConfig::default()
@@ -89,6 +89,8 @@ PixelizedColumn {
     source_terrain_ruggedness,
     source_river_valley_strength,
     source_river_flow_hint,
+    source_meso_delta_blocks,
+    source_meso_material_hint,
 }
 ```
 
@@ -96,7 +98,9 @@ PixelizedColumn {
 tile에서는 이 순서가 world z/x, 즉 chunk z/x와 local z/x로 안정적으로 해석된다. 같은 `(seed,
 generator_version, chunk range, MacroFieldTile, PixelizeConfig)`은 같은 column sequence를 만들어야 한다.
 `source_terrain_ruggedness`는 macro field의 final biome context ruggedness를 보존하며, downstream
-heightfield shoreline/bevel policy가 stage 11 handoff 뒤에도 같은 ruggedness context를 읽을 수 있게 한다.
+heightfield shoreline/bevel policy가 stage 12 handoff 뒤에도 같은 ruggedness context를 읽을 수 있게 한다.
+`source_meso_*` 계열 값은 stage 10 meso feature geometry를 다시 읽은 결과가 아니라, stage 11
+macro_field가 이미 sample에 bake한 contribution/hint를 보존한 것이다.
 
 ---
 
@@ -110,7 +114,7 @@ heightfield shoreline/bevel policy가 stage 11 handoff 뒤에도 같은 ruggedne
 - 각 sample은 하나의 final voxel column 후보가 된다.
 
 overview용 `macro_field_preview`처럼 더 넓은 footprint를 낮은 density로 샘플한 tile은 pixelize 입력이
-아니다. 그런 tile은 stage 10 preview surface이며, stage 11 column resolve를 대표하지 않는다.
+아니다. 그런 tile은 stage 11 preview surface이며, stage 12 column resolve를 대표하지 않는다.
 
 ---
 
@@ -154,7 +158,7 @@ macro field tile cache
 -> voxel fill writes ChunkData
 ```
 
-`MacroFieldTileCache`는 stage 10 source field cache이고, `PixelizedChunkArea`는 stage 11 chunk-aligned
+`MacroFieldTileCache`는 stage 11 source field cache이고, `PixelizedChunkArea`는 stage 12 chunk-aligned
 column cache다. chunk fill hot path는 graph/macro/hydrology/boundary를 다시 계산하지 않고 이 column
 cache 또는 그 downstream heightfield/voxel-column output을 읽는다.
 
@@ -162,7 +166,7 @@ cache 또는 그 downstream heightfield/voxel-column output을 읽는다.
 
 ## Preview
 
-`pixelize_preview`는 stage 11 output을 topdown chunk map으로 검사한다.
+`pixelize_preview`는 stage 12 output을 topdown chunk map으로 검사한다.
 
 - positional input은 `<seed> <cx> <cz> <r>`이다.
 - `cx/cz`는 chunk coordinate이고, `r`은 inclusive square chunk radius다.
@@ -173,19 +177,19 @@ cache 또는 그 downstream heightfield/voxel-column output을 읽는다.
 - PNG metadata/stdout은 chunk range, world block bounds, column resolution, sea level, height range,
   standing-water count, river-water hint count, source macro-field cache key를 기록한다.
 
-preview는 stage 11의 layout contract를 확인하는 표면이다. preview renderer가 macro field를 직접
+preview는 stage 12의 layout contract를 확인하는 표면이다. preview renderer가 macro field를 직접
 재샘플해서 column을 만들면 안 되며, 반드시 `PixelizedChunkArea`를 그려야 한다.
 
 ---
 
 ## 불변식
 
-1. `pixelize`는 `MacroFieldTile`만 소비하며 graph/macro/hydrology/river-plan/boundary를 직접 다시
+1. `pixelize`는 `MacroFieldTile`만 소비하며 graph/macro/hydrology/river-plan/boundary/meso-feature를 직접 다시
    해석하지 않는다.
 2. 하나의 output pixel은 하나의 world block column이다.
 3. output footprint는 chunk boundary에 정렬되어야 한다.
 4. `surface_y`와 `water_y`는 integer block height다.
-5. source `combined_macro_height`와 macro masks는 downstream stage가 진단/정책에 쓸 수 있게 보존된다.
+5. source `combined_macro_height`, macro masks, meso-baked source channel은 downstream stage가 진단/정책에 쓸 수 있게 보존된다.
 6. 같은 입력 tile과 config는 같은 `PixelizedChunkArea`를 만든다.
 7. 병렬 실행은 허용되지만 column order와 값은 scheduling에 의존하면 안 된다.
 8. `heightfield`는 새 path에서 first pixel/column resolve를 다시 수행하지 않고 `PixelizedColumn`을

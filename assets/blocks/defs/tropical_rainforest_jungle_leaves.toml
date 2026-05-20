@@ -1,7 +1,7 @@
 id = 49
 key = "tropical_rainforest_jungle_leaves"
 solid = true
-opaque = true
+opaque = false
 render = "cube"
 material = "foliage"
 top = "tropical_rainforest_jungle_leaves"

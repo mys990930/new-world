@@ -327,6 +327,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if input.material_kind == MATERIAL_WATER {
         alpha = clamp(alpha * 0.68, 0.0, 0.82);
     }
+    if input.material_kind == MATERIAL_FOLIAGE && alpha < 0.42 {
+        discard;
+    }
     if alpha <= 0.001 {
         discard;
     }

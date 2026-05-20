@@ -19,6 +19,7 @@ const DEFAULT_ZOOM_HEIGHT: u32 = 720;
 const DEFAULT_HEIGHTFIELD_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHTFIELD_HEIGHT: u32 = 720;
 const DEFAULT_CONTOUR_STEP_BLOCKS: i32 = 8;
+const MACRO_OVERVIEW_RADIUS: i32 = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SuiteConfig {
@@ -124,7 +125,7 @@ fn preview_steps(config: &SuiteConfig) -> Vec<PreviewStep> {
     let chunk_x = config.center_chunk_x.to_string();
     let chunk_z = config.center_chunk_z.to_string();
     let radius = config.radius.to_string();
-    let macro_field_radius = config.radius.max(1).to_string();
+    let macro_overview_radius = MACRO_OVERVIEW_RADIUS.to_string();
     let overview_width = config.overview_width.to_string();
     let overview_height = config.overview_height.to_string();
     let zoom_width = config.zoom_width.to_string();
@@ -175,8 +176,9 @@ fn preview_steps(config: &SuiteConfig) -> Vec<PreviewStep> {
             output_file: "03_macro_map.png",
             args: vec![
                 seed.clone(),
-                world_x.clone(),
-                world_z.clone(),
+                chunk_x.clone(),
+                chunk_z.clone(),
+                macro_overview_radius.clone(),
                 "--width".into(),
                 overview_width.clone(),
                 "--height".into(),
@@ -205,8 +207,9 @@ fn preview_steps(config: &SuiteConfig) -> Vec<PreviewStep> {
             output_file: "05_macro_combined.png",
             args: vec![
                 seed.clone(),
-                world_x.clone(),
-                world_z.clone(),
+                chunk_x.clone(),
+                chunk_z.clone(),
+                macro_overview_radius,
                 "--channel".into(),
                 "combined".into(),
                 "--contours".into(),
@@ -225,15 +228,14 @@ fn preview_steps(config: &SuiteConfig) -> Vec<PreviewStep> {
             output_file: "06_macro_zoom.png",
             args: vec![
                 seed.clone(),
-                world_x,
-                world_z,
+                chunk_x.clone(),
+                chunk_z.clone(),
+                radius.clone(),
                 "--channel".into(),
                 "combined".into(),
                 "--contours".into(),
                 "--contour-step".into(),
                 contour_step,
-                "--chunk-radius".into(),
-                macro_field_radius,
                 "--width".into(),
                 zoom_width.clone(),
                 "--height".into(),
@@ -514,6 +516,15 @@ mod tests {
         assert_eq!(steps[0].args[2], "16");
         assert_eq!(steps[3].args[1], "-2224");
         assert_eq!(steps[3].args[2], "16");
+        assert_eq!(steps[4].args[1], "-70");
+        assert_eq!(steps[4].args[2], "0");
+        assert_eq!(steps[2].args[1], "-70");
+        assert_eq!(steps[2].args[2], "0");
+        assert_eq!(steps[2].args[3], MACRO_OVERVIEW_RADIUS.to_string());
+        assert_eq!(steps[4].args[3], MACRO_OVERVIEW_RADIUS.to_string());
+        assert_eq!(steps[5].args[1], "-70");
+        assert_eq!(steps[5].args[2], "0");
+        assert_eq!(steps[5].args[3], "8");
         assert_eq!(steps[6].args[1], "-70");
         assert_eq!(steps[6].args[2], "0");
         assert_eq!(steps[6].args[3], "8");
@@ -526,19 +537,14 @@ mod tests {
     }
 
     #[test]
-    fn radius_zero_keeps_pixelize_center_chunk_and_gives_macro_field_a_nonzero_span() {
+    fn radius_zero_is_forwarded_to_chunk_radius_previews() {
         let config = parse_args_from(["42", "--radius", "0"])
             .expect("config")
             .validate()
             .unwrap();
         let steps = preview_steps(&config);
 
-        assert!(
-            steps[5]
-                .args
-                .windows(2)
-                .any(|pair| pair == ["--chunk-radius", "1"])
-        );
+        assert_eq!(steps[5].args[3], "0");
         assert_eq!(steps[6].args[3], "0");
         assert!(
             steps[7]

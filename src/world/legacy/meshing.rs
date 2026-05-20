@@ -65,6 +65,10 @@ pub fn build_chunk_mesh(
                     continue;
                 };
                 let block_def = registry.block_or_missing(block);
+                if block_def.is_rendered_foliage_cross() {
+                    append_foliage_cross(&mut mesh, center.coord(), local, block_def);
+                    continue;
+                }
                 if !block_def.is_rendered_cube() {
                     continue;
                 }
@@ -119,7 +123,11 @@ fn uniform_chunk_mesh(
     let block = center.uniform_block()?;
     let block_def = registry.block_or_missing(block);
     if !block_def.is_rendered_cube() {
-        return Some(CpuMesh::default());
+        return if block_def.is_rendered_foliage_cross() {
+            None
+        } else {
+            Some(CpuMesh::default())
+        };
     }
     if !block_def.is_opaque() || block_def.surface_height() < 1.0 - HEIGHT_EPSILON {
         return None;
@@ -252,6 +260,98 @@ fn append_face(
         base_index + 2,
         base_index + 3,
     ]);
+}
+
+fn append_foliage_cross(
+    mesh: &mut CpuMesh,
+    chunk: ChunkCoord,
+    local: LocalBlockCoord,
+    block_def: &BlockDef,
+) {
+    let world = chunk_local_to_world(chunk, local);
+    let min = [world.0 as f32, world.1 as f32, world.2 as f32];
+    let max = [
+        min[0] + 1.0,
+        min[1] + block_def.surface_height(),
+        min[2] + 1.0,
+    ];
+    let color = block_def.tint_as_linear_rgba();
+    let texture_layer = u32::from(block_def.texture_for_face(BlockFace::PosZ).0);
+    let material_kind = block_def.material;
+
+    let quads = [
+        (
+            [
+                [min[0], min[1], min[2]],
+                [max[0], min[1], max[2]],
+                [max[0], max[1], max[2]],
+                [min[0], max[1], min[2]],
+            ],
+            normalize2([-1.0, 0.0, 1.0]),
+        ),
+        (
+            [
+                [max[0], min[1], min[2]],
+                [min[0], min[1], max[2]],
+                [min[0], max[1], max[2]],
+                [max[0], max[1], min[2]],
+            ],
+            normalize2([1.0, 0.0, 1.0]),
+        ),
+    ];
+
+    for (positions, normal) in quads {
+        append_textured_quad(mesh, positions, color, normal, texture_layer, material_kind);
+    }
+}
+
+fn append_textured_quad(
+    mesh: &mut CpuMesh,
+    positions: [[f32; 3]; 4],
+    color: [f32; 4],
+    normal: [f32; 3],
+    texture_layer: u32,
+    material_kind: BlockMaterialKind,
+) {
+    let base_index = mesh.vertices.len() as u32;
+    let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+
+    extend_bounds(&mut mesh.bounds, &positions);
+
+    for (position, uv) in positions.into_iter().zip(uvs) {
+        mesh.vertices.push(MeshVertex {
+            position,
+            color,
+            normal,
+            uv,
+            texture_layer,
+            material_kind,
+            contour_edges: 0,
+        });
+    }
+
+    mesh.indices.extend_from_slice(&[
+        base_index,
+        base_index + 1,
+        base_index + 2,
+        base_index,
+        base_index + 2,
+        base_index + 3,
+        base_index + 2,
+        base_index + 1,
+        base_index,
+        base_index + 3,
+        base_index + 2,
+        base_index,
+    ]);
+}
+
+fn normalize2(value: [f32; 3]) -> [f32; 3] {
+    let length = (value[0] * value[0] + value[1] * value[1] + value[2] * value[2]).sqrt();
+    if length <= f32::EPSILON {
+        return [0.0, 1.0, 0.0];
+    }
+    [value[0] / length, value[1] / length, value[2] / length]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -709,6 +809,35 @@ mod tests {
             top_face_vertices
                 .iter()
                 .all(|vertex| vertex.contour_edges & TOP_EDGE_POS_X != 0)
+        );
+    }
+
+    #[test]
+    fn foliage_cross_vine_emits_two_double_sided_alpha_quads() {
+        let registry = test_registry();
+        let vine = registry
+            .block_id("swamp_cypress_vine")
+            .expect("tree vine should exist");
+        let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        chunk
+            .set_block(LocalBlockCoord::new(0, 0, 0).unwrap(), vine)
+            .unwrap();
+
+        let mesh = build_chunk_mesh(&chunk.snapshot(), NeighborChunks::default(), &registry);
+
+        assert_eq!(mesh.vertices.len(), 8);
+        assert_eq!(mesh.triangle_count(), 8);
+        assert_eq!(
+            mesh.bounds,
+            Some(RenderBounds {
+                min: [0.0, 0.0, 0.0],
+                max: [1.0, 1.0, 1.0],
+            })
+        );
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.material_kind == BlockMaterialKind::Foliage)
         );
     }
 

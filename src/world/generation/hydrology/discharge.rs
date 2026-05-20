@@ -2,8 +2,8 @@ use rayon::prelude::*;
 
 use super::super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch, WorldPlanePoint};
 use super::types::{
-    splitmix64, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyRole,
-    GraphRiverSegment, GraphRiverSegmentId, LakeContactTopology, WatershedId,
+    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyRole,
+    GraphRiverSegment, GraphRiverSegmentId, LakeContactTopology, WatershedId, splitmix64,
 };
 
 pub(super) fn resolve_selected_flow_accumulation(

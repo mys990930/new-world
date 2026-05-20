@@ -1,7 +1,7 @@
 id = 33
 key = "polar_tundra_shrub_leaves"
 solid = true
-opaque = true
+opaque = false
 render = "cube"
 material = "foliage"
 top = "polar_tundra_shrub_leaves"

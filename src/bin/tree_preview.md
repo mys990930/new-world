@@ -49,4 +49,6 @@ cargo run --bin tree_preview -- jungle 42 --output target/tree-preview/jungle.pn
 - It converts the generated relative tree voxels into temporary chunks only for meshing and rendering.
 - The preview ground is a temporary `grass` block plane.
 - The preview camera uses a lower-than-gameplay angle and tighter framing so tree silhouettes and block faces read clearly.
+- The preview environment intentionally uses a muted diagnostic sunset-style light and darker clear color, closer to the CPU isometric heightfield preview mood than the bright gameplay midday preset.
 - The block palette comes from the default block registry and uses the climate-specific test tree blocks under `assets/blocks`.
+- Tree leaves remain cube-rendered foliage blocks with muted alpha-cutout leaf textures, while vine blocks use `render = "foliage_cross"` cutout quads.

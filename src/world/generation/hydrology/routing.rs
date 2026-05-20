@@ -4,7 +4,7 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 use super::super::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch};
 use super::super::macro_map::{GraphMacroMap, MacroCorner, MacroSurfaceKind};
-use super::types::{splitmix64, GraphLocalMinimumResolution, WatershedId};
+use super::types::{GraphLocalMinimumResolution, WatershedId, splitmix64};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CornerNeighbor {

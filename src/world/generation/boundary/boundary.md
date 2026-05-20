@@ -53,6 +53,7 @@ generate_noisy_boundaries(
 ```rust
 BoundaryCache {
     curves: Vec<NoisyBoundaryCurve>,
+    junctions(): Vec<BoundaryJunction>,
     stats: BoundaryStats,
 }
 
@@ -64,6 +65,13 @@ NoisyBoundaryCurve {
     amplitude: f32,
     seed: u64,
     guard: BoundaryGuard,
+}
+
+BoundaryJunction {
+    corner: VoronoiCornerId,
+    position: WorldPlanePoint,
+    sites: Vec<VoronoiSiteId>,
+    radius_blocks: f32,
 }
 ```
 
@@ -160,6 +168,12 @@ launch 구현은 Amit식 noisy edge의 핵심인 "edge가 움직일 수 있는 g
   다시 clamp하고 endpoint를 원본 corner로 재고정한다. 너무 짧은 degenerate segment는 angle 검증과
   relaxation에서 제외할 수 있다.
 - endpoint는 항상 원본 corner 위치를 유지한다.
+- raw corner anchor는 그대로 유지하지만, `BoundaryCache`는 shared corner 주변의 sampling singularity를
+  줄이기 위한 deterministic `BoundaryJunction` influence를 제공한다. junction은 curve anchor의 corner id,
+  corner position, incident site id set, 평균 incident edge length 기반 radius를 가진다. launch radius는
+  평균 edge length의 약 0.30배이며 24..72 blocks로 clamp한다. 이 influence는 raw graph topology나
+  canonical curve point를 바꾸지 않고, downstream owner sampling이 corner 근처에서 단일 edge-side wedge에
+  잠기지 않게 하는 보조 cache data다.
 - 기본 subdivision level은 6이며 curve당 65개의 point를 만든다. 점 수는 raw topology를 바꾸는
   것이 아니라 preview/heightfield가 더 부드러운 곡선을 샘플할 수 있게 하는 geometry layer다.
 - amplitude profile 값은 edge/site local scale에 곱해지는 비율이며, launch 기본값은 4K preview에서도
@@ -208,6 +222,10 @@ graph region cache
 `BoundaryCache`는 `graph edge id -> noisy polyline/spline` 전체를 저장한다. chunk fill은 boundary
 curve를 새로 만들지 않고 boundary cache를 샘플한다. cache miss는 worker에서 graph/macro/hydrology/final-cell-context와
 같은 deterministic key/padding 정책으로 생성한다.
+`BoundaryJunction`은 같은 cache에서 curve anchor를 기준으로 deterministic하게 파생된다. 현재 Rust API는
+기존 public cache literal compatibility를 유지하기 위해 `BoundaryCache::junctions()`와
+`BoundaryCache::junction_for_corner()`로 노출하며, downstream cache context가 이를 한 번 materialize해
+사용한다.
 
 ---
 
@@ -242,6 +260,8 @@ curve가 없으므로 boundary stats의 책임이 아니다. river mouth edge가
   구현은 평균 second-difference를 강하게 제한해 톱니형 polyline 회귀를 잡는다.
 - local sharpness: 평균 roughness가 낮아도 일부 point에 pointy corner spike가 생기면 회귀다. 구현은
   normal displacement second-difference의 high-percentile과 maximum을 낮은 threshold로 함께 테스트한다.
+- junction influence: shared corner는 deterministic `BoundaryJunction`을 만들고 curve count를 바꾸지
+  않아야 한다.
 - angle limit: 의미 있는 interior vertex의 local turn angle은 기본 cap인 60도 아래여야 하며, 90도
   이상 right-angle/V-shape corner는 회귀다. 너무 짧은 degenerate segment는 angle assertion에서 제외할 수 있다.
 - no duplicate river curve: hydrology selected segment가 boundary curve 수를 늘리면 안 된다.

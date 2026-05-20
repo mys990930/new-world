@@ -12,6 +12,7 @@
 - Surface configure / resize handling
 - Render pipeline, shader, camera uniform, environment uniform, and sun-shadow uniform management
 - Block texture array decoding policy and GPU bind-group management
+- Alpha-cutout foliage sampling for terrain color and sun-shadow depth passes
 - Visible sun overlay and directional shadow-map rendering
 - Consume renderer material kinds and run material-aware shading
 - Depth buffer and shadow-map creation/recreation
@@ -108,10 +109,11 @@ NOT:
 3. GPU resource creation and destruction happen only inside the renderer.
 4. Block textures are uploaded as a same-size `texture_2d_array`, and mesh vertices address them by `texture_layer`.
 5. Mesh vertices also carry `material_kind`, but the renderer only interprets renderer-side shading enums and never queries world block definitions directly.
-6. The visible sun and shadow-map logic are renderer-owned visualizations of the current environment state, not gameplay-owned world objects.
-7. Future moving voxel-entity rendering should consume bridge-produced octant / pose data and must not infer gameplay-facing direction from velocity or input on its own.
-8. Screen-space UI sprites stay renderer-local DTOs and do not expose ECS/world ownership.
-9. Renderer weather is presentation-only; source weather scalars are world-owned and simulation-updated as specified in `../simulation/weather.md`.
+6. Foliage alpha cutout is renderer-owned shading behavior keyed by render material and uploaded texture alpha; foliage shape ownership still starts in world meshing.
+7. The visible sun and shadow-map logic are renderer-owned visualizations of the current environment state, not gameplay-owned world objects.
+8. Future moving voxel-entity rendering should consume bridge-produced octant / pose data and must not infer gameplay-facing direction from velocity or input on its own.
+9. Screen-space UI sprites stay renderer-local DTOs and do not expose ECS/world ownership.
+10. Renderer weather is presentation-only; source weather scalars are world-owned and simulation-updated as specified in `../simulation/weather.md`.
 
 ### Current Implementation Notes
 
@@ -134,3 +136,4 @@ NOT:
 - For future animated voxel creatures, precreated data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.
 - Water triangles are now renderer-split into a translucent terrain partition so semi-transparent water can render after opaque terrain without changing the app bridge DTO shape.
 - Exposed water surface height remains world-owned geometry; the renderer only shades and blends the lowered mesh it receives.
+- Foliage triangles remain in the opaque terrain partition, but the terrain and shadow shaders discard pixels below the foliage alpha threshold so cutout leaves/vines write depth and cast cutout sun shadows.

@@ -2,10 +2,10 @@
 
 ## 역할
 
-`surface_plan`은 graph-first generator의 13단계인 biome/material/water/coast surface policy resolve
+`surface_plan`은 graph-first generator의 14단계인 biome/material/water/coast surface policy resolve
 계약을 소유한다.
 
-이 단계는 stage 12 `heightfield`가 확정한 column height/water hint와, stage 8 final cell context에서
+이 단계는 stage 13 `heightfield`가 확정한 column height/water hint와, stage 8 final cell context에서
 이미 resolve된 biome/context를 함께 읽어 마지막 `voxel` fill이 소비할 column별 block-stack plan을 만든다.
 
 이 단계는 visible material boundary를 안정적으로 만들지만, hard polygon owner를 그대로 색칠하지
@@ -17,10 +17,10 @@
 
 - 이미 resolve된 biome influence와 hydrology role에서 surface policy 선택
 - ocean, coast, lake, river, wetland, floodplain의 material 의미 구분
-- slope, exposure, elevation, hydration에 따른 beach/cliff/rock/soil/vegetation 전환
+- elevation, hydration, hydrology role에 따른 beach/soil/sediment/vegetation 전환
 - column voxel fill이 읽을 surface column plan 정의
 - seasonal/runtime surface state와 연결될 수 있는 world-side 계약 유지
-- biome별 기본 block palette와 hydrology/slope override priority 정의
+- biome별 기본 block palette와 hydrology override priority 정의
 - deterministic material transition과 block-scale boundary breakup 정의
 
 ---
@@ -44,17 +44,19 @@ surface resolve는 아래 입력을 함께 본다.
 
 - stage 8 final cell context의 continuous temperature / hydration / ruggedness
 - dominant site와 blended biome influence
-- heightfield surface y와 slope
+- heightfield surface y
 - ocean/lake/river/wetland/coast role
 - river flow accumulation과 floodplain width
 - ridge/fault/cliff guide
-- meso feature material hint와 deformation mask
+- macro_field/pixelize/heightfield가 보존한 meso feature material hint와 baked contribution mask
 - local soil/sediment class
 - runtime season/weather state가 허용하는 override
 
-현재 graph-first 구현에서는 biome/context가 `MacroFieldSample`에 보존되고, height/water/river bed hint는
-`HeightfieldColumn`에 보존된다. `surface_plan`의 첫 구현은 이 둘을 같은 row-major column footprint에서
-받아 하나의 입력으로 묶는다.
+현재 graph-first 구현에서는 canonical noisy boundary owner의 biome/context가 `MacroFieldSample`에
+보존되고, height/water/river bed hint는 `HeightfieldColumn`에 보존된다. `surface_plan`의 첫 구현은 이
+둘을 같은 row-major column footprint에서 받아 하나의 입력으로 묶는다. `MacroFieldSample.nearest_site`,
+water/mask channel, material policy가 읽는 `biome`/`biome_context`는 같은 noisy owner region을 따라야
+한다.
 
 ```text
 SurfaceColumnInput {
@@ -128,6 +130,8 @@ surface resolve는 아래 priority를 고정한다.
    - ocean, lake, river, wetland, coast는 같은 water mask로 합치지 않는다.
    - river는 selected hydrology를 다시 풀지 않고 `river_valley_strength`, `river_flow_hint`,
      `river_bed_depth_blocks`, `river_gravel_hint`, `river_cutbank_hint`만 읽는다.
+   - `coast_mask`는 넓은 coast distance diagnostic이므로 그 자체만으로 `Coast` role을 만들지 않는다.
+     coast material은 explicit coast terrain, stage 8 coast water role, 또는 coast biome에서 온다.
 2. biome과 final context를 읽어 기본 material policy family를 고른다.
    - biome은 이미 stage 8에서 resolve된 `GraphBiomeKind`를 소비한다.
    - `surface_plan`은 temperature/hydration으로 biome을 다시 판정하지 않는다.
@@ -135,12 +139,7 @@ surface resolve는 아래 priority를 고정한다.
    - active ocean/lake/river bed, saturated wetland, strong floodplain, shoreline/intertidal strip은
      biome 기본 top보다 우선한다.
    - dry basin은 water override가 아니라 closed lowland/dry sediment override다.
-4. exposure/rocky override를 적용한다.
-   - 초기 구현은 `terrain_ruggedness`, `ridge_influence`, `river_bank_roughness_hint`,
-     `coast_mask`, `terrain_kind`를 slope proxy로 사용한다.
-   - area-level 구현에서는 3x3 neighbor `surface_y` delta로 slope/exposure를 계산해 rocky/cliff override를
-     더 정확히 적용한다.
-5. deterministic transition을 적용한다.
+4. deterministic transition을 적용한다.
    - visible material boundary는 hard owner line을 그대로 따르지 않는다.
    - transition은 world-space coordinate, seed/generator version, source material pair에서 결정되는
      stable noise 또는 boundary-step pass를 사용한다.
@@ -154,15 +153,23 @@ surface resolve는 아래 priority를 고정한다.
 hydrology role은 biome 기본 palette보다 강하지만, 모든 주변 땅을 mud로 바꾸지는 않는다.
 
 - active ocean water가 있는 column은 bed top을 `sand`, `silt`, `clay`, `gravel`, `stone` 계열로 선택한다.
-  shallow/low-energy shelf는 `sand`/`silt`, deeper or rugged bed는 `clay`/`stone`/`rock` 쪽으로 간다.
+  shallow/low-energy shelf는 `sand`/`silt`, higher-energy bed는 `gravel` 쪽으로 갈 수 있다.
 - lake column은 `silt`, `clay`, `mud`를 기본 sediment로 쓰고, rugged edge나 inlet/outlet 근처에서는
   `gravel`을 허용한다.
 - river core는 `gravel`, `silt`, `mud`, `wet_gravel` 계열을 쓴다. flow와 gravel/cutbank hint가 높을수록
   `gravel`/`wet_gravel`, low-energy floodplain은 `silt`/`mud`/`clay` 쪽으로 간다.
+- river valley/fan scalar가 남아 있는 dry land는 그 자체만으로 연속 sediment patch가 되면 안 된다.
+  dry bank나 mouth shoulder material은 selected river의 bed/roughness/gravel/cutbank hint와 충분히 강한
+  valley/flow hint를 함께 통과한 column에서만 deterministic speckle로 나타난다. active river core와
+  water column의 bed material은 계속 river sediment가 우선한다.
 - wetland는 `mud`, `peat`, `silt`, `clay`를 우선한다.
-- coast는 sandy/rocky/estuarine/mangrove 계열 biome과 `coast_mask`, ruggedness를 함께 본다.
-  sandy coast는 `sand`/`wet_sand`, rocky coast는 `rock`/`wet_gravel`/`stone`, estuary/lagoon/mangrove는
-  `mud`/`silt`/`clay`/`peat`를 우선한다.
+- coast는 sandy/estuarine/mangrove 계열 material을 우선한다.
+  ordinary coast는 `sand`/`wet_sand`, estuary/lagoon/mangrove는 active water, explicit coast terrain, or
+  already-coast columns with strong coast mask에서는 `mud`/`silt`/`clay`/`peat`를 우선한다.
+  `coast_mask`만 있는 ordinary land는 sand coast로 승격하지 않는다. `RockyCoast`, ruggedness, ridge scalar는
+  현재 기본 coast material을 `gravel`/`wet_gravel`/`rock`으로 승격하지 않는다.
+  dry weak coast-mouth shoulder는 selected mouth hint가 있을 때만 local `mud`/`silt` speckle을 허용하고,
+  나머지는 sandy/wet-sandy transition으로 남겨 broad rectangular mouth patch를 만들지 않는다.
 - dry basin은 `clay`, `silt`, `thin_soil`, `coarse_dirt`, `sand` 같은 dry sediment를 쓰며 water column을
   새로 만들지 않는다.
 
@@ -179,7 +186,14 @@ visible material boundary는 hard owner 경계를 그대로 따라가면 안 된
 - deterministic dithering
 - cover override
 - hydrology role 우선순위
-- slope/exposure 기반 rocky override
+- slope/exposure 기반 rocky override는 future work다. 현재 기본 resolve에서는 비활성이다.
+
+launch 구현의 material breakup은 noisy owner region을 다시 넓은 straight patch로 뒤집지 않는다. 먼저
+`boundary_mix_radius_blocks = 0`인 base resolve가 각 column의 noisy-owner policy material을 정하고,
+그 뒤 기본 radius `1` block, strength `28%`의 bounded local mix pass가 직교 인접한 다른 material을
+deterministic하게 일부 column만 빌려온다. 대각선으로만 닿는 material은 건너뛰지 않으므로 corner에서
+사각형 침범이 생기면 회귀다. 따라서 final top material이 base resolve와 다를 수 있는 범위는 이 local
+mix radius 안쪽뿐이다.
 
 ---
 
@@ -207,8 +221,8 @@ BiomeSurfacePolicy {
 }
 ```
 
-이 table은 biome 의미의 기본값만 제공한다. 실제 column output은 hydrology override와 exposure override를
-거친 뒤 확정된다.
+이 table은 biome 의미의 기본값만 제공한다. 실제 column output은 hydrology override와 deterministic
+transition을 거친 뒤 확정된다.
 
 초기 graph-first mapping은 아래를 seed table로 사용한다. `family`는 구현상의 policy family 이름이며,
 legacy `MaterialPolicyId`와 1:1로 고정되지 않는다.
@@ -267,14 +281,14 @@ legacy `MaterialPolicyId`와 1:1로 고정되지 않는다.
 4. MVP policy는 아래 범위만 포함한다.
    - biome 기본 palette
    - ocean/lake/river/wetland/coast/dry-basin override
-   - rugged/ridge/coast rocky override
+   - active ocean/lake/river/wetland/coast/dry-basin sediment override
    - deterministic top-material variation
 5. `voxel`은 surface plan을 소비하도록 확장한다.
    - terrain top 1 block은 `top_block`
    - 그 아래 `soil_depth_blocks`는 `subsurface_block`
    - 더 아래는 `base_block`
    - `terrain_top_y < y <= water_y`는 water/ice block
-6. vegetation placement는 계속 stage 14 이후 작업으로 남긴다.
+6. vegetation placement는 계속 stage 15 이후 작업으로 남긴다.
 
 첫 구현에서 preview 이미지는 새로 만들지 않아도 된다. 대신 unit test와 compile 검증은 반드시 수행한다.
 
@@ -284,7 +298,8 @@ legacy `MaterialPolicyId`와 1:1로 고정되지 않는다.
 
 1. `HeightfieldColumn` 또는 pixelized downstream column에 biome/context를 직접 보존해
    `MacroFieldTile` compatibility input을 제거한다.
-2. 3x3 neighbor slope/exposure, concavity, shoreline relative height를 `SurfacePlanArea` pass에서 계산한다.
+2. 3x3 neighbor slope/exposure, concavity, shoreline relative height를 `SurfacePlanArea` pass에서 계산하고,
+   별도 rocky/cliff material override를 다시 도입할지 검토한다.
 3. material transition을 단순 noise에서 boundary-aware stepping pass로 확장한다.
 4. runtime `SurfaceCondition`과 계절/날씨 상태를 연결해 wet, snow-covered, frozen, thawing cover override를
    추가한다.
@@ -347,8 +362,20 @@ priority를 함께 보고 실제 block을 배치한다.
 
 ## 현재 구현 상태
 
-- graph-first 저장 vertical slice에서는 아직 실제 surface/material resolve를 구현하지 않았다.
-- `world_create`가 사용하는 launch voxel fill은 이 단계를 stub으로 넘기며, 비물 지형은 임시로
-  registry의 `grass` block 하나만 사용한다.
-- ocean/lake/river/coast별 material policy는 이 문서의 계약으로 남아 있으며, 현재 stub이 최종 정책을
-  대체하지 않는다.
+- graph-first surface/material resolve launch slice가 `SurfaceColumnPlan`을 생성한다.
+- biome 기본 palette, ocean/lake/river/wetland/coast/dry-basin override, deterministic local material
+  variation을 적용한다.
+- `coast_mask`는 broad distance diagnostic으로 보존하지만, 그 값만으로 land biome을 coast/sand material로
+  승격하지 않는다.
+- rocky/exposure material override는 현재 기본 resolve에서 비활성이다. `terrain_ruggedness`,
+  `ridge_influence`, `RockyCoast` biome, river bank roughness hint는 active water/sediment rule을 제외하고
+  land/coast top material을 `gravel`/`wet_gravel`/`rock`/`exposed_rock`으로 승격하지 않는다.
+- `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `1`이고
+  `boundary_mix_strength_percent`는 `28`이다. 기본 surface plan
+  preview/generation path는 noisy-owner base material을 먼저 resolve한 뒤, 이 작은 radius 안에서만
+  Minecraft-style block-scale neighbor material breakup을 적용한다.
+- seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
+  noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
+  하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
+  한다. 이 audit은 ignored unit test로 보존하며, PNG를 만들지 않고 macro field, Perlin-enabled
+  heightfield, surface plan column data를 직접 비교한다.

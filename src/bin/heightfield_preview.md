@@ -29,7 +29,11 @@
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
-  - `--perlin`: enable optional heightfield Perlin micro relief. Default is off.
+  - `--perlin`: backward-compatible no-op alias; heightfield Perlin micro relief is on by
+    default.
+  - `--river-influence-color`: opt-in diagnostic terrain color mode. River core/bed influence is
+    colored separately from shoulder and broad-valley influence while the default output remains
+    unchanged. `--riverbed-influence-color` is accepted as a compatibility alias.
   - `--output <path>`
 
 ## Flow
@@ -43,9 +47,9 @@
    hidden X/Z scale layer; the `MacroFieldTile` column count and `sample_spacing_blocks` directly
    define the horizontal density while Y block height is resolved in the shared block-domain before
    rendering.
-7. If `--perlin` is present, add bounded heightfield-owned Perlin micro relief before contour-band
-   resolve, then snap/clamp the perturbed band result. Without `--perlin`,
-   `micro_relief_blocks` remains `0`.
+7. Add bounded heightfield-owned Perlin micro relief before contour-band resolve, then snap/clamp
+   the perturbed band result. `--perlin` is still accepted for older scripts but does not change the
+   default-on configuration.
 8. Snap heightfield surface/water output to integer block heights. Terrain and bed faces are kept
    as the first render pass even when a water surface exists above them.
 9. Project columns with a CPU 2D isometric column renderer. Water columns use the water surface as
@@ -59,8 +63,8 @@
 ## Interpretation
 
 - This binary is not final voxel fill.
-- Meso features are currently stubbed as zero. Perlin micro relief is available only with
-  `--perlin` and is disabled by default.
+- Meso features are currently stubbed as zero. Perlin micro relief is enabled by default for current
+  diagnostics; `--perlin` remains accepted as a backward-compatible no-op alias.
 - The default view is a CPU-rendered isometric column view, not a 3D orthographic camera. Projection
   is explicit:
 
@@ -101,6 +105,10 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   - subdued green-gray low land
   - pale gray high/ridge
   - muted gray/mauve dry basin
+- `--river-influence-color` replaces only the terrain color ramp with a river-influence diagnostic
+  ramp: core/riverbed columns use a hot magenta-orange color, shoulder/bank influence uses cyan,
+  and broad valley-only influence uses muted indigo. Water still renders as the same translucent
+  overlay, and the flag is off by default so normal preview output stays visually stable.
 - Ocean-owned dry terrain above sea level uses the same land ramp as ordinary land. If it renders
   blue, the issue is preview coloring, not heightfield water generation.
 - Water boxes come from heightfield water hints, not final fluid simulation. They are rendered as
@@ -120,7 +128,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   where each raw one-block interval opens the next 1-block terrace. This is not contour-line
   reconstruction; it is scalar-to-band quantization in the same block-height domain as the contour
   preview.
-- `--perlin` uses heightfield-owned deterministic world-space fBM micro relief before contour-band
+- The default Perlin path uses heightfield-owned deterministic world-space fBM micro relief before contour-band
   resolve, then snaps the perturbed source to integer block height. The preview-enabled default is
   noticeable but bounded, around `8` blocks amplitude with a `10` block clamp. Lake and submerged
   ocean source columns keep `0` land micro relief, river columns currently keep `0` to preserve
@@ -163,10 +171,16 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --width 1280 --height 72
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --width 1280 --height 720 --output target/heightfield-preview/heightfield-r8.png
 ```
 
-Optional Perlin micro relief:
+Backward-compatible Perlin alias:
 
 ```bash
 cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --perlin --output target/heightfield-preview/heightfield-r8-perlin.png
+```
+
+River influence diagnostic color:
+
+```bash
+cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --river-influence-color --output target/heightfield-preview/heightfield-r8-river-influence.png
 ```
 
 Quarter-view smoke set:

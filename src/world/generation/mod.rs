@@ -9,6 +9,7 @@ pub mod macro_map;
 pub mod pipeline;
 pub mod pixelize;
 pub mod river_plan;
+pub mod surface_plan;
 pub mod voxel;
 
 // Legacy generation remains available through `world::generation::*` until the
@@ -103,6 +104,12 @@ pub use pixelize::{
 pub use river_plan::{
     DEFAULT_RIVER_PLAN_TRUNK_FLOW, RiverChain, RiverChainId, RiverPlan, RiverPlanConfig,
     RiverPlanStats, RiverReach, RiverReachId, RiverReachType, RiverSegmentPlan, build_river_plan,
+};
+#[allow(unused_imports)]
+pub use surface_plan::{
+    BiomeSurfacePolicy, SurfaceBlockPalette, SurfaceColumnInput, SurfaceColumnPlan,
+    SurfaceHydrologyRole, SurfacePlanArea, SurfacePlanAreaStats, SurfacePlanConfig,
+    biome_surface_policy, generate_surface_plan_area, resolve_surface_column,
 };
 #[allow(unused_imports)]
 pub use voxel::{

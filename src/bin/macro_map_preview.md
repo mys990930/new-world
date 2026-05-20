@@ -10,12 +10,12 @@
 
 ## Inputs
 
-- positional: `<seed> <center-x> <center-z>`
-  - `center-x` and `center-z` are world-block coordinates.
+- positional: `<seed> <cx> <cz> <r>`
+  - `cx` and `cz` are chunk coordinates.
+  - `r` is an inclusive square chunk radius; the horizontal footprint is `(2r + 1)` chunks.
 - optional:
   - `--width <u32>`
   - `--height <u32>`
-  - `--world-span-blocks <i32>`
   - `--region-size-blocks <i32>`
   - `--site-spacing-blocks <i32>`
   - `--land-bias <f32>`
@@ -26,12 +26,14 @@
 
 - `--width 3840`
 - `--height 2160`
-- `--world-span-blocks 32768`
 - `--region-size-blocks DEFAULT_GRAPH_REGION_SIZE_BLOCKS`
 - `--site-spacing-blocks DEFAULT_SITE_SPACING_BLOCKS`
 - `--land-bias MacroMapConfig::new(...).land_bias`
 - `--stage macro_map`
-- output: `target/macro-map-preview/s<seed>_x<center-x>_z<center-z>.png`
+- output: `target/macro-map-preview/s<seed>_cx<cx>_cz<cz>_r<r>.png`
+- The horizontal world span is `(2r + 1) * CHUNK_EDGE` blocks. Non-square image sizes keep the
+  same world-blocks-per-pixel scale on both axes, so the visible Z span follows the image aspect;
+  use square `--width`/`--height` for an exact square chunk footprint.
 
 ## Outputs
 
@@ -95,7 +97,7 @@
 - A compact compass overlay using the common macro-field/world topdown orientation: image top=N,
   right=E, bottom=S, left=W.
 - A PNG iTXt chunk named `new-world-preview-header` containing seed, generator version, stage,
-  center, dimensions, world span, graph region sizing, land/ocean tuning values, graph area, site
+  center chunk, derived center world block, radius, dimensions, effective world span, graph region sizing, land/ocean tuning values, graph area, site
   count, visible site count, land site count, land ratio, candidate edge count, coast/ridge/fault
   edge counts, selected river/lake/sink/outlet counts, lake/ocean terminal segment counts,
   lake component count, small lake component count, inland water site count, dry basin site
@@ -111,15 +113,15 @@
 
 ## Output Path Rules
 
-- With no `--output`, the binary writes `target/macro-map-preview/s<seed>_x<center-x>_z<center-z>.png`.
+- With no `--output`, the binary writes `target/macro-map-preview/s<seed>_cx<cx>_cz<cz>_r<r>.png`.
 - With `--output <path>.png`, the binary writes that exact PNG path.
-- With `--output <directory>`, the binary writes `s<seed>_x<center-x>_z<center-z>.png` below that directory.
-- Width, height, span, spacing, stage, and generator version stay in PNG metadata rather than default filenames.
+- With `--output <directory>`, the binary writes `s<seed>_cx<cx>_cz<cz>_r<r>.png` below that directory.
+- Width, height, effective span, spacing, stage, and generator version stay in PNG metadata rather than default filenames.
 
 ## Current Flow
 
-1. Parse required seed and world-block center.
-2. Resolve the preview window from image dimensions and `--world-span-blocks`.
+1. Parse required seed, center chunk, and inclusive chunk radius.
+2. Convert the center chunk to its center world block and resolve the preview window from image dimensions and `(2r + 1) * CHUNK_EDGE` horizontal span.
 3. Build a padded Delaunay/circumcenter Voronoi dual graph patch through `generate_voronoi_graph_patch(...)`.
 4. Build the macro map through `generate_macro_map(&patch, MacroMapConfig::new(...))`, overriding
    `land_bias` from CLI options when provided.
@@ -179,11 +181,11 @@ If a future worker adds a preview-specific request type, keep this CLI and outpu
 ## Example
 
 ```bash
-cargo run --bin macro_map_preview -- 42 0 0
+cargo run --bin macro_map_preview -- 42 0 0 512
 ```
 
 Lower-resolution smoke check:
 
 ```bash
-cargo run --bin macro_map_preview -- 42 0 0 --width 640 --height 360 --output target/macro-map-preview/smoke.png
+cargo run --bin macro_map_preview -- 42 0 0 10 --width 640 --height 360 --output target/macro-map-preview/smoke.png
 ```

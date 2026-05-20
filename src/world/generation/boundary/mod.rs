@@ -17,6 +17,9 @@ pub const DEFAULT_BOUNDARY_MAX_LOCAL_TURN_DEGREES: f32 = 60.0;
 pub const DEFAULT_BOUNDARY_ANGLE_RELAXATION_PASSES: usize = 10;
 pub const DEFAULT_BOUNDARY_FAIRING_PASSES: usize = 2;
 pub const DEFAULT_BOUNDARY_MIN_ANGLE_SEGMENT_BLOCKS: f32 = 1.0;
+pub const DEFAULT_BOUNDARY_JUNCTION_RADIUS_FRACTION: f32 = 0.30;
+pub const DEFAULT_BOUNDARY_JUNCTION_MIN_RADIUS_BLOCKS: f32 = 24.0;
+pub const DEFAULT_BOUNDARY_JUNCTION_MAX_RADIUS_BLOCKS: f32 = 72.0;
 
 const HASH_BOUNDARY: u64 = 0xb31d_0f9c_53a7_8e21;
 const PROFILE_SALT_ORDINARY: u64 = 0x00ed_6e00_5eed_0000;
@@ -133,6 +136,14 @@ pub struct NoisyBoundaryCurve {
     pub guard: BoundaryGuard,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundaryJunction {
+    pub corner: VoronoiCornerId,
+    pub position: WorldPlanePoint,
+    pub sites: Vec<VoronoiSiteId>,
+    pub radius_blocks: f32,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct BoundaryStats {
     pub total_curve_count: usize,
@@ -160,6 +171,16 @@ pub struct BoundaryCache {
 impl BoundaryCache {
     pub fn curve_for_edge(&self, edge: VoronoiEdgeId) -> Option<&NoisyBoundaryCurve> {
         self.curves.iter().find(|curve| curve.edge == edge)
+    }
+
+    pub fn junctions(&self) -> Vec<BoundaryJunction> {
+        build_boundary_junctions(&self.curves)
+    }
+
+    pub fn junction_for_corner(&self, corner: VoronoiCornerId) -> Option<BoundaryJunction> {
+        self.junctions()
+            .into_iter()
+            .find(|junction| junction.corner == corner)
     }
 }
 
@@ -211,6 +232,72 @@ pub fn generate_noisy_boundaries(
     let stats = boundary_stats(&curves, patch.edges.len());
 
     BoundaryCache { curves, stats }
+}
+
+fn build_boundary_junctions(curves: &[NoisyBoundaryCurve]) -> Vec<BoundaryJunction> {
+    let mut accumulators = HashMap::<VoronoiCornerId, JunctionAccumulator>::new();
+    for curve in curves {
+        let edge_length = distance(curve.anchors.start, curve.anchors.end);
+        for (index, corner) in curve.anchors.corners.iter().copied().enumerate() {
+            let position = if index == 0 {
+                curve.anchors.start
+            } else {
+                curve.anchors.end
+            };
+            let accumulator = accumulators
+                .entry(corner)
+                .or_insert_with(|| JunctionAccumulator::new(position));
+            accumulator.position = position;
+            accumulator.incident_edge_count += 1;
+            accumulator.edge_length_sum += edge_length;
+            accumulator.sites.extend(curve.anchors.sites);
+        }
+    }
+
+    let mut junctions = accumulators
+        .into_iter()
+        .filter_map(|(corner, mut accumulator)| {
+            accumulator.sites.sort_by_key(|site| site.0);
+            accumulator.sites.dedup();
+            if accumulator.incident_edge_count < 2 || accumulator.sites.len() < 2 {
+                return None;
+            }
+            let average_edge_length =
+                accumulator.edge_length_sum / accumulator.incident_edge_count as f32;
+            let radius_blocks = (average_edge_length * DEFAULT_BOUNDARY_JUNCTION_RADIUS_FRACTION)
+                .clamp(
+                    DEFAULT_BOUNDARY_JUNCTION_MIN_RADIUS_BLOCKS,
+                    DEFAULT_BOUNDARY_JUNCTION_MAX_RADIUS_BLOCKS,
+                );
+            Some(BoundaryJunction {
+                corner,
+                position: accumulator.position,
+                sites: accumulator.sites,
+                radius_blocks,
+            })
+        })
+        .collect::<Vec<_>>();
+    junctions.sort_by_key(|junction| junction.corner.0);
+    junctions
+}
+
+#[derive(Debug, Clone)]
+struct JunctionAccumulator {
+    position: WorldPlanePoint,
+    sites: Vec<VoronoiSiteId>,
+    incident_edge_count: usize,
+    edge_length_sum: f32,
+}
+
+impl JunctionAccumulator {
+    fn new(position: WorldPlanePoint) -> Self {
+        Self {
+            position,
+            sites: Vec::new(),
+            incident_edge_count: 0,
+            edge_length_sum: 0.0,
+        }
+    }
 }
 
 fn validate_boundary_config(config: BoundaryConfig) {
@@ -832,11 +919,11 @@ fn unit_f32(value: u64) -> f32 {
 mod tests {
     use super::*;
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
     use crate::world::generation::macro_map::{
-        generate_macro_map, MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig,
+        MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroMapConfig, generate_macro_map,
     };
 
     #[test]
@@ -848,6 +935,44 @@ mod tests {
         assert_eq!(boundary.stats.total_curve_count, macro_map.edges.len());
         assert_eq!(boundary.stats.missing_macro_edge_count, 0);
         assert!(boundary.stats.ordinary_curve_count > 0);
+    }
+
+    #[test]
+    fn boundary_generation_creates_deterministic_shared_corner_junctions() {
+        let (patch, macro_map) = test_inputs(42, 0, 0);
+        let config = BoundaryConfig::new(42, 11);
+
+        let first = generate_noisy_boundaries(&patch, &macro_map, config);
+        let second = generate_noisy_boundaries(&patch, &macro_map, config);
+        let shared_corner = patch
+            .edges
+            .iter()
+            .flat_map(|edge| edge.corners)
+            .fold(
+                HashMap::<VoronoiCornerId, usize>::new(),
+                |mut counts, corner| {
+                    *counts.entry(corner).or_default() += 1;
+                    counts
+                },
+            )
+            .into_iter()
+            .find_map(|(corner, count)| (count >= 2).then_some(corner))
+            .expect("generated patch should contain shared Voronoi corners");
+
+        assert_eq!(first.curves.len(), macro_map.edges.len());
+        assert_eq!(first.curves.len(), second.curves.len());
+        assert_eq!(first.junctions(), second.junctions());
+        let junction = first
+            .junction_for_corner(shared_corner)
+            .expect("shared corner should produce a rounded junction influence");
+        assert!(junction.sites.len() >= 2);
+        assert!(
+            (DEFAULT_BOUNDARY_JUNCTION_MIN_RADIUS_BLOCKS
+                ..=DEFAULT_BOUNDARY_JUNCTION_MAX_RADIUS_BLOCKS)
+                .contains(&junction.radius_blocks),
+            "junction radius should stay conservative and clamped: {}",
+            junction.radius_blocks
+        );
     }
 
     #[test]

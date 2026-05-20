@@ -286,6 +286,7 @@ impl Renderer {
 
             shadow_pass.set_pipeline(&backend.shadow_depth_pipeline);
             shadow_pass.set_bind_group(0, &backend.shadow_pass_bind_group, &[]);
+            shadow_pass.set_bind_group(1, &backend.block_textures.bind_group, &[]);
 
             for coord in frame.visible_chunks {
                 let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {

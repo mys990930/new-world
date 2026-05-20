@@ -9,15 +9,16 @@ use image::RgbImage;
 use rayon::prelude::*;
 
 use new_world::world::generation::{
-    generate_macro_map, generate_noisy_boundaries, generate_voronoi_graph_patch,
-    graph_region_for_world_block, solve_hydrology, BoundaryCache, BoundaryConfig, BoundaryProfile,
-    GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph,
-    GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord, GraphRiverSegment,
-    HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind, NoisyBoundaryCurve,
-    VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch, VoronoiGraphPatchRequest,
-    VoronoiSiteId, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
+    BoundaryCache, BoundaryConfig, BoundaryProfile, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
+    DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
+    GraphHydrologyGraph, GraphLocalMinimumResolution, GraphRegionArea, GraphRegionCoord,
+    GraphRiverSegment, HydrologyConfig, MacroEdge, MacroMapConfig, MacroSite, MacroSurfaceKind,
+    NoisyBoundaryCurve, VoronoiCornerId, VoronoiGraphConfig, VoronoiGraphPatch,
+    VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint, generate_macro_map,
+    generate_noisy_boundaries, generate_voronoi_graph_patch, graph_region_for_world_block,
+    solve_hydrology,
 };
-use new_world::world::WorldMeta;
+use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 mod common;
 
@@ -28,7 +29,6 @@ use common::preview_draw::{
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
-const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
 const DEFAULT_STAGE: &str = "macro_map";
 const OUTPUT_DIR: &str = "target/macro-map-preview";
 const SEA_LEVEL: f32 = 0.0;
@@ -41,11 +41,11 @@ const RIVER_SOURCE_MARKER_RING_WIDTH_PX: i32 = 2;
 #[derive(Debug, Clone, PartialEq)]
 struct PreviewConfig {
     seed: u64,
-    center_x: i32,
-    center_z: i32,
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    radius: i32,
     width: u32,
     height: u32,
-    world_span_blocks: i32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
@@ -58,9 +58,10 @@ impl PreviewConfig {
         if self.width == 0 || self.height == 0 {
             return Err(cli_error("width and height must be >= 1"));
         }
-        if self.world_span_blocks <= 0 {
-            return Err(cli_error("world-span-blocks must be positive"));
+        if self.radius < 0 {
+            return Err(cli_error("radius must be non-negative"));
         }
+        self.effective_world_span_blocks()?;
         if self.region_size_blocks <= 0 {
             return Err(cli_error("region-size-blocks must be positive"));
         }
@@ -79,21 +80,49 @@ impl PreviewConfig {
         Ok(self)
     }
 
-    fn window(&self) -> PreviewWindow {
-        PreviewWindow {
-            center_x: self.center_x as f32,
-            center_z: self.center_z as f32,
+    fn center_world_x(&self) -> Result<i32, Box<dyn Error>> {
+        self.center_chunk_x
+            .checked_mul(CHUNK_EDGE_I32)
+            .and_then(|origin| origin.checked_add(CHUNK_EDGE_I32 / 2))
+            .ok_or_else(|| cli_error("center chunk x overflows world block coordinates"))
+    }
+
+    fn center_world_z(&self) -> Result<i32, Box<dyn Error>> {
+        self.center_chunk_z
+            .checked_mul(CHUNK_EDGE_I32)
+            .and_then(|origin| origin.checked_add(CHUNK_EDGE_I32 / 2))
+            .ok_or_else(|| cli_error("center chunk z overflows world block coordinates"))
+    }
+
+    fn chunk_count_per_axis(&self) -> Result<i32, Box<dyn Error>> {
+        self.radius
+            .checked_mul(2)
+            .and_then(|diameter| diameter.checked_add(1))
+            .ok_or_else(|| cli_error("radius overflows chunk footprint"))
+    }
+
+    fn effective_world_span_blocks(&self) -> Result<i32, Box<dyn Error>> {
+        self.chunk_count_per_axis()?
+            .checked_mul(CHUNK_EDGE_I32)
+            .ok_or_else(|| cli_error("radius overflows world span"))
+    }
+
+    fn window(&self) -> Result<PreviewWindow, Box<dyn Error>> {
+        let world_span_blocks = self.effective_world_span_blocks()? as f32;
+        Ok(PreviewWindow {
+            center_x: self.center_world_x()? as f32,
+            center_z: self.center_world_z()? as f32,
             width: self.width,
             height: self.height,
-            world_span_x: self.world_span_blocks as f32,
-            world_span_z: self.world_span_blocks as f32 * self.height as f32 / self.width as f32,
-        }
+            world_span_x: world_span_blocks,
+            world_span_z: world_span_blocks * self.height as f32 / self.width as f32,
+        })
     }
 
     fn default_output_path(&self) -> PathBuf {
         PathBuf::from(format!(
-            "{OUTPUT_DIR}/s{}_x{}_z{}.png",
-            self.seed, self.center_x, self.center_z
+            "{OUTPUT_DIR}/s{}_cx{}_cz{}_r{}.png",
+            self.seed, self.center_chunk_x, self.center_chunk_z, self.radius
         ))
     }
 }
@@ -336,11 +365,15 @@ struct PreviewHeader {
     seed: u64,
     generator_version: u32,
     stage: String,
-    center_x: i32,
-    center_z: i32,
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    center_world_x: i32,
+    center_world_z: i32,
+    radius: i32,
+    chunk_count_per_axis: i32,
     width: u32,
     height: u32,
-    world_span_blocks: i32,
+    effective_world_span_blocks: i32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
@@ -384,12 +417,19 @@ impl PreviewHeader {
             format!("generator_version={}", self.generator_version),
             format!("stage={}", self.stage),
             "map_name=macro map composite".to_string(),
-            format!("center_x={}", self.center_x),
-            format!("center_z={}", self.center_z),
+            format!("center_chunk_x={}", self.center_chunk_x),
+            format!("center_chunk_z={}", self.center_chunk_z),
+            format!("center_world_x={}", self.center_world_x),
+            format!("center_world_z={}", self.center_world_z),
+            format!("radius={}", self.radius),
+            format!("chunk_count_per_axis={}", self.chunk_count_per_axis),
             format!("width={}", self.width),
             format!("height={}", self.height),
             "orientation_overlay=north_up_east_right".to_string(),
-            format!("world_span_blocks={}", self.world_span_blocks),
+            format!(
+                "effective_world_span_blocks={}",
+                self.effective_world_span_blocks
+            ),
             format!("region_size_blocks={}", self.region_size_blocks),
             format!("site_spacing_blocks={}", self.site_spacing_blocks),
             format!("land_bias={}", self.land_bias),
@@ -622,7 +662,7 @@ impl PreviewHeader {
 fn main() -> Result<(), Box<dyn Error>> {
     let config = parse_args()?.validate()?;
     let meta = WorldMeta::new(config.seed);
-    let window = config.window();
+    let window = config.window()?;
     let graph_area = window.graph_area(config.region_size_blocks)?;
     let graph = build_macro_map_for_preview(&meta, &config, graph_area)?;
     let output = output_path_for_config(&config);
@@ -663,16 +703,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     let source_marker_stats = river_source_marker_overlay_stats(window, &graph.hydrology);
     let surface_stats = preview_surface_stats(&graph, window);
     let boundary_pixel_stats = boundary_pixel_stats(&graph.boundary, window);
+    let center_world_x = config.center_world_x()?;
+    let center_world_z = config.center_world_z()?;
+    let chunk_count_per_axis = config.chunk_count_per_axis()?;
+    let effective_world_span_blocks = config.effective_world_span_blocks()?;
 
     let header = PreviewHeader {
         seed: config.seed,
         generator_version: meta.generator_version,
         stage: config.stage.clone(),
-        center_x: config.center_x,
-        center_z: config.center_z,
+        center_chunk_x: config.center_chunk_x,
+        center_chunk_z: config.center_chunk_z,
+        center_world_x,
+        center_world_z,
+        radius: config.radius,
+        chunk_count_per_axis,
         width: config.width,
         height: config.height,
-        world_span_blocks: config.world_span_blocks,
+        effective_world_span_blocks,
         region_size_blocks: config.region_size_blocks,
         site_spacing_blocks: config.site_spacing_blocks,
         land_bias: config.land_bias,
@@ -721,9 +769,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("generator version: {}", meta.generator_version);
     println!("stage: {}", config.stage);
     println!(
-        "center world block: ({}, {})",
-        config.center_x, config.center_z
+        "center chunk: ({}, {}), center world block: ({}, {}), radius: {}, chunks/axis: {}",
+        config.center_chunk_x,
+        config.center_chunk_z,
+        center_world_x,
+        center_world_z,
+        config.radius,
+        chunk_count_per_axis
     );
+    println!("effective world span x: {effective_world_span_blocks} blocks");
     println!(
         "world footprint: x={:.1}..{:.1}, z={:.1}..{:.1}",
         window.min_x(),
@@ -832,17 +886,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() < 3 {
+    parse_args_from(env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(args: I) -> Result<PreviewConfig, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    if args.len() < 4 {
         return Err(cli_error(usage()));
     }
 
     let seed = parse_required::<u64>(&mut args, "seed")?;
-    let center_x = parse_required::<i32>(&mut args, "center-x")?;
-    let center_z = parse_required::<i32>(&mut args, "center-z")?;
+    let center_chunk_x = parse_required::<i32>(&mut args, "cx")?;
+    let center_chunk_z = parse_required::<i32>(&mut args, "cz")?;
+    let radius = parse_required::<i32>(&mut args, "r")?;
     let mut width = DEFAULT_WIDTH;
     let mut height = DEFAULT_HEIGHT;
-    let mut world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
     let mut land_bias = MacroMapConfig::new(seed, 0).land_bias;
@@ -854,9 +916,6 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         match flag.as_str() {
             "--width" => width = parse_required::<u32>(&mut args, "width")?,
             "--height" => height = parse_required::<u32>(&mut args, "height")?,
-            "--world-span-blocks" => {
-                world_span_blocks = parse_required::<i32>(&mut args, "world-span-blocks")?
-            }
             "--region-size-blocks" => {
                 region_size_blocks = parse_required::<i32>(&mut args, "region-size-blocks")?
             }
@@ -876,11 +935,11 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
 
     Ok(PreviewConfig {
         seed,
-        center_x,
-        center_z,
+        center_chunk_x,
+        center_chunk_z,
+        radius,
         width,
         height,
-        world_span_blocks,
         region_size_blocks,
         site_spacing_blocks,
         land_bias,
@@ -897,8 +956,8 @@ fn output_path_for_config(config: &PreviewConfig) -> PathBuf {
                 path.clone()
             } else {
                 path.join(format!(
-                    "s{}_x{}_z{}.png",
-                    config.seed, config.center_x, config.center_z
+                    "s{}_cx{}_cz{}_r{}.png",
+                    config.seed, config.center_chunk_x, config.center_chunk_z, config.radius
                 ))
             }
         },
@@ -915,8 +974,10 @@ fn build_macro_map_for_preview(
     graph_area: GraphRegionArea,
 ) -> Result<PreviewGraph, Box<dyn Error>> {
     let spacing = config.site_spacing_blocks as f32;
+    let center_world_x = config.center_world_x()?;
+    let center_world_z = config.center_world_z()?;
     let center_region =
-        graph_region_for_world_block(config.center_x, config.center_z, config.region_size_blocks);
+        graph_region_for_world_block(center_world_x, center_world_z, config.region_size_blocks);
     let padding_regions = required_padding_regions(center_region, graph_area)?;
     let graph_config = VoronoiGraphConfig {
         seed: meta.seed,
@@ -925,7 +986,7 @@ fn build_macro_map_for_preview(
         site_spacing_blocks: config.site_spacing_blocks,
         padding_regions,
     };
-    let request = VoronoiGraphPatchRequest::new(graph_config, config.center_x, config.center_z);
+    let request = VoronoiGraphPatchRequest::new(graph_config, center_world_x, center_world_z);
     let patch = generate_voronoi_graph_patch(request);
 
     let site_grid = patch
@@ -2174,7 +2235,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_map_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_map] [--output <path>]"
+    "usage: cargo run --bin macro_map_preview -- <seed> <cx> <cz> <r> [--width <u32>] [--height <u32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_map] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2191,11 +2252,11 @@ mod tests {
     fn test_config() -> PreviewConfig {
         PreviewConfig {
             seed: 42,
-            center_x: -10,
-            center_z: 20,
+            center_chunk_x: -10,
+            center_chunk_z: 20,
+            radius: 8,
             width: 128,
             height: 72,
-            world_span_blocks: 512,
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: MacroMapConfig::new(42, 0).land_bias,
@@ -2208,7 +2269,7 @@ mod tests {
     fn default_output_path_uses_short_seed_center_name() {
         let path = test_config().default_output_path().display().to_string();
 
-        assert!(path.ends_with("target/macro-map-preview/s42_x-10_z20.png"));
+        assert!(path.ends_with("target/macro-map-preview/s42_cx-10_cz20_r8.png"));
         assert!(!path.contains("generator_gv"));
         assert!(!path.contains("span"));
     }
@@ -2223,7 +2284,7 @@ mod tests {
             .to_string()
             .replace('\\', "/");
 
-        assert!(path.ends_with("target/macro-map-preview/smoke/s42_x-10_z20.png"));
+        assert!(path.ends_with("target/macro-map-preview/smoke/s42_cx-10_cz20_r8.png"));
     }
 
     #[test]
@@ -2235,6 +2296,33 @@ mod tests {
             output_path_for_config(&config),
             PathBuf::from("target/custom/macro.png")
         );
+    }
+
+    #[test]
+    fn parse_chunk_center_and_radius_contract() {
+        let config = parse_args_from(["42", "-2", "3", "10", "--width", "640", "--height", "360"])
+            .expect("config")
+            .validate()
+            .unwrap();
+
+        assert_eq!(config.seed, 42);
+        assert_eq!(config.center_chunk_x, -2);
+        assert_eq!(config.center_chunk_z, 3);
+        assert_eq!(config.radius, 10);
+        assert_eq!(config.center_world_x().unwrap(), -48);
+        assert_eq!(config.center_world_z().unwrap(), 112);
+        assert_eq!(config.effective_world_span_blocks().unwrap(), 672);
+    }
+
+    #[test]
+    fn window_uses_chunk_radius_span_with_image_aspect() {
+        let config = test_config();
+        let window = config.window().unwrap();
+
+        assert_eq!(window.center_x, -304.0);
+        assert_eq!(window.center_z, 656.0);
+        assert_eq!(window.world_span_x, 544.0);
+        assert_eq!(window.world_span_z, 306.0);
     }
 
     #[test]
@@ -2256,11 +2344,15 @@ mod tests {
             seed: 42,
             generator_version: 11,
             stage: DEFAULT_STAGE.to_string(),
-            center_x: 0,
-            center_z: 0,
+            center_chunk_x: 0,
+            center_chunk_z: 0,
+            center_world_x: 16,
+            center_world_z: 16,
+            radius: 512,
+            chunk_count_per_axis: 1025,
             width: 640,
             height: 360,
-            world_span_blocks: DEFAULT_WORLD_SPAN_BLOCKS,
+            effective_world_span_blocks: 32800,
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.0,
@@ -2618,7 +2710,7 @@ mod tests {
     fn base_voronoi_edge_overlay_changes_image_pixels() {
         let meta = WorldMeta::new(42);
         let config = test_config();
-        let window = config.window();
+        let window = config.window().unwrap();
         let area = window.graph_area(config.region_size_blocks).unwrap();
         let graph = build_macro_map_for_preview(&meta, &config, area).unwrap();
         let mut image =
@@ -2701,6 +2793,7 @@ mod tests {
         let config = test_config();
         let area = config
             .window()
+            .unwrap()
             .graph_area(config.region_size_blocks)
             .unwrap();
 
@@ -2716,13 +2809,14 @@ mod tests {
     fn default_preview_span_has_diagnosable_ridge_guides() {
         let meta = WorldMeta::new(42);
         let mut config = test_config();
-        config.center_x = 0;
-        config.center_z = 0;
+        config.center_chunk_x = 0;
+        config.center_chunk_z = 0;
         config.width = 640;
         config.height = 360;
-        config.world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
+        config.radius = 512;
         let area = config
             .window()
+            .unwrap()
             .graph_area(config.region_size_blocks)
             .unwrap();
 
@@ -2752,12 +2846,12 @@ mod tests {
     fn seed_42_default_preview_reports_inland_lake_components() {
         let meta = WorldMeta::new(42);
         let mut config = test_config();
-        config.center_x = 0;
-        config.center_z = 0;
+        config.center_chunk_x = 0;
+        config.center_chunk_z = 0;
         config.width = 640;
         config.height = 360;
-        config.world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
-        let window = config.window();
+        config.radius = 512;
+        let window = config.window().unwrap();
         let area = window.graph_area(config.region_size_blocks).unwrap();
 
         let graph = build_macro_map_for_preview(&meta, &config, area).unwrap();

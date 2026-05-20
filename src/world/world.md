@@ -72,7 +72,7 @@
 
 - graph region, site, corner, edge id와 patch
 - graph base `continentality/elevation_seed`와 macro ownership/elevation resolve annotation
-- graph region cache, macro map cache, hydrology/river-plan/final-cell-context/boundary/macro field/heightfield cache key와 cached stage output
+- graph region cache, macro map cache, hydrology/river-plan/final-cell-context/boundary/meso-feature/macro-field/heightfield cache key와 cached stage output
 - continuous blended field sample
 - hydrology watershed, drainage node, river segment
 - river plan chain/reach morphology, broad valley parameter, river bed hint
@@ -177,11 +177,11 @@ voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, regist
 - `generation/hydrology/hydrology.md`: graph-first watershed, river, lake, local minima 계약
 - `generation/river_plan/river_plan.md`: selected river를 reach morphology와 broad valley / narrow bed plan으로 번역하는 계약
 - `generation/boundary/boundary.md`: 모든 Voronoi edge의 canonical noisy geometry
-- `generation/meso_feature/meso_feature.md`: 국소 지형 feature planning과 heightfield deformation 계약
+- `generation/meso_feature/meso_feature.md`: noisy boundary 이후, macro field 이전의 국소 지형 feature planning 계약
 - `generation/field/field.md`: continuous blended field, moisture, biome influence 계약
 - `generation/biome/biome.md`: graph-first final cell biome context와 classification 계약
 - `generation/macro_field/macro_field.md`: graph-derived signed distance / influence field tile cache
-- `generation/heightfield/heightfield.md`: macro field와 Perlin micro relief 합성
+- `generation/heightfield/heightfield.md`: meso-baked macro field column과 Perlin micro relief 합성
 - `generation/surface_plan/surface_plan.md`: biome/material/water/coast surface policy resolve
 - `generation/vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `generation/voxel/voxel.md`: column plan에서 `ChunkData`로 이어지는 voxel fill 계약
@@ -211,8 +211,12 @@ voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, regist
 - `river_plan`은 hydrology selected river를 deterministic chain/reach, discharge ledger, broad valley,
   narrow bed hint로 번역한다. hydrology selected topology를 source of truth로 보존하면서 macro_field와
   heightfield가 읽을 morphology parameter를 제공한다.
+- 현재 `meso_feature` leaf는 noisy boundary 이후 macro field rasterization 전에 실행될 deterministic
+  feature plan 계약을 문서화한다. `macro_field`는 이 plan을 읽어 meso raise/carve/flatten/roughness
+  contribution을 sample channel과 combined height에 bake해야 한다.
 - 현재 `heightfield` leaf는 `MacroFieldTile`을 column-oriented heightfield cache로 변환하는 vertical
-  slice를 제공한다. meso feature와 Perlin micro relief는 아직 `0` stub이다.
+  slice를 제공한다. rewrite target에서는 pixelize가 보존한 meso-baked column 값을 읽고, meso geometry를
+  다시 해석하지 않는다.
 - 현재 `voxel` leaf는 launch용 graph-first voxel fill을 제공한다. `PixelizedChunkArea`를
   `GraphFirstVoxelPlan`으로 변환하고, `surface_y`/`water_y`를 읽어 `grass`와 `water`만으로
   `ChunkData`를 채운다.

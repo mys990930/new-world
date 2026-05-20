@@ -15,6 +15,7 @@
 - define the missing-block fallback
 - define block visual-material classification through `BlockMaterialKind`
 - define per-block exposed surface-height defaults for meshing
+- define `foliage_cross` as a render kind for alpha-cutout vines and thin vegetation
 
 ## Non-Responsibilities
 
@@ -90,6 +91,7 @@ default_manifest_path() -> PathBuf
 - the `air` block must exist at `id = 0`
 - registry lookups expose meaning only and never mutate world storage
 - block material classification lives alongside block definition data, not in renderer-only code
+- alpha-cutout foliage blocks should normally set `opaque = false` so they do not cull neighboring geometry as if every texel were solid
 
 ## Related Modules
 
@@ -103,6 +105,8 @@ default_manifest_path() -> PathBuf
 
 - Block definition TOML files may now specify `material = "..."`.
 - Block definition TOML files may now specify `surface_height = 0.90`-style exposed top heights.
+- Block definition TOML files may now specify `render = "foliage_cross"` for vines and similar cutout vegetation that keeps one-block world meaning but emits crossed quads in meshing.
+- Cube-rendered leaf blocks may also use alpha-cutout PNG textures; they stay `render = "cube"` but should use `opaque = false` so holes can reveal rear faces or neighboring blocks.
 - If a block definition omits `material`, the registry infers a reasonable default from the block key so the system remains backward-compatible.
 - The current built-in categories are `generic_opaque`, `grass`, `soil`, `stone`, `sand`, `foliage`, `water`, and `emissive`.
 - `BlockMaterialKind` exists so meshing and renderer shading can react to material semantics without making the renderer responsible for block-type ownership.

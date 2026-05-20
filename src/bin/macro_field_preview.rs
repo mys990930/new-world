@@ -9,21 +9,21 @@ use image::RgbImage;
 use rayon::prelude::*;
 
 use new_world::world::generation::{
-    extract_macro_field_contours, generate_macro_field_tile, graph_region_for_world_block,
-    BoundaryCache, GraphDrainageNode, GraphDrainageNodeId, GraphDrainageNodeKind,
-    GraphHydrologyGraph, GraphMacroMap, GraphRegionArea, MacroFieldContourSet,
-    MacroFieldSample as CoreMacroFieldSample, MacroFieldTileConfig as CoreMacroFieldTileConfig,
+    BoundaryCache, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY,
+    DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, GraphDrainageNode,
+    GraphDrainageNodeId, GraphDrainageNodeKind, GraphHydrologyGraph, GraphMacroMap,
+    GraphRegionArea, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    MacroFieldContourSet, MacroFieldSample as CoreMacroFieldSample,
+    MacroFieldTileConfig as CoreMacroFieldTileConfig,
     MacroFieldTileStats as CoreMacroFieldTileStats, MacroMapConfig, RiverPlan, RiverReachType,
-    VoronoiGraphPatch, WorldPlanePoint, DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
-    DEFAULT_MACRO_FIELD_CONTOUR_MAJOR_EVERY, DEFAULT_MACRO_FIELD_CONTOUR_STEP_BLOCKS,
-    DEFAULT_SITE_SPACING_BLOCKS, MACRO_FIELD_CONTOUR_HEIGHT_MAX_BLOCKS,
-    MACRO_FIELD_CONTOUR_HEIGHT_MIN_BLOCKS,
+    VoronoiGraphPatch, WorldPlanePoint, extract_macro_field_contours, generate_macro_field_tile,
+    graph_region_for_world_block,
 };
-use new_world::world::{WorldMeta, CHUNK_EDGE_I32};
+use new_world::world::{CHUNK_EDGE_I32, WorldMeta};
 
 mod common;
 
-use common::generation_preview_context::{build_common_preview_world, PreviewStageInput};
+use common::generation_preview_context::{PreviewStageInput, build_common_preview_world};
 use common::preview_compass::draw_compass_rgb;
 use common::preview_draw::{
     blend_pixel, blend_pixel_i32, blend_rect, draw_circle_ring, draw_pixel_line,
@@ -32,9 +32,6 @@ use common::preview_draw::{
 
 const DEFAULT_WIDTH: u32 = 3840;
 const DEFAULT_HEIGHT: u32 = 2160;
-const DEFAULT_WORLD_SPAN_BLOCKS: i32 = 32768;
-const DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS: i32 =
-    DEFAULT_WORLD_SPAN_BLOCKS / (CHUNK_EDGE_I32 * 2);
 const DEFAULT_STAGE: &str = "macro_field";
 const OUTPUT_DIR: &str = "target/macro-field-preview";
 const MACRO_PREVIEW_MIN_HEIGHT: f32 = -1.0;
@@ -90,12 +87,11 @@ const RENDERABLE_CHANNELS: [PreviewChannel; 7] = [
 #[derive(Debug, Clone, PartialEq)]
 struct PreviewConfig {
     seed: u64,
-    center_x: i32,
-    center_z: i32,
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    radius: i32,
     width: u32,
     height: u32,
-    world_span_blocks: i32,
-    chunk_radius: Option<i32>,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
     land_bias: f32,
@@ -112,11 +108,8 @@ impl PreviewConfig {
         if self.width == 0 || self.height == 0 {
             return Err(cli_error("width and height must be >= 1"));
         }
-        if self.world_span_blocks <= 0 {
-            return Err(cli_error("world-span-blocks must be positive"));
-        }
-        if self.chunk_radius.is_some_and(|radius| radius <= 0) {
-            return Err(cli_error("chunk-radius must be positive"));
+        if self.radius < 0 {
+            return Err(cli_error("r must be zero or positive"));
         }
         if self.region_size_blocks <= 0 {
             return Err(cli_error("region-size-blocks must be positive"));
@@ -139,41 +132,64 @@ impl PreviewConfig {
         if self.contour_major_every == 0 {
             return Err(cli_error("contour-major-every must be >= 1"));
         }
+        self.effective_world_span_blocks()?;
         Ok(self)
     }
 
-    fn window(&self) -> PreviewWindow {
-        PreviewWindow {
-            center_x: self.center_x as f32,
-            center_z: self.center_z as f32,
+    fn window(&self) -> Result<PreviewWindow, Box<dyn Error>> {
+        let span = self.effective_world_span_blocks()?;
+        Ok(PreviewWindow {
+            center_x: self.center_world_x()? as f32,
+            center_z: self.center_world_z()? as f32,
             width: self.width,
             height: self.height,
-            world_span_x: self.effective_world_span_blocks() as f32,
-            world_span_z: self.effective_world_span_blocks() as f32 * self.height as f32
-                / self.width as f32,
-        }
+            world_span_x: span as f32,
+            world_span_z: span as f32 * self.height as f32 / self.width as f32,
+        })
     }
 
-    fn effective_world_span_blocks(&self) -> i32 {
-        self.chunk_radius
-            .map(|radius| radius.saturating_mul(CHUNK_EDGE_I32).saturating_mul(2))
-            .unwrap_or(self.world_span_blocks)
+    fn center_world_x(&self) -> Result<i32, Box<dyn Error>> {
+        self.center_chunk_x
+            .checked_mul(CHUNK_EDGE_I32)
+            .and_then(|value| value.checked_add(CHUNK_EDGE_I32 / 2))
+            .ok_or_else(|| cli_error("center world x overflowed"))
+    }
+
+    fn center_world_z(&self) -> Result<i32, Box<dyn Error>> {
+        self.center_chunk_z
+            .checked_mul(CHUNK_EDGE_I32)
+            .and_then(|value| value.checked_add(CHUNK_EDGE_I32 / 2))
+            .ok_or_else(|| cli_error("center world z overflowed"))
+    }
+
+    fn chunk_count_per_axis(&self) -> Result<i32, Box<dyn Error>> {
+        self.radius
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| cli_error("chunk radius overflowed"))
+    }
+
+    fn effective_world_span_blocks(&self) -> Result<i32, Box<dyn Error>> {
+        self.chunk_count_per_axis()?
+            .checked_mul(CHUNK_EDGE_I32)
+            .ok_or_else(|| cli_error("chunk footprint overflowed"))
     }
 
     fn default_single_path(&self, channel: PreviewChannel) -> PathBuf {
         PathBuf::from(format!(
-            "{OUTPUT_DIR}/s{}_x{}_z{}_{}.png",
+            "{OUTPUT_DIR}/s{}_cx{}_cz{}_r{}_{}.png",
             self.seed,
-            self.center_x,
-            self.center_z,
+            self.center_chunk_x,
+            self.center_chunk_z,
+            self.radius,
             channel.as_str()
         ))
     }
 
     fn default_all_dir(&self) -> PathBuf {
         PathBuf::from(format!(
-            "{OUTPUT_DIR}/s{}_x{}_z{}",
-            self.seed, self.center_x, self.center_z
+            "{OUTPUT_DIR}/s{}_cx{}_cz{}_r{}",
+            self.seed, self.center_chunk_x, self.center_chunk_z, self.radius
         ))
     }
 }
@@ -462,14 +478,15 @@ struct PreviewHeader {
     generator_version: u32,
     stage: String,
     channel: PreviewChannel,
-    center_x: i32,
-    center_z: i32,
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    center_world_x: i32,
+    center_world_z: i32,
+    radius: i32,
     width: u32,
     height: u32,
-    world_span_blocks: i32,
     effective_world_span_blocks: i32,
-    chunk_radius: Option<i32>,
-    default_chunk_radius: i32,
+    chunk_count_per_axis: i32,
     sample_spacing_blocks: f32,
     region_size_blocks: i32,
     site_spacing_blocks: i32,
@@ -535,22 +552,19 @@ impl PreviewHeader {
             format!("stage={}", self.stage),
             format!("channel={}", self.channel.as_str()),
             format!("map_name={}", self.channel.map_name()),
-            format!("center_x={}", self.center_x),
-            format!("center_z={}", self.center_z),
+            format!("center_chunk_x={}", self.center_chunk_x),
+            format!("center_chunk_z={}", self.center_chunk_z),
+            format!("center_world_x={}", self.center_world_x),
+            format!("center_world_z={}", self.center_world_z),
+            format!("radius={}", self.radius),
             format!("width={}", self.width),
             format!("height={}", self.height),
             "orientation_overlay=north_up_east_right".to_string(),
-            format!("world_span_blocks={}", self.world_span_blocks),
             format!(
                 "effective_world_span_blocks={}",
                 self.effective_world_span_blocks
             ),
-            format!(
-                "chunk_radius={}",
-                self.chunk_radius
-                    .map_or_else(|| "default_footprint".to_string(), |radius| radius.to_string())
-            ),
-            format!("default_chunk_radius={}", self.default_chunk_radius),
+            format!("chunk_count_per_axis={}", self.chunk_count_per_axis),
             format!("chunk_edge_blocks={}", CHUNK_EDGE_I32),
             format!("sample_spacing_blocks={:.3}", self.sample_spacing_blocks),
             format!("region_size_blocks={}", self.region_size_blocks),
@@ -755,7 +769,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let total_start = Instant::now();
     let config = parse_args()?.validate()?;
     let meta = WorldMeta::new(config.seed);
-    let window = config.window();
+    let window = config.window()?;
     let graph_area = window.graph_area(config.region_size_blocks)?;
     let build_start = Instant::now();
     let preview = build_preview_world(&meta, &config, graph_area)?;
@@ -788,14 +802,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             generator_version: meta.generator_version,
             stage: config.stage.clone(),
             channel,
-            center_x: config.center_x,
-            center_z: config.center_z,
+            center_chunk_x: config.center_chunk_x,
+            center_chunk_z: config.center_chunk_z,
+            center_world_x: config.center_world_x()?,
+            center_world_z: config.center_world_z()?,
+            radius: config.radius,
             width: config.width,
             height: config.height,
-            world_span_blocks: config.world_span_blocks,
-            effective_world_span_blocks: config.effective_world_span_blocks(),
-            chunk_radius: config.chunk_radius,
-            default_chunk_radius: DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS,
+            effective_world_span_blocks: config.effective_world_span_blocks()?,
+            chunk_count_per_axis: config.chunk_count_per_axis()?,
             sample_spacing_blocks: window.sample_spacing_blocks(),
             region_size_blocks: config.region_size_blocks,
             site_spacing_blocks: config.site_spacing_blocks,
@@ -922,8 +937,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .join(", ")
     );
     println!(
-        "center world block: ({}, {})",
-        config.center_x, config.center_z
+        "center chunk: ({}, {}), center world block: ({}, {})",
+        config.center_chunk_x,
+        config.center_chunk_z,
+        config.center_world_x()?,
+        config.center_world_z()?
     );
     println!(
         "world footprint: x={:.1}..{:.1}, z={:.1}..{:.1}",
@@ -933,15 +951,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.max_z()
     );
     println!(
-        "preview footprint: span {:.0} blocks, sample grid {}x{}, spacing {:.3} blocks/sample, chunk-radius {} (default equivalent {})",
+        "preview footprint: radius {}, chunks {}x{}, span {:.0} blocks, sample grid {}x{}, spacing {:.3} blocks/sample",
+        config.radius,
+        config.chunk_count_per_axis()?,
+        config.chunk_count_per_axis()?,
         window.world_span_x,
         config.width,
         config.height,
-        window.sample_spacing_blocks(),
-        config
-            .chunk_radius
-            .map_or_else(|| "default".to_string(), |radius| radius.to_string()),
-        DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS
+        window.sample_spacing_blocks()
     );
     println!(
         "graph regions: x={}..{}, z={}..{}",
@@ -1114,18 +1131,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() < 3 {
+    parse_args_from(env::args().skip(1))
+}
+
+fn parse_args_from<I, S>(args: I) -> Result<PreviewConfig, Box<dyn Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    if args.len() < 4 {
         return Err(cli_error(usage()));
     }
 
     let seed = parse_required::<u64>(&mut args, "seed")?;
-    let center_x = parse_required::<i32>(&mut args, "center-x")?;
-    let center_z = parse_required::<i32>(&mut args, "center-z")?;
+    let center_chunk_x = parse_required::<i32>(&mut args, "cx")?;
+    let center_chunk_z = parse_required::<i32>(&mut args, "cz")?;
+    let radius = parse_required::<i32>(&mut args, "r")?;
     let mut width = DEFAULT_WIDTH;
     let mut height = DEFAULT_HEIGHT;
-    let mut world_span_blocks = DEFAULT_WORLD_SPAN_BLOCKS;
-    let mut chunk_radius = None;
     let mut region_size_blocks = DEFAULT_GRAPH_REGION_SIZE_BLOCKS;
     let mut site_spacing_blocks = DEFAULT_SITE_SPACING_BLOCKS;
     let mut land_bias = MacroMapConfig::new(seed, WorldMeta::new(seed).generator_version).land_bias;
@@ -1141,12 +1165,6 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
         match flag.as_str() {
             "--width" => width = parse_required::<u32>(&mut args, "width")?,
             "--height" => height = parse_required::<u32>(&mut args, "height")?,
-            "--world-span-blocks" => {
-                world_span_blocks = parse_required::<i32>(&mut args, "world-span-blocks")?
-            }
-            "--chunk-radius" => {
-                chunk_radius = Some(parse_required::<i32>(&mut args, "chunk-radius")?)
-            }
             "--region-size-blocks" => {
                 region_size_blocks = parse_required::<i32>(&mut args, "region-size-blocks")?
             }
@@ -1179,12 +1197,11 @@ fn parse_args() -> Result<PreviewConfig, Box<dyn Error>> {
 
     Ok(PreviewConfig {
         seed,
-        center_x,
-        center_z,
+        center_chunk_x,
+        center_chunk_z,
+        radius,
         width,
         height,
-        world_span_blocks,
-        chunk_radius,
         region_size_blocks,
         site_spacing_blocks,
         land_bias,
@@ -1251,8 +1268,8 @@ fn build_preview_world(
     let common = build_common_preview_world(
         meta,
         PreviewStageInput {
-            center_world_x: config.center_x,
-            center_world_z: config.center_z,
+            center_world_x: config.center_world_x()?,
+            center_world_z: config.center_world_z()?,
             region_size_blocks: config.region_size_blocks,
             site_spacing_blocks: config.site_spacing_blocks,
             land_bias: config.land_bias,
@@ -2387,11 +2404,7 @@ fn contour_height_color(height_blocks: f32, is_major: bool) -> [u8; 3] {
             (1.00, [168, 48, 45]),
         ],
     );
-    if is_major {
-        lighten(base, 0.18)
-    } else {
-        base
-    }
+    if is_major { lighten(base, 0.18) } else { base }
 }
 
 fn gradient_fire(value: f32) -> [u8; 3] {
@@ -2530,10 +2543,10 @@ fn draw_legend_overlay(
         bar_x,
         y + panel_height.saturating_sub(12 * scale),
         &format!(
-            "R {} / SPC {:.2}",
-            config
-                .chunk_radius
-                .map_or(DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS, |radius| radius),
+            "cx {} cz {} r {} / SPC {:.2}",
+            config.center_chunk_x,
+            config.center_chunk_z,
+            config.radius,
             window.sample_spacing_blocks()
         ),
         [196, 205, 194],
@@ -2862,7 +2875,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin macro_field_preview -- <seed> <center-x> <center-z> [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit|contour>] [--contour-step <blocks>] [--contour-major-every <n>] [--contours] [--output <path>]"
+    "usage: cargo run --bin macro_field_preview -- <seed> <cx> <cz> <r> [--width <u32>] [--height <u32>] [--region-size-blocks <i32>] [--site-spacing-blocks <i32>] [--land-bias <f32>] [--stage macro_field] [--channel <all|macro|mask|ridge|river|combined|lit|contour>] [--contour-step <blocks>] [--contour-major-every <n>] [--contours] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2882,12 +2895,11 @@ mod tests {
     fn test_config() -> PreviewConfig {
         PreviewConfig {
             seed: 42,
-            center_x: -10,
-            center_z: 20,
+            center_chunk_x: -10,
+            center_chunk_z: 20,
+            radius: 1,
             width: 64,
             height: 32,
-            world_span_blocks: 1024,
-            chunk_radius: None,
             region_size_blocks: DEFAULT_GRAPH_REGION_SIZE_BLOCKS,
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: 0.14,
@@ -2901,17 +2913,19 @@ mod tests {
     }
 
     #[test]
-    fn default_output_path_uses_short_seed_center_channel_name() {
+    fn default_output_path_uses_short_seed_chunk_center_radius_channel_name() {
         let config = test_config();
         let paths = output_paths_for_config(&config).unwrap();
 
         assert_eq!(paths.len(), 1);
-        assert!(paths[0]
-            .1
-            .display()
-            .to_string()
-            .replace('\\', "/")
-            .ends_with("target/macro-field-preview/s42_x-10_z20_lit.png"));
+        assert!(
+            paths[0]
+                .1
+                .display()
+                .to_string()
+                .replace('\\', "/")
+                .ends_with("target/macro-field-preview/s42_cx-10_cz20_r1_lit.png")
+        );
         assert!(!paths[0].1.display().to_string().contains("generator_gv"));
         assert!(!paths[0].1.display().to_string().contains("span"));
     }
@@ -2933,6 +2947,37 @@ mod tests {
                     .replace('\\', "/")
                     .ends_with("target/macro-field-preview/field-smoke/macro.png")
         }));
+    }
+
+    #[test]
+    fn parse_args_requires_chunk_center_and_radius() {
+        let config = parse_args_from([
+            "42",
+            "-70",
+            "0",
+            "8",
+            "--width",
+            "128",
+            "--height",
+            "96",
+            "--channel",
+            "combined",
+        ])
+        .unwrap()
+        .validate()
+        .unwrap();
+
+        assert_eq!(config.center_chunk_x, -70);
+        assert_eq!(config.center_chunk_z, 0);
+        assert_eq!(config.radius, 8);
+        assert_eq!(
+            config.center_world_x().unwrap(),
+            -70 * CHUNK_EDGE_I32 + CHUNK_EDGE_I32 / 2
+        );
+        assert_eq!(
+            config.effective_world_span_blocks().unwrap(),
+            17 * CHUNK_EDGE_I32
+        );
     }
 
     #[test]
@@ -3182,30 +3227,38 @@ mod tests {
             RIVER_TRIBUTARY_SOURCE_MARKER_COLOR, RIVER_CENTERLINE_TRIBUTARY_COLOR,
             "tributary source marker ring should not collapse into the centerline color"
         );
-        assert!(image
-            .as_raw()
-            .chunks_exact(3)
-            .any(|pixel| { pixel[0] > 230 && pixel[1] > 170 && pixel[2] < 90 }));
+        assert!(
+            image
+                .as_raw()
+                .chunks_exact(3)
+                .any(|pixel| { pixel[0] > 230 && pixel[1] > 170 && pixel[2] < 90 })
+        );
     }
 
     #[test]
     fn standing_water_boundary_treats_ocean_and_lake_as_water_only() {
-        assert!(FieldSample {
-            ocean_mask: 1.0,
-            ..FieldSample::default()
-        }
-        .is_standing_water());
-        assert!(FieldSample {
-            lake_mask: 1.0,
-            ..FieldSample::default()
-        }
-        .is_standing_water());
-        assert!(!FieldSample {
-            dry_mask: 1.0,
-            coast_mask: 1.0,
-            ..FieldSample::default()
-        }
-        .is_standing_water());
+        assert!(
+            FieldSample {
+                ocean_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
+        assert!(
+            FieldSample {
+                lake_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
+        assert!(
+            !FieldSample {
+                dry_mask: 1.0,
+                coast_mask: 1.0,
+                ..FieldSample::default()
+            }
+            .is_standing_water()
+        );
     }
 
     #[test]
@@ -3258,25 +3311,45 @@ mod tests {
     }
 
     #[test]
-    fn chunk_radius_zooms_macro_field_world_footprint() {
-        let default_config = test_config();
-        let zoomed_config = PreviewConfig {
-            chunk_radius: Some(4),
+    fn radius_uses_inclusive_chunk_footprint() {
+        let config = PreviewConfig {
+            radius: 4,
             ..test_config()
         }
         .validate()
         .unwrap();
 
-        assert_eq!(DEFAULT_MACRO_FIELD_PREVIEW_CHUNK_RADIUS, 512);
+        assert_eq!(config.chunk_count_per_axis().unwrap(), 9);
         assert_eq!(
-            default_config.effective_world_span_blocks(),
-            default_config.world_span_blocks
+            config.effective_world_span_blocks().unwrap(),
+            CHUNK_EDGE_I32 * 9
+        );
+        assert_eq!(config.center_world_x().unwrap(), -10 * CHUNK_EDGE_I32 + 16);
+        assert_eq!(config.center_world_z().unwrap(), 20 * CHUNK_EDGE_I32 + 16);
+        assert_eq!(
+            config.window().unwrap().world_span_x,
+            (CHUNK_EDGE_I32 * 9) as f32
         );
         assert_eq!(
-            zoomed_config.effective_world_span_blocks(),
-            CHUNK_EDGE_I32 * 8
+            config.window().unwrap().world_span_z,
+            (CHUNK_EDGE_I32 * 9) as f32 * config.height as f32 / config.width as f32
         );
-        assert!(zoomed_config.window().world_span_x < default_config.window().world_span_x);
+    }
+
+    #[test]
+    fn radius_zero_previews_one_chunk() {
+        let config = PreviewConfig {
+            radius: 0,
+            ..test_config()
+        }
+        .validate()
+        .unwrap();
+
+        assert_eq!(config.chunk_count_per_axis().unwrap(), 1);
+        assert_eq!(
+            config.effective_world_span_blocks().unwrap(),
+            CHUNK_EDGE_I32
+        );
     }
 
     #[test]

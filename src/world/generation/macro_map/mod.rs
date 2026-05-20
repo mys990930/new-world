@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
-use super::biome::{classify_graph_biome, GraphBiomeCell, GraphBiomeContext, GraphBiomeWaterRole};
+use super::biome::{GraphBiomeCell, GraphBiomeContext, GraphBiomeWaterRole, classify_graph_biome};
 use super::graph::{
     GraphBaseFields, GraphRegionCoord, VoronoiCornerId, VoronoiEdgeId, VoronoiGraphPatch,
     VoronoiSiteId, WorldPlanePoint,
@@ -1336,8 +1336,8 @@ mod tests {
     use super::super::biome::GraphBiomeKind;
     use super::*;
     use crate::world::generation::graph::{
-        generate_voronoi_graph_patch, VoronoiGraphConfig, VoronoiGraphPatchRequest,
-        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
+        DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS, VoronoiGraphConfig,
+        VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -1382,14 +1382,16 @@ mod tests {
             })
             .expect("expected at least one deterministic seed with both land and ocean");
 
-        assert!(map
-            .sites
-            .iter()
-            .any(|site| site.signed_macro_elevation > 0.0));
-        assert!(map
-            .sites
-            .iter()
-            .any(|site| site.signed_macro_elevation < 0.0));
+        assert!(
+            map.sites
+                .iter()
+                .any(|site| site.signed_macro_elevation > 0.0)
+        );
+        assert!(
+            map.sites
+                .iter()
+                .any(|site| site.signed_macro_elevation < 0.0)
+        );
     }
 
     #[test]

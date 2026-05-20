@@ -49,7 +49,7 @@ generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
 ## Tree Kinds
 
 - `PolarTundraShrub`: low, crooked sparse-leaf shrub form, roughly 1.0-2.0m tall.
-- `BorealTaigaConifer`: pointed conifer with a short visible lower trunk and narrow stacked triangular leaf shelves, roughly 7.0-11.5m tall.
+- `BorealTaigaConifer`: pointed conifer with a short visible lower trunk and more readable stacked triangular leaf shelves, roughly 7.0-11.5m tall.
 - `TemperateDeciduous`: broad oak-like straight 1x1 or 2x2 trunk with rounded crown, roughly 5.0-8.0m tall.
 - `TemperateBirch`: pale straight trunk with light oval crown, roughly 6.0-10.0m tall.
 - `MediterraneanOlive`: low, moderately spreading, sparse dry-climate crown, roughly 3.0-5.5m tall.
@@ -75,4 +75,4 @@ generate_tree_blueprint(request: TreeGenRequest) -> TreeBlueprint
 
 ## Preview
 
-`src/bin/tree_preview.rs` renders a single generated tree blueprint through the existing world meshing and offscreen renderer path. It is a diagnostic tool only and does not change the generation pipeline.
+`src/bin/tree_preview.rs` renders a single generated tree blueprint through the existing world meshing and offscreen renderer path. It is a diagnostic tool only and does not change the generation pipeline. Current default tree leaf palette entries remain cube-rendered foliage blocks with alpha-cutout texture holes, while vine palette entries resolve to `foliage_cross` cutout proxies.

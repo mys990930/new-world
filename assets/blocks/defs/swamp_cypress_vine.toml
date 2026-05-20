@@ -1,8 +1,8 @@
 id = 45
 key = "swamp_cypress_vine"
 solid = true
-opaque = true
-render = "cube"
+opaque = false
+render = "foliage_cross"
 material = "foliage"
 top = "swamp_cypress_vine"
 bottom = "swamp_cypress_vine"

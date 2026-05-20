@@ -63,6 +63,7 @@ struct PreviewConfig {
     chunk_radius: Option<i32>,
     quarter_turns: u8,
     perlin: bool,
+    river_influence_color: bool,
     output: Option<PathBuf>,
 }
 
@@ -338,6 +339,7 @@ struct PreviewHeader {
     perlin_enabled: bool,
     perlin_amplitude_blocks: f32,
     perlin_max_abs_blocks: f32,
+    river_influence_color: bool,
     build_ms: u128,
     macro_field_ms: u128,
     heightfield_ms: u128,
@@ -475,6 +477,14 @@ impl PreviewHeader {
             } else {
                 "micro_relief_blocks=0_perlin_disabled".to_string()
             },
+            format!(
+                "terrain_color_mode={}",
+                if self.river_influence_color {
+                    "river_influence_core_bed_shoulder"
+                } else {
+                    "default_terrain_ramp"
+                }
+            ),
             contour_gap_metadata(
                 self.contour_step_blocks,
                 self.contour_min_gap_blocks,
@@ -571,12 +581,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let player_cube = PlayerDiagnosticCube::for_tile(&heightfield, window)?;
 
     let mesh_start = Instant::now();
-    let plan = IsoRenderPlan::new(
+    let mut plan = IsoRenderPlan::new(
         &heightfield,
         config.width,
         config.height,
         config.quarter_turns % 4,
     )?;
+    plan.river_influence_color = config.river_influence_color;
     let mesh_ms = mesh_start.elapsed().as_millis();
 
     let render_start = Instant::now();
@@ -664,6 +675,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         perlin_enabled: heightfield.config.perlin.enabled,
         perlin_amplitude_blocks: heightfield.config.perlin.amplitude_blocks,
         perlin_max_abs_blocks: heightfield.config.perlin.max_abs_blocks,
+        river_influence_color: config.river_influence_color,
         build_ms,
         macro_field_ms,
         heightfield_ms,
@@ -708,6 +720,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             "on"
         } else {
             "off"
+        }
+    );
+    println!(
+        "terrain color mode: {}",
+        if config.river_influence_color {
+            "river influence diagnostic"
+        } else {
+            "default terrain ramp"
         }
     );
     if let Some(radius) = config.chunk_radius {
@@ -1009,6 +1029,7 @@ struct IsoRenderPlan {
     width: u32,
     height: u32,
     quarter_turns: u8,
+    river_influence_color: bool,
     tile_w_px: f32,
     tile_h_px: f32,
     vertical_px_per_block: f32,
@@ -1056,6 +1077,7 @@ impl IsoRenderPlan {
             width,
             height,
             quarter_turns: quarter_turns % 4,
+            river_influence_color: false,
             tile_w_px,
             tile_h_px,
             vertical_px_per_block,
@@ -1222,7 +1244,7 @@ fn draw_column_terrain_iso(
     column: HeightfieldColumn,
 ) {
     let surface = column.surface_height_blocks;
-    let color = terrain_color_rgba(column);
+    let color = terrain_color_rgba_for_plan(column, plan);
     for side in visible_side_directions(plan.quarter_turns) {
         let neighbor_height =
             neighbor_terrain_surface(tile, x, z, side.dx, side.dz).unwrap_or(surface - 12.0);
@@ -1886,6 +1908,14 @@ fn terrain_color_rgba(column: HeightfieldColumn) -> [u8; 4] {
     f32_color_to_rgba(terrain_color_raw(column))
 }
 
+fn terrain_color_rgba_for_plan(column: HeightfieldColumn, plan: IsoRenderPlan) -> [u8; 4] {
+    if plan.river_influence_color {
+        f32_color_to_rgba(river_influence_terrain_color_raw(column))
+    } else {
+        terrain_color_rgba(column)
+    }
+}
+
 fn water_color_rgba(column: HeightfieldColumn) -> [u8; 4] {
     f32_color_to_rgba(water_color_raw(column))
 }
@@ -1927,6 +1957,27 @@ fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
     color
 }
 
+fn river_influence_terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
+    let base = terrain_color_raw(column);
+    let core = column.river_core_strength.clamp(0.0, 1.0);
+    let shoulder = column.river_shoulder_strength.clamp(0.0, 1.0);
+    let valley = column.river_valley_strength.clamp(0.0, 1.0);
+    if core > 0.01 {
+        let bed_depth = (column.river_bed_depth_blocks / 40.0).clamp(0.0, 1.0);
+        let hot_bed = mix_rgb(rgb8([178, 38, 182]), rgb8([255, 86, 42]), bed_depth);
+        return mix_rgb(base, hot_bed, (0.42 + core * 0.58).clamp(0.0, 1.0));
+    }
+    if shoulder > 0.01 {
+        let bank = rgb8([88, 198, 220]);
+        return mix_rgb(base, bank, (0.18 + shoulder * 0.58).clamp(0.0, 0.76));
+    }
+    if valley > 0.05 {
+        let broad = rgb8([106, 112, 190]);
+        return mix_rgb(base, broad, (valley * 0.42).clamp(0.0, 0.42));
+    }
+    base
+}
+
 fn is_dry_ocean_terrain(column: HeightfieldColumn) -> bool {
     matches!(column.terrain_kind, HeightfieldTerrainKind::Ocean)
         && column.water_level_blocks.is_none()
@@ -1958,6 +2009,16 @@ fn combined_terrain_ramp(value: f32) -> [f32; 4] {
         ],
     );
     rgb8(c)
+}
+
+fn mix_rgb(left: [f32; 4], right: [f32; 4], t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    [
+        left[0] + (right[0] - left[0]) * t,
+        left[1] + (right[1] - left[1]) * t,
+        left[2] + (right[2] - left[2]) * t,
+        left[3],
+    ]
 }
 
 fn gradient_color(value: f32, stops: &[(f32, [u8; 3])]) -> [u8; 3] {
@@ -2139,7 +2200,7 @@ fn draw_overlay(image: &mut OffscreenRenderOutput, header: &PreviewHeader) {
         layout.scale,
     );
     text_y += layout.line_step;
-    draw_legend_keys(&mut rgba, text_x, text_y, layout.scale);
+    draw_legend_keys(&mut rgba, header, text_x, text_y, layout.scale);
     text_y += layout.line_step;
     draw_grid_legend_keys(&mut rgba, header, text_x, text_y, layout.scale);
     draw_scale_bar(&mut rgba, header, layout.scale);
@@ -2281,16 +2342,28 @@ fn draw_panel(image: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32) {
     }
 }
 
-fn draw_legend_keys(image: &mut RgbaImage, x: u32, y: u32, scale: u32) {
-    let keys = [
+fn draw_legend_keys(image: &mut RgbaImage, header: &PreviewHeader, x: u32, y: u32, scale: u32) {
+    let default_keys = [
         ("WTR", [58, 120, 154, 255]),
         ("LOW", [101, 130, 117, 255]),
         ("HI", [190, 190, 181, 255]),
         ("DRY", [118, 111, 119, 255]),
         ("PLY", PLAYER_CUBE_TOP_COLOR),
     ];
+    let river_keys = [
+        ("WTR", [58, 120, 154, 255]),
+        ("CORE", [255, 86, 42, 255]),
+        ("SHLD", [88, 198, 220, 255]),
+        ("BVAL", [106, 112, 190, 255]),
+        ("PLY", PLAYER_CUBE_TOP_COLOR),
+    ];
+    let keys = if header.river_influence_color {
+        &river_keys
+    } else {
+        &default_keys
+    };
     let mut cursor = x;
-    for (label, color) in keys {
+    for (label, color) in keys.iter().copied() {
         let swatch = 5 * scale;
         for sy in 0..swatch {
             for sx in 0..swatch {
@@ -2558,7 +2631,8 @@ where
         columns_z: None,
         chunk_radius: None,
         quarter_turns: 0,
-        perlin: false,
+        perlin: true,
+        river_influence_color: false,
         output: None,
     };
 
@@ -2595,6 +2669,9 @@ where
             }
             "--perlin" => {
                 config.perlin = true;
+            }
+            "--river-influence-color" | "--riverbed-influence-color" => {
+                config.river_influence_color = true;
             }
             "--output" => {
                 config.output = Some(PathBuf::from(parse_required::<String>(
@@ -2637,7 +2714,7 @@ where
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--perlin] [--output <path>]"
+    "usage: cargo run --bin heightfield_preview -- <seed> <center-chunk-x> <center-chunk-z> [--world-center] [--width <u32>] [--height <u32>] [--world-span-blocks <i32>] [--chunk-radius <i32>] [--columns-x <u32>] [--columns-z <u32>] [--quarter-turns <u8>] [--perlin] [--river-influence-color] [--output <path>]"
 }
 
 fn cli_error(message: impl Into<String>) -> Box<dyn Error> {
@@ -2793,6 +2870,7 @@ mod tests {
                 columns_z: Some(192),
                 chunk_radius: None,
                 perlin: false,
+                river_influence_color: false,
                 output: None,
             };
             let meta = WorldMeta::new(seed);
@@ -2888,6 +2966,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             perlin: false,
+            river_influence_color: false,
             output: None,
         };
 
@@ -2915,6 +2994,7 @@ mod tests {
             chunk_radius: Some(4),
             quarter_turns: 2,
             perlin: false,
+            river_influence_color: false,
             output: None,
         };
 
@@ -3013,6 +3093,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             perlin: false,
+            river_influence_color: false,
             output: None,
         };
         let window = config.window();
@@ -3121,12 +3202,49 @@ mod tests {
     }
 
     #[test]
-    fn parse_perlin_flag_defaults_off_and_can_enable_micro_relief() {
+    fn parse_perlin_flag_is_backward_compatible_noop_alias() {
         let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
         let enabled = parse_args_from(["42", "0", "0", "--perlin"]).expect("parse args");
 
-        assert!(!default_config.perlin);
+        assert!(default_config.perlin);
         assert!(enabled.perlin);
+    }
+
+    #[test]
+    fn parse_river_influence_color_flag_is_opt_in() {
+        let default_config = parse_args_from(["42", "0", "0"]).expect("parse args");
+        let enabled =
+            parse_args_from(["42", "0", "0", "--river-influence-color"]).expect("parse args");
+        let alias =
+            parse_args_from(["42", "0", "0", "--riverbed-influence-color"]).expect("parse args");
+
+        assert!(!default_config.river_influence_color);
+        assert!(enabled.river_influence_color);
+        assert!(alias.river_influence_color);
+    }
+
+    #[test]
+    fn river_influence_color_distinguishes_core_from_shoulder() {
+        let mut core = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::River);
+        core.river_core_strength = 1.0;
+        core.river_shoulder_strength = 1.0;
+        core.river_valley_strength = 1.0;
+        core.river_bed_depth_blocks = 24.0;
+        let mut shoulder = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::Land);
+        shoulder.river_core_strength = 0.0;
+        shoulder.river_shoulder_strength = 0.8;
+        shoulder.river_valley_strength = 0.8;
+        let ordinary = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::Land);
+
+        assert_ne!(
+            f32_color_to_rgba(river_influence_terrain_color_raw(core)),
+            f32_color_to_rgba(river_influence_terrain_color_raw(shoulder))
+        );
+        assert_eq!(
+            f32_color_to_rgba(river_influence_terrain_color_raw(ordinary)),
+            terrain_color_rgba(ordinary),
+            "ordinary terrain should keep the default ramp in river diagnostic mode"
+        );
     }
 
     #[test]
@@ -3147,6 +3265,7 @@ mod tests {
             chunk_radius: None,
             quarter_turns: 0,
             perlin: false,
+            river_influence_color: false,
             output: None,
         }
         .window();
@@ -3182,6 +3301,7 @@ mod tests {
             chunk_radius: Some(2),
             quarter_turns: 0,
             perlin: false,
+            river_influence_color: false,
             output: None,
         };
         let window = config.window();
@@ -3224,6 +3344,7 @@ mod tests {
             chunk_radius: Some(1),
             quarter_turns: 0,
             perlin: false,
+            river_influence_color: false,
             output: None,
         };
         let window = config.window();
@@ -3544,10 +3665,25 @@ mod tests {
                 0.0
             },
             terrain_ruggedness: 0.0,
+            river_core_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+                1.0
+            } else {
+                0.0
+            },
+            river_shoulder_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+                1.0
+            } else {
+                0.0
+            },
             river_valley_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
                 1.0
             } else {
                 0.0
+            },
+            river_distance_blocks: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+                0.0
+            } else {
+                f32::INFINITY
             },
             river_flow_hint: 0.0,
             river_bed_depth_blocks: 0.0,

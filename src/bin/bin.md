@@ -30,6 +30,7 @@
 | `meso_preview` | Top-down isolated meso-feature preview over a flat baseline | Works for explicit seed / coordinate windows |
 | `new-world-textmode` | Continuously refreshed console grid for fixed tick time/weather/surface/ecology events over the ECS `3x3` active chunk scope | Works as the first textmode simulation slice |
 | `pixelize_preview` | Top-down graph-first chunk pixelize preview, one resolved column per world block by default | Works with the current core `pixelize` API export |
+| `surface_plan_preview` | Quarter-view graph-first surface/material plan preview from heightfield columns | Works with the current core `surface_plan` API export |
 | `terrain_probe` | Per-chunk / per-column generation probe dump | Currently blocked by `probe_chunk(...)` and `probe_column(...)` TODO |
 | `tree_preview` | Quarter-view preview of five generated variants for one climate tree blueprint | Works |
 | `world_create` | Generate and persist a created-world dump | Works through the graph-first launch voxel fill path |
@@ -202,8 +203,8 @@ cargo run --bin generation_preview_suite -- 42 --center-chunk-x -70 --center-chu
 ```
 
 - Notes:
-  - The suite accepts chunk coordinates and converts them to world-block centers for graph/macro
-    overview binaries.
+  - The suite accepts chunk coordinates, converts them to world-block centers for graph/biome
+    overview binaries, and forwards chunk center/radius directly to macro-map and chunk-footprint previews.
   - It reuses existing preview binaries as child processes and does not own terrain/rendering policy.
   - See [generation_preview_suite.md](./generation_preview_suite.md).
 
@@ -247,28 +248,27 @@ cargo run --release --bin heightfield_preview -- 42 0 0 --chunk-radius 8 --quart
     tuning.
   - Auto output names include quarter and chunk radius suffixes such as `s42_cx0_cz0_q0_r4.png`.
     Explicit `--output` paths are respected exactly.
-  - Meso feature is currently stubbed to zero. Perlin micro relief is available with `--perlin`.
+  - Meso feature is currently stubbed to zero. Perlin micro relief is on by default; `--perlin`
+    remains accepted as a backward-compatible alias.
   - See [heightfield_preview.md](./heightfield_preview.md).
 
 ## macro_field_preview
 
 - Purpose: render top-down PNG previews for graph-first macro field rasterization.
 - Parameters:
-  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
-  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`,
+  - positional: `<seed> <cx> <cz> <r>` where `cx/cz` are chunk coordinates and `r` is inclusive chunk radius
+  - optional: `--width <u32>`, `--height <u32>`, `--region-size-blocks <i32>`,
     `--site-spacing-blocks <i32>`, `--land-bias <f32>`, `--stage macro_field`,
     `--channel <all|macro|mask|ridge|river|combined|lit|contour>`, `--contours`, `--contour-step <blocks>`,
     `--contour-major-every <n>`, `--output <path>`
 - Defaults:
   - `--width 3840`
   - `--height 2160`
-  - `--world-span-blocks 32768`
-  - default footprint is equivalent to `--chunk-radius 512` with `CHUNK_EDGE = 32`
   - `--channel lit`
 - Example:
 
 ```bash
-cargo run --release --bin macro_field_preview -- 42 0 0 --width 1280 --height 720 --channel combined --contours --output target/macro-field-preview/combined.png
+cargo run --release --bin macro_field_preview -- 42 0 0 8 --width 1280 --height 720 --channel combined --contours --output target/macro-field-preview/combined.png
 ```
 
 - Notes:
@@ -311,17 +311,16 @@ cargo run --bin pixelize_preview -- 42 0 0 1 --output target/pixelize-preview/sm
 
 - Purpose: render one top-down PNG composite for the graph-first macro map stage, showing ocean/lake separation, coast, inland elevation, base Voronoi graph edges, hydrology, and guide overlays.
 - Parameters:
-  - positional: `<seed> <center-x> <center-z>` where center coordinates are world-block coordinates
-  - optional: `--width <u32>`, `--height <u32>`, `--world-span-blocks <i32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage macro_map`, `--output <path>`
+  - positional: `<seed> <cx> <cz> <r>` where center coordinates are chunk coordinates and `r` is an inclusive square chunk radius
+  - optional: `--width <u32>`, `--height <u32>`, `--region-size-blocks <i32>`, `--site-spacing-blocks <i32>`, `--stage macro_map`, `--output <path>`
 - Defaults:
   - `--width 3840`
   - `--height 2160`
-  - `--world-span-blocks 32768`
   - `--stage macro_map`
 - Example:
 
 ```bash
-cargo run --bin macro_map_preview -- 42 0 0 --width 640 --height 360 --output target/macro-map-preview/smoke.png
+cargo run --bin macro_map_preview -- 42 0 0 10 --width 640 --height 360 --output target/macro-map-preview/smoke.png
 ```
 
 - Notes:

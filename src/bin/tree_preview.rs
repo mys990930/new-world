@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         textures: block_registry_to_render_textures(&registry),
         environment: preview_environment(),
         chunk_meshes: render_meshes,
-        clear_color_override: Some([0.72, 0.82, 0.92, 1.0]),
+        clear_color_override: Some([0.34, 0.39, 0.43, 1.0]),
     })?;
     draw_compass_offscreen(&mut image);
     write_offscreen_png(&output, &image)?;
@@ -354,14 +354,17 @@ fn build_preview_camera(
 }
 
 fn preview_environment() -> RenderEnvironment {
-    let mut environment = RenderEnvironment::midday_quarter_view();
-    environment.fog_density = 0.0;
-    environment.ambient_intensity = 0.98;
-    environment.sun_intensity = 1.24;
-    environment.top_face_boost = 0.28;
-    environment.side_shadow_strength = 0.36;
-    environment.silhouette_boost = 0.22;
-    environment.saturation_boost = 0.08;
+    let mut environment = RenderEnvironment::sunset_quarter_view();
+    environment.sun_color = [0.96, 0.88, 0.72];
+    environment.sun_intensity = 0.76;
+    environment.ambient_color = [0.38, 0.43, 0.48];
+    environment.ambient_intensity = 0.48;
+    environment.fog_color = [0.46, 0.52, 0.57];
+    environment.fog_density = 0.003;
+    environment.top_face_boost = 0.08;
+    environment.side_shadow_strength = 0.58;
+    environment.silhouette_boost = 0.18;
+    environment.saturation_boost = 0.0;
     environment
 }
 
