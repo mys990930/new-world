@@ -285,7 +285,9 @@ legacy `MaterialPolicyId`와 1:1로 고정되지 않는다.
    `BiomeSurfacePolicy`를 정의한다.
 2. `resolve_surface_column(input, config) -> SurfaceColumnPlan`을 단일 column 순수 함수로 구현한다.
 3. `generate_surface_plan_area(heightfield, macro_field, config)`는 row-major order를 유지하며 deterministic
-   parallel conversion을 허용한다.
+   parallel conversion을 허용한다. `MacroFieldTile`이 들어오면 heightfield column과 macro sample의
+   world-space position이 같은지 먼저 검증한다. `SurfaceColumnPlan.world_x/world_z`는 sample position을
+   포함하는 voxel block coordinate(`floor`)로 변환한다.
 4. MVP policy는 아래 범위만 포함한다.
    - biome 기본 palette
    - ocean/lake/river/wetland/coast/dry-basin override
@@ -373,6 +375,9 @@ priority를 함께 보고 실제 block을 배치한다.
 - graph-first surface/material resolve launch slice가 `SurfaceColumnPlan`을 생성한다.
 - biome 기본 palette, ocean/lake/river/wetland/coast/dry-basin override를 적용한 뒤,
   `MacroFieldSample.nearest_site` 기준으로 non-water noisy-owner top material을 단일화한다.
+- `MacroFieldTile` compatibility input이 연결된 area path는 heightfield/macro-field row-major length,
+  dimensions, sample positions가 일치하지 않으면 panic으로 중단한다. 이 검증은 preview나 audit이 서로
+  다른 좌표 footprint를 같은 column처럼 비교하는 회귀를 막기 위한 launch-scope contract다.
 - `coast_mask`는 broad distance diagnostic으로 보존하지만, 그 값만으로 land biome을 coast/sand material로
   승격하지 않는다.
 - rocky/exposure material override는 현재 기본 resolve에서 비활성이다. `terrain_ruggedness`,
@@ -385,9 +390,11 @@ priority를 함께 보고 실제 block을 배치한다.
 - seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
   noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
-  한다. 이 audit은 ignored unit test로 보존하며, PNG를 만들지 않고 macro field, Perlin-enabled
-  heightfield, surface plan column data를 직접 비교한다.
+  한다. 또한 인접한 non-water final top material이 달라지는 모든 edge는 해당 두 noisy-owner site를 잇는
+  `NoisyBoundaryCurve`의 block-edge support 안에 있어야 한다. 이 audit은 ignored unit test로 보존하며,
+  PNG를 만들지 않고 macro field, Perlin-enabled heightfield, surface plan column data를 직접 비교한다.
 - seed `42`, chunk `(-73, -40)`의 focused boundary audit은 1-block guard를 둔 column data를 직접 비교해
   raw nearest site, noisy owner site, biome, base top block, final top block, local mix source neighbor를
   출력한다. 이 audit 역시 preview 이미지 없이 adjacent owner pair의 mutual material swap이 없는지,
-  그리고 final non-water top material이 같은 noisy owner site 안에서 하나뿐인지 검사한다.
+  final non-water top material이 같은 noisy owner site 안에서 하나뿐인지, 그리고 material transition edge가
+  noisy boundary curve로 지지되는지 검사한다.

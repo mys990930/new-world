@@ -320,11 +320,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let heightfield_ms = heightfield_start.elapsed().as_millis();
 
     let surface_plan_start = Instant::now();
-    let surface_plan = generate_surface_plan_area(
-        &heightfield,
-        Some(&macro_tile),
-        SurfacePlanConfig::default(),
-    );
+    let surface_config = SurfacePlanConfig::new(meta.seed, meta.generator_version);
+    let surface_plan = generate_surface_plan_area(&heightfield, Some(&macro_tile), surface_config);
     let surface_plan_ms = surface_plan_start.elapsed().as_millis();
     validate_plan_shape(&surface_plan, &heightfield)?;
 

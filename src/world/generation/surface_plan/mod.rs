@@ -7,6 +7,8 @@ use super::macro_field::{MacroFieldSample, MacroFieldTile};
 use crate::world::generation::graph::VoronoiSiteId;
 use crate::world::legacy::surface::SurfaceCondition;
 
+const SURFACE_PLAN_POSITION_EPSILON: f32 = 0.001;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurfacePlanConfig {
     pub seed: u64,
@@ -698,6 +700,7 @@ pub fn generate_surface_plan_area(
     macro_field: Option<&MacroFieldTile>,
     config: SurfacePlanConfig,
 ) -> SurfacePlanArea {
+    validate_surface_plan_inputs(heightfield, macro_field);
     let mix_sources = macro_field.map(|tile| {
         (0..heightfield.columns.len())
             .map(|index| SurfaceMixSource {
@@ -716,8 +719,8 @@ pub fn generate_surface_plan_area(
             let sample = macro_field.and_then(|tile| tile.samples.get(index));
             resolve_surface_column(
                 SurfaceColumnInput {
-                    world_x: column.position.x.round() as i32,
-                    world_z: column.position.z.round() as i32,
+                    world_x: surface_block_coord_from_sample_position(column.position.x),
+                    world_z: surface_block_coord_from_sample_position(column.position.z),
                     heightfield: *column,
                     biome: sample.and_then(|sample| sample.biome),
                     biome_context: sample.and_then(|sample| sample.biome_context),
@@ -745,6 +748,49 @@ pub fn generate_surface_plan_area(
         stats,
         config,
     }
+}
+
+fn validate_surface_plan_inputs(
+    heightfield: &HeightfieldTile,
+    macro_field: Option<&MacroFieldTile>,
+) {
+    if let Some(tile) = macro_field {
+        assert_eq!(
+            heightfield.columns.len(),
+            tile.samples.len(),
+            "surface_plan requires heightfield and macro field to share the same row-major footprint"
+        );
+        assert_eq!(
+            heightfield.width, tile.config.width,
+            "surface_plan requires heightfield and macro field widths to match"
+        );
+        assert_eq!(
+            heightfield.height, tile.config.height,
+            "surface_plan requires heightfield and macro field heights to match"
+        );
+        for (index, (column, sample)) in heightfield.columns.iter().zip(&tile.samples).enumerate() {
+            assert!(
+                (column.position.x - sample.position.x).abs() <= SURFACE_PLAN_POSITION_EPSILON
+                    && (column.position.z - sample.position.z).abs()
+                        <= SURFACE_PLAN_POSITION_EPSILON,
+                "surface_plan input coordinate mismatch at index {index}: heightfield=({:.3},{:.3}) macro=({:.3},{:.3})",
+                column.position.x,
+                column.position.z,
+                sample.position.x,
+                sample.position.z
+            );
+        }
+    }
+}
+
+fn surface_block_coord_from_sample_position(value: f32) -> i32 {
+    assert!(value.is_finite(), "surface sample position must be finite");
+    let floored = value.floor();
+    assert!(
+        floored >= i32::MIN as f32 && floored <= i32::MAX as f32,
+        "surface sample position must fit i32 world block coordinates"
+    );
+    floored as i32
 }
 
 fn normalize_non_water_owner_surface_materials(
@@ -1493,7 +1539,7 @@ mod tests {
                 ..HeightfieldConfig::default()
             },
         );
-        let surface_config = SurfacePlanConfig::default();
+        let surface_config = SurfacePlanConfig::new(meta.seed, meta.generator_version);
         let base_surface_config = SurfacePlanConfig {
             boundary_mix_radius_blocks: 0,
             ..surface_config
@@ -1826,6 +1872,25 @@ mod tests {
         for representative in &final_owner_top_audit.conflict_representatives {
             eprintln!("final_non_water_owner_top_conflict {representative}");
         }
+        let final_transition_audit = audit_final_non_water_material_transitions_by_boundary(
+            &macro_tile.samples,
+            &surface_plan.columns,
+            &boundary.curves,
+            macro_tile.config.width as usize,
+            macro_tile.config.height as usize,
+            macro_tile.config.sample_spacing_blocks,
+        );
+        eprintln!(
+            "final_non_water_material_transition_audit transition_count={} unsupported_transition_count={}",
+            final_transition_audit.transition_count,
+            final_transition_audit.unsupported_transition_count
+        );
+        for representative in &final_transition_audit.transition_representatives {
+            eprintln!("final_non_water_material_transition {representative}");
+        }
+        for representative in &final_transition_audit.unsupported_transition_representatives {
+            eprintln!("unsupported_final_non_water_material_transition {representative}");
+        }
         eprintln!("anomaly_count={anomaly_count}");
         for representative in &representatives {
             eprintln!("anomaly {representative}");
@@ -1854,6 +1919,10 @@ mod tests {
         assert_eq!(
             final_owner_top_audit.conflicting_owner_count, 0,
             "final non-water top materials must stay singular within each noisy-boundary owner"
+        );
+        assert_eq!(
+            final_transition_audit.unsupported_transition_count, 0,
+            "final non-water material transitions must lie on the noisy boundary curve between their owner sites"
         );
         assert_eq!(
             anomaly_count, 0,
@@ -1943,7 +2012,7 @@ mod tests {
                 ..HeightfieldConfig::default()
             },
         );
-        let surface_config = SurfacePlanConfig::default();
+        let surface_config = SurfacePlanConfig::new(meta.seed, meta.generator_version);
         let base_surface_config = SurfacePlanConfig {
             boundary_mix_radius_blocks: 0,
             ..surface_config
@@ -1970,6 +2039,7 @@ mod tests {
         let mut owner_switch_rows = Vec::new();
         let mut owner_boundary_swap_count = 0usize;
         let mut owner_boundary_swap_rows = Vec::new();
+        let mut chunk_owner_top_counts = BTreeMap::<String, BTreeMap<&'static str, usize>>::new();
 
         for z in guard_blocks..guard_blocks + CHUNK_EDGE_I32 {
             for x in guard_blocks..guard_blocks + CHUNK_EDGE_I32 {
@@ -1980,6 +2050,15 @@ mod tests {
                 let plan = surface_plan.columns[index];
                 *base_top_counts.entry(base_plan.top_block).or_default() += 1;
                 *final_top_counts.entry(plan.top_block).or_default() += 1;
+                if is_non_water_owner_surface_column(plan) {
+                    if let Some(site) = sample.nearest_site {
+                        *chunk_owner_top_counts
+                            .entry(format!("{site:?}"))
+                            .or_default()
+                            .entry(plan.top_block)
+                            .or_default() += 1;
+                    }
+                }
 
                 let raw_site = raw_context
                     .nearest_site(sample.position)
@@ -2159,6 +2238,34 @@ mod tests {
         for row in &final_owner_top_audit.conflict_representatives {
             eprintln!("final_non_water_owner_top_conflict {row}");
         }
+        let final_transition_audit = audit_final_non_water_material_transitions_by_boundary(
+            &macro_tile.samples,
+            &surface_plan.columns,
+            &boundary.curves,
+            macro_tile.config.width as usize,
+            macro_tile.config.height as usize,
+            macro_tile.config.sample_spacing_blocks,
+        );
+        eprintln!(
+            "final_non_water_material_transition_audit transition_count={} unsupported_transition_count={}",
+            final_transition_audit.transition_count,
+            final_transition_audit.unsupported_transition_count
+        );
+        for row in &final_transition_audit.transition_representatives {
+            eprintln!("final_non_water_material_transition {row}");
+        }
+        for row in &final_transition_audit.unsupported_transition_representatives {
+            eprintln!("unsupported_final_non_water_material_transition {row}");
+        }
+        eprintln!(
+            "focused_chunk_non_water_owner_top_count owner_count={}",
+            chunk_owner_top_counts.len()
+        );
+        for (site, counts) in &chunk_owner_top_counts {
+            eprintln!(
+                "focused_chunk_non_water_owner_top_count site={site} final_counts={counts:?}"
+            );
+        }
 
         assert_eq!(unsupported_raw_owner_switch_count, 0);
         assert_eq!(unsupported_local_mix_count, 0);
@@ -2166,6 +2273,16 @@ mod tests {
         assert_eq!(
             final_owner_top_audit.conflicting_owner_count, 0,
             "final non-water top materials must stay singular within each noisy-boundary owner"
+        );
+        assert_eq!(
+            final_transition_audit.unsupported_transition_count, 0,
+            "final non-water material transitions must lie on the noisy boundary curve between their owner sites"
+        );
+        assert!(
+            chunk_owner_top_counts
+                .values()
+                .all(|counts| counts.len() <= 1),
+            "focused chunk final non-water top materials must stay singular within each noisy-boundary owner"
         );
     }
 
@@ -2244,6 +2361,123 @@ mod tests {
             owner_count_representatives,
             conflict_representatives,
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct FinalNonWaterMaterialTransitionAudit {
+        transition_count: usize,
+        unsupported_transition_count: usize,
+        transition_representatives: Vec<String>,
+        unsupported_transition_representatives: Vec<String>,
+    }
+
+    fn audit_final_non_water_material_transitions_by_boundary(
+        samples: &[MacroFieldSample],
+        columns: &[SurfaceColumnPlan],
+        curves: &[NoisyBoundaryCurve],
+        width: usize,
+        height: usize,
+        sample_spacing_blocks: f32,
+    ) -> FinalNonWaterMaterialTransitionAudit {
+        let mut audit = FinalNonWaterMaterialTransitionAudit::default();
+        if width == 0
+            || height == 0
+            || samples.len() != columns.len()
+            || samples.len() != width * height
+        {
+            return audit;
+        }
+
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                for (label, neighbor_index) in [
+                    ("E", (x + 1 < width).then_some(index + 1)),
+                    ("S", (z + 1 < height).then_some(index + width)),
+                ] {
+                    let Some(neighbor_index) = neighbor_index else {
+                        continue;
+                    };
+                    let left_column = columns[index];
+                    let right_column = columns[neighbor_index];
+                    if !is_non_water_owner_surface_column(left_column)
+                        || !is_non_water_owner_surface_column(right_column)
+                        || left_column.top_block == right_column.top_block
+                    {
+                        continue;
+                    }
+
+                    audit.transition_count += 1;
+                    let left_sample = samples[index];
+                    let right_sample = samples[neighbor_index];
+                    let midpoint = WorldPlanePoint::new(
+                        (left_sample.position.x + right_sample.position.x) * 0.5,
+                        (left_sample.position.z + right_sample.position.z) * 0.5,
+                    );
+                    let support = noisy_boundary_support_for_owner_pair(
+                        curves,
+                        left_sample.nearest_site,
+                        right_sample.nearest_site,
+                        midpoint,
+                        sample_spacing_blocks,
+                    );
+                    let row = format!(
+                        "{label} left#{} world=({}, {}) site={:?} top={} | right#{} world=({}, {}) site={:?} top={} midpoint=({:.2},{:.2}) support={:?}",
+                        index,
+                        left_column.world_x,
+                        left_column.world_z,
+                        left_sample.nearest_site,
+                        left_column.top_block,
+                        neighbor_index,
+                        right_column.world_x,
+                        right_column.world_z,
+                        right_sample.nearest_site,
+                        right_column.top_block,
+                        midpoint.x,
+                        midpoint.z,
+                        support
+                    );
+                    if audit.transition_representatives.len() < 24 {
+                        audit.transition_representatives.push(row.clone());
+                    }
+                    if !support.is_some_and(|(_, _, within)| within) {
+                        audit.unsupported_transition_count += 1;
+                        if audit.unsupported_transition_representatives.len() < 24 {
+                            audit.unsupported_transition_representatives.push(row);
+                        }
+                    }
+                }
+            }
+        }
+
+        audit
+    }
+
+    fn noisy_boundary_support_for_owner_pair(
+        curves: &[NoisyBoundaryCurve],
+        left_site: Option<VoronoiSiteId>,
+        right_site: Option<VoronoiSiteId>,
+        position: WorldPlanePoint,
+        sample_spacing_blocks: f32,
+    ) -> Option<(f32, f32, bool)> {
+        let left_site = left_site?;
+        let right_site = right_site?;
+        if left_site == right_site {
+            return None;
+        }
+
+        curves
+            .iter()
+            .filter(|curve| {
+                curve.anchors.sites.contains(&left_site)
+                    && curve.anchors.sites.contains(&right_site)
+            })
+            .map(|curve| {
+                let distance = test_polyline_distance(position, &curve.points);
+                let radius = curve.amplitude + sample_spacing_blocks;
+                (distance, radius, distance <= radius + 0.001)
+            })
+            .min_by(|left, right| left.0.total_cmp(&right.0))
     }
 
     fn is_supported_local_mix(
@@ -2896,6 +3130,44 @@ mod tests {
     }
 
     #[test]
+    fn surface_plan_world_block_coords_floor_sample_positions() {
+        let heightfield =
+            heightfield_tile(1, 1, vec![column(0.5, -0.5, HeightfieldTerrainKind::Land)]);
+        let macro_field = MacroFieldTile {
+            config: MacroFieldTileConfig::new(0.5, -0.5, 1, 1, 1.0),
+            samples: vec![sample(0.5, -0.5, GraphBiomeKind::TemperateGrassland)],
+            stats: MacroFieldTileStats::default(),
+        };
+
+        let area = generate_surface_plan_area(
+            &heightfield,
+            Some(&macro_field),
+            SurfacePlanConfig::default(),
+        );
+
+        assert_eq!(area.columns[0].world_x, 0);
+        assert_eq!(area.columns[0].world_z, -1);
+    }
+
+    #[test]
+    #[should_panic(expected = "surface_plan input coordinate mismatch")]
+    fn surface_plan_rejects_misaligned_macro_field_samples() {
+        let heightfield =
+            heightfield_tile(1, 1, vec![column(0.0, 0.0, HeightfieldTerrainKind::Land)]);
+        let macro_field = MacroFieldTile {
+            config: MacroFieldTileConfig::new(1.0, 0.0, 1, 1, 1.0),
+            samples: vec![sample(1.0, 0.0, GraphBiomeKind::TemperateGrassland)],
+            stats: MacroFieldTileStats::default(),
+        };
+
+        let _ = generate_surface_plan_area(
+            &heightfield,
+            Some(&macro_field),
+            SurfacePlanConfig::default(),
+        );
+    }
+
+    #[test]
     fn noisy_boundary_mixing_steps_neighbor_materials_without_changing_height_or_role() {
         let config = SurfacePlanConfig {
             boundary_mix_radius_blocks: 1,
@@ -3104,8 +3376,8 @@ mod tests {
         biome_context: Option<GraphBiomeContext>,
     ) -> SurfaceColumnInput {
         SurfaceColumnInput {
-            world_x: heightfield.position.x.round() as i32,
-            world_z: heightfield.position.z.round() as i32,
+            world_x: surface_block_coord_from_sample_position(heightfield.position.x),
+            world_z: surface_block_coord_from_sample_position(heightfield.position.z),
             heightfield,
             biome,
             biome_context,

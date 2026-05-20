@@ -33,7 +33,7 @@
    `heightfield_preview`; bounded heightfield-owned micro relief is enabled before surface material
    policy is applied. `--perlin` remains accepted for older scripts but does not change the
    default-on configuration.
-5. Call `generate_surface_plan_area(&heightfield, Some(&macro_tile), SurfacePlanConfig::default())`.
+5. Call `generate_surface_plan_area(&heightfield, Some(&macro_tile), SurfacePlanConfig::new(seed, generator_version))`.
 6. Render terrain as isometric columns using `SurfaceColumnPlan.top_block` for top faces and
    `SurfaceColumnPlan.base_block` for visible side faces. The diagnostic palette keeps side-face
    base materials visually distinct from grass/sand top materials where possible, e.g. `sandstone`
