@@ -7,8 +7,8 @@ use super::river::{
     nearest_point_on_segment, point_segment_distance, projected_t_on_segment,
     river_boundary_roughness_blocks, river_boundary_roughness_offset,
     river_core_strength_for_roughened_distance, river_hints_from_strength,
-    river_valley_strength_for_roughened_distance, river_water_radius_blocks, river_width_blocks,
-    squared_distance,
+    river_shoulder_radius_blocks, river_valley_strength_for_roughened_distance,
+    river_water_radius_blocks, squared_distance,
 };
 use super::types::{MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats};
 use crate::world::generation::boundary::NoisyBoundaryCurve;
@@ -500,7 +500,7 @@ pub(super) fn rounded_river_raster_points(
     let water_radius =
         river_water_radius_blocks(flow_hint, water_width_blocks, configured_radius_blocks);
     let valley_radius =
-        river_width_blocks(flow_hint, valley_width_blocks, configured_radius_blocks);
+        river_shoulder_radius_blocks(flow_hint, valley_width_blocks, configured_radius_blocks);
     let corner_cut_blocks = (water_radius * 1.2)
         .max(valley_radius * 0.18)
         .clamp(2.0, configured_radius_blocks * 0.16);
@@ -1167,7 +1167,7 @@ pub(super) fn river_raster_active_radius_blocks(
         source.water_width_blocks(),
         configured_radius_blocks,
     );
-    let valley_radius = river_width_blocks(
+    let valley_radius = river_shoulder_radius_blocks(
         source.flow_hint(),
         source.valley_width_blocks(),
         configured_radius_blocks,

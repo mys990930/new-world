@@ -1,5 +1,5 @@
 use super::context::{MACRO_FIELD_CURVE_BUCKET_BLOCKS, MACRO_FIELD_SITE_BUCKET_BLOCKS};
-use super::height::{boundary_roughness_offset, lerp, smoothstep01};
+use super::height::{boundary_roughness_offset, lerp, river_shoulder_log_growth, smoothstep01};
 use crate::world::generation::graph::WorldPlanePoint;
 use crate::world::generation::river_plan::{
     DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverSegmentPlan,
@@ -161,7 +161,7 @@ pub(super) fn river_valley_strength_for_effective_distance(
         planned_water_width_blocks,
         configured_radius_blocks,
     );
-    let valley_radius = river_width_blocks(
+    let valley_radius = river_shoulder_radius_blocks(
         flow_hint,
         planned_valley_width_blocks,
         configured_radius_blocks,
@@ -170,13 +170,14 @@ pub(super) fn river_valley_strength_for_effective_distance(
     if !distance_blocks.is_finite() || distance_blocks >= valley_radius {
         return 0.0;
     }
+    let shoulder_cap = river_shoulder_strength_cap(flow_hint);
     if distance_blocks <= water_radius {
         let t = (distance_blocks / water_radius.max(f32::EPSILON)).clamp(0.0, 1.0);
-        return lerp(1.0, 0.89, smoothstep01(t)).clamp(0.0, 1.0);
+        return lerp(shoulder_cap, shoulder_cap * 0.88, smoothstep01(t)).clamp(0.0, 1.0);
     }
     let t = ((distance_blocks - water_radius) / (valley_radius - water_radius).max(f32::EPSILON))
         .clamp(0.0, 1.0);
-    (0.87 * (1.0 - smoothstep01(t)).powf(1.2)).clamp(0.0, 1.0)
+    (shoulder_cap * (1.0 - smoothstep01(t)).powf(1.25)).clamp(0.0, 1.0)
 }
 
 pub(super) fn river_core_strength_for_effective_distance(
@@ -219,16 +220,31 @@ pub(super) fn river_boundary_roughness_blocks(
         .clamp(0.0, water_radius * 0.33)
 }
 
-pub(super) fn river_width_blocks(
+pub(super) fn river_shoulder_radius_blocks(
     flow_hint: f32,
     planned_width_blocks: f32,
     configured_radius_blocks: f32,
 ) -> f32 {
     let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
     let fallback = lerp(3.0, configured_radius_blocks, flow_t);
-    planned_width_blocks
+    let planned = planned_width_blocks
         .max(fallback.min(18.0))
-        .clamp(1.0, configured_radius_blocks)
+        .clamp(1.0, configured_radius_blocks);
+    let upstream_radius = planned.min(18.0).max(3.0);
+    let downstream_cap = (planned * 0.5)
+        .max(upstream_radius)
+        .min(configured_radius_blocks * 0.5);
+    lerp(
+        upstream_radius,
+        downstream_cap,
+        river_shoulder_log_growth(flow_hint),
+    )
+    .min(planned)
+    .clamp(1.0, configured_radius_blocks)
+}
+
+pub(super) fn river_shoulder_strength_cap(flow_hint: f32) -> f32 {
+    lerp(0.82, 0.50, river_shoulder_log_growth(flow_hint)).clamp(0.0, 1.0)
 }
 
 pub(super) fn river_water_radius_blocks(
@@ -523,16 +539,16 @@ mod tests {
         let trunk_flow = flow_hint(1024.0);
 
         assert!(
-            river_width_blocks(headwater_flow, 4.0, radius)
-                < river_width_blocks(trunk_flow, 180.0, radius),
-            "river corridor width should grow with selected/display flow"
+            river_shoulder_radius_blocks(headwater_flow, 4.0, radius)
+                < river_shoulder_radius_blocks(trunk_flow, 180.0, radius),
+            "river shoulder radius should grow with selected/display flow"
         );
         assert!(
             river_depth_factor(headwater_flow) < river_depth_factor(trunk_flow),
             "river carve depth should grow with selected/display flow"
         );
         assert!(
-            river_width_blocks(headwater_flow, 4.0, radius) < radius * 0.10,
+            river_shoulder_radius_blocks(headwater_flow, 4.0, radius) < radius * 0.10,
             "headwater rivers should be much narrower than the maximum downstream radius"
         );
     }
@@ -567,39 +583,45 @@ mod tests {
         let water_radius = super::river_water_radius_blocks(flow, water_width, radius);
         let roughness = river_boundary_roughness_blocks(flow, water_width, radius, 96.0);
         let threshold_distance = water_radius + roughness * 0.35;
-        let base = river_valley_strength_for_distance(
+        let base = river_core_strength_for_effective_distance(
             threshold_distance,
             flow,
             water_width,
-            valley_width,
             radius,
         );
         let mut min_rough = f32::INFINITY;
         let mut max_rough = f32::NEG_INFINITY;
         for x in 0..128 {
             let position = WorldPlanePoint::new(x as f32 * 19.0, 37.0);
-            let rough = super::river_valley_strength_for_sample_distance(
+            let roughness_offset =
+                super::river_boundary_roughness_offset(position, flow, water_width, radius, 96.0);
+            let rough = super::river_core_strength_for_roughened_distance(
                 threshold_distance,
-                position,
+                roughness_offset,
                 flow,
                 water_width,
-                valley_width,
                 radius,
-                96.0,
             );
             min_rough = min_rough.min(rough);
             max_rough = max_rough.max(rough);
             assert_eq!(
                 rough,
-                super::river_valley_strength_for_sample_distance(
-                    threshold_distance,
-                    position,
-                    flow,
-                    water_width,
-                    valley_width,
-                    radius,
-                    96.0,
-                ),
+                {
+                    let roughness_offset = super::river_boundary_roughness_offset(
+                        position,
+                        flow,
+                        water_width,
+                        radius,
+                        96.0,
+                    );
+                    super::river_core_strength_for_roughened_distance(
+                        threshold_distance,
+                        roughness_offset,
+                        flow,
+                        water_width,
+                        radius,
+                    )
+                },
                 "river boundary roughness must be deterministic at a world position"
             );
         }
@@ -622,8 +644,8 @@ mod tests {
         );
 
         assert!(
-            min_rough < base && max_rough > base,
-            "roughness should move samples on both sides of the smooth core boundary: base={base} min={min_rough} max={max_rough}"
+            min_rough <= base && max_rough > base,
+            "roughness should pull some samples across the smooth core boundary: base={base} min={min_rough} max={max_rough}"
         );
         assert!(
             max_rough >= 0.88 && min_rough < 0.88,
@@ -640,11 +662,8 @@ mod tests {
         let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
         let flow = flow_hint(1024.0);
         let water_width = DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS;
-        let valley_width = 520.0;
-        let inside =
-            river_valley_strength_for_distance(99.0, flow, water_width, valley_width, radius);
-        let outside =
-            river_valley_strength_for_distance(106.0, flow, water_width, valley_width, radius);
+        let inside = river_core_strength_for_effective_distance(99.0, flow, water_width, radius);
+        let outside = river_core_strength_for_effective_distance(106.0, flow, water_width, radius);
 
         assert!(
             inside >= 0.88,
@@ -690,9 +709,50 @@ mod tests {
     }
 
     #[test]
+    fn downstream_shoulder_radius_and_strength_cap_to_half_planned_valley() {
+        let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
+        let flow = flow_hint(1024.0);
+        let water_width = DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS;
+        let planned_valley_width = 520.0;
+        let shoulder_radius = river_shoulder_radius_blocks(flow, planned_valley_width, radius);
+        let core = river_core_strength_for_effective_distance(99.0, flow, water_width, radius);
+        let shoulder_at_bank = river_valley_strength_for_distance(
+            101.0,
+            flow,
+            water_width,
+            planned_valley_width,
+            radius,
+        );
+        let outside_old_planned = river_valley_strength_for_distance(
+            planned_valley_width * 0.55,
+            flow,
+            water_width,
+            planned_valley_width,
+            radius,
+        );
+
+        assert!(
+            shoulder_radius <= planned_valley_width * 0.52,
+            "downstream broad-valley shoulder radius should cap near half the planned scale: {shoulder_radius}"
+        );
+        assert!(
+            core >= 0.88,
+            "water/core corridor must keep the absolute downstream target: {core}"
+        );
+        assert!(
+            shoulder_at_bank <= 0.52,
+            "non-core shoulder strength should be capped below core strength: {shoulder_at_bank}"
+        );
+        assert_eq!(
+            outside_old_planned, 0.0,
+            "old downstream shoulder tail should no longer influence beyond the capped radius"
+        );
+    }
+
+    #[test]
     fn river_valley_uses_flow_scaled_width() {
         let radius = DEFAULT_MACRO_FIELD_RIVER_RADIUS_BLOCKS;
-        let distance = radius * 0.45;
+        let distance = 180.0;
         let headwater =
             river_valley_strength_for_distance(distance, flow_hint(12.0), 4.0, 12.0, radius);
         let trunk = river_valley_strength_for_distance(

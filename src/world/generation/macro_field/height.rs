@@ -94,24 +94,29 @@ pub(super) fn river_shoulder_context_height(
     }
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
-    let shoulder_t = shoulder * lerp(0.18, 1.0, flow_t);
+    let log_flow_t = river_shoulder_log_growth(river_flow_hint);
+    let context_t = shoulder * lerp(0.14, 0.52, log_flow_t);
+    let centerline_t = shoulder * lerp(0.18, 0.82, flow_t);
     let centerline_elevation = river_centerline_macro_elevation
         .filter(|height| height.is_finite())
         .unwrap_or(macro_elevation)
         .min(macro_elevation);
     let centerline_drop = (macro_elevation - centerline_elevation).max(0.0);
     let positive_relief = macro_elevation.max(0.0);
-    let relief_compression = positive_relief * lerp(0.02, 0.08, flow_t);
-    let lowland_bias = config.river_carve_scale * lerp(0.06, 0.55, flow_t);
-    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.10, flow_t);
+    let terrain_context = smoothstep_range(0.01, 0.18, positive_relief + centerline_drop * 0.6);
+    let relief_compression = positive_relief * lerp(0.015, 0.055, log_flow_t);
+    let contextual_floor_bias =
+        config.river_carve_scale * lerp(0.02, 0.18, log_flow_t) * terrain_context;
+    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.07, log_flow_t);
     let near_sea_t = 1.0 - smoothstep_range(0.0, 0.025, macro_elevation.max(0.0));
-    let near_sea_bias = config.river_carve_scale * lerp(0.0, 0.35, flow_t) * near_sea_t;
-    let centerline_pull = centerline_drop * shoulder_t * lerp(0.01, 0.06, flow_t);
+    let near_sea_bias =
+        config.river_carve_scale * lerp(0.0, 0.10, log_flow_t) * near_sea_t * terrain_context;
+    let centerline_pull = centerline_drop * centerline_t * lerp(0.025, 0.145, flow_t);
     let _ = river_longitudinal_blocks;
     let broad_lowering =
-        (relief_compression + lowland_bias + below_sea_bias + near_sea_bias) * shoulder_t;
-    let max_context_shift = config.river_carve_scale * lerp(0.45, 2.4, flow_t)
-        + centerline_drop * lerp(0.02, 0.12, flow_t);
+        (relief_compression + contextual_floor_bias + below_sea_bias + near_sea_bias) * context_t;
+    let max_context_shift = config.river_carve_scale * lerp(0.35, 1.0, log_flow_t)
+        + centerline_drop * lerp(0.02, 0.10, flow_t);
     let lowering = (broad_lowering + centerline_pull).min(max_context_shift);
 
     (macro_elevation - lowering).min(macro_elevation)
@@ -123,6 +128,10 @@ pub(super) fn river_shoulder_height_strength(strength: f32) -> f32 {
         return 0.0;
     }
     smoothstep01(strength).powf(1.35)
+}
+
+pub(super) fn river_shoulder_log_growth(flow_hint: f32) -> f32 {
+    ((1.0 + flow_hint.clamp(0.0, 1.0) * 15.0).ln() / 16.0_f32.ln()).clamp(0.0, 1.0)
 }
 
 pub(super) fn ocean_bathymetry_macro_height(source_height: f32) -> f32 {
@@ -455,6 +464,31 @@ mod tests {
     }
 
     #[test]
+    fn downstream_river_shoulder_context_is_capped_and_terrain_contextual() {
+        let config = test_tile_config();
+        let source = 0.42;
+        let upstream = river_shoulder_context_height(source, 1.0, 0.05, None, f32::NAN, config);
+        let downstream = river_shoulder_context_height(source, 1.0, 1.0, None, f32::NAN, config);
+        let near_sea = river_shoulder_context_height(0.012, 1.0, 1.0, None, f32::NAN, config);
+
+        let upstream_shift = source - upstream;
+        let downstream_shift = source - downstream;
+        let near_sea_shift = 0.012 - near_sea;
+        assert!(
+            downstream_shift > upstream_shift,
+            "downstream shoulder should still grow from upstream context: upstream={upstream_shift} downstream={downstream_shift}"
+        );
+        assert!(
+            downstream_shift <= config.river_carve_scale * 1.05,
+            "downstream broad valley context should stay near half of the previous high-Q shift budget: {downstream_shift}"
+        );
+        assert!(
+            near_sea_shift < downstream_shift * 0.25,
+            "fixed floor bias should be terrain-context gated instead of lowering every shoulder sample uniformly: near_sea={near_sea_shift} downstream={downstream_shift}"
+        );
+    }
+
+    #[test]
     fn weak_river_shoulder_tail_is_continuous_but_attenuated_for_height() {
         let config = test_tile_config();
         let base = river_shoulder_context_height(0.34, 0.0, 0.8, Some(0.12), 384.0, config);
@@ -492,13 +526,14 @@ mod tests {
     }
 
     #[test]
-    fn ocean_owned_broad_river_valley_can_lower_positive_source_below_sea_level() {
+    fn ocean_owned_broad_river_valley_lowers_without_forcing_positive_source_below_sea_level() {
         let config = test_tile_config();
+        let source = 0.01;
         let carved = combine_macro_height(0.01, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, config);
 
         assert!(
-            carved < 0.0,
-            "selected river broad-valley context should affect ocean-owned above-sea terrain: {carved}"
+            carved < source && carved > 0.0,
+            "selected river broad-valley context should lower ocean-owned positive source without snapping it below sea level: {carved}"
         );
     }
 

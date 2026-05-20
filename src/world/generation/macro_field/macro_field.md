@@ -98,6 +98,9 @@ MacroFieldTileConfig {
 
 MacroFieldSample {
     position,
+    raw_nearest_site,
+    raw_biome_context,
+    raw_biome,
     nearest_site,
     surface_kind,
     biome_context,
@@ -292,13 +295,19 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      U/V 단면, cutbank/gravel 편향은 이 단계에서 완성하지 않는다.
    - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
-     `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를 읽는다.
+     `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를
+     source guide로 읽되, macro_field 단계에서는 high-Q/downstream reach의 non-core shoulder 반경을
+     logarithmic growth curve로 압축하고 planned downstream scale의 대략 절반 근처에서 cap한다.
      raster 단계에서 Voronoi cell 크기를 다시 읽어 동적으로 폭을 재계산하지 않는다.
+     이 cap은 shoulder/context에만 적용하며, `river_core_strength`가 읽는 water/bed corridor의
+     absolute `bed_width_blocks` target은 바꾸지 않는다.
      combined height에 반영되는 shoulder context는 river shoulder strength 전체를 연속 감쇠로 읽는다.
      낮은 broad-tail 값도 hard cutoff로 0 처리하지 않는다. cutoff boundary가 생기면 block-height contour가
      river 진행 방향과 무관한 직선 onset seam처럼 읽히기 때문이다. shoulder lowering은 source macro
-     elevation 자체를 보존한 채 약한 flow-scaled lowering과 centerline pull을 감산한다. macro_field의
-     broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
+     elevation 자체를 보존한 채 relief compression과 centerline pull 중심으로 감산한다. lowland/near-sea
+     floor bias는 source relief 또는 projected centerline drop이 있을 때만 약하게 들어가며, high-Q shoulder
+     height modulation도 capped logarithmic profile을 읽어 broad valley가 river boundary shape 그대로 균일하게
+     내려앉지 않게 한다. macro_field의 broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
      이 단계에서 shoulder strength 변화가 source relief를 상쇄할 정도로 깊게 적용되면 contour slab/vertical
      seam이 생긴다. centerline은 valley 방향성 hint일 뿐 cross-section을 평평하게 만드는 target height가
      아니다. 단, sea-level 근처 source는 river mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.
@@ -580,9 +589,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   classification override ownership for boundary edges whose owner sites are locally plausible for the sample.
   This keeps the visible curve active for the real cell edge and for narrow regions between adjacent edges,
   while preventing distant unrelated curves from protruding their source owner into another cell.
-- `biome_context` and `biome` are handed off from the noisy owner site. Surface material policy must fill the
-  canonical noisy boundary region; local cross-material breakup then belongs to `surface_plan`'s bounded
-  block-scale mix pass.
+- `raw_nearest_site` / `raw_biome_context` / `raw_biome` preserve the straight graph-cell identity, while
+  `nearest_site` / `biome_context` / `biome` remain the noisy-boundary visible owner handoff. Downstream
+  surface material policy can therefore audit and normalize a graph cell without re-querying graph topology.
 - owner sampling materializes deterministic `BoundaryJunction` influence from `BoundaryCache` once in the
   raster context. Inside each junction radius it chooses the nearest incident macro site before nearest
   boundary side classification; outside that radius the existing noisy boundary-side behavior is unchanged.
@@ -607,7 +616,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   뒤 chamfer distance field로 만든다. river influence는 `RiverSegmentPlan`이 참조하는 selected edge id의
   canonical noisy curve를 topology guide로 읽되, distance/strength bake는 endpoint를 보존한 rounded
   realization corridor를 사용한다. corridor width와 bed-depth hint는 fixed radius나 flow hint만으로 재추정하지 않고 river plan의 absolute `bed_width_blocks`,
-  `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다.
+  `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다. 단, broad shoulder raster radius/profile은
+  macro_field의 bounded logarithmic shoulder helper를 거쳐 high-Q downstream influence를 planned broad
+  valley scale의 대략 절반까지 줄인다. core water/bed radius와 bed depth hint는 이 shoulder cap을 타지 않는다.
   river stroke rasterization은 launch 기본 검색 반경 `640` blocks 전체를 segment마다 훑지 않고,
   river plan이 제공한 실제 broad-valley/water width와 roughness guard로 계산한 tile-local active
   radius만 스캔한다. 이 radius 밖의 sample은 strength가 0이므로 결과를 바꾸지 않으면서 dense
