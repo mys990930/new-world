@@ -436,9 +436,6 @@ pub(in crate::world::generation::macro_field) fn test_contour_tile(
             let combined_macro_height = blocks_to_combined_macro_height(*height_blocks);
             MacroFieldSample {
                 position: config.sample_position(index),
-                raw_nearest_site: None,
-                raw_biome_context: None,
-                raw_biome: None,
                 nearest_site: None,
                 surface_kind: None,
                 biome_context: None,

@@ -67,10 +67,8 @@ pub fn sample_macro_field_point(
     position: WorldPlanePoint,
 ) -> MacroFieldSample {
     let owner_sample = context.owner_sample(position, config);
-    let raw_nearest_site = owner_sample.raw;
     let nearest_site = owner_sample.primary;
     let surface_kind = nearest_site.map(|site| site.surface_kind);
-    let raw_biome_cell = raw_nearest_site.and_then(|site| context.biome_for_site(site.id));
     let biome_cell = nearest_site.and_then(|site| context.biome_for_site(site.id));
     let macro_elevation = owner_sample.macro_elevation;
     let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
@@ -136,9 +134,6 @@ pub fn sample_macro_field_point(
 
     MacroFieldSample {
         position,
-        raw_nearest_site: raw_nearest_site.map(|site| site.id),
-        raw_biome_context: raw_biome_cell.map(|biome| biome.context),
-        raw_biome: raw_biome_cell.map(|biome| biome.biome),
         nearest_site: nearest_site.map(|site| site.id),
         surface_kind,
         biome_context: biome_cell.map(|biome| biome.context),
@@ -170,10 +165,8 @@ fn sample_macro_field_point_with_influence(
     influence: MacroFieldInfluenceSample,
 ) -> MacroFieldSample {
     let owner_sample = context.owner_sample(position, config);
-    let raw_nearest_site = owner_sample.raw;
     let nearest_site = owner_sample.primary;
     let surface_kind = nearest_site.map(|site| site.surface_kind);
-    let raw_biome_cell = raw_nearest_site.and_then(|site| context.biome_for_site(site.id));
     let biome_cell = nearest_site.and_then(|site| context.biome_for_site(site.id));
     let macro_elevation = owner_sample.macro_elevation;
     let site_coastness = nearest_site.map(|site| site.coastness).unwrap_or_default();
@@ -220,9 +213,6 @@ fn sample_macro_field_point_with_influence(
 
     MacroFieldSample {
         position,
-        raw_nearest_site: raw_nearest_site.map(|site| site.id),
-        raw_biome_context: raw_biome_cell.map(|biome| biome.context),
-        raw_biome: raw_biome_cell.map(|biome| biome.biome),
         nearest_site: nearest_site.map(|site| site.id),
         surface_kind,
         biome_context: biome_cell.map(|biome| biome.context),

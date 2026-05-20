@@ -98,9 +98,6 @@ MacroFieldTileConfig {
 
 MacroFieldSample {
     position,
-    raw_nearest_site,
-    raw_biome_context,
-    raw_biome,
     nearest_site,
     surface_kind,
     biome_context,
@@ -593,9 +590,6 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   classification override ownership for boundary edges whose owner sites are locally plausible for the sample.
   This keeps the visible curve active for the real cell edge and for narrow regions between adjacent edges,
   while preventing distant unrelated curves from protruding their source owner into another cell.
-- `raw_nearest_site` / `raw_biome_context` / `raw_biome` preserve the straight graph-cell identity, while
-  `nearest_site` / `biome_context` / `biome` remain the noisy-boundary visible owner handoff. Downstream
-  surface material policy can therefore audit and normalize a graph cell without re-querying graph topology.
 - owner sampling materializes deterministic `BoundaryJunction` influence from `BoundaryCache` once in the
   raster context. Inside each junction radius it chooses the nearest incident macro site before nearest
   boundary side classification; outside that radius the existing noisy boundary-side behavior is unchanged.

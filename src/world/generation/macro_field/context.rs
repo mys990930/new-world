@@ -203,7 +203,6 @@ impl<'a> MacroFieldRasterContext<'a> {
 
         if let Some(site) = self.nearest_junction_site(position, raw_nearest_site, config) {
             return OwnerSample {
-                raw: raw_nearest_site.copied(),
                 primary: Some(site),
                 macro_elevation: self.interpolated_macro_elevation(position),
                 lake_lowering_factor: if is_lake_surface(site.surface_kind) {
@@ -231,7 +230,6 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .or_else(|| raw_nearest_site.copied());
 
             return OwnerSample {
-                raw: raw_nearest_site.copied(),
                 primary,
                 macro_elevation: self.interpolated_macro_elevation(position),
                 lake_lowering_factor: if is_lake_pair
@@ -314,7 +312,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             return OwnerSample::default();
         };
         OwnerSample {
-            raw: Some(site),
             primary: Some(site),
             macro_elevation: self.interpolated_macro_elevation(position),
             lake_lowering_factor: if is_lake_surface(site.surface_kind) {
@@ -553,7 +550,6 @@ fn junction_owner_radius_blocks(config: MacroFieldTileConfig) -> f32 {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct OwnerSample {
-    pub(super) raw: Option<MacroSite>,
     pub(super) primary: Option<MacroSite>,
     pub(super) macro_elevation: f32,
     pub(super) lake_lowering_factor: f32,
@@ -562,7 +558,6 @@ pub(super) struct OwnerSample {
 impl Default for OwnerSample {
     fn default() -> Self {
         Self {
-            raw: None,
             primary: None,
             macro_elevation: 0.0,
             lake_lowering_factor: 0.0,

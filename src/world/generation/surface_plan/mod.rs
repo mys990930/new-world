@@ -762,7 +762,7 @@ fn normalize_non_water_owner_surface_materials(
             continue;
         }
         let (Some(site), Some(top)) = (
-            surface_material_cell_site(*sample),
+            sample.nearest_site,
             canonical_non_water_owner_top(*sample, config),
         ) else {
             continue;
@@ -774,7 +774,7 @@ fn normalize_non_water_owner_surface_materials(
         if !is_non_water_owner_surface_column(*column) {
             continue;
         }
-        let Some(site) = surface_material_cell_site(*sample) else {
+        let Some(site) = sample.nearest_site else {
             continue;
         };
         let Some(top) = top_by_site.get(&site).copied() else {
@@ -789,12 +789,9 @@ fn canonical_non_water_owner_top(
     sample: MacroFieldSample,
     _config: SurfacePlanConfig,
 ) -> Option<&'static str> {
-    let biome = sample
-        .raw_biome
-        .or(sample.biome)
-        .unwrap_or(GraphBiomeKind::TemperateGrassland);
+    let biome = sample.biome.unwrap_or(GraphBiomeKind::TemperateGrassland);
     let policy = biome_surface_policy(biome);
-    let context = sample.raw_biome_context.or(sample.biome_context)?;
+    let context = sample.biome_context?;
 
     match context.water_role {
         GraphBiomeWaterRole::ShallowOcean
@@ -819,10 +816,6 @@ fn canonical_non_water_owner_top(
 
 fn is_non_water_owner_surface_column(column: SurfaceColumnPlan) -> bool {
     column.water_y.is_none()
-}
-
-fn surface_material_cell_site(sample: MacroFieldSample) -> Option<VoronoiSiteId> {
-    sample.raw_nearest_site.or(sample.nearest_site)
 }
 
 fn apply_noisy_boundary_mixing(
@@ -1684,8 +1677,8 @@ mod tests {
                     world_x: base_plan.world_x,
                     world_z: base_plan.world_z,
                     heightfield: *height,
-                    biome: sample.raw_biome.or(sample.biome),
-                    biome_context: sample.raw_biome_context.or(sample.biome_context),
+                    biome: sample.biome,
+                    biome_context: sample.biome_context,
                     runtime_surface: None,
                 },
                 base_surface_config,
@@ -1694,14 +1687,11 @@ mod tests {
                 anomaly_count += 1;
                 if representatives.len() < 24 {
                     representatives.push(format!(
-                        "#{index} world=({}, {}) raw_site={:?} noisy_site={:?} raw_biome={:?} noisy_biome={:?} raw_water_role={:?} noisy_water_role={:?} terrain={:?} role={:?} top={} allowed={:?} surface_y={} water_y={:?} river(core={:.3},valley={:.3},flow={:.3},bed={:.3},gravel={:.3}) masks(ocean={:.3},lake={:.3},coast={:.3},dry={:.3})",
+                        "#{index} world=({}, {}) site={:?} biome={:?} water_role={:?} terrain={:?} role={:?} top={} allowed={:?} surface_y={} water_y={:?} river(core={:.3},valley={:.3},flow={:.3},bed={:.3},gravel={:.3}) masks(ocean={:.3},lake={:.3},coast={:.3},dry={:.3})",
                         base_plan.world_x,
                         base_plan.world_z,
-                        sample.raw_nearest_site,
                         sample.nearest_site,
-                        sample.raw_biome,
                         sample.biome,
-                        sample.raw_biome_context.map(|context| context.water_role),
                         sample.biome_context.map(|context| context.water_role),
                         height.terrain_kind,
                         base_plan.hydrology_role,
@@ -1825,16 +1815,16 @@ mod tests {
         let final_owner_top_audit =
             audit_final_non_water_tops_by_owner(&macro_tile.samples, &surface_plan.columns);
         eprintln!(
-            "final_non_water_cell_top_audit checked_columns={} cell_count={} conflicting_cell_count={}",
+            "final_non_water_owner_top_audit checked_columns={} owner_count={} conflicting_owner_count={}",
             final_owner_top_audit.checked_column_count,
             final_owner_top_audit.owner_count,
             final_owner_top_audit.conflicting_owner_count
         );
         for representative in &final_owner_top_audit.owner_count_representatives {
-            eprintln!("final_non_water_cell_top_count {representative}");
+            eprintln!("final_non_water_owner_top_count {representative}");
         }
         for representative in &final_owner_top_audit.conflict_representatives {
-            eprintln!("final_non_water_cell_top_conflict {representative}");
+            eprintln!("final_non_water_owner_top_conflict {representative}");
         }
         eprintln!("anomaly_count={anomaly_count}");
         for representative in &representatives {
@@ -1863,7 +1853,7 @@ mod tests {
         );
         assert_eq!(
             final_owner_top_audit.conflicting_owner_count, 0,
-            "final non-water top materials must stay singular within each raw Voronoi graph cell"
+            "final non-water top materials must stay singular within each noisy-boundary owner"
         );
         assert_eq!(
             anomaly_count, 0,
@@ -2158,16 +2148,16 @@ mod tests {
         let final_owner_top_audit =
             audit_final_non_water_tops_by_owner(&macro_tile.samples, &surface_plan.columns);
         eprintln!(
-            "final_non_water_cell_top_audit checked_columns={} cell_count={} conflicting_cell_count={}",
+            "final_non_water_owner_top_audit checked_columns={} owner_count={} conflicting_owner_count={}",
             final_owner_top_audit.checked_column_count,
             final_owner_top_audit.owner_count,
             final_owner_top_audit.conflicting_owner_count
         );
         for row in &final_owner_top_audit.owner_count_representatives {
-            eprintln!("final_non_water_cell_top_count {row}");
+            eprintln!("final_non_water_owner_top_count {row}");
         }
         for row in &final_owner_top_audit.conflict_representatives {
-            eprintln!("final_non_water_cell_top_conflict {row}");
+            eprintln!("final_non_water_owner_top_conflict {row}");
         }
 
         assert_eq!(unsupported_raw_owner_switch_count, 0);
@@ -2175,7 +2165,7 @@ mod tests {
         assert_eq!(owner_boundary_swap_count, 0);
         assert_eq!(
             final_owner_top_audit.conflicting_owner_count, 0,
-            "final non-water top materials must stay singular within each raw Voronoi graph cell"
+            "final non-water top materials must stay singular within each noisy-boundary owner"
         );
     }
 
@@ -2200,7 +2190,7 @@ mod tests {
             if !is_non_water_owner_surface_column(*column) {
                 continue;
             }
-            let Some(site) = surface_material_cell_site(*sample) else {
+            let Some(site) = sample.nearest_site else {
                 continue;
             };
 
@@ -2212,14 +2202,13 @@ mod tests {
                 .entry(column.top_block)
                 .or_default() += 1;
             rows_by_site.entry(site_key).or_default().push(format!(
-                "#{index} world=({}, {}) raw_site={:?} noisy_site={:?} role={:?} water_y={:?} biome={:?} final_top={}",
+                "#{index} world=({}, {}) site={:?} role={:?} water_y={:?} biome={:?} final_top={}",
                 column.world_x,
                 column.world_z,
-                sample.raw_nearest_site,
                 sample.nearest_site,
                 column.hydrology_role,
                 column.water_y,
-                sample.raw_biome.or(sample.biome),
+                sample.biome,
                 column.top_block
             ));
         }
@@ -2769,7 +2758,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_surface_plan_area_normalizes_non_water_top_by_raw_cell_site() {
+    fn generate_surface_plan_area_keeps_noisy_owner_material_boundaries() {
         let heightfield = heightfield_tile(
             2,
             1,
@@ -2778,19 +2767,15 @@ mod tests {
                 column(-2321.0, -1280.0, HeightfieldTerrainKind::Land),
             ],
         );
-        let mut coast_raw = sample(-2322.0, -1280.0, GraphBiomeKind::SandyCoast);
-        let mut forest_noisy = sample(-2321.0, -1280.0, GraphBiomeKind::TemperateMixedForest);
-        for sample in [&mut coast_raw, &mut forest_noisy] {
-            sample.raw_nearest_site = Some(VoronoiSiteId(107374182413));
-            sample.raw_biome = Some(GraphBiomeKind::SandyCoast);
-            sample.raw_biome_context = sample.raw_biome_context.map(|mut context| {
-                context.water_role = GraphBiomeWaterRole::Coast;
-                context
-            });
-        }
-        coast_raw.nearest_site = Some(VoronoiSiteId(107374182413));
-        forest_noisy.nearest_site = Some(VoronoiSiteId(98784247821));
-        let samples = vec![coast_raw, forest_noisy];
+        let mut coast_owner = sample(-2322.0, -1280.0, GraphBiomeKind::SandyCoast);
+        coast_owner.nearest_site = Some(VoronoiSiteId(107374182413));
+        coast_owner.biome_context = coast_owner.biome_context.map(|mut context| {
+            context.water_role = GraphBiomeWaterRole::Coast;
+            context
+        });
+        let mut forest_owner = sample(-2321.0, -1280.0, GraphBiomeKind::TemperateMixedForest);
+        forest_owner.nearest_site = Some(VoronoiSiteId(98784247821));
+        let samples = vec![coast_owner, forest_owner];
         let macro_field = MacroFieldTile {
             config: MacroFieldTileConfig::new(-2322.0, -1280.0, 2, 1, 1.0),
             samples,
@@ -2805,9 +2790,9 @@ mod tests {
         let audit = audit_final_non_water_tops_by_owner(&macro_field.samples, &area.columns);
 
         assert_eq!(area.columns[0].top_block, "sand");
-        assert_eq!(area.columns[1].top_block, "sand");
+        assert_eq!(area.columns[1].top_block, "grass");
         assert_eq!(audit.checked_column_count, 2);
-        assert_eq!(audit.owner_count, 1);
+        assert_eq!(audit.owner_count, 2);
         assert_eq!(audit.conflicting_owner_count, 0);
     }
 
@@ -3193,22 +3178,6 @@ mod tests {
     fn sample(x: f32, z: f32, biome: GraphBiomeKind) -> MacroFieldSample {
         MacroFieldSample {
             position: WorldPlanePoint::new(x, z),
-            raw_nearest_site: None,
-            raw_biome_context: Some(GraphBiomeContext {
-                temperature: 0.5,
-                hydration: 0.5,
-                elevation: 0.0,
-                continentality: 0.0,
-                coastness: 0.0,
-                mountainness: 0.0,
-                ruggedness: 0.0,
-                water_role: if biome == GraphBiomeKind::Lake {
-                    GraphBiomeWaterRole::Lake
-                } else {
-                    GraphBiomeWaterRole::Land
-                },
-            }),
-            raw_biome: Some(biome),
             nearest_site: None,
             surface_kind: None,
             biome_context: Some(GraphBiomeContext {
