@@ -2,8 +2,7 @@ use rayon::prelude::*;
 
 use super::biome::{GraphBiomeContext, GraphBiomeKind, GraphBiomeWaterRole};
 use super::heightfield::{HeightfieldColumn, HeightfieldTerrainKind, HeightfieldTile};
-use super::macro_field::{MacroFieldSample, MacroFieldTile};
-use crate::world::generation::graph::VoronoiSiteId;
+use super::macro_field::MacroFieldTile;
 use crate::world::legacy::surface::SurfaceCondition;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -118,19 +117,6 @@ pub struct SurfaceColumnPlan {
     pub soil_depth_blocks: u8,
     pub vegetation_allowed: bool,
     pub cover_phase: u8,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct SurfaceMixSource {
-    owner_site: Option<VoronoiSiteId>,
-}
-
-impl SurfaceMixSource {
-    fn from_macro_sample(sample: Option<&MacroFieldSample>) -> Self {
-        Self {
-            owner_site: sample.and_then(|sample| sample.nearest_site),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -705,13 +691,13 @@ pub fn generate_surface_plan_area(
     macro_field: Option<&MacroFieldTile>,
     config: SurfacePlanConfig,
 ) -> SurfacePlanArea {
-    let resolved = heightfield
+    let mut columns = heightfield
         .columns
         .par_iter()
         .enumerate()
         .map(|(index, column)| {
             let sample = macro_field.and_then(|tile| tile.samples.get(index));
-            let plan = resolve_surface_column(
+            resolve_surface_column(
                 SurfaceColumnInput {
                     world_x: column.position.x.round() as i32,
                     world_z: column.position.z.round() as i32,
@@ -721,26 +707,14 @@ pub fn generate_surface_plan_area(
                     runtime_surface: None,
                 },
                 config,
-            );
-            (plan, SurfaceMixSource::from_macro_sample(sample))
+            )
         })
         .collect::<Vec<_>>();
-    let mut columns = resolved
-        .iter()
-        .map(|(column, _)| *column)
-        .collect::<Vec<_>>();
-    let mix_sources = macro_field.map(|_| {
-        resolved
-            .iter()
-            .map(|(_, source)| *source)
-            .collect::<Vec<_>>()
-    });
     apply_noisy_boundary_mixing(
         &mut columns,
         heightfield.width as usize,
         heightfield.height as usize,
         config,
-        mix_sources.as_deref(),
     );
     let stats = surface_plan_stats(&columns);
 
@@ -759,7 +733,6 @@ fn apply_noisy_boundary_mixing(
     width: usize,
     height: usize,
     config: SurfacePlanConfig,
-    mix_sources: Option<&[SurfaceMixSource]>,
 ) {
     if columns.is_empty()
         || width == 0
@@ -771,25 +744,14 @@ fn apply_noisy_boundary_mixing(
     }
 
     let original = columns.to_vec();
-    let mix_sources = mix_sources.filter(|sources| sources.len() == original.len());
     let radius = usize::from(config.boundary_mix_radius_blocks);
     for z in 0..height {
         for x in 0..width {
             let index = z * width + x;
             let current = original[index];
-            let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
-            let Some((neighbor, distance)) = nearest_mix_candidate(
-                &original,
-                mix_sources,
-                width,
-                height,
-                x,
-                z,
-                radius,
-                current,
-                current_source,
-                config,
-            ) else {
+            let Some((neighbor, distance)) =
+                nearest_mix_candidate(&original, width, height, x, z, radius, current, config)
+            else {
                 continue;
             };
 
@@ -807,14 +769,12 @@ fn apply_noisy_boundary_mixing(
 
 fn nearest_mix_candidate(
     columns: &[SurfaceColumnPlan],
-    mix_sources: Option<&[SurfaceMixSource]>,
     width: usize,
     height: usize,
     x: usize,
     z: usize,
     radius: usize,
     current: SurfaceColumnPlan,
-    current_source: Option<SurfaceMixSource>,
     config: SurfacePlanConfig,
 ) -> Option<(SurfaceColumnPlan, usize)> {
     let mut best: Option<(SurfaceColumnPlan, usize, u64)> = None;
@@ -834,16 +794,8 @@ fn nearest_mix_candidate(
             if distance == 0 || distance > radius {
                 continue;
             }
-            let neighbor_index = nz * width + nx;
-            let neighbor = columns[neighbor_index];
-            let neighbor_source =
-                mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
-            if !mix_candidate_allowed_with_sources(
-                current,
-                neighbor,
-                current_source,
-                neighbor_source,
-            ) {
+            let neighbor = columns[nz * width + nx];
+            if !mix_candidate_allowed(current, neighbor) {
                 continue;
             }
             let tie = boundary_candidate_tie_breaker(current, neighbor, config);
@@ -859,22 +811,9 @@ fn nearest_mix_candidate(
     best.map(|(neighbor, distance, _)| (neighbor, distance))
 }
 
-fn mix_candidate_allowed_with_sources(
-    current: SurfaceColumnPlan,
-    neighbor: SurfaceColumnPlan,
-    current_source: Option<SurfaceMixSource>,
-    neighbor_source: Option<SurfaceMixSource>,
-) -> bool {
+fn mix_candidate_allowed(current: SurfaceColumnPlan, neighbor: SurfaceColumnPlan) -> bool {
     if current.top_block == neighbor.top_block {
         return false;
-    }
-    if let (Some(current_site), Some(neighbor_site)) = (
-        current_source.and_then(|source| source.owner_site),
-        neighbor_source.and_then(|source| source.owner_site),
-    ) {
-        if current_site != neighbor_site {
-            return false;
-        }
     }
     if current.water_y.is_some() != neighbor.water_y.is_some() {
         return false;
@@ -1153,12 +1092,10 @@ fn surface_plan_stats(columns: &[SurfaceColumnPlan]) -> SurfacePlanAreaStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::generation::boundary::BoundaryProfile;
     use crate::world::generation::graph::WorldPlanePoint;
     use crate::world::generation::macro_field::{
         MacroFieldRasterContext, MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats,
     };
-    use crate::world::generation::macro_map::{MacroSite, MacroSurfaceKind};
     use crate::world::generation::{
         BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
         GraphRegionArea, HeightfieldConfig, HeightfieldPerlinConfig, HydrologyConfig,
@@ -1169,7 +1106,7 @@ mod tests {
         solve_hydrology,
     };
     use crate::world::{CHUNK_EDGE_I32, WorldMeta};
-    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    use std::collections::{BTreeMap, BTreeSet};
 
     const ALL_BIOMES: &[GraphBiomeKind] = &[
         GraphBiomeKind::ShallowOcean,
@@ -1203,7 +1140,6 @@ mod tests {
         GraphBiomeKind::TemperateBroadleafForest,
         GraphBiomeKind::TemperateGrassland,
     ];
-    const AUDIT_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS: f32 = 8.0;
 
     const KNOWN_BLOCK_KEYS: &[&str] = &[
         "grass",
@@ -1239,10 +1175,10 @@ mod tests {
     #[test]
     #[ignore = "diagnostic audit for the seed 42 surface-plan preview footprint"]
     fn diagnose_seed42_surface_plan_contract_data() {
-        let seed = audit_u64_env("SURFACE_PLAN_AUDIT_SEED", 42);
-        let center_chunk_x = audit_i32_env("SURFACE_PLAN_AUDIT_CX", -70);
-        let center_chunk_z = audit_i32_env("SURFACE_PLAN_AUDIT_CZ", -32);
-        let chunk_radius = audit_i32_env("SURFACE_PLAN_AUDIT_R", 8);
+        let seed = 42;
+        let center_chunk_x = -70;
+        let center_chunk_z = -32;
+        let chunk_radius = 8;
         let meta = WorldMeta::new(seed);
         let min_chunk_x = center_chunk_x - chunk_radius;
         let _max_chunk_x = center_chunk_x + chunk_radius;
@@ -1301,11 +1237,6 @@ mod tests {
             &macro_map,
             BoundaryConfig::new(meta.seed, meta.generator_version),
         );
-        let macro_site_by_id = macro_map
-            .sites
-            .iter()
-            .map(|site| (site.id, *site))
-            .collect::<HashMap<_, _>>();
         let river_plan = build_river_plan(&patch, &macro_map, &hydrology, Default::default());
         let macro_tile = generate_macro_field_tile(
             &patch,
@@ -1337,11 +1268,6 @@ mod tests {
             generate_surface_plan_area(&heightfield, Some(&macro_tile), base_surface_config);
         let surface_plan =
             generate_surface_plan_area(&heightfield, Some(&macro_tile), surface_config);
-        let surface_mix_sources = macro_tile
-            .samples
-            .iter()
-            .map(|sample| SurfaceMixSource::from_macro_sample(Some(sample)))
-            .collect::<Vec<_>>();
 
         let mut anomaly_count = 0usize;
         let mut representatives = Vec::new();
@@ -1357,24 +1283,10 @@ mod tests {
         let mut raw_owner_switch_count = 0usize;
         let mut unsupported_raw_owner_switch_count = 0usize;
         let mut raw_owner_switch_representatives = Vec::new();
-        let mut raw_owner_material_family_switch_count = 0usize;
-        let mut raw_owner_material_family_switch_representatives = Vec::new();
-        let mut raw_owner_material_curve_profile_counts = BTreeMap::<String, usize>::new();
-        let mut raw_owner_surface_family_switch_count = 0usize;
-        let mut raw_owner_surface_family_switch_representatives = Vec::new();
-        let mut raw_owner_surface_curve_profile_counts = BTreeMap::<String, usize>::new();
-        let mut raw_owner_surface_kind_pair_counts = BTreeMap::<String, usize>::new();
-        let mut coast_adjacent_land_surface_switch_count = 0usize;
-        let mut coast_adjacent_land_surface_switch_profile_counts =
-            BTreeMap::<String, usize>::new();
         let mut local_mix_count = 0usize;
         let mut local_mix_pair_counts = BTreeMap::<String, usize>::new();
-        let mut grass_sand_local_mix_count = 0usize;
-        let mut grass_sand_local_mix_representatives = Vec::new();
         let mut unsupported_local_mix_count = 0usize;
         let mut unsupported_local_mix_representatives = Vec::new();
-        let mut base_land_material_family_mismatch_count = 0usize;
-        let mut base_land_material_family_mismatch_representatives = Vec::new();
 
         for (index, (((sample, height), base_plan), plan)) in macro_tile
             .samples
@@ -1457,12 +1369,6 @@ mod tests {
                 .map(|site| site.id);
             if raw_site != sample.nearest_site {
                 raw_owner_switch_count += 1;
-                let raw_expected_top = raw_site
-                    .and_then(|site| macro_map.biome(site))
-                    .map(|biome| biome_surface_policy(biome.biome).default_top);
-                let owner_expected_top = sample
-                    .biome
-                    .map(|biome| biome_surface_policy(biome).default_top);
                 let allowance = raw_owner_switch_allowance(
                     &boundary.curves,
                     raw_site,
@@ -1470,107 +1376,6 @@ mod tests {
                     sample.position,
                     macro_tile.config.sample_spacing_blocks,
                 );
-                let switch_curve = raw_owner_switch_curve_sample(
-                    &boundary.curves,
-                    raw_site,
-                    sample.nearest_site,
-                    sample.position,
-                    macro_tile.config.sample_spacing_blocks,
-                );
-                let raw_macro_site = raw_site.and_then(|site| macro_site_by_id.get(&site).copied());
-                let owner_macro_site = sample
-                    .nearest_site
-                    .and_then(|site| macro_site_by_id.get(&site).copied());
-                if raw_expected_top.is_some()
-                    && owner_expected_top.is_some()
-                    && raw_expected_top.map(surface_family)
-                        != owner_expected_top.map(surface_family)
-                {
-                    raw_owner_material_family_switch_count += 1;
-                    *raw_owner_material_curve_profile_counts
-                        .entry(switch_curve.profile_key())
-                        .or_default() += 1;
-                    if raw_owner_material_family_switch_representatives.len() < 32 {
-                        raw_owner_material_family_switch_representatives.push(format!(
-                            "#{index} world=({}, {}) raw={:?} raw_top={:?}/{:?} owner={:?} owner_top={:?}/{:?} sample_biome={:?} water_role={:?} terrain={:?} role={:?} base_top={} final_top={} allowance={:?}",
-                            plan.world_x,
-                            plan.world_z,
-                            raw_site,
-                            raw_expected_top,
-                            raw_expected_top.map(surface_family),
-                            sample.nearest_site,
-                            owner_expected_top,
-                            owner_expected_top.map(surface_family),
-                            sample.biome,
-                            sample.biome_context.map(|context| context.water_role),
-                            height.terrain_kind,
-                            plan.hydrology_role,
-                            base_plan.top_block,
-                            plan.top_block,
-                            allowance,
-                        ));
-                    }
-                    if !matches!(base_plan.hydrology_role, SurfaceHydrologyRole::River)
-                        && matches!(
-                            (
-                                surface_family(base_plan.top_block),
-                                surface_family(plan.top_block)
-                            ),
-                            ("vegetated", "vegetated")
-                                | ("sand", "sand")
-                                | ("vegetated", "sand")
-                                | ("sand", "vegetated")
-                        )
-                    {
-                        raw_owner_surface_family_switch_count += 1;
-                        *raw_owner_surface_curve_profile_counts
-                            .entry(switch_curve.profile_key())
-                            .or_default() += 1;
-                        if let (Some(raw_site), Some(owner_site)) =
-                            (raw_macro_site, owner_macro_site)
-                        {
-                            *raw_owner_surface_kind_pair_counts
-                                .entry(surface_kind_pair_key(raw_site, owner_site, switch_curve))
-                                .or_default() += 1;
-                            if is_coast_adjacent_land_pair(
-                                raw_site.surface_kind,
-                                owner_site.surface_kind,
-                            ) {
-                                coast_adjacent_land_surface_switch_count += 1;
-                                *coast_adjacent_land_surface_switch_profile_counts
-                                    .entry(switch_curve.profile_key())
-                                    .or_default() += 1;
-                            }
-                        }
-                        if raw_owner_surface_family_switch_representatives.len() < 32 {
-                            raw_owner_surface_family_switch_representatives.push(format!(
-                                "#{index} world=({}, {}) raw={:?} raw_top={:?}/{:?} owner={:?} owner_top={:?}/{:?} sample_biome={:?} water_role={:?} terrain={:?} role={:?} base_top={} final_top={} curve={}",
-                                plan.world_x,
-                                plan.world_z,
-                                raw_site,
-                                raw_expected_top,
-                                raw_expected_top.map(surface_family),
-                                sample.nearest_site,
-                                owner_expected_top,
-                                owner_expected_top.map(surface_family),
-                                sample.biome,
-                                sample.biome_context.map(|context| context.water_role),
-                                height.terrain_kind,
-                                plan.hydrology_role,
-                                base_plan.top_block,
-                                plan.top_block,
-                                raw_owner_switch_curve_detail(
-                                    &boundary.curves,
-                                    raw_site,
-                                    sample.nearest_site,
-                                    sample.position,
-                                    macro_tile.config.sample_spacing_blocks,
-                                )
-                                .unwrap_or_else(|| "none".to_string()),
-                            ));
-                        }
-                    }
-                }
                 if !allowance.is_some_and(|(_, _, within)| within) {
                     unsupported_raw_owner_switch_count += 1;
                     if raw_owner_switch_representatives.len() < 24 {
@@ -1595,26 +1400,6 @@ mod tests {
                 *local_mix_pair_counts
                     .entry(format!("{}->{}", base_plan.top_block, plan.top_block))
                     .or_default() += 1;
-                if is_grass_sand_family_pair(base_plan.top_block, plan.top_block) {
-                    grass_sand_local_mix_count += 1;
-                    if grass_sand_local_mix_representatives.len() < 32 {
-                        grass_sand_local_mix_representatives.push(format!(
-                            "#{index} world=({}, {}) site={:?} biome={:?} water_role={:?} base_role={:?} base_top={} final_role={:?} final_top={} terrain={:?} surface_y={} water_y={:?}",
-                            plan.world_x,
-                            plan.world_z,
-                            sample.nearest_site,
-                            sample.biome,
-                            sample.biome_context.map(|context| context.water_role),
-                            base_plan.hydrology_role,
-                            base_plan.top_block,
-                            plan.hydrology_role,
-                            plan.top_block,
-                            height.terrain_kind,
-                            plan.surface_y,
-                            plan.water_y,
-                        ));
-                    }
-                }
 
                 if !is_supported_local_mix(
                     &base_surface_plan.columns,
@@ -1623,7 +1408,6 @@ mod tests {
                     index,
                     *base_plan,
                     plan.top_block,
-                    Some(&surface_mix_sources),
                     surface_config,
                 ) {
                     unsupported_local_mix_count += 1;
@@ -1640,45 +1424,6 @@ mod tests {
                             plan.hydrology_role,
                             plan.top_block,
                         ));
-                    }
-                }
-            }
-            if matches!(
-                base_plan.hydrology_role,
-                SurfaceHydrologyRole::Land | SurfaceHydrologyRole::Ridge
-            ) {
-                if let Some(owner_expected_top) = sample
-                    .biome
-                    .map(|biome| biome_surface_policy(biome).default_top)
-                {
-                    if surface_family(owner_expected_top) != surface_family(base_plan.top_block) {
-                        base_land_material_family_mismatch_count += 1;
-                        if base_land_material_family_mismatch_representatives.len() < 32 {
-                            base_land_material_family_mismatch_representatives.push(format!(
-                                "#{index} world=({}, {}) site={:?} biome={:?} water_role={:?} role={:?} expected_top={}/{:?} base_top={}/{:?} final_top={} terrain={:?} river(core={:.3},valley={:.3},flow={:.3},bed={:.3},gravel={:.3}) masks(ocean={:.3},lake={:.3},coast={:.3},dry={:.3})",
-                                base_plan.world_x,
-                                base_plan.world_z,
-                                sample.nearest_site,
-                                sample.biome,
-                                sample.biome_context.map(|context| context.water_role),
-                                base_plan.hydrology_role,
-                                owner_expected_top,
-                                surface_family(owner_expected_top),
-                                base_plan.top_block,
-                                surface_family(base_plan.top_block),
-                                plan.top_block,
-                                height.terrain_kind,
-                                height.river_core_strength,
-                                height.river_valley_strength,
-                                height.river_flow_hint,
-                                height.river_bed_depth_blocks,
-                                height.river_gravel_hint,
-                                sample.ocean_mask,
-                                sample.lake_mask,
-                                sample.coast_mask,
-                                sample.dry_basin_mask,
-                            ));
-                        }
                     }
                 }
             }
@@ -1751,44 +1496,11 @@ mod tests {
         for representative in &raw_owner_switch_representatives {
             eprintln!("unsupported_raw_owner_switch {representative}");
         }
-        eprintln!(
-            "raw_owner_material_family_switch_count={raw_owner_material_family_switch_count}"
-        );
-        eprintln!(
-            "raw_owner_material_curve_profile_counts={raw_owner_material_curve_profile_counts:?}"
-        );
-        for representative in &raw_owner_material_family_switch_representatives {
-            eprintln!("raw_owner_material_family_switch {representative}");
-        }
-        eprintln!("raw_owner_surface_family_switch_count={raw_owner_surface_family_switch_count}");
-        eprintln!(
-            "raw_owner_surface_curve_profile_counts={raw_owner_surface_curve_profile_counts:?}"
-        );
-        eprintln!("raw_owner_surface_kind_pair_counts={raw_owner_surface_kind_pair_counts:?}");
-        eprintln!(
-            "coast_adjacent_land_surface_switch_count={coast_adjacent_land_surface_switch_count}"
-        );
-        eprintln!(
-            "coast_adjacent_land_surface_switch_profile_counts={coast_adjacent_land_surface_switch_profile_counts:?}"
-        );
-        for representative in &raw_owner_surface_family_switch_representatives {
-            eprintln!("raw_owner_surface_family_switch {representative}");
-        }
         eprintln!("local_mix_count={local_mix_count}");
         eprintln!("local_mix_pair_counts={local_mix_pair_counts:?}");
-        eprintln!("grass_sand_local_mix_count={grass_sand_local_mix_count}");
-        for representative in &grass_sand_local_mix_representatives {
-            eprintln!("grass_sand_local_mix {representative}");
-        }
         eprintln!("unsupported_local_mix_count={unsupported_local_mix_count}");
         for representative in &unsupported_local_mix_representatives {
             eprintln!("unsupported_local_mix {representative}");
-        }
-        eprintln!(
-            "base_land_material_family_mismatch_count={base_land_material_family_mismatch_count}"
-        );
-        for representative in &base_land_material_family_mismatch_representatives {
-            eprintln!("base_land_material_family_mismatch {representative}");
         }
         eprintln!("anomaly_count={anomaly_count}");
         for representative in &representatives {
@@ -1817,60 +1529,6 @@ mod tests {
         );
     }
 
-    #[derive(Debug, Clone, Copy)]
-    struct RawOwnerSwitchCurveSample {
-        profile: Option<BoundaryProfile>,
-        within_radius: bool,
-    }
-
-    impl RawOwnerSwitchCurveSample {
-        fn missing() -> Self {
-            Self {
-                profile: None,
-                within_radius: false,
-            }
-        }
-
-        fn profile_key(self) -> String {
-            self.profile
-                .map(|profile| format!("{profile:?}"))
-                .unwrap_or_else(|| "None".to_string())
-        }
-    }
-
-    fn audit_i32_env(name: &str, default: i32) -> i32 {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(default)
-    }
-
-    fn audit_u64_env(name: &str, default: u64) -> u64 {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(default)
-    }
-
-    fn surface_family(block: &'static str) -> &'static str {
-        match block {
-            "grass" | "jungle_grass" | "dry_grass" | "moss" | "podzol" => "vegetated",
-            "sand" | "wet_sand" | "red_sand" | "sandstone" => "sand",
-            "mud" | "silt" | "clay" | "peat" => "wet_sediment",
-            "gravel" | "wet_gravel" => "gravel",
-            "stone" | "rock" | "exposed_rock" | "moraine" => "rock",
-            "coarse_dirt" | "dirt" | "humus" | "thin_soil" | "alpine_soil" | "laterite" => "soil",
-            other => other,
-        }
-    }
-
-    fn is_grass_sand_family_pair(left: &'static str, right: &'static str) -> bool {
-        matches!(
-            (surface_family(left), surface_family(right)),
-            ("vegetated", "sand") | ("sand", "vegetated")
-        )
-    }
-
     fn is_supported_local_mix(
         base_columns: &[SurfaceColumnPlan],
         width: usize,
@@ -1878,7 +1536,6 @@ mod tests {
         index: usize,
         current: SurfaceColumnPlan,
         final_top_block: &'static str,
-        mix_sources: Option<&[SurfaceMixSource]>,
         config: SurfacePlanConfig,
     ) -> bool {
         let radius = usize::from(config.boundary_mix_radius_blocks);
@@ -1887,8 +1544,6 @@ mod tests {
         }
         let x = index % width;
         let z = index / width;
-        let mix_sources = mix_sources.filter(|sources| sources.len() == base_columns.len());
-        let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
         let min_x = x.saturating_sub(radius);
         let max_x = (x + radius).min(width.saturating_sub(1));
         let min_z = z.saturating_sub(radius);
@@ -1905,17 +1560,8 @@ mod tests {
                 if distance == 0 || distance > radius {
                     continue;
                 }
-                let neighbor_index = nz * width + nx;
-                let neighbor = base_columns[neighbor_index];
-                let neighbor_source =
-                    mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
-                if neighbor.top_block == final_top_block
-                    && mix_candidate_allowed_with_sources(
-                        current,
-                        neighbor,
-                        current_source,
-                        neighbor_source,
-                    )
+                let neighbor = base_columns[nz * width + nx];
+                if neighbor.top_block == final_top_block && mix_candidate_allowed(current, neighbor)
                 {
                     return true;
                 }
@@ -1944,150 +1590,11 @@ mod tests {
                 curve.anchors.sites.contains(&raw_site) && curve.anchors.sites.contains(&owner_site)
             })
             .map(|curve| {
-                let owner_points = audit_owner_points_for_curve(curve);
-                let distance = test_polyline_distance(position, &owner_points);
-                let radius = audit_owner_radius_blocks(curve, sample_spacing_blocks);
+                let distance = test_polyline_distance(position, &curve.points);
+                let radius = curve.amplitude + sample_spacing_blocks * 0.5;
                 (distance, radius, distance <= radius + 0.001)
             })
             .min_by(|left, right| left.0.total_cmp(&right.0))
-    }
-
-    fn raw_owner_switch_curve_sample(
-        curves: &[NoisyBoundaryCurve],
-        raw_site: Option<VoronoiSiteId>,
-        owner_site: Option<VoronoiSiteId>,
-        position: WorldPlanePoint,
-        sample_spacing_blocks: f32,
-    ) -> RawOwnerSwitchCurveSample {
-        let Some(raw_site) = raw_site else {
-            return RawOwnerSwitchCurveSample::missing();
-        };
-        let Some(owner_site) = owner_site else {
-            return RawOwnerSwitchCurveSample::missing();
-        };
-        if raw_site == owner_site {
-            return RawOwnerSwitchCurveSample {
-                profile: None,
-                within_radius: true,
-            };
-        }
-
-        curves
-            .iter()
-            .filter(|curve| {
-                curve.anchors.sites.contains(&raw_site) && curve.anchors.sites.contains(&owner_site)
-            })
-            .map(|curve| {
-                let owner_points = audit_owner_points_for_curve(curve);
-                let distance = test_polyline_distance(position, &owner_points);
-                (distance, curve)
-            })
-            .min_by(|left, right| left.0.total_cmp(&right.0))
-            .map(|(distance, curve)| {
-                let radius = audit_owner_radius_blocks(curve, sample_spacing_blocks);
-                RawOwnerSwitchCurveSample {
-                    profile: Some(curve.profile),
-                    within_radius: distance <= radius + 0.001,
-                }
-            })
-            .unwrap_or_else(RawOwnerSwitchCurveSample::missing)
-    }
-
-    fn surface_kind_pair_key(
-        raw_site: MacroSite,
-        owner_site: MacroSite,
-        curve: RawOwnerSwitchCurveSample,
-    ) -> String {
-        format!(
-            "{:?}->{:?}/profile={}/within={}",
-            raw_site.surface_kind,
-            owner_site.surface_kind,
-            curve.profile_key(),
-            curve.within_radius,
-        )
-    }
-
-    fn is_coast_adjacent_land_pair(raw: MacroSurfaceKind, owner: MacroSurfaceKind) -> bool {
-        raw.is_land_owned() && owner.is_land_owned() && (raw.is_coast() || owner.is_coast())
-    }
-
-    fn raw_owner_switch_curve_detail(
-        curves: &[NoisyBoundaryCurve],
-        raw_site: Option<VoronoiSiteId>,
-        owner_site: Option<VoronoiSiteId>,
-        position: WorldPlanePoint,
-        sample_spacing_blocks: f32,
-    ) -> Option<String> {
-        let raw_site = raw_site?;
-        let owner_site = owner_site?;
-        if raw_site == owner_site {
-            return Some("same-site".to_string());
-        }
-
-        curves
-            .iter()
-            .filter(|curve| {
-                curve.anchors.sites.contains(&raw_site) && curve.anchors.sites.contains(&owner_site)
-            })
-            .map(|curve| {
-                let owner_points = audit_owner_points_for_curve(curve);
-                let distance = test_polyline_distance(position, &owner_points);
-                let visual_distance = test_polyline_distance(position, &curve.points);
-                (distance, visual_distance, curve)
-            })
-            .min_by(|left, right| left.0.total_cmp(&right.0))
-            .map(|(distance, visual_distance, curve)| {
-                let radius = audit_owner_radius_blocks(curve, sample_spacing_blocks);
-                format!(
-                    "edge={:?} profile={:?} amp={:.3} owner_dist={:.3} visual_dist={:.3} radius={:.3} within={} anchors={:?}",
-                    curve.edge,
-                    curve.profile,
-                    curve.amplitude,
-                    distance,
-                    visual_distance,
-                    radius,
-                    distance <= radius + 0.001,
-                    curve.anchors.sites,
-                )
-            })
-    }
-
-    fn audit_owner_radius_blocks(curve: &NoisyBoundaryCurve, sample_spacing_blocks: f32) -> f32 {
-        let radius = match curve.profile {
-            BoundaryProfile::LandSeam => {
-                curve.amplitude.min(AUDIT_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS)
-            }
-            _ => curve.amplitude,
-        };
-        radius + sample_spacing_blocks * 0.5
-    }
-
-    fn audit_owner_points_for_curve(curve: &NoisyBoundaryCurve) -> Vec<WorldPlanePoint> {
-        if curve.profile != BoundaryProfile::LandSeam
-            || curve.amplitude <= AUDIT_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS
-            || curve.points.len() <= 2
-        {
-            return curve.points.clone();
-        }
-
-        let scale = (AUDIT_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS / curve.amplitude).clamp(0.0, 1.0);
-        let last = curve.points.len() - 1;
-        curve
-            .points
-            .iter()
-            .enumerate()
-            .map(|(index, point)| {
-                let t = index as f32 / last as f32;
-                let chord = WorldPlanePoint::new(
-                    curve.anchors.start.x + (curve.anchors.end.x - curve.anchors.start.x) * t,
-                    curve.anchors.start.z + (curve.anchors.end.z - curve.anchors.start.z) * t,
-                );
-                WorldPlanePoint::new(
-                    chord.x + (point.x - chord.x) * scale,
-                    chord.z + (point.z - chord.z) * scale,
-                )
-            })
-            .collect()
     }
 
     fn test_polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f32 {
@@ -2538,7 +2045,7 @@ mod tests {
             test_plan(2, 0, "grass", SurfaceHydrologyRole::Land),
         ];
 
-        apply_noisy_boundary_mixing(&mut columns, 3, 1, config, None);
+        apply_noisy_boundary_mixing(&mut columns, 3, 1, config);
 
         assert_eq!(columns[0].surface_y, 4);
         assert_eq!(columns[0].water_y, None);
@@ -2571,43 +2078,11 @@ mod tests {
             test_plan(2, 2, "grass", SurfaceHydrologyRole::Land),
         ];
 
-        apply_noisy_boundary_mixing(&mut columns, 3, 3, config, None);
+        apply_noisy_boundary_mixing(&mut columns, 3, 3, config);
 
         assert_eq!(
             columns[4].top_block, "grass",
             "diagonal-only contact must not create a square-corner material intrusion"
-        );
-    }
-
-    #[test]
-    fn noisy_boundary_mixing_does_not_cross_macro_owner_sites() {
-        let config = SurfacePlanConfig {
-            boundary_mix_radius_blocks: 1,
-            boundary_mix_strength_percent: 100,
-            ..SurfacePlanConfig::new(7, 2)
-        };
-        let mut columns = vec![
-            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
-            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
-        ];
-        let mix_sources = vec![
-            SurfaceMixSource {
-                owner_site: Some(VoronoiSiteId(1)),
-            },
-            SurfaceMixSource {
-                owner_site: Some(VoronoiSiteId(2)),
-            },
-        ];
-
-        apply_noisy_boundary_mixing(&mut columns, 2, 1, config, Some(&mix_sources));
-
-        assert_eq!(
-            columns[0].top_block, "sand",
-            "local material breakup must not copy material across the macro owner boundary"
-        );
-        assert_eq!(
-            columns[1].top_block, "grass",
-            "local material breakup must not copy material across the macro owner boundary"
         );
     }
 
@@ -2624,7 +2099,7 @@ mod tests {
         ];
         columns[0].water_y = Some(5);
 
-        apply_noisy_boundary_mixing(&mut columns, 2, 1, config, None);
+        apply_noisy_boundary_mixing(&mut columns, 2, 1, config);
 
         assert_eq!(columns[0].top_block, "sand");
         assert_eq!(columns[0].water_y, Some(5));

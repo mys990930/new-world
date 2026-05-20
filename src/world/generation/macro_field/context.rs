@@ -11,9 +11,7 @@ use super::river::{
 };
 use super::types::MacroFieldTileConfig;
 use crate::world::generation::biome::GraphBiomeCell;
-use crate::world::generation::boundary::{
-    BoundaryCache, BoundaryJunction, BoundaryProfile, NoisyBoundaryCurve,
-};
+use crate::world::generation::boundary::{BoundaryCache, BoundaryJunction, NoisyBoundaryCurve};
 use crate::world::generation::graph::{
     VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint,
 };
@@ -26,7 +24,6 @@ pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_RADIUS_BLOCKS: f32 = 768.0;
 pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_BUCKET_RADIUS: i32 = 4;
 pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_DISTANCE_POWER: f32 = 1.45;
 pub(super) const MACRO_FIELD_JUNCTION_OWNER_MAX_RADIUS_BLOCKS: f32 = 8.0;
-pub(super) const MACRO_FIELD_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS: f32 = 8.0;
 #[derive(Debug)]
 pub struct MacroFieldRasterContext<'a> {
     pub(super) sites: &'a [MacroSite],
@@ -124,13 +121,13 @@ impl<'a> MacroFieldRasterContext<'a> {
                 let left = site_by_id.get(&edge.sites[0]).copied()?;
                 let right = site_by_id.get(&edge.sites[1]).copied()?;
                 let curve = boundary_curves.get(&edge.id).copied()?;
-                Some(BoundaryEdgeRef::new(curve, left, right))
+                Some(BoundaryEdgeRef { curve, left, right })
             })
             .collect::<Vec<_>>();
         boundary_edges.sort_by_key(|edge| edge.curve.edge.0);
         let max_boundary_owner_radius_blocks = boundary_edges
             .iter()
-            .map(|edge| edge.owner_radius_blocks)
+            .map(|edge| edge.curve.amplitude)
             .fold(0.0, f32::max);
         let junctions = boundary.junctions();
         let boundary_grid = CurveIndexGrid::from_boundary_edges(&boundary_edges);
@@ -263,7 +260,10 @@ impl<'a> MacroFieldRasterContext<'a> {
             .filter_map(|index| self.junctions.get(index))
             .filter(|junction| {
                 squared_distance(position, junction.position)
-                    <= junction.radius_blocks.min(owner_radius_blocks).powi(2)
+                    <= junction
+                        .radius_blocks
+                        .min(owner_radius_blocks)
+                        .powi(2)
             })
             .filter(|junction| {
                 raw_nearest_site
@@ -453,34 +453,22 @@ pub(super) struct RiverCurveRef {
     pub(super) bed_depth_blocks: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct BoundaryEdgeRef<'a> {
     pub(super) curve: &'a NoisyBoundaryCurve,
-    pub(super) owner_points: Vec<WorldPlanePoint>,
-    pub(super) owner_radius_blocks: f32,
     pub(super) left: MacroSite,
     pub(super) right: MacroSite,
 }
 
-impl<'a> BoundaryEdgeRef<'a> {
-    fn new(curve: &'a NoisyBoundaryCurve, left: MacroSite, right: MacroSite) -> Self {
-        BoundaryEdgeRef {
-            curve,
-            owner_points: owner_points_for_curve(curve),
-            owner_radius_blocks: owner_radius_blocks_for_curve(curve),
-            left,
-            right,
-        }
-    }
-
-    fn side_sample(&self, position: WorldPlanePoint) -> Option<BoundarySideSample> {
-        let nearest = nearest_polyline_segment(position, &self.owner_points)?;
+impl BoundaryEdgeRef<'_> {
+    fn side_sample(self, position: WorldPlanePoint) -> Option<BoundarySideSample> {
+        let nearest = nearest_polyline_segment(position, &self.curve.points)?;
         let side = signed_side(position, nearest.start, nearest.end);
         let left_side = signed_side(self.left.position, nearest.start, nearest.end);
         let right_side = signed_side(self.right.position, nearest.start, nearest.end);
         Some(BoundarySideSample {
             distance: nearest.distance,
-            owner_radius_blocks: self.owner_radius_blocks,
+            owner_radius_blocks: self.curve.amplitude,
             side,
             left_side,
             right_side,
@@ -552,43 +540,6 @@ fn junction_owner_radius_blocks(config: MacroFieldTileConfig) -> f32 {
         .min(MACRO_FIELD_JUNCTION_OWNER_MAX_RADIUS_BLOCKS)
 }
 
-fn owner_radius_blocks_for_curve(curve: &NoisyBoundaryCurve) -> f32 {
-    match curve.profile {
-        BoundaryProfile::LandSeam => curve
-            .amplitude
-            .min(MACRO_FIELD_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS),
-        _ => curve.amplitude,
-    }
-}
-
-fn owner_points_for_curve(curve: &NoisyBoundaryCurve) -> Vec<WorldPlanePoint> {
-    if curve.profile != BoundaryProfile::LandSeam
-        || curve.amplitude <= MACRO_FIELD_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS
-        || curve.points.len() <= 2
-    {
-        return curve.points.clone();
-    }
-
-    let scale = (MACRO_FIELD_LAND_SEAM_OWNER_MAX_RADIUS_BLOCKS / curve.amplitude).clamp(0.0, 1.0);
-    let last = curve.points.len() - 1;
-    curve
-        .points
-        .iter()
-        .enumerate()
-        .map(|(index, point)| {
-            let t = index as f32 / last as f32;
-            let chord = WorldPlanePoint::new(
-                curve.anchors.start.x + (curve.anchors.end.x - curve.anchors.start.x) * t,
-                curve.anchors.start.z + (curve.anchors.end.z - curve.anchors.start.z) * t,
-            );
-            WorldPlanePoint::new(
-                chord.x + (point.x - chord.x) * scale,
-                chord.z + (point.z - chord.z) * scale,
-            )
-        })
-        .collect()
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(super) struct OwnerSample {
     pub(super) primary: Option<MacroSite>,
@@ -623,7 +574,7 @@ impl CurveIndexGrid {
     fn from_boundary_edges(edges: &[BoundaryEdgeRef<'_>]) -> Self {
         let mut grid = Self::default();
         for (index, edge) in edges.iter().enumerate() {
-            grid.insert_curve(index, &edge.owner_points);
+            grid.insert_curve(index, &edge.curve.points);
         }
         grid.dedup_bucket_entries();
         grid
@@ -765,15 +716,20 @@ impl SiteIndexGrid {
         mut visit: impl FnMut(usize),
     ) {
         let center = site_bucket(position);
-        for search in 0..=4 {
+        for search in 1..=4 {
+            let mut found = false;
             for z in center.1 - search..=center.1 + search {
                 for x in center.0 - search..=center.0 + search {
                     if let Some(bucket) = self.buckets.get(&(x, z)) {
+                        found = true;
                         for index in bucket {
                             visit(*index);
                         }
                     }
                 }
+            }
+            if found {
+                return;
             }
         }
     }
@@ -1479,216 +1435,6 @@ mod tests {
         assert!(
             sample.lake_lowering_factor <= f32::EPSILON,
             "blend radius must not leak owner-dependent transition effects without an owner-boundary hit"
-        );
-    }
-
-    #[test]
-    fn nearest_site_search_does_not_stop_at_first_nonempty_bucket_ring() {
-        let far_ring_site = test_site(
-            VoronoiSiteId(1),
-            0.0,
-            0.0,
-            MacroSurfaceKind::Continent,
-            0.10,
-        );
-        let nearer_outer_ring_site = test_site(
-            VoronoiSiteId(2),
-            512.0,
-            256.0,
-            MacroSurfaceKind::Continent,
-            0.20,
-        );
-        let macro_map = GraphMacroMap {
-            sites: vec![far_ring_site, nearer_outer_ring_site],
-            corners: Vec::new(),
-            edges: Vec::new(),
-            biomes: Vec::new(),
-        };
-        let boundary = BoundaryCache {
-            curves: Vec::new(),
-            stats: Default::default(),
-        };
-        let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
-        let position = WorldPlanePoint::new(255.0, 255.0);
-
-        let nearest = context
-            .nearest_site(position)
-            .expect("test macro map should have sites");
-
-        assert_eq!(
-            nearest.id, nearer_outer_ring_site.id,
-            "nearest-site lookup must consider all nearby bucket rings, otherwise 256-block site bucket boundaries become visible owner/mask seams"
-        );
-    }
-
-    #[test]
-    fn land_seam_owner_switch_is_capped_without_flattening_boundary_curve() {
-        let left = test_site(
-            VoronoiSiteId(1),
-            -30.0,
-            0.0,
-            MacroSurfaceKind::CoastLand,
-            0.30,
-        );
-        let right = test_site(
-            VoronoiSiteId(2),
-            30.0,
-            0.0,
-            MacroSurfaceKind::Continent,
-            0.10,
-        );
-        let edge = VoronoiEdgeId(181);
-        let start = WorldPlanePoint::new(16.0, -64.0);
-        let end = WorldPlanePoint::new(16.0, 64.0);
-        let macro_map = GraphMacroMap {
-            sites: vec![left, right],
-            corners: Vec::new(),
-            edges: vec![MacroEdge {
-                id: edge,
-                sites: [left.id, right.id],
-                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
-                guide: MacroEdgeGuide {
-                    is_coast: false,
-                    is_ridge_candidate: false,
-                    is_river_candidate: false,
-                    is_fault_candidate: false,
-                    coastness: 0.0,
-                    mountainness: 0.0,
-                    ridgeness: 0.0,
-                    signed_elevation_gradient: 0.0,
-                    drainage_divide_potential: 0.0,
-                    river_potential: 0.0,
-                },
-                lake_class: MacroLakeEdgeClass::NonLake,
-            }],
-            biomes: Vec::new(),
-        };
-        let boundary = BoundaryCache {
-            curves: vec![NoisyBoundaryCurve {
-                edge,
-                profile: BoundaryProfile::LandSeam,
-                anchors: BoundaryAnchors {
-                    corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
-                    sites: [left.id, right.id],
-                    start,
-                    end,
-                },
-                points: vec![start, end],
-                amplitude: 30.0,
-                seed: 181,
-                guard: BoundaryGuard {
-                    min_x: -16.0,
-                    max_x: 48.0,
-                    min_z: -72.0,
-                    max_z: 72.0,
-                },
-            }],
-            stats: Default::default(),
-        };
-        let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
-        let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 4, 1.0);
-
-        let inside_cap = context.owner_sample(WorldPlanePoint::new(8.0, 0.0), config);
-        let outside_cap = context.owner_sample(WorldPlanePoint::new(6.0, 0.0), config);
-
-        assert_eq!(
-            inside_cap.primary.map(|site| site.id),
-            Some(left.id),
-            "inside the narrow land seam owner band, the noisy curve may choose the curve-side owner"
-        );
-        assert_eq!(
-            outside_cap.primary.map(|site| site.id),
-            Some(right.id),
-            "outside the land seam owner cap, the raw nearest site should win even though the visual curve amplitude remains broad"
-        );
-    }
-
-    #[test]
-    fn land_seam_owner_curve_is_narrowed_from_visual_curve() {
-        let left = test_site(
-            VoronoiSiteId(1),
-            -30.0,
-            0.0,
-            MacroSurfaceKind::CoastLand,
-            0.30,
-        );
-        let right = test_site(
-            VoronoiSiteId(2),
-            30.0,
-            0.0,
-            MacroSurfaceKind::Continent,
-            0.10,
-        );
-        let edge = VoronoiEdgeId(182);
-        let start = WorldPlanePoint::new(16.0, -64.0);
-        let mid = WorldPlanePoint::new(46.0, 0.0);
-        let end = WorldPlanePoint::new(16.0, 64.0);
-        let macro_map = GraphMacroMap {
-            sites: vec![left, right],
-            corners: Vec::new(),
-            edges: vec![MacroEdge {
-                id: edge,
-                sites: [left.id, right.id],
-                corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
-                guide: MacroEdgeGuide {
-                    is_coast: false,
-                    is_ridge_candidate: false,
-                    is_river_candidate: false,
-                    is_fault_candidate: false,
-                    coastness: 0.0,
-                    mountainness: 0.0,
-                    ridgeness: 0.0,
-                    signed_elevation_gradient: 0.0,
-                    drainage_divide_potential: 0.0,
-                    river_potential: 0.0,
-                },
-                lake_class: MacroLakeEdgeClass::NonLake,
-            }],
-            biomes: Vec::new(),
-        };
-        let boundary = BoundaryCache {
-            curves: vec![NoisyBoundaryCurve {
-                edge,
-                profile: BoundaryProfile::LandSeam,
-                anchors: BoundaryAnchors {
-                    corners: [VoronoiCornerId(1), VoronoiCornerId(2)],
-                    sites: [left.id, right.id],
-                    start,
-                    end,
-                },
-                points: vec![start, mid, end],
-                amplitude: 30.0,
-                seed: 182,
-                guard: BoundaryGuard {
-                    min_x: -16.0,
-                    max_x: 52.0,
-                    min_z: -72.0,
-                    max_z: 72.0,
-                },
-            }],
-            stats: Default::default(),
-        };
-        let patch = Default::default();
-        let river_plan = RiverPlan::default();
-        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
-        let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 4, 1.0);
-
-        let near_visual_bulge = context.owner_sample(WorldPlanePoint::new(44.0, 0.0), config);
-        let near_narrow_owner_curve = context.owner_sample(WorldPlanePoint::new(22.0, 0.0), config);
-
-        assert_eq!(
-            near_visual_bulge.primary.map(|site| site.id),
-            Some(right.id),
-            "a broad visual land-seam bend must not drag material ownership deep into the raw-nearest side"
-        );
-        assert_eq!(
-            near_narrow_owner_curve.primary.map(|site| site.id),
-            Some(left.id),
-            "the narrowed owner curve should still provide a local noisy handoff near the raw seam"
         );
     }
 

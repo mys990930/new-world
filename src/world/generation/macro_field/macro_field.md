@@ -220,10 +220,7 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 3. 먼저 raw nearest macro site와 그 distance를 찾되, sample point가 local owner로 plausible한 site를
    가진 canonical noisy boundary curve의 owner-side radius 안에 있으면 해당 curve의 양쪽 site를 읽어
    noisy curve 기준 owner를 다시 고른다. 이 owner-side radius는 curve displacement amplitude와 sample
-   spacing guard를 기본으로 고려한다. 단, `LandSeam` profile은 preview overlay에 쓰는 canonical curve는
-   그대로 보존하고, material owner sampling에는 displacement를 작은 고정 cap까지 축소한 별도 owner
-   polyline을 사용한다. 따라서 보이는 경계는 noisy curve를 유지하지만 surface/material owner가 다른 cell
-   안쪽으로 broad patch처럼 침범하지 않아야 한다.
+   spacing guard만 고려한다.
    `boundary_blend_radius_blocks`는 material/lake lowering transition 폭이지, noisy owner 판정의
    최대 거리로 쓰면 안 된다.
    - 단, sample point가 `BoundaryCache`의 rounded junction radius 안에 있으면 단일 nearest edge side
@@ -471,13 +468,11 @@ combined macro height preview: -0.50 .. 1.00
 ```
 
 per-image min/max와 robust percentile은 metadata/stdout 진단값일 뿐 color scale의 source가 아니다.
-모든 non-contour channel은 canonical noisy Voronoi graph edge overlay를 기본으로 표시할 수 있다.
-사용자가 terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field cache grid가 아니라,
-stage 9의 `BoundaryCache`가 제공하는 noisy edge geometry다. 이 overlay는 field 값을 가리지 않는
-faint reference layer여야 하며, 기본 alpha는 강한 선 레이어가 아니라 위치 확인용 수준이어야 한다.
-straight nearest-site 경계가 아니라 canonical noisy curve를 따른다. 단, `combined`/`lit` channel에
-`--contours`를 함께 켠 경우에는 contour 판독이 우선이다. 이때 graph edge reference line은 꺼서
-Voronoi edge가 1-block contour 단차나 terrain seam처럼 읽히지 않게 한다.
+모든 channel은 canonical noisy Voronoi graph edge overlay를 기본으로 표시해야 한다. 사용자가
+terrain tile 경계를 확인한다고 말할 때의 1차 의미는 macro-field cache grid가 아니라, stage 9의
+`BoundaryCache`가 제공하는 noisy edge geometry다. 이 overlay는 field 값을 가리지 않는 faint
+reference layer여야 하며, 기본 alpha는 강한 선 레이어가 아니라 위치 확인용 수준이어야 한다.
+straight nearest-site 경계가 아니라 canonical noisy curve를 따른다.
 
 macro field preview는 selected river centerline도 `RiverPlan` segment와 `BoundaryCache` canonical
 curve를 기준으로 표시해야 한다. 이 선은 river valley field의 폭을 대체하지 않는 진단용 중심선이며,
@@ -569,9 +564,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   while reducing repeated scalar work in sample fill.
 - owner sampling keeps noisy-boundary side classification active across each curve's displacement
   amplitude band for terrain owner/mask channels, while `boundary_blend_radius_blocks` continues to control
-  only local transition effects such as lake/wetland lowering. `LandSeam` is the exception: its visual
-  `BoundaryCache` curve keeps the normal preview-visible amplitude, but owner switching uses a narrowed
-  owner polyline and narrow cap so material seams do not become broad swapped regions.
+  only local transition effects such as lake/wetland lowering.
 - owner sampling computes the raw nearest macro site distance once and only lets noisy-boundary side
   classification override ownership for boundary edges whose owner sites are locally plausible for the sample.
   This keeps the visible curve active for the real cell edge and for narrow regions between adjacent edges,
