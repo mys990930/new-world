@@ -219,31 +219,32 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      near-threshold sample은 이미 dense river neighbors와 orthogonal support를 가진 경우에만 river
      water/core threshold까지 승격한다. 이 후처리는 raster strength만 보정하며 selected hydrology,
      river_plan geometry, macro masks를 바꾸지 않고 convex outside bank corner는 보존해야 한다.
-3. 먼저 raw nearest macro site와 그 distance를 찾되, sample point가 local owner로 plausible한 site를
-   가진 canonical noisy boundary curve의 owner-side radius 안에 있으면 해당 curve의 양쪽 site를 읽어
-   noisy curve 기준 owner를 다시 고른다. 이 owner-side radius는 curve displacement amplitude와 sample
-   spacing guard만 고려한다.
-   `boundary_blend_radius_blocks`는 material/lake lowering transition 폭이지, noisy owner 판정의
-   최대 거리로 쓰면 안 된다.
+3. owner/mask 판정은 raw nearest macro site가 아니라 canonical noisy boundary curve set의 nearest
+   side query를 기준으로 고른다. 각 sample은 가까운 `NoisyBoundaryCurve`의 양쪽 owner site 중 curve
+   side와 일치하는 site를 visible owner로 사용한다. raw nearest macro site는 boundary candidate가 전혀
+   없을 때의 fallback일 뿐이며, surface material cell을 나누는 기준으로 쓰면 안 된다.
+   `boundary_blend_radius_blocks`와 curve displacement amplitude는 material/lake lowering transition
+   폭이나 curve 생성 guard이지, noisy owner 판정의 최대 거리로 쓰면 안 된다.
    - 단, sample point가 `BoundaryCache`의 rounded junction radius 안에 있으면 단일 nearest edge side
      판정보다 junction 판정을 우선한다. 이때 owner는 해당 corner에 incident한 macro site 중 sample과 가장
-     가까운 site다. incident site set이 비어 있거나 macro_map site를 찾지 못하면 기존 nearest-site /
-     boundary-side flow로 fallback한다. 이 정책은 triple/multi-edge corner에서 pointed wedge를 줄이기 위한
+     가까운 site다. incident site set이 비어 있거나 macro_map site를 찾지 못하면 nearest boundary-side
+     flow로 fallback한다. 이 정책은 triple/multi-edge corner에서 pointed wedge를 줄이기 위한
      sampling rule이며 raw graph topology, curve anchors, edge ids를 바꾸지 않는다.
    - 이 단계의 visible ownership/mask boundary는 straight nearest-site 선이 아니라 stage 9
      `BoundaryCache`의 `NoisyBoundaryCurve`를 따라야 한다.
-   - 단, unrelated nearby edge는 owner를 훔칠 수 없다. boundary curve는 현재 sample의 raw nearest site에
-     incident한 edge일 때만 owner/mask 판정에 참여한다. boundary curve의 양쪽 owner site가 현재 sample의
-     raw nearest distance와 owner-side radius로 만든 local plausibility band 밖에 있으면 source
-     owner handoff를 override하지 않는다. junction radius 내부의 rounded junction rule도 raw nearest
-     site에 incident한 junction에만 적용된다.
+   - noisy curve side 판정은 가장 가까운 polyline segment의 sign을 그대로 쓰지 않는다. anchor chord와
+     noisy curve가 만드는 displacement ribbon 안에서는 anchor-side classification을 한 번 toggle해,
+     굴곡진 polyline의 segment medial axis가 material boundary처럼 보이지 않게 한다.
+   - surface material과 terrain owner/mask channel은 raw nearest-site line이나 curve amplitude band
+     edge에서 갈라지면 회귀다. 서로 다른 non-water material이 만나는 transition은 그 두 owner site를 잇는
+     canonical noisy boundary curve 가까이에 있어야 한다.
    - macro elevation scalar의 source는 `macro_map`의 `MacroSite.signed_macro_elevation`이다.
      `macro_field`는 가까운 macro site source elevation을 짧은 범위에서 보간해 continuous scalar field를
      만든다. site 중심에서는 원본 elevation을 그대로 보존해야 하며, 장거리 land-group 평균이나
      terrain-kind-specific profile을 만들면 안 된다. 보간 candidate를 fixed top-K로 자르면 K번째/다음
      site의 higher-order Voronoi boundary가 xz 평면에서 직선 단차로 보일 수 있으므로, compact support
      falloff가 0으로 수렴하는 radius 안의 site 전체를 사용해야 한다.
-   - boundary owner-side band 안에서도 scalar height와 owner/mask 판정을 분리한다. owner/mask 판정은
+   - boundary owner-side query 안에서도 scalar height와 owner/mask 판정을 분리한다. owner/mask 판정은
      여전히 가장 가까운 noisy boundary side query를 따르지만, scalar height는 선택된 owner site의 hard
      value가 아니라 같은 local interpolation field를 읽는다. explicit coast boundary는 coast
      mask/influence source로 남지만, macro_field 단계에서 coast-specific elevation profile을 별도로
@@ -568,8 +569,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - `src/world/generation/macro_field/mod.rs`가 `MacroFieldTileConfig`, `MacroFieldSample`,
   `MacroFieldTile`, `generate_macro_field_tile`을 제공한다.
 - sample fill은 rayon parallel iterator를 사용하고, index 기반 위치 계산으로 deterministic order를 유지한다.
-- launch rasterizer는 nearest macro site를 기본 lookup으로 사용하되, canonical noisy boundary curve의
-  displacement band 안에서는 side test로 owner/mask boundary를 고른다. macro elevation은
+- launch rasterizer는 canonical noisy boundary curve set의 nearest side query로 owner/mask boundary를
+  고른다. raw nearest macro site는 boundary candidate가 없을 때의 fallback이며, surface material
+  boundary의 기준이 아니다. macro elevation은
   가까운 `MacroSite.signed_macro_elevation` source들을 local distance-weighted interpolation으로
   샘플한다. site 중심 값은 그대로 보존하고, owner switch만으로 scalar가 계단처럼 끊기지 않아야 한다.
   현재 보간은 fixed top-K truncation 없이 compact support radius 안의 후보 전체를 사용한다. 후보가
@@ -583,13 +585,15 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 - boundary/polyline nearest queries compare squared segment distances first and only take the final
   square root for the selected nearest distance. This preserves deterministic nearest-segment semantics
   while reducing repeated scalar work in sample fill.
-- owner sampling keeps noisy-boundary side classification active across each curve's displacement
-  amplitude band for terrain owner/mask channels, while `boundary_blend_radius_blocks` continues to control
+- owner sampling keeps noisy-boundary side classification active for terrain owner/mask channels without
+  clamping it to the curve displacement amplitude band. `boundary_blend_radius_blocks` continues to control
   only local transition effects such as lake/wetland lowering.
-- owner sampling computes the raw nearest macro site distance once and only lets noisy-boundary side
-  classification override ownership for boundary edges whose owner sites are locally plausible for the sample.
-  This keeps the visible curve active for the real cell edge and for narrow regions between adjacent edges,
-  while preventing distant unrelated curves from protruding their source owner into another cell.
+- owner sampling searches nearby boundary-curve buckets for the nearest canonical noisy boundary side and
+  uses that curve's owner pair for the visible owner. If the local bucket search has no candidates it falls
+  back to the full boundary set; raw nearest-site lookup is only the final no-boundary fallback.
+- curve side classification uses the displacement ribbon between each noisy curve and its anchor chord to
+  toggle the anchor side. It must not use per-nearest-segment signs as the owner boundary, because highly
+  curved polylines can otherwise create material transitions along segment medial axes away from the curve.
 - owner sampling materializes deterministic `BoundaryJunction` influence from `BoundaryCache` once in the
   raster context. Inside each junction radius it chooses the nearest incident macro site before nearest
   boundary side classification; outside that radius the existing noisy boundary-side behavior is unchanged.

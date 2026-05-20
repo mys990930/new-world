@@ -1365,7 +1365,7 @@ mod tests {
     use super::*;
     use crate::world::generation::graph::WorldPlanePoint;
     use crate::world::generation::macro_field::{
-        MacroFieldRasterContext, MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats,
+        MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats,
     };
     use crate::world::generation::{
         BoundaryConfig, DEFAULT_GRAPH_REGION_SIZE_BLOCKS, DEFAULT_SITE_SPACING_BLOCKS,
@@ -1531,7 +1531,6 @@ mod tests {
                 1.0,
             ),
         );
-        let raw_context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let heightfield = generate_heightfield_tile(
             &macro_tile,
             HeightfieldConfig {
@@ -1567,9 +1566,6 @@ mod tests {
         let mut missing_owner_biome_representatives = Vec::new();
         let mut owner_biome_mismatch_count = 0usize;
         let mut owner_biome_mismatch_representatives = Vec::new();
-        let mut raw_owner_switch_count = 0usize;
-        let mut unsupported_raw_owner_switch_count = 0usize;
-        let mut raw_owner_switch_representatives = Vec::new();
         let mut local_mix_count = 0usize;
         let mut local_mix_pair_counts = BTreeMap::<String, usize>::new();
         let mut unsupported_local_mix_count = 0usize;
@@ -1651,37 +1647,6 @@ mod tests {
                                 base_plan.top_block,
                             ));
                         }
-                    }
-                }
-            }
-            let raw_site = raw_context
-                .nearest_site(sample.position)
-                .map(|site| site.id);
-            if raw_site != sample.nearest_site {
-                raw_owner_switch_count += 1;
-                let allowance = raw_owner_switch_allowance(
-                    &boundary.curves,
-                    raw_site,
-                    sample.nearest_site,
-                    sample.position,
-                    macro_tile.config.sample_spacing_blocks,
-                );
-                if !allowance.is_some_and(|(_, _, within)| within) {
-                    unsupported_raw_owner_switch_count += 1;
-                    if raw_owner_switch_representatives.len() < 24 {
-                        raw_owner_switch_representatives.push(format!(
-                            "#{index} world=({}, {}) raw={:?} owner={:?} biome={:?} water_role={:?} terrain={:?} role={:?} top={} boundary_allowance={:?}",
-                            plan.world_x,
-                            plan.world_z,
-                            raw_site,
-                            sample.nearest_site,
-                            sample.biome,
-                            sample.biome_context.map(|context| context.water_role),
-                            height.terrain_kind,
-                            plan.hydrology_role,
-                            plan.top_block,
-                            allowance,
-                        ));
                     }
                 }
             }
@@ -1842,11 +1807,6 @@ mod tests {
         for representative in &owner_biome_mismatch_representatives {
             eprintln!("owner_biome_mismatch {representative}");
         }
-        eprintln!("raw_owner_switch_count={raw_owner_switch_count}");
-        eprintln!("unsupported_raw_owner_switch_count={unsupported_raw_owner_switch_count}");
-        for representative in &raw_owner_switch_representatives {
-            eprintln!("unsupported_raw_owner_switch {representative}");
-        }
         eprintln!("local_mix_count={local_mix_count}");
         eprintln!("local_mix_pair_counts={local_mix_pair_counts:?}");
         eprintln!("unsupported_local_mix_count={unsupported_local_mix_count}");
@@ -1903,10 +1863,6 @@ mod tests {
         assert_eq!(
             owner_biome_mismatch_count, 0,
             "biome/context handoff must follow the canonical noisy boundary owner site"
-        );
-        assert_eq!(
-            unsupported_raw_owner_switch_count, 0,
-            "raw owner may change only inside the canonical noisy boundary owner band for that raw/owner site pair"
         );
         assert_eq!(
             unsupported_local_mix_count, 0,
@@ -2004,7 +1960,6 @@ mod tests {
                 1.0,
             ),
         );
-        let raw_context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let heightfield = generate_heightfield_tile(
             &macro_tile,
             HeightfieldConfig {
@@ -2029,14 +1984,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let mut raw_owner_switch_count = 0usize;
-        let mut unsupported_raw_owner_switch_count = 0usize;
         let mut local_mix_count = 0usize;
         let mut unsupported_local_mix_count = 0usize;
         let mut base_top_counts = BTreeMap::<&'static str, usize>::new();
         let mut final_top_counts = BTreeMap::<&'static str, usize>::new();
         let mut local_mix_rows = Vec::new();
-        let mut owner_switch_rows = Vec::new();
         let mut owner_boundary_swap_count = 0usize;
         let mut owner_boundary_swap_rows = Vec::new();
         let mut chunk_owner_top_counts = BTreeMap::<String, BTreeMap<&'static str, usize>>::new();
@@ -2057,38 +2009,6 @@ mod tests {
                             .or_default()
                             .entry(plan.top_block)
                             .or_default() += 1;
-                    }
-                }
-
-                let raw_site = raw_context
-                    .nearest_site(sample.position)
-                    .map(|site| site.id);
-                if raw_site != sample.nearest_site {
-                    raw_owner_switch_count += 1;
-                    let allowance = raw_owner_switch_allowance(
-                        &boundary.curves,
-                        raw_site,
-                        sample.nearest_site,
-                        sample.position,
-                        macro_tile.config.sample_spacing_blocks,
-                    );
-                    if !allowance.is_some_and(|(_, _, within)| within) {
-                        unsupported_raw_owner_switch_count += 1;
-                    }
-                    if owner_switch_rows.len() < 24 {
-                        owner_switch_rows.push(format!(
-                            "world=({}, {}) local=({}, {}) raw={:?} noisy_owner={:?} biome={:?} base_top={} final_top={} allowance={:?}",
-                            plan.world_x,
-                            plan.world_z,
-                            x - guard_blocks,
-                            z - guard_blocks,
-                            raw_site,
-                            sample.nearest_site,
-                            sample.biome,
-                            base_plan.top_block,
-                            plan.top_block,
-                            allowance,
-                        ));
                     }
                 }
 
@@ -2210,11 +2130,6 @@ mod tests {
         );
         eprintln!("base_top_counts={base_top_counts:?}");
         eprintln!("final_top_counts={final_top_counts:?}");
-        eprintln!("raw_owner_switch_count={raw_owner_switch_count}");
-        eprintln!("unsupported_raw_owner_switch_count={unsupported_raw_owner_switch_count}");
-        for row in &owner_switch_rows {
-            eprintln!("owner_switch {row}");
-        }
         eprintln!("local_mix_count={local_mix_count}");
         eprintln!("unsupported_local_mix_count={unsupported_local_mix_count}");
         for row in &local_mix_rows {
@@ -2267,7 +2182,6 @@ mod tests {
             );
         }
 
-        assert_eq!(unsupported_raw_owner_switch_count, 0);
         assert_eq!(unsupported_local_mix_count, 0);
         assert_eq!(owner_boundary_swap_count, 0);
         assert_eq!(
@@ -2421,8 +2335,9 @@ mod tests {
                         midpoint,
                         sample_spacing_blocks,
                     );
+                    let nearest_curve = nearest_boundary_curve_summary(curves, midpoint);
                     let row = format!(
-                        "{label} left#{} world=({}, {}) site={:?} top={} | right#{} world=({}, {}) site={:?} top={} midpoint=({:.2},{:.2}) support={:?}",
+                        "{label} left#{} world=({}, {}) site={:?} top={} | right#{} world=({}, {}) site={:?} top={} midpoint=({:.2},{:.2}) support={:?} nearest_curve={}",
                         index,
                         left_column.world_x,
                         left_column.world_z,
@@ -2435,7 +2350,8 @@ mod tests {
                         right_column.top_block,
                         midpoint.x,
                         midpoint.z,
-                        support
+                        support,
+                        nearest_curve.as_deref().unwrap_or("None")
                     );
                     if audit.transition_representatives.len() < 24 {
                         audit.transition_representatives.push(row.clone());
@@ -2474,10 +2390,35 @@ mod tests {
             })
             .map(|curve| {
                 let distance = test_polyline_distance(position, &curve.points);
-                let radius = curve.amplitude + sample_spacing_blocks;
+                let radius = sample_spacing_blocks;
                 (distance, radius, distance <= radius + 0.001)
             })
             .min_by(|left, right| left.0.total_cmp(&right.0))
+    }
+
+    fn nearest_boundary_curve_summary(
+        curves: &[NoisyBoundaryCurve],
+        position: WorldPlanePoint,
+    ) -> Option<String> {
+        curves
+            .iter()
+            .map(|curve| {
+                let distance = test_polyline_distance(position, &curve.points);
+                (curve, distance)
+            })
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .map(|(curve, distance)| {
+                format!(
+                    "edge={:?} sites={:?} distance={:.3} start=({:.1},{:.1}) end=({:.1},{:.1})",
+                    curve.edge,
+                    curve.anchors.sites,
+                    distance,
+                    curve.anchors.start.x,
+                    curve.anchors.start.z,
+                    curve.anchors.end.x,
+                    curve.anchors.end.z
+                )
+            })
     }
 
     fn is_supported_local_mix(
@@ -2588,32 +2529,6 @@ mod tests {
         }
 
         None
-    }
-
-    fn raw_owner_switch_allowance(
-        curves: &[NoisyBoundaryCurve],
-        raw_site: Option<VoronoiSiteId>,
-        owner_site: Option<VoronoiSiteId>,
-        position: WorldPlanePoint,
-        sample_spacing_blocks: f32,
-    ) -> Option<(f32, f32, bool)> {
-        let raw_site = raw_site?;
-        let owner_site = owner_site?;
-        if raw_site == owner_site {
-            return Some((0.0, 0.0, true));
-        }
-
-        curves
-            .iter()
-            .filter(|curve| {
-                curve.anchors.sites.contains(&raw_site) && curve.anchors.sites.contains(&owner_site)
-            })
-            .map(|curve| {
-                let distance = test_polyline_distance(position, &curve.points);
-                let radius = curve.amplitude + sample_spacing_blocks * 0.5;
-                (distance, radius, distance <= radius + 0.001)
-            })
-            .min_by(|left, right| left.0.total_cmp(&right.0))
     }
 
     fn test_polyline_distance(position: WorldPlanePoint, points: &[WorldPlanePoint]) -> f32 {

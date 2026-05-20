@@ -394,7 +394,7 @@ priority를 함께 보고 실제 block을 배치한다.
   `NoisyBoundaryCurve`의 block-edge support 안에 있어야 한다. 이 audit은 ignored unit test로 보존하며,
   PNG를 만들지 않고 macro field, Perlin-enabled heightfield, surface plan column data를 직접 비교한다.
 - seed `42`, chunk `(-73, -40)`의 focused boundary audit은 1-block guard를 둔 column data를 직접 비교해
-  raw nearest site, noisy owner site, biome, base top block, final top block, local mix source neighbor를
-  출력한다. 이 audit 역시 preview 이미지 없이 adjacent owner pair의 mutual material swap이 없는지,
+  noisy owner site, biome, base top block, final top block, local mix source neighbor를 출력한다. 이 audit
+  역시 preview 이미지 없이 adjacent owner pair의 mutual material swap이 없는지,
   final non-water top material이 같은 noisy owner site 안에서 하나뿐인지, 그리고 material transition edge가
-  noisy boundary curve로 지지되는지 검사한다.
+  noisy boundary curve 자체의 block-edge support로 지지되는지 검사한다.

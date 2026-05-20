@@ -20,6 +20,7 @@ use crate::world::generation::river_plan::RiverPlan;
 
 pub(super) const MACRO_FIELD_CURVE_BUCKET_BLOCKS: f32 = 64.0;
 pub(super) const MACRO_FIELD_SITE_BUCKET_BLOCKS: f32 = 256.0;
+pub(super) const MACRO_FIELD_NOISY_OWNER_SEARCH_RADIUS_BLOCKS: f32 = 1024.0;
 pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_RADIUS_BLOCKS: f32 = 768.0;
 pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_BUCKET_RADIUS: i32 = 4;
 pub(super) const MACRO_FIELD_SCALAR_INTERPOLATION_DISTANCE_POWER: f32 = 1.45;
@@ -32,7 +33,6 @@ pub struct MacroFieldRasterContext<'a> {
     pub(super) site_grid: SiteIndexGrid,
     pub(super) boundary_edges: Vec<BoundaryEdgeRef<'a>>,
     pub(super) boundary_grid: CurveIndexGrid,
-    pub(super) max_boundary_owner_radius_blocks: f32,
     pub(super) junctions: Vec<BoundaryJunction>,
     pub(super) junction_grid: JunctionIndexGrid,
     pub(super) coast_curves: Vec<&'a NoisyBoundaryCurve>,
@@ -135,10 +135,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             })
             .collect::<Vec<_>>();
         boundary_edges.sort_by_key(|edge| edge.curve.edge.0);
-        let max_boundary_owner_radius_blocks = boundary_edges
-            .iter()
-            .map(|edge| edge.curve.amplitude)
-            .fold(0.0, f32::max);
         let junctions = boundary.junctions();
         let boundary_grid = CurveIndexGrid::from_boundary_edges(&boundary_edges);
         let junction_grid = JunctionIndexGrid::from_junctions(&junctions);
@@ -153,7 +149,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             site_grid,
             boundary_edges,
             boundary_grid,
-            max_boundary_owner_radius_blocks,
             junctions,
             junction_grid,
             coast_curves,
@@ -196,12 +191,9 @@ impl<'a> MacroFieldRasterContext<'a> {
         position: WorldPlanePoint,
         config: MacroFieldTileConfig,
     ) -> OwnerSample {
-        let raw_nearest_site = self.nearest_site(position);
-        let raw_nearest_distance = raw_nearest_site
-            .map(|site| squared_distance(position, site.position).sqrt())
-            .unwrap_or(f32::INFINITY);
+        let fallback_site = self.nearest_site(position);
 
-        if let Some(site) = self.nearest_junction_site(position, raw_nearest_site, config) {
+        if let Some(site) = self.nearest_junction_site(position, config) {
             return OwnerSample {
                 primary: Some(site),
                 macro_elevation: self.interpolated_macro_elevation(position),
@@ -213,12 +205,7 @@ impl<'a> MacroFieldRasterContext<'a> {
             };
         }
 
-        if let Some(boundary) = self.nearest_owner_boundary(
-            position,
-            config,
-            raw_nearest_distance,
-            raw_nearest_site.map(|site| site.id),
-        ) {
+        if let Some(boundary) = self.nearest_owner_boundary(position) {
             let primary_site = boundary.primary_site();
             let secondary = boundary.secondary_site();
             let is_lake_pair = is_lake_surface(primary_site.surface_kind)
@@ -227,7 +214,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                 .site_by_id
                 .get(&primary_site.id)
                 .copied()
-                .or_else(|| raw_nearest_site.copied());
+                .or_else(|| fallback_site.copied());
 
             return OwnerSample {
                 primary,
@@ -253,16 +240,14 @@ impl<'a> MacroFieldRasterContext<'a> {
             };
         }
 
-        self.owner_sample_from_site(position, raw_nearest_site)
+        self.owner_sample_from_site(position, fallback_site)
     }
 
     fn nearest_junction_site(
         &self,
         position: WorldPlanePoint,
-        raw_nearest_site: Option<&MacroSite>,
         config: MacroFieldTileConfig,
     ) -> Option<MacroSite> {
-        let raw_nearest_site = raw_nearest_site.map(|site| site.id);
         let owner_radius_blocks = junction_owner_radius_blocks(config);
         self.junction_grid
             .candidate_indices(position)
@@ -271,11 +256,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             .filter(|junction| {
                 squared_distance(position, junction.position)
                     <= junction.radius_blocks.min(owner_radius_blocks).powi(2)
-            })
-            .filter(|junction| {
-                raw_nearest_site
-                    .map(|site| junction.sites.contains(&site))
-                    .unwrap_or(true)
             })
             .filter_map(|junction| {
                 junction
@@ -366,31 +346,17 @@ impl<'a> MacroFieldRasterContext<'a> {
         }
     }
 
-    fn nearest_owner_boundary(
-        &self,
-        position: WorldPlanePoint,
-        config: MacroFieldTileConfig,
-        raw_nearest_distance: f32,
-        raw_nearest_site: Option<VoronoiSiteId>,
-    ) -> Option<BoundarySideSample> {
-        let search_radius =
-            self.max_boundary_owner_radius_blocks + config.sample_spacing_blocks * 0.5;
-        self.boundary_grid
-            .candidate_indices(position, search_radius)
+    fn nearest_owner_boundary(&self, position: WorldPlanePoint) -> Option<BoundarySideSample> {
+        let mut candidate_indices = self
+            .boundary_grid
+            .candidate_indices(position, MACRO_FIELD_NOISY_OWNER_SEARCH_RADIUS_BLOCKS);
+        if candidate_indices.is_empty() {
+            candidate_indices = (0..self.boundary_edges.len()).collect();
+        }
+
+        candidate_indices
             .into_iter()
             .filter_map(|index| self.boundary_edges[index].side_sample(position))
-            .filter(|sample| sample.distance <= sample.owner_radius_blocks(config))
-            .filter(|sample| {
-                raw_nearest_site
-                    .map(|site| sample.has_site(site))
-                    .unwrap_or(true)
-            })
-            .filter(|sample| {
-                sample.has_plausible_local_owner(
-                    position,
-                    raw_nearest_distance + sample.owner_radius_blocks(config),
-                )
-            })
             .min_by(|left, right| left.distance.total_cmp(&right.distance))
     }
 
@@ -471,39 +437,60 @@ pub(super) struct BoundaryEdgeRef<'a> {
 impl BoundaryEdgeRef<'_> {
     fn side_sample(self, position: WorldPlanePoint) -> Option<BoundarySideSample> {
         let nearest = nearest_polyline_segment(position, &self.curve.points)?;
-        let side = signed_side(position, nearest.start, nearest.end);
-        let left_side = signed_side(self.left.position, nearest.start, nearest.end);
-        let right_side = signed_side(self.right.position, nearest.start, nearest.end);
+        let matches_left_side = self.matches_left_noisy_side(position, nearest.start, nearest.end);
         Some(BoundarySideSample {
             distance: nearest.distance,
-            owner_radius_blocks: self.curve.amplitude,
-            side,
-            left_side,
-            right_side,
+            matches_left_side,
             left: self.left,
             right: self.right,
         })
+    }
+
+    fn matches_left_noisy_side(
+        self,
+        position: WorldPlanePoint,
+        nearest_start: WorldPlanePoint,
+        nearest_end: WorldPlanePoint,
+    ) -> bool {
+        let anchor_start = self.curve.anchors.start;
+        let anchor_end = self.curve.anchors.end;
+        if squared_distance(anchor_start, anchor_end) <= f32::EPSILON {
+            return segment_side_matches_left(
+                position,
+                nearest_start,
+                nearest_end,
+                self.left,
+                self.right,
+            );
+        }
+
+        let left_side = usable_side(
+            signed_side(self.left.position, anchor_start, anchor_end),
+            signed_side(self.right.position, anchor_start, anchor_end),
+        );
+        let sample_side = usable_side(
+            signed_side(position, anchor_start, anchor_end),
+            signed_side(self.right.position, anchor_start, anchor_end),
+        );
+        let mut matches_left = sample_side.signum() == left_side.signum();
+        if point_inside_noisy_boundary_ribbon(position, &self.curve.points) {
+            matches_left = !matches_left;
+        }
+        matches_left
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct BoundarySideSample {
     pub(super) distance: f32,
-    pub(super) owner_radius_blocks: f32,
-    pub(super) side: f32,
-    pub(super) left_side: f32,
-    pub(super) right_side: f32,
+    pub(super) matches_left_side: bool,
     pub(super) left: MacroSite,
     pub(super) right: MacroSite,
 }
 
 impl BoundarySideSample {
-    fn owner_radius_blocks(self, config: MacroFieldTileConfig) -> f32 {
-        self.owner_radius_blocks + config.sample_spacing_blocks * 0.5
-    }
-
     fn primary_site(self) -> MacroSite {
-        if self.matches_left_side() {
+        if self.matches_left_side {
             self.left
         } else {
             self.right
@@ -511,35 +498,55 @@ impl BoundarySideSample {
     }
 
     fn secondary_site(self) -> MacroSite {
-        if self.matches_left_side() {
+        if self.matches_left_side {
             self.right
         } else {
             self.left
         }
     }
+}
 
-    fn has_plausible_local_owner(self, position: WorldPlanePoint, max_site_distance: f32) -> bool {
-        if !max_site_distance.is_finite() {
-            return true;
+fn segment_side_matches_left(
+    position: WorldPlanePoint,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    left: MacroSite,
+    right: MacroSite,
+) -> bool {
+    let left_side = usable_side(
+        signed_side(left.position, start, end),
+        signed_side(right.position, start, end),
+    );
+    let sample_side = usable_side(signed_side(position, start, end), left_side);
+    sample_side.signum() == left_side.signum()
+}
+
+fn point_inside_noisy_boundary_ribbon(
+    position: WorldPlanePoint,
+    points: &[WorldPlanePoint],
+) -> bool {
+    if points.len() < 3 {
+        return false;
+    }
+
+    let mut inside = false;
+    for (start, end) in points
+        .windows(2)
+        .map(|segment| (segment[0], segment[1]))
+        .chain(
+            points
+                .last()
+                .zip(points.first())
+                .map(|(end, start)| (*end, *start)),
+        )
+    {
+        if ((start.z > position.z) != (end.z > position.z))
+            && position.x < (end.x - start.x) * (position.z - start.z) / (end.z - start.z) + start.x
+        {
+            inside = !inside;
         }
-        let max_distance2 = max_site_distance * max_site_distance;
-        squared_distance(position, self.left.position) <= max_distance2
-            || squared_distance(position, self.right.position) <= max_distance2
     }
-
-    fn has_site(&self, site: VoronoiSiteId) -> bool {
-        self.left.id == site || self.right.id == site
-    }
-
-    fn matches_left_side(self) -> bool {
-        let left_side = usable_side(self.left_side, self.right_side);
-        let sample_side = if self.side.abs() <= f32::EPSILON {
-            left_side
-        } else {
-            self.side
-        };
-        sample_side.signum() == left_side.signum()
-    }
+    inside
 }
 
 fn junction_owner_radius_blocks(config: MacroFieldTileConfig) -> f32 {
@@ -1050,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_nearby_boundary_cannot_steal_raw_nearest_owner() {
+    fn nearest_noisy_boundary_side_can_select_non_raw_owner() {
         let raw_owner = test_site(
             VoronoiSiteId(1),
             2.0,
@@ -1130,17 +1137,17 @@ mod tests {
 
         assert_eq!(
             sample.primary.map(|site| site.id),
-            Some(raw_owner.id),
-            "a nearby boundary that is not incident to the raw nearest site must not protrude its source owner into the sample"
+            Some(distant_right.id),
+            "global owner sampling should follow the nearest noisy boundary side even when the raw nearest site differs"
         );
         assert!(
             sample.lake_lowering_factor <= f32::EPSILON,
-            "unrelated lake/ocean style ownership must not leak side effects into the raw owner"
+            "ordinary non-lake boundary ownership must not leak lake lowering side effects"
         );
     }
 
     #[test]
-    fn ordinary_land_boundary_secondary_switch_does_not_override_scalar_elevation() {
+    fn nearest_noisy_boundary_side_selection_keeps_scalar_elevation_continuous() {
         use crate::world::generation::boundary::{
             BoundaryAnchors, BoundaryGuard, BoundaryProfile, NoisyBoundaryCurve,
         };
@@ -1267,8 +1274,8 @@ mod tests {
         let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
         let mut config = test_tile_config();
         config.boundary_blend_radius_blocks = 8.0;
-        let left_position = WorldPlanePoint::new(-0.1, 0.0);
-        let right_position = WorldPlanePoint::new(0.9, 0.0);
+        let left_position = WorldPlanePoint::new(0.9, 0.0);
+        let right_position = WorldPlanePoint::new(1.1, 0.0);
 
         let left = context.owner_sample(left_position, config);
         let right = context.owner_sample(right_position, config);
@@ -1276,8 +1283,8 @@ mod tests {
         assert_eq!(left.primary.map(|site| site.id), Some(primary.id));
         assert_eq!(
             right.primary.map(|site| site.id),
-            Some(coastland_secondary.id),
-            "the right sample is raw-nearest to the coastland incident site; owner selection may follow that owner, but scalar elevation must remain interpolated"
+            Some(continent_secondary.id),
+            "owner selection should follow the closest noisy boundary side, while scalar elevation remains interpolated"
         );
         let low = coastland_secondary
             .signed_macro_elevation
@@ -1299,14 +1306,14 @@ mod tests {
         );
         assert!(
             (left.macro_elevation - right.macro_elevation).abs() < 0.005,
-            "adjacent ordinary-boundary secondary switches should stay continuous, left={} right={}",
+            "adjacent noisy-boundary side samples should stay continuous, left={} right={}",
             left.macro_elevation,
             right.macro_elevation
         );
     }
 
     #[test]
-    fn junction_owner_prefers_nearest_incident_site_before_boundary_side() {
+    fn junction_owner_uses_nearest_incident_site_before_boundary_side() {
         use crate::world::generation::graph::{VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId};
         use crate::world::generation::macro_map::{
             MacroEdge, MacroEdgeGuide, MacroLakeEdgeClass, MacroSurfaceKind,
@@ -1394,13 +1401,13 @@ mod tests {
         );
         assert_eq!(
             outside_junction.primary.map(|site| site.id),
-            Some(corner_site.id),
-            "outside the junction radius, non-incident boundary side classification must not steal the raw-nearest owner"
+            Some(right.id),
+            "outside the sample-scale junction radius, owner selection should fall back to nearest noisy boundary side"
         );
     }
 
     #[test]
-    fn boundary_blend_radius_does_not_extend_owner_switch_beyond_curve_amplitude() {
+    fn boundary_blend_radius_does_not_limit_global_noisy_owner_side() {
         let left = test_site(
             VoronoiSiteId(1),
             -10.0,
@@ -1473,17 +1480,17 @@ mod tests {
 
         assert_eq!(
             sample.primary.map(|site| site.id),
-            Some(right.id),
-            "owner switching must stay inside the noisy curve amplitude band, even when the point is inside boundary_blend_radius_blocks"
+            Some(left.id),
+            "owner selection must follow the nearest noisy boundary side; boundary_blend_radius_blocks only controls local transition effects"
         );
         assert!(
             sample.lake_lowering_factor <= f32::EPSILON,
-            "blend radius must not leak owner-dependent transition effects without an owner-boundary hit"
+            "blend radius must not create lake lowering for a non-lake owner pair"
         );
     }
 
     #[test]
-    fn junction_owner_selection_ignores_junctions_not_incident_to_raw_site() {
+    fn junction_owner_selection_is_not_limited_by_raw_nearest_site() {
         let left = test_site(
             VoronoiSiteId(1),
             -10.0,
@@ -1566,8 +1573,8 @@ mod tests {
 
         assert_eq!(
             sample.primary.map(|site| site.id),
-            Some(outsider.id),
-            "a rounded junction must not pull material into a raw cell whose nearest site is not incident to that junction"
+            Some(corner_site.id),
+            "inside junction support, global junction owner selection uses the nearest incident macro site even when raw nearest differs"
         );
     }
 
@@ -1645,7 +1652,7 @@ mod tests {
         let config = MacroFieldTileConfig::new(0.0, 0.0, 8, 8, 1.0);
 
         let near_junction = context.owner_sample(WorldPlanePoint::new(-0.25, 0.0), config);
-        let outside_sample_scale = context.owner_sample(WorldPlanePoint::new(-8.0, 4.0), config);
+        let outside_sample_scale = context.owner_sample(WorldPlanePoint::new(-8.0, 40.0), config);
 
         assert_eq!(
             near_junction.primary.map(|site| site.id),
@@ -1655,7 +1662,7 @@ mod tests {
         assert_eq!(
             outside_sample_scale.primary.map(|site| site.id),
             Some(left.id),
-            "junction owner selection must not use the raw 24..72 block junction radius as a broad material region"
+            "outside sample-scale junction support, owner selection falls back to nearest noisy boundary side"
         );
     }
 
