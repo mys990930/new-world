@@ -177,7 +177,8 @@ pub(super) fn river_valley_strength_for_effective_distance(
     }
     let t = ((distance_blocks - water_radius) / (valley_radius - water_radius).max(f32::EPSILON))
         .clamp(0.0, 1.0);
-    (shoulder_cap * (1.0 - smoothstep01(t)).powf(1.25)).clamp(0.0, 1.0)
+    let shoulder_falloff_power = lerp(1.12, 1.25, river_shoulder_log_growth(flow_hint));
+    (shoulder_cap * (1.0 - smoothstep01(t)).powf(shoulder_falloff_power)).clamp(0.0, 1.0)
 }
 
 pub(super) fn river_core_strength_for_effective_distance(
@@ -244,7 +245,7 @@ pub(super) fn river_shoulder_radius_blocks(
 }
 
 pub(super) fn river_shoulder_strength_cap(flow_hint: f32) -> f32 {
-    lerp(0.82, 0.50, river_shoulder_log_growth(flow_hint)).clamp(0.0, 1.0)
+    lerp(0.86, 0.50, river_shoulder_log_growth(flow_hint)).clamp(0.0, 1.0)
 }
 
 pub(super) fn river_water_radius_blocks(
@@ -264,7 +265,7 @@ pub(super) fn river_water_radius_blocks(
 }
 
 pub(super) fn river_depth_factor(flow_hint: f32) -> f32 {
-    lerp(0.08, 0.55, smoothstep01(flow_hint.clamp(0.0, 1.0))).clamp(0.0, 1.0)
+    lerp(0.10, 0.62, smoothstep01(flow_hint.clamp(0.0, 1.0))).clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -295,9 +296,9 @@ pub(super) fn river_hints_from_strength(
 ) -> RiverInfluenceHints {
     let valley = valley_strength.clamp(0.0, 1.0);
     let flow = flow_hint.clamp(0.0, 1.0);
-    let planned_depth_hint = (planned_bed_depth_blocks.max(0.0) / 40.0).clamp(0.0, 1.0);
+    let planned_depth_hint = (planned_bed_depth_blocks.max(0.0) / 36.0).clamp(0.0, 1.0);
     RiverInfluenceHints {
-        bed_depth_hint: (valley * planned_depth_hint.max(river_depth_factor(flow) * 0.45))
+        bed_depth_hint: (valley * planned_depth_hint.max(river_depth_factor(flow) * 0.50))
             .clamp(0.0, 1.0),
         bank_roughness_hint: (valley * (1.0 - flow * 0.45)).clamp(0.0, 1.0),
         gravel_hint: (valley * (0.65 - flow * 0.25)).clamp(0.0, 1.0),
@@ -519,16 +520,45 @@ mod tests {
             "headwater valley context should stay meaningful while width is narrowed: base={base} upstream={upstream}"
         );
         assert!(
-            inside_narrow_valley > 0.0 && outside_narrow_valley == 0.0,
-            "low-flow valley context should narrow by radius/profile instead of mostly reducing depth: inside={inside_narrow_valley} outside={outside_narrow_valley}"
+            inside_narrow_valley > 0.67 && outside_narrow_valley == 0.0,
+            "low-flow valley context should keep a visible immediate shoulder without widening the narrow reach: inside={inside_narrow_valley} outside={outside_narrow_valley}"
+        );
+        let near_shoulder =
+            river_valley_strength_for_distance(5.0, low_flow, 4.0, 6.0, config.river_radius_blocks);
+        assert!(
+            near_shoulder > 0.10,
+            "low-flow shoulder should not collapse immediately outside the core bed: {near_shoulder}"
         );
         assert!(
-            downstream < upstream - config.river_carve_scale * 0.8,
-            "downstream broad-valley context should still scale up with Q: upstream={upstream} downstream={downstream}"
+            downstream < upstream - config.river_carve_scale * 0.35,
+            "downstream broad-valley context should still scale up with Q without restoring a uniform boundary-shaped floor: upstream={upstream} downstream={downstream}"
         );
         assert!(
-            hints.bed_depth_hint > 0.0,
-            "narrower broad land carve must not remove the selected river bed/water depth hint"
+            hints.bed_depth_hint > 0.05,
+            "narrower broad land carve must preserve a deeper selected river bed/water depth hint: {}",
+            hints.bed_depth_hint
+        );
+    }
+
+    #[test]
+    fn river_core_depth_hint_is_stronger_without_using_shoulder_strength() {
+        let low_flow_core = river_hints_from_strength(1.0, 0.02, 1.6);
+        let low_flow_shoulder_only = river_hints_from_strength(0.0, 0.02, 1.6);
+        let trunk_core = river_hints_from_strength(1.0, 1.0, 24.0);
+
+        assert!(
+            low_flow_core.bed_depth_hint > 0.05,
+            "low-flow core bed hint should stay visible: {}",
+            low_flow_core.bed_depth_hint
+        );
+        assert_eq!(
+            low_flow_shoulder_only.bed_depth_hint, 0.0,
+            "bed depth hint must stay tied to river/core strength, not broad shoulder context"
+        );
+        assert!(
+            trunk_core.bed_depth_hint > 0.66,
+            "planned downstream bed depth should be scaled deeper overall: {}",
+            trunk_core.bed_depth_hint
         );
     }
 

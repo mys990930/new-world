@@ -95,28 +95,28 @@ pub(super) fn river_shoulder_context_height(
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
     let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let context_t = shoulder * lerp(0.14, 0.52, log_flow_t);
-    let centerline_t = shoulder * lerp(0.18, 0.82, flow_t);
+    let context_t = shoulder * lerp(0.12, 0.44, log_flow_t);
+    let centerline_t = shoulder * lerp(0.28, 0.92, flow_t);
     let centerline_elevation = river_centerline_macro_elevation
         .filter(|height| height.is_finite())
         .unwrap_or(macro_elevation)
         .min(macro_elevation);
     let centerline_drop = (macro_elevation - centerline_elevation).max(0.0);
     let positive_relief = macro_elevation.max(0.0);
-    let terrain_context = smoothstep_range(0.01, 0.18, positive_relief + centerline_drop * 0.6);
-    let relief_compression = positive_relief * lerp(0.015, 0.055, log_flow_t);
+    let terrain_context = smoothstep_range(0.01, 0.18, positive_relief + centerline_drop * 0.8);
+    let relief_compression = positive_relief * lerp(0.01, 0.038, log_flow_t);
     let contextual_floor_bias =
-        config.river_carve_scale * lerp(0.02, 0.18, log_flow_t) * terrain_context;
-    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.07, log_flow_t);
+        config.river_carve_scale * lerp(0.01, 0.08, log_flow_t) * terrain_context;
+    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.045, log_flow_t);
     let near_sea_t = 1.0 - smoothstep_range(0.0, 0.025, macro_elevation.max(0.0));
     let near_sea_bias =
-        config.river_carve_scale * lerp(0.0, 0.10, log_flow_t) * near_sea_t * terrain_context;
-    let centerline_pull = centerline_drop * centerline_t * lerp(0.025, 0.145, flow_t);
+        config.river_carve_scale * lerp(0.0, 0.045, log_flow_t) * near_sea_t * terrain_context;
+    let centerline_pull = centerline_drop * centerline_t * lerp(0.08, 0.32, flow_t);
     let _ = river_longitudinal_blocks;
     let broad_lowering =
         (relief_compression + contextual_floor_bias + below_sea_bias + near_sea_bias) * context_t;
-    let max_context_shift = config.river_carve_scale * lerp(0.35, 1.0, log_flow_t)
-        + centerline_drop * lerp(0.02, 0.10, flow_t);
+    let max_context_shift = config.river_carve_scale * lerp(0.28, 0.72, log_flow_t)
+        + centerline_drop * lerp(0.08, 0.28, flow_t);
     let lowering = (broad_lowering + centerline_pull).min(max_context_shift);
 
     (macro_elevation - lowering).min(macro_elevation)
@@ -460,6 +460,30 @@ mod tests {
         assert!(
             high_source - low_source > 0.004,
             "river shoulder context should lower the valley without flattening cross-section source relief into a contour slab: low={low_source} high={high_source}"
+        );
+    }
+
+    #[test]
+    fn river_shoulder_context_follows_centerline_relief_more_than_uniform_floor() {
+        let config = test_tile_config();
+        let source = 0.42;
+        let flat_context =
+            river_shoulder_context_height(source, 0.92, 0.82, Some(source), f32::NAN, config);
+        let axis_context =
+            river_shoulder_context_height(source, 0.92, 0.82, Some(0.22), f32::NAN, config);
+        let low_relief_context =
+            river_shoulder_context_height(0.018, 0.92, 0.82, Some(0.018), f32::NAN, config);
+
+        let flat_shift = source - flat_context;
+        let axis_shift = source - axis_context;
+        let low_relief_shift = 0.018 - low_relief_context;
+        assert!(
+            axis_shift > flat_shift * 4.0,
+            "river shoulder should align banks toward the lower centerline instead of mostly applying a uniform boundary-shaped floor: flat={flat_shift} axis={axis_shift}"
+        );
+        assert!(
+            low_relief_shift < flat_shift * 0.35,
+            "uniform lowland/floor bias should be weak when terrain has little source relief to connect to: low_relief={low_relief_shift} flat={flat_shift}"
         );
     }
 

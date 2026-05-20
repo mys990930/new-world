@@ -206,8 +206,9 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      이 값은 downstream diagnostic/hint이며 combined height에 직접 noise/bias로 더하지 않는다. segment나
      confluence ownership이 바뀌는 곳에서 longitudinal hint가 hard switch하면 1-block contour가 강
      진행방향과 수직인 직선 seam처럼 읽히기 때문이다. broad valley height는 source macro elevation을
-     보존한 채 flow-scaled lowering과 약한 centerline pull만 적용해 처음부터 낮은 골짜기로 읽히게 하는
-     terrain-context 조정이다. narrow bed 단면은 macro field에서 직접 완성하지 않는다.
+     보존하되, river boundary shape 전체를 균일하게 내리는 fixed floor보다 projected centerline과 주변
+     source elevation의 상대 relief를 우선해 낮춘다. 그래서 combined contour는 river를 가로지르는 cut
+     mark가 아니라 river axis와 함께 눕는 낮은 골짜기 맥락으로 읽혀야 한다. narrow bed 단면은 macro field에서 직접 완성하지 않는다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -301,11 +302,13 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      raster 단계에서 Voronoi cell 크기를 다시 읽어 동적으로 폭을 재계산하지 않는다.
      이 cap은 shoulder/context에만 적용하며, `river_core_strength`가 읽는 water/bed corridor의
      absolute `bed_width_blocks` target은 바꾸지 않는다.
+     low-Q/headwater shoulder profile은 같은 좁은 반경 안에서 immediate shoulder falloff와 cap을 조금
+     더 살리되, downstream high-Q cap 끝값은 유지한다.
      combined height에 반영되는 shoulder context는 river shoulder strength 전체를 연속 감쇠로 읽는다.
      낮은 broad-tail 값도 hard cutoff로 0 처리하지 않는다. cutoff boundary가 생기면 block-height contour가
      river 진행 방향과 무관한 직선 onset seam처럼 읽히기 때문이다. shoulder lowering은 source macro
-     elevation 자체를 보존한 채 relief compression과 centerline pull 중심으로 감산한다. lowland/near-sea
-     floor bias는 source relief 또는 projected centerline drop이 있을 때만 약하게 들어가며, high-Q shoulder
+     elevation 자체를 보존한 채 relief compression과 stronger centerline pull 중심으로 감산한다. lowland/near-sea
+     floor bias는 source relief 또는 projected centerline drop이 있을 때만 매우 약하게 들어가며, high-Q shoulder
      height modulation도 capped logarithmic profile을 읽어 broad valley가 river boundary shape 그대로 균일하게
      내려앉지 않게 한다. macro_field의 broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
      이 단계에서 shoulder strength 변화가 source relief를 상쇄할 정도로 깊게 적용되면 contour slab/vertical
@@ -325,7 +328,8 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      valley topology나 서로 다른 river component ownership을 바꾸지 않는다.
    - 상류 broad-valley context modulation은 land/broad valley가 과하게 넓게 파이지 않도록 낮은 Q에서 좁은
      shoulder로 적용한다. 이 조정은 combined macro height의 broad valley width/profile을 줄이며,
-     center carve strength와 heightfield가 읽는 river bed/water depth hint는 유지한다.
+     center carve strength와 heightfield가 읽는 river bed/water depth hint는 유지하되, core depth hint는
+     이전보다 조금 더 깊게 전달한다.
    - 깊이 정보는 현재 단순 diagnostic hint로 전달하며, 현실적인 단면 carve는 heightfield/water/surface
      단계에서 다시 설계한다.
 8. final cell context를 sample 위치에 맞춰 raster/cache한다.
@@ -619,6 +623,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   `broad_valley_width_blocks`, `bed_depth_blocks`를 읽는다. 단, broad shoulder raster radius/profile은
   macro_field의 bounded logarithmic shoulder helper를 거쳐 high-Q downstream influence를 planned broad
   valley scale의 대략 절반까지 줄인다. core water/bed radius와 bed depth hint는 이 shoulder cap을 타지 않는다.
+  low-flow/headwater profile은 그 좁은 corridor 안에서 immediate shoulder와 core bed-depth hint를 조금 더
+  강하게 보존하지만, high-Q downstream broad shoulder cap은 그대로 유지한다.
   river stroke rasterization은 launch 기본 검색 반경 `640` blocks 전체를 segment마다 훑지 않고,
   river plan이 제공한 실제 broad-valley/water width와 roughness guard로 계산한 tile-local active
   radius만 스캔한다. 이 radius 밖의 sample은 strength가 0이므로 결과를 바꾸지 않으면서 dense
