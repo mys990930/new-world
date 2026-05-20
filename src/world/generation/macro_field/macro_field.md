@@ -198,12 +198,13 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - 각 sample cell은 실제 물/강바닥 corridor인 `river_core_strength`와 broad valley context guide인
      `river_shoulder_strength`를 분리해 보존한다. `river_valley_strength`는 기존 preview/tool 호환을 위한
      legacy aggregate diagnostic이며 water/bed eligibility의 source가 아니다. combined height에는
-     `river_shoulder_strength` 기반 contextual valley modulation만 반영한다. 이때 nearest rounded
-     river source polyline의 누적 arc length에서 결정적인 `river_longitudinal_blocks` hint를 함께
-     저장해 broad valley floor의 저주파 변화를 river 진행 방향으로 맞춘다. 이는 기존 terrain에 일정
-     깊이를 사후 감산하는 carve가 아니라, source macro elevation을 낮은 longitudinal valley context 쪽으로
-     압축해 처음부터 낮은 골짜기로 읽히게 하는 broad terrain-context 조정이다. narrow bed 단면은 macro
-     field에서 직접 완성하지 않는다.
+     `river_shoulder_strength` 기반 contextual valley modulation만 반영한다. nearest rounded river
+     source polyline의 누적 arc length에서 결정적인 `river_longitudinal_blocks` hint도 함께 저장하지만,
+     이 값은 downstream diagnostic/hint이며 combined height에 직접 noise/bias로 더하지 않는다. segment나
+     confluence ownership이 바뀌는 곳에서 longitudinal hint가 hard switch하면 1-block contour가 강
+     진행방향과 수직인 직선 seam처럼 읽히기 때문이다. broad valley height는 source macro elevation을
+     보존한 채 flow-scaled lowering과 약한 centerline pull만 적용해 처음부터 낮은 골짜기로 읽히게 하는
+     terrain-context 조정이다. narrow bed 단면은 macro field에서 직접 완성하지 않는다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -284,20 +285,30 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - river 전용 noisy curve나 새 river topology를 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
    - macro_field가 combined height에 반영하는 값은 `river_shoulder_strength` 기반 valley context
-     modulation이다. 이 modulation은 nearest rounded centerline projection의 source-polyline 누적
-     arc length에서 온 longitudinal hint로 완만히 변하는 valley floor bias를 더한다. global x/z
-     projection은 쓰지 않으므로 broad shoulder 등고선이 river를 가로지르는 단순 radial lowering band가
-     아니라 river 진행 방향을 따라 이어지는 valley로 읽혀야 한다. 좁은 river bed, U/V 단면,
-     cutbank/gravel 편향은 이 단계에서 완성하지 않는다.
+     modulation이다. 이 modulation은 nearest rounded centerline projection의 source elevation context와
+     flow-scaled shoulder strength를 읽고, `river_longitudinal_blocks`는 downstream diagnostic/hint로만
+     보존한다. global x/z projection이나 edge-local arc length를 combined height의 직접 floor-noise source로
+     쓰지 않으므로 broad shoulder 등고선이 river를 가로지르는 반복 slab/band로 고정되면 회귀다. 좁은 river bed,
+     U/V 단면, cutbank/gravel 편향은 이 단계에서 완성하지 않는다.
    - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
      `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를 읽는다.
      raster 단계에서 Voronoi cell 크기를 다시 읽어 동적으로 폭을 재계산하지 않는다.
-   - river raster pass는 shoulder/core sample마다 가장 가까운 rounded centerline projection과 source
-     polyline의 누적 arc length 기반 `river_longitudinal_blocks`도 보존한다. combined height는 이 값을 읽어 river 진행 방향의
-     저주파 valley floor bias를 만든다. 따라서 기존 macro elevation contour가 강을 가로지르는 방향으로
-     놓여 있어도 broad shoulder 안에서는 계곡 단면이 강축과 더 나란히 읽혀야 한다. 강을 새로 routing하거나
-     RiverPlan geometry를 바꾸는 동작은 아니다.
+     combined height에 반영되는 shoulder context는 river shoulder strength 전체를 연속 감쇠로 읽는다.
+     낮은 broad-tail 값도 hard cutoff로 0 처리하지 않는다. cutoff boundary가 생기면 block-height contour가
+     river 진행 방향과 무관한 직선 onset seam처럼 읽히기 때문이다. shoulder lowering은 source macro
+     elevation 자체를 보존한 채 약한 flow-scaled lowering과 centerline pull을 감산한다. macro_field의
+     broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
+     이 단계에서 shoulder strength 변화가 source relief를 상쇄할 정도로 깊게 적용되면 contour slab/vertical
+     seam이 생긴다. centerline은 valley 방향성 hint일 뿐 cross-section을 평평하게 만드는 target height가
+     아니다. 단, sea-level 근처 source는 river mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.
+   - river raster pass는 shoulder/core sample마다 가장 가까운 rounded centerline projection과 river
+     chain 누적 arc length 기반 `river_longitudinal_blocks`도 보존한다. 이 값은 downstream hint로 유지되지만
+     combined height의 직접 floor-noise source가 아니다. 같은 connected river component 안에서 넓은 shoulder
+     stroke가 겹치는 sample은 source 하나의 nearest longitudinal 값으로 hard switch하지 않고,
+     component-local contribution weight로 longitudinal hint를 섞어 confluence/joint 주변 diagnostic seam을
+     줄인다. broad shoulder 안의 combined height는 강을 새로 routing하거나 RiverPlan geometry를 바꾸지 않고,
+     centerline context와 flow-scaled shoulder strength로만 낮아져야 한다.
    - water/core boundary에는 world-space deterministic roughness offset을 작게 적용한다. 이 offset은
      selected river curve나 hydrology topology를 새로 만들지 않고, river_plan이 정한 water radius 주변의
      threshold band에서만 거리 profile을 흔든다. roughness amplitude는 planned water width와 flow hint로

@@ -96,16 +96,26 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .flatten()
             })
             .collect::<Vec<_>>();
+        let mut chain_lengths = HashMap::new();
+        for plan in &river_plan.segments {
+            *chain_lengths.entry(plan.chain_id).or_insert(0.0) +=
+                plan.segment_length_blocks.max(0.0);
+        }
         let mut river_curves = river_plan
             .segments
             .iter()
             .filter_map(|plan| {
+                let chain_length = chain_lengths.get(&plan.chain_id).copied().unwrap_or(0.0);
+                let longitudinal_start_blocks = (plan.chain_downstream_progress * chain_length
+                    - plan.segment_length_blocks.max(0.0) * 0.5)
+                    .max(0.0);
                 boundary_curves
                     .get(&plan.edge)
                     .copied()
                     .map(|curve| RiverCurveRef {
                         edge: plan.edge,
                         points: curve.points.clone(),
+                        longitudinal_start_blocks,
                         flow_hint: flow_hint_from_plan(plan),
                         water_width_blocks: plan.bed_width_blocks,
                         valley_width_blocks: plan.broad_valley_width_blocks,
@@ -260,10 +270,7 @@ impl<'a> MacroFieldRasterContext<'a> {
             .filter_map(|index| self.junctions.get(index))
             .filter(|junction| {
                 squared_distance(position, junction.position)
-                    <= junction
-                        .radius_blocks
-                        .min(owner_radius_blocks)
-                        .powi(2)
+                    <= junction.radius_blocks.min(owner_radius_blocks).powi(2)
             })
             .filter(|junction| {
                 raw_nearest_site
@@ -447,6 +454,7 @@ impl<'a> MacroFieldRasterContext<'a> {
 pub(super) struct RiverCurveRef {
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: Vec<WorldPlanePoint>,
+    pub(super) longitudinal_start_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
@@ -716,20 +724,15 @@ impl SiteIndexGrid {
         mut visit: impl FnMut(usize),
     ) {
         let center = site_bucket(position);
-        for search in 1..=4 {
-            let mut found = false;
+        for search in 0..=4 {
             for z in center.1 - search..=center.1 + search {
                 for x in center.0 - search..=center.0 + search {
                     if let Some(bucket) = self.buckets.get(&(x, z)) {
-                        found = true;
                         for index in bucket {
                             visit(*index);
                         }
                     }
                 }
-            }
-            if found {
-                return;
             }
         }
     }
@@ -792,6 +795,47 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
+
+    #[test]
+    fn nearest_site_search_does_not_stop_at_first_nonempty_bucket_ring() {
+        let far_ring_site = test_site(
+            VoronoiSiteId(1),
+            0.0,
+            0.0,
+            MacroSurfaceKind::Continent,
+            0.10,
+        );
+        let nearer_outer_ring_site = test_site(
+            VoronoiSiteId(2),
+            512.0,
+            256.0,
+            MacroSurfaceKind::Continent,
+            0.20,
+        );
+        let macro_map = GraphMacroMap {
+            sites: vec![far_ring_site, nearer_outer_ring_site],
+            corners: Vec::new(),
+            edges: Vec::new(),
+            biomes: Vec::new(),
+        };
+        let boundary = BoundaryCache {
+            curves: Vec::new(),
+            stats: Default::default(),
+        };
+        let patch = Default::default();
+        let river_plan = RiverPlan::default();
+        let context = MacroFieldRasterContext::new(&patch, &macro_map, &river_plan, &boundary);
+        let position = WorldPlanePoint::new(255.0, 255.0);
+
+        let nearest = context
+            .nearest_site(position)
+            .expect("test macro map should have sites");
+
+        assert_eq!(
+            nearest.id, nearer_outer_ring_site.id,
+            "nearest-site lookup must consider all nearby bucket rings, otherwise 256-block site bucket boundaries become visible owner/mask seams"
+        );
+    }
 
     #[test]
     fn macro_field_owner_sampling_follows_noisy_boundary_curve() {

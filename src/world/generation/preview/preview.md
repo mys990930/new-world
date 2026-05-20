@@ -356,10 +356,12 @@ renderer/GPU 계약을 만들지 않는다.
   overlay가 표시되는 channel의 water/terrain boundary, `GRID` = macro-field cache tile grid를 뜻한다.
 - 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
   같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
-- 모든 `macro_field_preview` channel은 stage 9 `BoundaryCache`의 canonical noisy Voronoi graph edge
-  overlay를 표시한다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의 기본 표면이지만,
-  field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며, 색과 opacity는
-  macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다.
+- `macro_field_preview`의 non-contour channel은 stage 9 `BoundaryCache`의 canonical noisy Voronoi
+  graph edge overlay를 표시할 수 있다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의
+  기본 표면이지만, field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며,
+  색과 opacity는 macro/combined/lit 값을 먼저 읽을 수 있을 정도로 약해야 한다. 단,
+  `combined --contours`와 `lit --contours`는 contour 판독을 우선하므로 graph edge overlay를 끈다.
+  이 모드에서 Voronoi reference line이 1-block contour 단차나 terrain seam처럼 보이면 회귀다.
 - `macro_field_preview`는 hydrology가 선택하고 `RiverPlan`이 morphology를 부여한 모든 river segment의
   centerline을 같은 `BoundaryCache` canonical noisy curve 위에 별도 cyan/blue overlay로 표시한다.
   본류성 reach(`Lower`, `Trunk`, `LakeOutlet`)는 지류보다 약간 더 두껍고 밝게 그리되, 이는 강폭

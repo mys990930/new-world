@@ -136,6 +136,7 @@ pub(super) fn rasterize_influence_fields(
         .map(|river| RiverRasterSource {
             edge: river.edge,
             points: &river.points,
+            longitudinal_start_blocks: river.longitudinal_start_blocks,
             flow_hint: river.flow_hint,
             water_width_blocks: river.water_width_blocks,
             valley_width_blocks: river.valley_width_blocks,
@@ -205,6 +206,11 @@ pub(super) struct RiverRasterRow {
     pub(super) river_centerline_x: Vec<f32>,
     pub(super) river_centerline_z: Vec<f32>,
     pub(super) river_longitudinal_blocks: Vec<f32>,
+    pub(super) centerline_weighted_x_sum: Vec<f32>,
+    pub(super) centerline_weighted_z_sum: Vec<f32>,
+    pub(super) centerline_weight_sum: Vec<f32>,
+    pub(super) longitudinal_weighted_sum: Vec<f32>,
+    pub(super) longitudinal_weight_sum: Vec<f32>,
     pub(super) flow_weighted_sum: Vec<f32>,
     pub(super) flow_weight_sum: Vec<f32>,
     pub(super) river_bed_depth_hint: Vec<f32>,
@@ -224,6 +230,11 @@ impl RiverRasterRow {
             river_centerline_x: vec![f32::NAN; width],
             river_centerline_z: vec![f32::NAN; width],
             river_longitudinal_blocks: vec![f32::NAN; width],
+            centerline_weighted_x_sum: vec![0.0; width],
+            centerline_weighted_z_sum: vec![0.0; width],
+            centerline_weight_sum: vec![0.0; width],
+            longitudinal_weighted_sum: vec![0.0; width],
+            longitudinal_weight_sum: vec![0.0; width],
             flow_weighted_sum: vec![0.0; width],
             flow_weight_sum: vec![0.0; width],
             river_bed_depth_hint: vec![0.0; width],
@@ -395,6 +406,7 @@ pub(super) fn copy_strongest_neighbor_river_hints(
 pub(super) struct RiverRasterSource<'a> {
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: &'a [WorldPlanePoint],
+    pub(super) longitudinal_start_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
@@ -407,6 +419,7 @@ pub(super) struct RiverRasterWorkSource {
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: Vec<WorldPlanePoint>,
     pub(super) cumulative_lengths: Vec<f32>,
+    pub(super) longitudinal_start_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
@@ -432,6 +445,7 @@ pub(super) fn rounded_river_raster_sources(
                 edge: source.edge,
                 cumulative_lengths: cumulative_polyline_lengths(&points),
                 points,
+                longitudinal_start_blocks: source.longitudinal_start_blocks,
                 flow_hint: source.flow_hint,
                 water_width_blocks: source.water_width_blocks,
                 valley_width_blocks: source.valley_width_blocks,
@@ -469,7 +483,7 @@ pub(super) fn segment_longitudinal_blocks(
         .get(segment_index + 1)
         .copied()
         .unwrap_or(start);
-    lerp(start, end, t.clamp(0.0, 1.0))
+    source.longitudinal_start_blocks + lerp(start, end, t.clamp(0.0, 1.0))
 }
 
 pub(super) fn rounded_river_raster_points(
@@ -782,7 +796,9 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
     let mut river_valley_strength = Vec::with_capacity(sample_count);
     let mut river_centerline_x = Vec::with_capacity(sample_count);
     let mut river_centerline_z = Vec::with_capacity(sample_count);
-    let mut river_longitudinal_blocks = Vec::with_capacity(sample_count);
+    let mut river_longitudinal_blocks_raw = Vec::with_capacity(sample_count);
+    let mut longitudinal_weighted_sum = Vec::with_capacity(sample_count);
+    let mut longitudinal_weight_sum = Vec::with_capacity(sample_count);
     let mut flow_weighted_sum = Vec::with_capacity(sample_count);
     let mut flow_weight_sum = Vec::with_capacity(sample_count);
     let mut river_bed_depth_hint = Vec::with_capacity(sample_count);
@@ -796,7 +812,9 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
         river_valley_strength.extend(row.river_valley_strength);
         river_centerline_x.extend(row.river_centerline_x);
         river_centerline_z.extend(row.river_centerline_z);
-        river_longitudinal_blocks.extend(row.river_longitudinal_blocks);
+        river_longitudinal_blocks_raw.extend(row.river_longitudinal_blocks);
+        longitudinal_weighted_sum.extend(row.longitudinal_weighted_sum);
+        longitudinal_weight_sum.extend(row.longitudinal_weight_sum);
         flow_weighted_sum.extend(row.flow_weighted_sum);
         flow_weight_sum.extend(row.flow_weight_sum);
         river_bed_depth_hint.extend(row.river_bed_depth_hint);
@@ -815,7 +833,18 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
             }
         })
         .collect();
-
+    let river_longitudinal_blocks = river_longitudinal_blocks_raw
+        .into_iter()
+        .zip(longitudinal_weighted_sum)
+        .zip(longitudinal_weight_sum)
+        .map(|((nearest, sum), weight)| {
+            if weight > f32::EPSILON {
+                sum / weight
+            } else {
+                nearest
+            }
+        })
+        .collect();
     RasterDistanceField {
         distance_blocks,
         river_core_strength,
@@ -865,7 +894,23 @@ pub(super) fn rasterize_river_row(
         .iter()
         .filter(|strength| **strength > 0.001)
         .count();
+    resolve_river_row_weighted_hints(&mut row);
     row
+}
+
+pub(super) fn resolve_river_row_weighted_hints(row: &mut RiverRasterRow) {
+    for x in 0..row.distance_blocks.len() {
+        let centerline_weight = row.centerline_weight_sum[x];
+        if centerline_weight > f32::EPSILON {
+            row.river_centerline_x[x] = row.centerline_weighted_x_sum[x] / centerline_weight;
+            row.river_centerline_z[x] = row.centerline_weighted_z_sum[x] / centerline_weight;
+        }
+        let longitudinal_weight = row.longitudinal_weight_sum[x];
+        if longitudinal_weight > f32::EPSILON {
+            row.river_longitudinal_blocks[x] =
+                row.longitudinal_weighted_sum[x] / longitudinal_weight;
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1002,11 +1047,13 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.river_bank_roughness_hint[x] = row.river_bank_roughness_hint[x].max(rough_hint);
             row.river_gravel_hint[x] = row.river_gravel_hint[x].max(gravel_hint);
             row.river_cutbank_hint[x] = row.river_cutbank_hint[x].max(cutbank_hint);
-            if closest_subpixel_distance + same_centerline_band <= current_distance {
-                row.river_centerline_x[x] = centerline_position.x;
-                row.river_centerline_z[x] = centerline_position.z;
-                row.river_longitudinal_blocks[x] = longitudinal_blocks;
-            }
+            accumulate_river_row_hints(
+                row,
+                x,
+                centerline_position,
+                longitudinal_blocks,
+                anti_aliased_strength,
+            );
             row.flow_weighted_sum[x] += strength * anti_aliased_strength;
             row.flow_weight_sum[x] += anti_aliased_strength;
         } else if closest_subpixel_distance + same_centerline_band < current_distance {
@@ -1018,6 +1065,13 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.river_centerline_z[x] = centerline_position.z;
             row.river_longitudinal_blocks[x] = longitudinal_blocks;
             river_owner_component[x] = source.component_id;
+            reset_river_row_hints(
+                row,
+                x,
+                centerline_position,
+                longitudinal_blocks,
+                anti_aliased_strength,
+            );
             row.river_bed_depth_hint[x] = bed_hint;
             row.river_bank_roughness_hint[x] = rough_hint;
             row.river_gravel_hint[x] = gravel_hint;
@@ -1026,6 +1080,41 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.flow_weight_sum[x] = anti_aliased_strength;
         }
     }
+}
+
+pub(super) fn accumulate_river_row_hints(
+    row: &mut RiverRasterRow,
+    x: usize,
+    centerline_position: WorldPlanePoint,
+    longitudinal_blocks: f32,
+    weight: f32,
+) {
+    let weight = weight.clamp(0.0, 1.0);
+    if weight <= f32::EPSILON {
+        return;
+    }
+    row.centerline_weighted_x_sum[x] += centerline_position.x * weight;
+    row.centerline_weighted_z_sum[x] += centerline_position.z * weight;
+    row.centerline_weight_sum[x] += weight;
+    if longitudinal_blocks.is_finite() {
+        row.longitudinal_weighted_sum[x] += longitudinal_blocks * weight;
+        row.longitudinal_weight_sum[x] += weight;
+    }
+}
+
+pub(super) fn reset_river_row_hints(
+    row: &mut RiverRasterRow,
+    x: usize,
+    centerline_position: WorldPlanePoint,
+    longitudinal_blocks: f32,
+    weight: f32,
+) {
+    row.centerline_weighted_x_sum[x] = 0.0;
+    row.centerline_weighted_z_sum[x] = 0.0;
+    row.centerline_weight_sum[x] = 0.0;
+    row.longitudinal_weighted_sum[x] = 0.0;
+    row.longitudinal_weight_sum[x] = 0.0;
+    accumulate_river_row_hints(row, x, centerline_position, longitudinal_blocks, weight);
 }
 
 pub(super) fn component_union_strength(existing: f32, incoming: f32) -> f32 {
@@ -1944,6 +2033,61 @@ mod tests {
         assert!(
             (vertical_field.river_longitudinal_blocks[vertical_center] - 64.0).abs() <= 0.001,
             "vertical river should use distance along its own source line instead of global x/z projection"
+        );
+    }
+
+    #[test]
+    fn river_longitudinal_hint_keeps_chain_offset_across_edges() {
+        let curve = test_noisy_curve(
+            334,
+            vec![
+                WorldPlanePoint::new(0.0, 64.0),
+                WorldPlanePoint::new(128.0, 64.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 9, 16.0);
+        let mut source = test_river_source(&curve, 0.65);
+        source.longitudinal_start_blocks = 192.0;
+
+        let field = rasterize_curve_anti_aliased_polyline_field(&[source], config, 96.0);
+        let center = 4 * 9 + 4;
+
+        assert!(
+            (field.river_longitudinal_blocks[center] - 256.0).abs() <= 0.001,
+            "river longitudinal floor bias must use chain-local distance, not restart at every Voronoi edge"
+        );
+    }
+
+    #[test]
+    fn connected_river_overlap_blends_longitudinal_hint() {
+        let left = test_noisy_curve(
+            335,
+            vec![
+                WorldPlanePoint::new(0.0, 64.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            ],
+        );
+        let right = test_noisy_curve(
+            336,
+            vec![
+                WorldPlanePoint::new(64.0, 64.0),
+                WorldPlanePoint::new(128.0, 64.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 9, 9, 16.0);
+        let left_source = test_river_source(&left, 0.65);
+        let mut right_source = test_river_source(&right, 0.65);
+        right_source.longitudinal_start_blocks = 512.0;
+
+        let field =
+            rasterize_curve_anti_aliased_polyline_field(&[left_source, right_source], config, 96.0);
+        let joint = 4 * 9 + 4;
+
+        assert!(
+            field.river_longitudinal_blocks[joint] > 128.0
+                && field.river_longitudinal_blocks[joint] < 512.0,
+            "same-component overlap should blend longitudinal hints instead of keeping a hard nearest-segment jump: {}",
+            field.river_longitudinal_blocks[joint]
         );
     }
 

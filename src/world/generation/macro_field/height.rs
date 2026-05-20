@@ -88,60 +88,41 @@ pub(super) fn river_shoulder_context_height(
     river_longitudinal_blocks: f32,
     config: MacroFieldTileConfig,
 ) -> f32 {
-    let shoulder = river_shoulder_strength.clamp(0.0, 1.0);
+    let shoulder = river_shoulder_height_strength(river_shoulder_strength);
     if shoulder <= f32::EPSILON {
         return macro_elevation;
     }
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
-    let context_t = shoulder * lerp(0.16, 1.0, flow_t);
+    let shoulder_t = shoulder * lerp(0.18, 1.0, flow_t);
     let centerline_elevation = river_centerline_macro_elevation
         .filter(|height| height.is_finite())
         .unwrap_or(macro_elevation)
         .min(macro_elevation);
-    let cross_section_t = (shoulder * lerp(0.35, 0.82, flow_t)).clamp(0.0, 1.0);
-    let contextual_source = lerp(macro_elevation, centerline_elevation, cross_section_t);
-    let positive_relief = contextual_source.max(0.0);
-    let relief_compression = positive_relief * lerp(0.10, 0.38, flow_t);
-    let lowland_bias = config.river_carve_scale * lerp(0.10, 0.85, flow_t);
-    let below_sea_bias = (-contextual_source).max(0.0) * lerp(0.0, 0.10, flow_t);
-    let longitudinal_floor_bias = river_longitudinal_floor_bias(
-        river_longitudinal_blocks,
-        river_flow_hint,
-        config.river_carve_scale,
-    );
-    let valley_context = contextual_source - relief_compression - lowland_bias - below_sea_bias
-        + longitudinal_floor_bias;
-    let max_context_shift = config.river_carve_scale * lerp(0.45, 2.8, flow_t);
-    let centerline_shift = (macro_elevation - contextual_source).max(0.0);
-    let target = valley_context.max(macro_elevation - max_context_shift - centerline_shift);
+    let centerline_drop = (macro_elevation - centerline_elevation).max(0.0);
+    let positive_relief = macro_elevation.max(0.0);
+    let relief_compression = positive_relief * lerp(0.02, 0.08, flow_t);
+    let lowland_bias = config.river_carve_scale * lerp(0.06, 0.55, flow_t);
+    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.10, flow_t);
+    let near_sea_t = 1.0 - smoothstep_range(0.0, 0.025, macro_elevation.max(0.0));
+    let near_sea_bias = config.river_carve_scale * lerp(0.0, 0.35, flow_t) * near_sea_t;
+    let centerline_pull = centerline_drop * shoulder_t * lerp(0.01, 0.06, flow_t);
+    let _ = river_longitudinal_blocks;
+    let broad_lowering =
+        (relief_compression + lowland_bias + below_sea_bias + near_sea_bias) * shoulder_t;
+    let max_context_shift = config.river_carve_scale * lerp(0.45, 2.4, flow_t)
+        + centerline_drop * lerp(0.02, 0.12, flow_t);
+    let lowering = (broad_lowering + centerline_pull).min(max_context_shift);
 
-    lerp(macro_elevation, target, context_t).min(macro_elevation)
+    (macro_elevation - lowering).min(macro_elevation)
 }
 
-pub(super) fn river_longitudinal_floor_bias(
-    river_longitudinal_blocks: f32,
-    river_flow_hint: f32,
-    river_carve_scale: f32,
-) -> f32 {
-    if !river_longitudinal_blocks.is_finite() || river_carve_scale <= 0.0 {
+pub(super) fn river_shoulder_height_strength(strength: f32) -> f32 {
+    let strength = strength.clamp(0.0, 1.0);
+    if strength <= f32::EPSILON {
         return 0.0;
     }
-
-    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
-    let broad = smooth_value_noise_1d(
-        river_longitudinal_blocks,
-        lerp(384.0, 960.0, flow_t),
-        0xA5B1_7A11_E57A_9E31,
-    );
-    let long = smooth_value_noise_1d(
-        river_longitudinal_blocks + 173.0,
-        lerp(960.0, 1728.0, flow_t),
-        0x51ED_C0DE_72F1_9AB5,
-    );
-    let noise = (broad * 0.62 + long * 0.38).clamp(-1.0, 1.0);
-
-    noise * river_carve_scale * lerp(0.22, 0.58, flow_t)
+    smoothstep01(strength).powf(1.35)
 }
 
 pub(super) fn ocean_bathymetry_macro_height(source_height: f32) -> f32 {
@@ -226,16 +207,6 @@ pub(super) fn smooth_value_noise_2d(
     let top = a + (b - a) * tx;
     let bottom = c + (d - c) * tx;
     top + (bottom - top) * tz
-}
-
-pub(super) fn smooth_value_noise_1d(position_blocks: f32, scale_blocks: f32, salt: u64) -> f32 {
-    let scale = scale_blocks.max(1.0);
-    let x = position_blocks / scale;
-    let x0 = x.floor() as i32;
-    let tx = smootherstep(x - x0 as f32);
-    let a = signed_lattice_noise(x0, 0, salt);
-    let b = signed_lattice_noise(x0 + 1, 0, salt);
-    a + (b - a) * tx
 }
 
 pub(super) fn signed_lattice_noise(x: i32, z: i32, salt: u64) -> f32 {
@@ -453,11 +424,11 @@ mod tests {
     fn river_shoulder_context_reads_centerline_macro_elevation() {
         let config = test_tile_config();
         let without_centerline =
-            river_shoulder_context_height(0.48, 0.82, 0.72, None, f32::NAN, config);
+            river_shoulder_context_height(0.48, 0.92, 0.72, None, f32::NAN, config);
         let with_lower_centerline =
-            river_shoulder_context_height(0.48, 0.82, 0.72, Some(0.28), f32::NAN, config);
+            river_shoulder_context_height(0.48, 0.92, 0.72, Some(0.28), f32::NAN, config);
         let with_higher_centerline =
-            river_shoulder_context_height(0.48, 0.82, 0.72, Some(0.72), f32::NAN, config);
+            river_shoulder_context_height(0.48, 0.92, 0.72, Some(0.72), f32::NAN, config);
 
         assert!(
             with_lower_centerline < without_centerline - config.river_carve_scale,
@@ -466,6 +437,57 @@ mod tests {
         assert_eq!(
             with_higher_centerline, without_centerline,
             "centerline context may lower banks toward the river floor but must not raise shoulder terrain"
+        );
+    }
+
+    #[test]
+    fn river_shoulder_context_preserves_cross_section_source_relief() {
+        let config = test_tile_config();
+        let low_source =
+            river_shoulder_context_height(0.028, 0.44, 0.82, Some(0.020), f32::NAN, config);
+        let high_source =
+            river_shoulder_context_height(0.036, 0.44, 0.82, Some(0.020), f32::NAN, config);
+
+        assert!(
+            high_source - low_source > 0.004,
+            "river shoulder context should lower the valley without flattening cross-section source relief into a contour slab: low={low_source} high={high_source}"
+        );
+    }
+
+    #[test]
+    fn weak_river_shoulder_tail_is_continuous_but_attenuated_for_height() {
+        let config = test_tile_config();
+        let base = river_shoulder_context_height(0.34, 0.0, 0.8, Some(0.12), 384.0, config);
+        let weak = river_shoulder_context_height(0.34, 0.18, 0.8, Some(0.12), 384.0, config);
+        let active = river_shoulder_context_height(0.34, 0.74, 0.8, Some(0.12), 384.0, config);
+
+        let weak_shift = base - weak;
+        let active_shift = base - active;
+        assert!(
+            weak_shift > 0.0,
+            "weak shoulder tails should remain continuous"
+        );
+        assert!(
+            weak_shift < active_shift * 0.20,
+            "weak broad-shoulder tails should be strongly attenuated without creating a hard contour cutoff"
+        );
+        assert!(
+            active < base,
+            "active river shoulder should still lower combined height near the selected river corridor"
+        );
+    }
+
+    #[test]
+    fn river_shoulder_height_does_not_step_on_longitudinal_hint_switch() {
+        let config = test_tile_config();
+        let left_hint =
+            river_shoulder_context_height(0.036, 0.90, 0.75, Some(0.024), 116.0, config);
+        let right_hint =
+            river_shoulder_context_height(0.036, 0.90, 0.75, Some(0.024), 172.0, config);
+
+        assert_eq!(
+            left_hint, right_hint,
+            "longitudinal hints are diagnostics/downstream hints; combined macro height must not form a vertical seam when nearest river segment ownership switches"
         );
     }
 

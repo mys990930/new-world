@@ -875,9 +875,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             core_stats: tile.core_stats,
         };
         let mut image = render_channel(window, &tile, channel)?;
-        draw_tile_boundary_overlay(&mut image, window, tile_grid);
-        if channel != PreviewChannel::Contour {
+        if tile_boundary_overlay_enabled(channel) {
+            draw_tile_boundary_overlay(&mut image, window, tile_grid);
+        }
+        if graph_edge_overlay_enabled(channel, config.contours) {
             draw_noisy_graph_edge_overlay(&mut image, window, &preview.boundary, channel);
+        }
+        if channel != PreviewChannel::Contour {
             draw_river_centerline_overlay(
                 &mut image,
                 window,
@@ -1672,6 +1676,19 @@ fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid:
             amount,
         );
     }
+}
+
+fn tile_boundary_overlay_enabled(channel: PreviewChannel) -> bool {
+    matches!(channel, PreviewChannel::Contour)
+}
+
+fn graph_edge_overlay_enabled(channel: PreviewChannel, contours_enabled: bool) -> bool {
+    channel != PreviewChannel::Contour
+        && !(contours_enabled
+            && matches!(
+                channel,
+                PreviewChannel::CombinedMacroHeight | PreviewChannel::LitHeightfield
+            ))
 }
 
 fn draw_noisy_graph_edge_overlay(
@@ -3076,6 +3093,40 @@ mod tests {
         assert_ne!(image.as_raw(), &before);
         assert_eq!(grid.vertical_lines, 5);
         assert_eq!(grid.horizontal_lines, 3);
+    }
+
+    #[test]
+    fn tile_boundary_overlay_is_diagnostic_only() {
+        assert!(
+            !tile_boundary_overlay_enabled(PreviewChannel::CombinedMacroHeight),
+            "combined preview should not draw cache-grid lines by default; straight vertical lines there read as terrain discontinuities"
+        );
+        assert!(
+            !tile_boundary_overlay_enabled(PreviewChannel::LitHeightfield),
+            "lit preview should not draw cache-grid lines by default"
+        );
+        assert!(tile_boundary_overlay_enabled(PreviewChannel::Contour));
+    }
+
+    #[test]
+    fn graph_edge_overlay_does_not_compete_with_contour_reading() {
+        assert!(graph_edge_overlay_enabled(
+            PreviewChannel::CombinedMacroHeight,
+            false
+        ));
+        assert!(graph_edge_overlay_enabled(
+            PreviewChannel::LitHeightfield,
+            false
+        ));
+        assert!(
+            !graph_edge_overlay_enabled(PreviewChannel::CombinedMacroHeight, true),
+            "combined --contours should show terrain contours without faint Voronoi edge lines reading as vertical terrain steps"
+        );
+        assert!(
+            !graph_edge_overlay_enabled(PreviewChannel::LitHeightfield, true),
+            "lit --contours should keep contour readability above graph-edge reference lines"
+        );
+        assert!(!graph_edge_overlay_enabled(PreviewChannel::Contour, false));
     }
 
     #[test]

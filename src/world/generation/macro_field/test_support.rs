@@ -360,6 +360,7 @@ pub(in crate::world::generation::macro_field) fn test_river_source<'a>(
     RiverRasterSource {
         edge: curve.edge,
         points: &curve.points,
+        longitudinal_start_blocks: 0.0,
         flow_hint,
         water_width_blocks: lerp(
             1.5,
