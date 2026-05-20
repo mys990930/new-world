@@ -3,6 +3,7 @@ use rayon::prelude::*;
 use super::biome::{GraphBiomeContext, GraphBiomeKind, GraphBiomeWaterRole};
 use super::heightfield::{HeightfieldColumn, HeightfieldTerrainKind, HeightfieldTile};
 use super::macro_field::MacroFieldTile;
+use crate::world::generation::graph::VoronoiSiteId;
 use crate::world::legacy::surface::SurfaceCondition;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -117,6 +118,11 @@ pub struct SurfaceColumnPlan {
     pub soil_depth_blocks: u8,
     pub vegetation_allowed: bool,
     pub cover_phase: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SurfaceMixSource {
+    owner_site: Option<VoronoiSiteId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -691,6 +697,16 @@ pub fn generate_surface_plan_area(
     macro_field: Option<&MacroFieldTile>,
     config: SurfacePlanConfig,
 ) -> SurfacePlanArea {
+    let mix_sources = macro_field.map(|tile| {
+        (0..heightfield.columns.len())
+            .map(|index| SurfaceMixSource {
+                owner_site: tile
+                    .samples
+                    .get(index)
+                    .and_then(|sample| sample.nearest_site),
+            })
+            .collect::<Vec<_>>()
+    });
     let mut columns = heightfield
         .columns
         .par_iter()
@@ -715,6 +731,7 @@ pub fn generate_surface_plan_area(
         heightfield.width as usize,
         heightfield.height as usize,
         config,
+        mix_sources.as_deref(),
     );
     let stats = surface_plan_stats(&columns);
 
@@ -733,6 +750,7 @@ fn apply_noisy_boundary_mixing(
     width: usize,
     height: usize,
     config: SurfacePlanConfig,
+    mix_sources: Option<&[SurfaceMixSource]>,
 ) {
     if columns.is_empty()
         || width == 0
@@ -744,14 +762,25 @@ fn apply_noisy_boundary_mixing(
     }
 
     let original = columns.to_vec();
+    let mix_sources = mix_sources.filter(|sources| sources.len() == original.len());
     let radius = usize::from(config.boundary_mix_radius_blocks);
     for z in 0..height {
         for x in 0..width {
             let index = z * width + x;
             let current = original[index];
-            let Some((neighbor, distance)) =
-                nearest_mix_candidate(&original, width, height, x, z, radius, current, config)
-            else {
+            let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
+            let Some((neighbor, distance)) = nearest_mix_candidate(
+                &original,
+                mix_sources,
+                width,
+                height,
+                x,
+                z,
+                radius,
+                current,
+                current_source,
+                config,
+            ) else {
                 continue;
             };
 
@@ -769,12 +798,14 @@ fn apply_noisy_boundary_mixing(
 
 fn nearest_mix_candidate(
     columns: &[SurfaceColumnPlan],
+    mix_sources: Option<&[SurfaceMixSource]>,
     width: usize,
     height: usize,
     x: usize,
     z: usize,
     radius: usize,
     current: SurfaceColumnPlan,
+    current_source: Option<SurfaceMixSource>,
     config: SurfacePlanConfig,
 ) -> Option<(SurfaceColumnPlan, usize)> {
     let mut best: Option<(SurfaceColumnPlan, usize, u64)> = None;
@@ -794,8 +825,16 @@ fn nearest_mix_candidate(
             if distance == 0 || distance > radius {
                 continue;
             }
-            let neighbor = columns[nz * width + nx];
-            if !mix_candidate_allowed(current, neighbor) {
+            let neighbor_index = nz * width + nx;
+            let neighbor = columns[neighbor_index];
+            let neighbor_source =
+                mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
+            if !mix_candidate_allowed_with_sources(
+                current,
+                neighbor,
+                current_source,
+                neighbor_source,
+            ) {
                 continue;
             }
             let tie = boundary_candidate_tie_breaker(current, neighbor, config);
@@ -811,9 +850,22 @@ fn nearest_mix_candidate(
     best.map(|(neighbor, distance, _)| (neighbor, distance))
 }
 
-fn mix_candidate_allowed(current: SurfaceColumnPlan, neighbor: SurfaceColumnPlan) -> bool {
+fn mix_candidate_allowed_with_sources(
+    current: SurfaceColumnPlan,
+    neighbor: SurfaceColumnPlan,
+    current_source: Option<SurfaceMixSource>,
+    neighbor_source: Option<SurfaceMixSource>,
+) -> bool {
     if current.top_block == neighbor.top_block {
         return false;
+    }
+    if let (Some(current_site), Some(neighbor_site)) = (
+        current_source.and_then(|source| source.owner_site),
+        neighbor_source.and_then(|source| source.owner_site),
+    ) {
+        if current_site != neighbor_site {
+            return false;
+        }
     }
     if current.water_y.is_some() != neighbor.water_y.is_some() {
         return false;
@@ -1268,6 +1320,13 @@ mod tests {
             generate_surface_plan_area(&heightfield, Some(&macro_tile), base_surface_config);
         let surface_plan =
             generate_surface_plan_area(&heightfield, Some(&macro_tile), surface_config);
+        let surface_mix_sources = macro_tile
+            .samples
+            .iter()
+            .map(|sample| SurfaceMixSource {
+                owner_site: sample.nearest_site,
+            })
+            .collect::<Vec<_>>();
 
         let mut anomaly_count = 0usize;
         let mut representatives = Vec::new();
@@ -1408,6 +1467,7 @@ mod tests {
                     index,
                     *base_plan,
                     plan.top_block,
+                    Some(&surface_mix_sources),
                     surface_config,
                 ) {
                     unsupported_local_mix_count += 1;
@@ -1536,6 +1596,7 @@ mod tests {
         index: usize,
         current: SurfaceColumnPlan,
         final_top_block: &'static str,
+        mix_sources: Option<&[SurfaceMixSource]>,
         config: SurfacePlanConfig,
     ) -> bool {
         let radius = usize::from(config.boundary_mix_radius_blocks);
@@ -1544,6 +1605,8 @@ mod tests {
         }
         let x = index % width;
         let z = index / width;
+        let mix_sources = mix_sources.filter(|sources| sources.len() == base_columns.len());
+        let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
         let min_x = x.saturating_sub(radius);
         let max_x = (x + radius).min(width.saturating_sub(1));
         let min_z = z.saturating_sub(radius);
@@ -1560,8 +1623,17 @@ mod tests {
                 if distance == 0 || distance > radius {
                     continue;
                 }
-                let neighbor = base_columns[nz * width + nx];
-                if neighbor.top_block == final_top_block && mix_candidate_allowed(current, neighbor)
+                let neighbor_index = nz * width + nx;
+                let neighbor = base_columns[neighbor_index];
+                let neighbor_source =
+                    mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
+                if neighbor.top_block == final_top_block
+                    && mix_candidate_allowed_with_sources(
+                        current,
+                        neighbor,
+                        current_source,
+                        neighbor_source,
+                    )
                 {
                     return true;
                 }
@@ -2045,7 +2117,7 @@ mod tests {
             test_plan(2, 0, "grass", SurfaceHydrologyRole::Land),
         ];
 
-        apply_noisy_boundary_mixing(&mut columns, 3, 1, config);
+        apply_noisy_boundary_mixing(&mut columns, 3, 1, config, None);
 
         assert_eq!(columns[0].surface_y, 4);
         assert_eq!(columns[0].water_y, None);
@@ -2078,11 +2150,43 @@ mod tests {
             test_plan(2, 2, "grass", SurfaceHydrologyRole::Land),
         ];
 
-        apply_noisy_boundary_mixing(&mut columns, 3, 3, config);
+        apply_noisy_boundary_mixing(&mut columns, 3, 3, config, None);
 
         assert_eq!(
             columns[4].top_block, "grass",
             "diagonal-only contact must not create a square-corner material intrusion"
+        );
+    }
+
+    #[test]
+    fn noisy_boundary_mixing_does_not_cross_macro_owner_sites() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 1,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let mut columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        apply_noisy_boundary_mixing(&mut columns, 2, 1, config, Some(&mix_sources));
+
+        assert_eq!(
+            columns[0].top_block, "sand",
+            "local material breakup must not copy material across the macro owner boundary"
+        );
+        assert_eq!(
+            columns[1].top_block, "grass",
+            "local material breakup must not copy material across the macro owner boundary"
         );
     }
 
@@ -2099,7 +2203,7 @@ mod tests {
         ];
         columns[0].water_y = Some(5);
 
-        apply_noisy_boundary_mixing(&mut columns, 2, 1, config);
+        apply_noisy_boundary_mixing(&mut columns, 2, 1, config, None);
 
         assert_eq!(columns[0].top_block, "sand");
         assert_eq!(columns[0].water_y, Some(5));
