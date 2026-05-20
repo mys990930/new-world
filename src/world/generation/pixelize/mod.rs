@@ -1184,6 +1184,9 @@ mod tests {
     ) -> MacroFieldSample {
         MacroFieldSample {
             position: WorldPlanePoint::new(world_x as f32, world_z as f32),
+            raw_nearest_site: None,
+            raw_biome_context: None,
+            raw_biome: None,
             nearest_site: None,
             surface_kind: None,
             biome_context: None,

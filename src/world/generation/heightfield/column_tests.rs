@@ -1536,6 +1536,9 @@ fn sample(
 ) -> MacroFieldSample {
     MacroFieldSample {
         position: WorldPlanePoint::new(x, z),
+        raw_nearest_site: None,
+        raw_biome_context: None,
+        raw_biome: None,
         nearest_site: None,
         surface_kind: None,
         biome_context: None,

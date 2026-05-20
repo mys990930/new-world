@@ -67,6 +67,9 @@ impl MacroFieldTileConfig {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MacroFieldSample {
     pub position: WorldPlanePoint,
+    pub raw_nearest_site: Option<VoronoiSiteId>,
+    pub raw_biome_context: Option<GraphBiomeContext>,
+    pub raw_biome: Option<GraphBiomeKind>,
     pub nearest_site: Option<VoronoiSiteId>,
     pub surface_kind: Option<MacroSurfaceKind>,
     pub biome_context: Option<GraphBiomeContext>,

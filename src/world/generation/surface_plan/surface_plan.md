@@ -52,11 +52,11 @@ surface resolve는 아래 입력을 함께 본다.
 - local soil/sediment class
 - runtime season/weather state가 허용하는 override
 
-현재 graph-first 구현에서는 canonical noisy boundary owner의 biome/context가 `MacroFieldSample`에
-보존되고, height/water/river bed hint는 `HeightfieldColumn`에 보존된다. `surface_plan`의 첫 구현은 이
-둘을 같은 row-major column footprint에서 받아 하나의 입력으로 묶는다. `MacroFieldSample.nearest_site`,
-water/mask channel, material policy가 읽는 `biome`/`biome_context`는 같은 noisy owner region을 따라야
-한다.
+현재 graph-first 구현에서는 canonical noisy boundary owner의 biome/context와 raw nearest graph-cell
+biome/context가 모두 `MacroFieldSample`에 보존되고, height/water/river bed hint는 `HeightfieldColumn`에
+보존된다. `surface_plan`의 첫 구현은 이 둘을 같은 row-major column footprint에서 받아 하나의 입력으로
+묶는다. `MacroFieldSample.nearest_site`는 noisy owner region을 따르고, 최종 non-water top material
+단일화는 `MacroFieldSample.raw_nearest_site`를 기준으로 한다.
 
 ```text
 SurfaceColumnInput {
@@ -188,15 +188,20 @@ visible material boundary는 hard owner 경계를 그대로 따라가면 안 된
 - hydrology role 우선순위
 - slope/exposure 기반 rocky override는 future work다. 현재 기본 resolve에서는 비활성이다.
 
-launch 구현의 material breakup은 noisy owner region을 다시 넓은 straight patch로 뒤집지 않는다. 먼저
-`boundary_mix_radius_blocks = 0`인 base resolve가 각 column의 noisy-owner policy material을 정하고,
-그 뒤 기본 radius `1` block, strength `28%`의 bounded local mix pass가 직교 인접한 다른 material을
-deterministic하게 일부 column만 빌려온다. 단, `MacroFieldTile` metadata가 있는 area resolve에서는 이
-pass가 `MacroFieldSample.nearest_site`를 함께 읽어 서로 다른 macro owner site 사이의 material copy를
-금지한다. block-scale breakup은 같은 noisy-owner region 안에서만 허용되고, owner handoff 자체를 새로
-넓히거나 뒤집으면 안 된다. 대각선으로만 닿는 material은 건너뛰지 않으므로 corner에서 사각형 침범이
-생기면 회귀다. 따라서 final top material이 base resolve와 다를 수 있는 범위는 이 local mix radius
-안쪽이며, owner site가 같은 column neighbor에서 온 경우뿐이다.
+launch 구현의 material resolve는 `MacroFieldTile` metadata가 있는 area path에서
+`MacroFieldSample.raw_nearest_site`를 surface material cell 기준으로 사용한다. 먼저 column별 hydrology/biome
+policy를 계산하되, 최종 pass에서 active water column(`water_y.is_some()`)만 제외하고 non-water
+surface top은 같은 raw Voronoi graph cell 안에서 하나의 canonical top block으로 정규화한다. dry river
+bank, dry lake/ocean fringe처럼 hydrology role은 남아 있지만 실제 물 column이 아닌 표면도 정규화
+대상이다. 따라서 한 Voronoi graph cell 내부의 일반 표면이 `sand`/`wet_sand`나 `grass`/`sand`처럼
+넓은 덩어리로 갈라지면 회귀다. `nearest_site`가 보존하는 noisy-boundary owner는 height/mask/role handoff
+와 boundary overlay 진단에 남지만, 최종 non-water top material 단일화 기준은 raw graph cell이다.
+
+`boundary_mix_radius_blocks`는 macro owner metadata가 없는 fallback 또는 실제 water bed 같은 protected column을
+위한 보조 pass로 남아 있지만, macro-field 기반 preview/generation path에서는 raw-cell 정규화가 최종
+non-water top material을 다시 닫는다. 서로 다른 owner site 사이의 material copy는 계속 금지되고,
+shared boundary 양쪽의 두 owner column이 서로의 base top material을 맞교환한 상태가 되면 그 pair는
+base material로 되돌린다.
 
 ---
 
@@ -285,7 +290,7 @@ legacy `MaterialPolicyId`와 1:1로 고정되지 않는다.
    - biome 기본 palette
    - ocean/lake/river/wetland/coast/dry-basin override
    - active ocean/lake/river/wetland/coast/dry-basin sediment override
-   - deterministic top-material variation
+   - owner-site 단위 non-water top material 정규화
 5. `voxel`은 surface plan을 소비하도록 확장한다.
    - terrain top 1 block은 `top_block`
    - 그 아래 `soil_depth_blocks`는 `subsurface_block`
@@ -366,21 +371,23 @@ priority를 함께 보고 실제 block을 배치한다.
 ## 현재 구현 상태
 
 - graph-first surface/material resolve launch slice가 `SurfaceColumnPlan`을 생성한다.
-- biome 기본 palette, ocean/lake/river/wetland/coast/dry-basin override, deterministic local material
-  variation을 적용한다.
+- biome 기본 palette, ocean/lake/river/wetland/coast/dry-basin override를 적용한 뒤,
+  `MacroFieldSample.raw_nearest_site` 기준으로 non-water raw-cell top material을 단일화한다.
 - `coast_mask`는 broad distance diagnostic으로 보존하지만, 그 값만으로 land biome을 coast/sand material로
   승격하지 않는다.
 - rocky/exposure material override는 현재 기본 resolve에서 비활성이다. `terrain_ruggedness`,
   `ridge_influence`, `RockyCoast` biome, river bank roughness hint는 active water/sediment rule을 제외하고
   land/coast top material을 `gravel`/`wet_gravel`/`rock`/`exposed_rock`으로 승격하지 않는다.
 - `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `1`이고
-  `boundary_mix_strength_percent`는 `28`이다. 기본 surface plan
-  preview/generation path는 noisy-owner base material을 먼저 resolve한 뒤, 이 작은 radius 안에서만
-  Minecraft-style block-scale neighbor material breakup을 적용한다. `MacroFieldTile` metadata가 연결된
-  path에서는 이 pass가 `MacroFieldSample.nearest_site`를 함께 읽어 서로 다른 macro owner site 사이의
-  material copy를 금지한다.
+  `boundary_mix_strength_percent`는 `28`이다. 다만 기본 surface plan preview/generation path처럼
+  `MacroFieldTile` metadata가 연결된 경우, final pass가 `MacroFieldSample.raw_nearest_site`별 non-water top
+  material을 단일화한다. 제외 대상은 hydrology role 자체가 아니라 `water_y`가 있는 실제 water column이다.
 - seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
   noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
   한다. 이 audit은 ignored unit test로 보존하며, PNG를 만들지 않고 macro field, Perlin-enabled
   heightfield, surface plan column data를 직접 비교한다.
+- seed `42`, chunk `(-73, -40)`의 focused boundary audit은 1-block guard를 둔 column data를 직접 비교해
+  raw nearest site, noisy owner site, biome, base top block, final top block, local mix source neighbor를
+  출력한다. 이 audit 역시 preview 이미지 없이 adjacent owner pair의 mutual material swap이 없는지,
+  그리고 final non-water top material이 같은 raw Voronoi cell 안에서 하나뿐인지 검사한다.
