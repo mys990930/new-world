@@ -677,7 +677,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
   안에서 얕은 shelf 형태로 퍼진다. low-Q mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도
   coast/ocean source 쪽으로 끊기지 않게 하고, 마지막 river segment가 아주 짧으면 fan 전용 bed-depth
-  hint를 낮춰 하구 시작점에서 deep trench target으로 급락하지 않게 한다. deterministic world-space
+  hint를 낮춰 하구 시작점에서 deep trench target으로 급락하지 않게 한다. fan influence는 terminal
+  endpoint 이후의 downstream 누적 거리(`estuary_along_blocks`)도 함께 저장하며, height 합성은 시작부
+  허용 depth를 얕게 잡고 거리당 완만하게만 증가시킨다. 따라서 terminal river/core/broad-valley budget을
+  다시 조정하지 않고도 짧은 마지막 segment의 estuary 시작부가 바다 shelf 목표 높이로 즉시 snap되지
+  않아야 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. `river_core_strength` 또는
   selected river water corridor를 downstream cell로 승격하지 않고, height 합성에서 estuary influence만

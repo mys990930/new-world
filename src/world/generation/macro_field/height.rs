@@ -129,6 +129,7 @@ pub(super) fn combine_macro_height_with_river_profile(
         0.0,
         0.0,
         0.0,
+        0.0,
         config,
     )
 }
@@ -155,6 +156,7 @@ pub(super) fn combine_macro_height_with_estuary_profile(
     estuary_strength: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
+    estuary_along_blocks: f32,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let ridge_raise = ridge_influence * config.ridge_height_scale;
@@ -207,6 +209,7 @@ pub(super) fn combine_macro_height_with_estuary_profile(
         estuary_strength,
         estuary_flow_hint,
         estuary_bed_depth_hint,
+        estuary_along_blocks,
         config,
     );
     if ocean_mask > 0.5 {
@@ -228,6 +231,7 @@ pub(super) fn estuary_fan_macro_height(
     estuary_strength: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
+    estuary_along_blocks: f32,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let strength = estuary_strength.clamp(0.0, 1.0);
@@ -246,8 +250,13 @@ pub(super) fn estuary_fan_macro_height(
     let flow_t = smoothstep01(estuary_flow_hint.clamp(0.0, 1.0));
     let bed_t = estuary_bed_depth_hint.clamp(0.0, 1.0);
     let active = smoothstep01(strength) * water_context;
-    let shallow_shelf_depth =
-        config.river_carve_scale * lerp(0.35, 1.15, flow_t) + bed_t * lerp(0.006, 0.026, flow_t);
+    let raw_shelf_depth_blocks = (config.river_carve_scale * lerp(0.35, 1.15, flow_t)
+        + bed_t * lerp(0.006, 0.026, flow_t))
+        * 2048.0;
+    let start_depth_blocks = lerp(1.5, 3.5, flow_t);
+    let slope_limited_depth_blocks =
+        (start_depth_blocks + estuary_along_blocks.max(0.0) / 2.5).max(0.0);
+    let shallow_shelf_depth = raw_shelf_depth_blocks.min(slope_limited_depth_blocks) / 2048.0;
     let edge_t = smoothstep_range(0.20, 0.92, active);
     let target = -shallow_shelf_depth * lerp(0.16, 1.0, edge_t);
     let lowering = (height - target).max(0.0) * active;
@@ -1091,12 +1100,15 @@ mod tests {
     #[test]
     fn estuary_fan_lowers_only_coast_or_ocean_near_sea_source() {
         let config = test_tile_config();
-        let coast =
-            estuary_fan_macro_height(0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
-        let ocean =
-            estuary_fan_macro_height(0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, config);
-        let ordinary =
-            estuary_fan_macro_height(0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+        let coast = estuary_fan_macro_height(
+            0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
+        );
+        let ocean = estuary_fan_macro_height(
+            0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, 96.0, config,
+        );
+        let ordinary = estuary_fan_macro_height(
+            0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
+        );
 
         assert!(
             coast <= 0.0,
@@ -1115,10 +1127,12 @@ mod tests {
     #[test]
     fn estuary_fan_edge_strength_does_not_snap_water_boundary_below_sea() {
         let config = test_tile_config();
-        let weak_edge =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, config);
-        let core =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+        let weak_edge = estuary_fan_macro_height(
+            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, 96.0, config,
+        );
+        let core = estuary_fan_macro_height(
+            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
+        );
 
         assert!(
             weak_edge > 0.0,
@@ -1131,12 +1145,53 @@ mod tests {
     }
 
     #[test]
+    fn estuary_fan_start_depth_is_slope_limited() {
+        let config = test_tile_config();
+        let mut heights = Vec::new();
+        let mut max_delta_blocks = 0.0_f32;
+        let mut previous_height = None::<f32>;
+
+        for along in 0..=24 {
+            let height = estuary_fan_macro_height(
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.90,
+                0.70,
+                along as f32,
+                config,
+            ) * 2048.0;
+            if let Some(previous) = previous_height {
+                max_delta_blocks = max_delta_blocks.max((height - previous).abs());
+            }
+            previous_height = Some(height);
+            heights.push(height);
+        }
+
+        eprintln!("estuary start heights blocks={heights:?} max_delta={max_delta_blocks:.3}");
+        assert!(
+            max_delta_blocks <= 0.58,
+            "estuary fan start should not fall faster than a 30 degree grade: max_delta={max_delta_blocks}"
+        );
+        assert!(
+            heights[0] >= -4.0,
+            "estuary fan origin should start shallow instead of snapping to the sea-bottom target: {heights:?}"
+        );
+    }
+
+    #[test]
     fn estuary_fan_excludes_lake_and_dry_basin_sources() {
         let config = test_tile_config();
-        let lake =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 0.85, 0.70, config);
-        let dry =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, config);
+        let lake = estuary_fan_macro_height(
+            0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
+        );
+        let dry = estuary_fan_macro_height(
+            0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+        );
 
         assert_eq!(lake, 0.020);
         assert_eq!(dry, 0.020);

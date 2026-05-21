@@ -50,6 +50,7 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) estuary_strength: f32,
     pub(super) estuary_flow_hint: f32,
     pub(super) estuary_bed_depth_hint: f32,
+    pub(super) estuary_along_blocks: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +72,7 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) estuary_strength: Vec<f32>,
     pub(super) estuary_flow_hint: Vec<f32>,
     pub(super) estuary_bed_depth_hint: Vec<f32>,
+    pub(super) estuary_along_blocks: Vec<f32>,
     pub(super) stats: MacroFieldInfluenceStats,
 }
 
@@ -124,6 +126,7 @@ impl MacroFieldInfluenceFields {
             estuary_strength: self.estuary_strength[index].clamp(0.0, 1.0),
             estuary_flow_hint: self.estuary_flow_hint[index].clamp(0.0, 1.0),
             estuary_bed_depth_hint: self.estuary_bed_depth_hint[index].clamp(0.0, 1.0),
+            estuary_along_blocks: self.estuary_along_blocks[index].max(0.0),
         }
     }
 }
@@ -193,6 +196,7 @@ pub(super) fn rasterize_influence_fields(
         estuary_strength: estuary.strength,
         estuary_flow_hint: estuary.flow_hint,
         estuary_bed_depth_hint: estuary.bed_depth_hint,
+        estuary_along_blocks: estuary.along_blocks,
         stats,
     }
 }
@@ -202,6 +206,7 @@ pub(super) struct EstuaryFanField {
     pub(super) strength: Vec<f32>,
     pub(super) flow_hint: Vec<f32>,
     pub(super) bed_depth_hint: Vec<f32>,
+    pub(super) along_blocks: Vec<f32>,
 }
 
 pub(super) fn rasterize_estuary_fan_field(
@@ -214,6 +219,7 @@ pub(super) fn rasterize_estuary_fan_field(
             strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             bed_depth_hint: vec![0.0; sample_count],
+            along_blocks: vec![0.0; sample_count],
         };
     }
 
@@ -231,6 +237,7 @@ pub(super) fn rasterize_estuary_fan_field(
         strength: samples.iter().map(|sample| sample.strength).collect(),
         flow_hint: samples.iter().map(|sample| sample.flow_hint).collect(),
         bed_depth_hint: samples.iter().map(|sample| sample.bed_depth_hint).collect(),
+        along_blocks: samples.iter().map(|sample| sample.along_blocks).collect(),
     }
 }
 
@@ -239,6 +246,7 @@ pub(super) struct EstuaryFanSample {
     pub(super) strength: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+    pub(super) along_blocks: f32,
 }
 
 pub(super) fn estuary_fan_sample(
@@ -278,6 +286,7 @@ pub(super) fn estuary_fan_sample(
         strength,
         flow_hint: fan.flow_hint,
         bed_depth_hint: fan.bed_depth_hint,
+        along_blocks: along,
     }
 }
 
