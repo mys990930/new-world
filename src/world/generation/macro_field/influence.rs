@@ -48,6 +48,7 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) river_gravel_hint: f32,
     pub(super) river_cutbank_hint: f32,
     pub(super) estuary_strength: f32,
+    pub(super) estuary_progress: f32,
     pub(super) estuary_flow_hint: f32,
     pub(super) estuary_bed_depth_hint: f32,
 }
@@ -69,6 +70,7 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
     pub(super) estuary_strength: Vec<f32>,
+    pub(super) estuary_progress: Vec<f32>,
     pub(super) estuary_flow_hint: Vec<f32>,
     pub(super) estuary_bed_depth_hint: Vec<f32>,
     pub(super) stats: MacroFieldInfluenceStats,
@@ -122,6 +124,7 @@ impl MacroFieldInfluenceFields {
             river_gravel_hint: self.river_gravel_hint[index].clamp(0.0, 1.0),
             river_cutbank_hint: self.river_cutbank_hint[index].clamp(0.0, 1.0),
             estuary_strength: self.estuary_strength[index].clamp(0.0, 1.0),
+            estuary_progress: self.estuary_progress[index].clamp(0.0, 1.0),
             estuary_flow_hint: self.estuary_flow_hint[index].clamp(0.0, 1.0),
             estuary_bed_depth_hint: self.estuary_bed_depth_hint[index].clamp(0.0, 1.0),
         }
@@ -191,6 +194,7 @@ pub(super) fn rasterize_influence_fields(
         river_gravel_hint: river.river_gravel_hint,
         river_cutbank_hint: river.river_cutbank_hint,
         estuary_strength: estuary.strength,
+        estuary_progress: estuary.progress,
         estuary_flow_hint: estuary.flow_hint,
         estuary_bed_depth_hint: estuary.bed_depth_hint,
         stats,
@@ -200,6 +204,7 @@ pub(super) fn rasterize_influence_fields(
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct EstuaryFanField {
     pub(super) strength: Vec<f32>,
+    pub(super) progress: Vec<f32>,
     pub(super) flow_hint: Vec<f32>,
     pub(super) bed_depth_hint: Vec<f32>,
 }
@@ -212,6 +217,7 @@ pub(super) fn rasterize_estuary_fan_field(
     if fans.is_empty() {
         return EstuaryFanField {
             strength: vec![0.0; sample_count],
+            progress: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             bed_depth_hint: vec![0.0; sample_count],
         };
@@ -229,6 +235,7 @@ pub(super) fn rasterize_estuary_fan_field(
 
     EstuaryFanField {
         strength: samples.iter().map(|sample| sample.strength).collect(),
+        progress: samples.iter().map(|sample| sample.progress).collect(),
         flow_hint: samples.iter().map(|sample| sample.flow_hint).collect(),
         bed_depth_hint: samples.iter().map(|sample| sample.bed_depth_hint).collect(),
     }
@@ -237,6 +244,7 @@ pub(super) fn rasterize_estuary_fan_field(
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct EstuaryFanSample {
     pub(super) strength: f32,
+    pub(super) progress: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
 }
@@ -266,11 +274,12 @@ pub(super) fn estuary_fan_sample(
         return EstuaryFanSample::default();
     }
 
-    let along_strength = 1.0 - smoothstep01(progress);
-    let shelf_tail = 1.0 - smoothstep01((progress - 0.72) / 0.28);
-    let strength = (cross * along_strength.max(shelf_tail * 0.35)).clamp(0.0, 1.0);
+    let inlet_blend = 0.58 + smoothstep01(progress / 0.24) * 0.42;
+    let outlet_fade = 1.0 - smoothstep01((progress - 0.88) / 0.12) * 0.18;
+    let strength = (cross * inlet_blend * outlet_fade).clamp(0.0, 1.0);
     EstuaryFanSample {
         strength,
+        progress,
         flow_hint: fan.flow_hint,
         bed_depth_hint: fan.bed_depth_hint,
     }
@@ -2546,6 +2555,10 @@ mod tests {
         assert!(
             downstream_wide_edge.strength > 0.0,
             "downstream fan should retain a broad shallow shelf influence"
+        );
+        assert!(
+            downstream_wide_edge.progress > start_edge.progress,
+            "estuary fan raster should preserve downstream progress for gradient-limited height policy"
         );
     }
 

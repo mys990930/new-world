@@ -223,6 +223,7 @@ fn sample_macro_field_point_with_influence(
         river_longitudinal_blocks,
         Some(position),
         influence.estuary_strength,
+        influence.estuary_progress,
         influence.estuary_flow_hint,
         influence.estuary_bed_depth_hint,
         config,

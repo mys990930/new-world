@@ -152,16 +152,18 @@ impl<'a> MacroFieldRasterContext<'a> {
                     return None;
                 }
                 let flow_hint = flow_hint_from_plan(plan);
-                let flow_t = flow_hint.clamp(0.0, 1.0);
+                let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
                 let start_half_width_blocks = (plan.bed_width_blocks * 0.55)
                     .max(6.0)
                     .min(plan.broad_valley_width_blocks.max(8.0));
                 let end_half_width_blocks = (start_half_width_blocks
                     + plan.broad_valley_width_blocks * (0.55 + flow_t * 0.95))
                     .max(start_half_width_blocks * 2.0);
-                let length_blocks = (plan.broad_valley_width_blocks * (1.10 + flow_t * 1.30))
-                    .max(plan.bed_width_blocks * 3.0)
-                    .clamp(64.0, 768.0);
+                let length_blocks = estuary_fan_length_blocks(
+                    plan.bed_width_blocks,
+                    plan.broad_valley_width_blocks,
+                    flow_hint,
+                );
                 Some(EstuaryFanRef {
                     segment_id: plan.segment_id.0,
                     origin: endpoints.downstream_position,
@@ -491,6 +493,17 @@ pub(super) struct EstuaryFanRef {
     pub(super) length_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+}
+
+pub(super) fn estuary_fan_length_blocks(
+    bed_width_blocks: f32,
+    broad_valley_width_blocks: f32,
+    flow_hint: f32,
+) -> f32 {
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let valley_reach = broad_valley_width_blocks.max(8.0) * (1.45 + flow_t * 1.55);
+    let bed_reach = bed_width_blocks.max(1.0) * (5.0 + flow_t * 4.0);
+    valley_reach.max(bed_reach).max(192.0).clamp(160.0, 896.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -868,6 +881,21 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
+
+    #[test]
+    fn low_flow_estuary_fan_keeps_minimum_downstream_reach() {
+        let headwater = estuary_fan_length_blocks(2.0, 14.0, 0.02);
+        let downstream = estuary_fan_length_blocks(96.0, 280.0, 0.85);
+
+        assert!(
+            headwater >= 192.0,
+            "low-Q river mouths still need enough downstream fan reach to meet connected ocean: {headwater}"
+        );
+        assert!(
+            downstream > headwater,
+            "high-Q mouths should keep a larger fan than the minimum low-Q guide: headwater={headwater} downstream={downstream}"
+        );
+    }
 
     #[test]
     fn nearest_site_search_does_not_stop_at_first_nonempty_bucket_ring() {

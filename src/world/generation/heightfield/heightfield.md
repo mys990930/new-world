@@ -17,8 +17,9 @@
 water hint와 tile-local post-process smoothing만 수행한다. Q나 river hint를 다시 읽어 terrain을 새로
 깎으면 회귀다.
 terminal river 이후 coast/ocean cell에 퍼지는 estuary fan guide도 같은 규칙을 따른다. fan은
-`macro_field`가 source bed에 굽는 local carve guide이며, `heightfield`가 downstream cell을 river로
-판정 확장하거나 별도 shallow-to-sea carve를 다시 적용하지 않는다.
+`macro_field`가 source bed에 굽는 local carve guide이며, downstream progress 기반의 완만한
+gradient-limited shelf로 해석된다. `heightfield`가 downstream cell을 river로 판정 확장하거나 별도
+shallow-to-sea carve를 다시 적용하지 않는다.
 
 현재 구현 파일 경계:
 
@@ -66,7 +67,8 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
   소비한다. heightfield는 river hint를 terrain carve source로 쓰지 않고 water hint, terrain kind,
   diagnostics, same-context smoothing에만 사용한다.
   terminal 하구 fan도 macro_field/pixelize가 보존한 source bed로만 소비하며, heightfield-local
-  river 판정 확장이나 coast/ocean terrain carve source로 사용하지 않는다.
+  river 판정 확장이나 coast/ocean terrain carve source로 사용하지 않는다. fan 시작/끝의 수면 연결성은
+  macro_field의 progress-based shelf source를 따른다.
 - Perlin relief는 `HeightfieldPerlinConfig.enabled`일 때만 적용하며 기본값은 비활성화다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
