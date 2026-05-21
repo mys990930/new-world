@@ -7,8 +7,6 @@ pub const DEFAULT_HEIGHTFIELD_PERLIN_PERSISTENCE: f32 = 0.5;
 pub const DEFAULT_HEIGHTFIELD_PERLIN_LACUNARITY: f32 = 2.0;
 pub const DEFAULT_HEIGHTFIELD_PERLIN_MAX_ABS_BLOCKS: f32 = 10.0;
 const NEGATIVE_MACRO_HEIGHT_BLOCKS_PER_UNIT: f32 = 2048.0;
-const RIVER_CONTEXTUAL_RELIEF_FULL_WIDTH_BLOCKS: f32 = 24.0;
-const RIVER_CONTEXTUAL_RELIEF_MAX_WIDTH_BLOCKS: f32 = 50.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeightfieldPerlinPlacement {
@@ -106,65 +104,6 @@ pub fn micro_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinC
     (normalized * config.amplitude_blocks).clamp(-config.max_abs_blocks, config.max_abs_blocks)
 }
 
-pub fn river_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
-    if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
-        return 0.0;
-    }
-    if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
-        return 0.0;
-    }
-    if sample.river_core_strength <= 0.5 || sample.river_flow_hint <= 0.0 {
-        return 0.0;
-    }
-    let width_factor = river_contextual_relief_width_factor(sample);
-    if width_factor <= f32::EPSILON {
-        return 0.0;
-    }
-
-    let river_t = sample.river_core_strength.clamp(0.0, 1.0);
-    let bed_t = sample.river_bed_depth_hint.clamp(0.0, 1.0);
-    let rough_t = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
-    let amplitude = (config.amplitude_blocks * (0.72 + rough_t * 0.58 + bed_t * 0.48))
-        .min(config.max_abs_blocks * 1.35)
-        .max(0.0)
-        * river_t
-        * width_factor;
-    if amplitude <= f32::EPSILON {
-        return 0.0;
-    }
-
-    octave_noise_2d(sample.position.x, sample.position.z, config, 0.62, 0x71) * amplitude
-}
-
-pub fn river_bank_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
-    if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
-        return 0.0;
-    }
-    if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
-        return 0.0;
-    }
-    let bank_factor = river_bank_relief_factor(sample);
-    if bank_factor <= f32::EPSILON {
-        return 0.0;
-    }
-
-    let valley_t = sample.river_shoulder_strength.clamp(0.0, 1.0);
-    let bank_t = (1.0 - valley_t).clamp(0.0, 1.0);
-    let rough_t = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
-    let gravel_t = sample.river_gravel_hint.clamp(0.0, 1.0);
-    let shoulder_t = (bank_t * 1.55).clamp(0.0, 1.0);
-    let amplitude = (config.amplitude_blocks * (0.55 + rough_t * 0.45 + gravel_t * 0.35))
-        .min(config.max_abs_blocks * 1.15)
-        .max(0.0)
-        * shoulder_t
-        * bank_factor;
-    if amplitude <= f32::EPSILON {
-        return 0.0;
-    }
-
-    octave_noise_2d(sample.position.x, sample.position.z, config, 0.48, 0xB4) * amplitude
-}
-
 pub fn ocean_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
     if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
         return 0.0;
@@ -233,33 +172,6 @@ fn is_submerged_ocean_source(sample: &MacroFieldSample, config: HeightfieldPerli
 
 fn shallow_ocean_border_band_normalized(config: HeightfieldPerlinConfig) -> f32 {
     config.max_abs_blocks.max(0.0) / NEGATIVE_MACRO_HEIGHT_BLOCKS_PER_UNIT
-}
-
-fn river_bank_relief_factor(sample: &MacroFieldSample) -> f32 {
-    let valley = sample.river_shoulder_strength.clamp(0.0, 1.0);
-    if sample.river_flow_hint <= 0.0 || !sample.river_distance_blocks.is_finite() {
-        return 0.0;
-    }
-
-    let strength_gate = smoothstep01((valley - 0.34) / 0.18);
-    let local_distance_gate = river_contextual_relief_width_factor(sample);
-    (strength_gate * local_distance_gate).clamp(0.0, 1.0)
-}
-
-fn river_contextual_relief_width_factor(sample: &MacroFieldSample) -> f32 {
-    if sample.river_flow_hint <= 0.0 {
-        return 0.0;
-    }
-    if !sample.river_distance_blocks.is_finite() {
-        return 1.0;
-    }
-
-    1.0 - smoothstep01(
-        (sample.river_distance_blocks - RIVER_CONTEXTUAL_RELIEF_FULL_WIDTH_BLOCKS)
-            / (RIVER_CONTEXTUAL_RELIEF_MAX_WIDTH_BLOCKS
-                - RIVER_CONTEXTUAL_RELIEF_FULL_WIDTH_BLOCKS)
-                .max(f32::EPSILON),
-    )
 }
 
 fn perlin_2d(x: f32, z: f32, seed: u64, generator_version: u32, octave: u8) -> f32 {

@@ -4,11 +4,7 @@ use super::mapping::{
     contour_config_for_sample, normalized_to_blocks, resolve_contour_band_height,
     snap_height_to_block, snap_to_contour_step,
 };
-use super::river::{
-    deterministic_river_bank_variation_blocks, deterministic_river_bed_variation_blocks,
-    river_bank_relief_factor, river_bank_slope_lowering_blocks, river_bed_depth_blocks,
-    river_bed_downcut_variation_limit_blocks, river_water_depth_blocks,
-};
+use super::river::{river_bed_depth_blocks, river_water_depth_blocks};
 use super::water::{lake_bed_height_blocks, lake_water_level_blocks, ocean_bed_height_blocks};
 use super::{
     HeightfieldColumn, HeightfieldConfig, HeightfieldPerlinPlacement, HeightfieldTerrainKind,
@@ -40,16 +36,8 @@ pub fn heightfield_column_from_sample(
     );
     let has_core_river_hint =
         sample.river_core_strength >= config.river_water_threshold && sample.river_flow_hint > 0.0;
-    let has_standing_water_mouth_bed_hint = (is_ocean || is_lake)
-        && raw_surface_height_blocks < config.sea_level_blocks
-        && sample.river_flow_hint > 0.0
-        && sample.river_bed_depth_hint > 0.0
-        && sample.river_distance_blocks.is_finite()
-        && sample.river_core_strength > 0.0;
-    let has_river_bed_hint =
-        (has_core_river_hint && !is_ocean && !is_lake) || has_standing_water_mouth_bed_hint;
     let is_river_hint = has_core_river_hint && !is_ocean && !is_lake;
-    let river_bed_depth_blocks = if has_river_bed_hint {
+    let river_bed_depth_blocks = if is_river_hint {
         river_bed_depth_blocks(sample)
     } else {
         0.0
@@ -62,39 +50,6 @@ pub fn heightfield_column_from_sample(
     };
     let lake_water_level_blocks = is_lake.then(|| lake_water_level_blocks(sample, config));
     let is_dry_basin = sample.dry_basin_mask > 0.5;
-    let river_bed_base_height_blocks = surface_height_blocks - river_bed_depth_blocks;
-    let river_bed_relief_blocks = if is_river_hint {
-        perlin::river_bed_relief_blocks(sample, config.perlin).clamp(
-            -river_bed_depth_blocks * 0.75,
-            (river_water_depth_blocks(sample) - 1.0).max(0.0),
-        )
-    } else {
-        0.0
-    };
-    let river_bed_variation_blocks = if has_river_bed_hint {
-        let downcut_limit =
-            river_bed_downcut_variation_limit_blocks(sample, river_bed_depth_blocks);
-        deterministic_river_bed_variation_blocks(sample).clamp(
-            -downcut_limit,
-            (river_water_depth_blocks(sample) - 1.0).max(0.0),
-        )
-    } else {
-        0.0
-    };
-    let river_bank_relief_blocks = if !is_river_hint && !is_ocean && !is_lake {
-        let bank_factor = river_bank_relief_factor(sample, config);
-        ((deterministic_river_bank_variation_blocks(sample)
-            + perlin::river_bank_relief_blocks(sample, config.perlin))
-            * bank_factor)
-            .clamp(-4.0, 4.0)
-    } else {
-        0.0
-    };
-    let river_bank_slope_lowering_blocks = if !is_river_hint && !is_ocean && !is_lake {
-        river_bank_slope_lowering_blocks(sample, config)
-    } else {
-        0.0
-    };
     let ocean_bed_relief_blocks = if is_ocean && surface_height_blocks < config.sea_level_blocks {
         let max_raise_blocks = (config.sea_level_blocks - surface_height_blocks - 1.0).max(0.0);
         perlin::ocean_bed_relief_blocks(sample, config.perlin)
@@ -104,7 +59,7 @@ pub fn heightfield_column_from_sample(
     };
     let river_water_level_blocks = if is_river_hint {
         let base_constrained =
-            river_bed_base_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
+            surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
         let base_snapped = snap_to_contour_step(base_constrained, contour);
         let base_y = snap_height_to_block(base_snapped) as f32;
         Some(snap_height_to_block(
@@ -113,19 +68,14 @@ pub fn heightfield_column_from_sample(
     } else {
         None
     };
-    let surface_height_blocks = if (is_ocean || is_lake) && has_standing_water_mouth_bed_hint {
-        let water = lake_water_level_blocks.unwrap_or(config.sea_level_blocks);
-        (water - river_bed_depth_blocks + river_bed_variation_blocks).min(water - 1.0)
-    } else if is_ocean {
+    let surface_height_blocks = if is_ocean {
         ocean_bed_height_blocks(surface_height_blocks + ocean_bed_relief_blocks, config)
     } else if is_lake {
         lake_water_level_blocks
             .map(|water| lake_bed_height_blocks(surface_height_blocks, water, config))
             .unwrap_or(surface_height_blocks)
-    } else if is_river_hint {
-        river_bed_base_height_blocks + river_bed_relief_blocks + river_bed_variation_blocks
     } else {
-        surface_height_blocks + river_bank_relief_blocks - river_bank_slope_lowering_blocks
+        surface_height_blocks
     };
     let constrained_surface_height_blocks =
         surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
@@ -152,8 +102,7 @@ pub fn heightfield_column_from_sample(
         None
     };
     let water_y = water_level_blocks.map(snap_height_to_block);
-    let river_water_height_blocks =
-        has_river_bed_hint.then_some(water_y.unwrap_or(surface_y) as f32);
+    let river_water_height_blocks = is_river_hint.then_some(water_y.unwrap_or(surface_y) as f32);
     let terrain_kind = if is_ocean {
         HeightfieldTerrainKind::Ocean
     } else if is_lake {

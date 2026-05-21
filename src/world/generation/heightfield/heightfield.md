@@ -12,16 +12,19 @@
 직접 읽어 column-oriented heightfield cache로 바꾸지만, 이 path는 pixelize module이 들어오기 전까지의
 임시 wrapper다. rewrite 후에는 같은 height/water policy를 pixelized columns 위에 적용한다.
 
+책임 경계상 river valley, river bank, river core bed depth, riverbed randomness는 `macro_field`가
+`combined_macro_height`에 bake해서 넘긴다. `heightfield`는 그 결과를 block/contour column으로 resolve하고,
+water hint와 tile-local post-process smoothing만 수행한다. Q나 river hint를 다시 읽어 terrain을 새로
+깎으면 회귀다.
+
 현재 구현 파일 경계:
 
 - `mod.rs`: public config/type/facade API와 leaf module export를 소유한다.
 - `mapping.rs`: macro scalar에서 block height로 가는 변환, contour/snap, interpolation/noise primitive를 소유한다.
 - `column.rs`: 단일 `MacroFieldSample`에서 `HeightfieldColumn`으로 가는 column-local orchestration을 소유한다.
 - `water.rs`: column-local ocean/lake water level과 standing-water bed helper를 소유한다.
-- `river.rs`: macro-field river hint를 heightfield-local bed/bank relief와 river water hint 조정으로
-  해석하는 helper를 소유한다. broad river valley carve는 소유하지 않는다. river water descent 이후에는
-  active water가 있는 same-context river/core 이웃에 한해 높은 bed를 낮추는 1-block cross-section step
-  guard를 적용할 수 있다.
+- `river.rs`: river water hint descent/suppression과 same-context riverbed step smoothing만 소유한다.
+  river bed/bank/valley carve는 소유하지 않는다.
 - `stats.rs`: `HeightfieldTileStats`와 neighbor-delta/tile diagnostics aggregation을 소유한다.
 
 ```text
@@ -56,13 +59,9 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
   coast terrain kind로 보존하고, 최종 terrain bed가 sea level 아래이면 sea-level water hint를 만든다.
 - meso feature geometry를 다시 해석하지 않고, pixelize가 보존한 macro_field-baked meso channel을
   diagnostic/detail input으로 소비한다.
-- selected river bed와 bank/shoulder에는 world-space deterministic relief를 기본 적용해 완전히 균일한
-  계단식 bed를 줄인다. 이 relief는 가능한 한 `raw + river contextual relief + optional Perlin -> contour
-  -> snap/clamp` 순서로 들어가 contour band 자체가 주변 맥락을 읽게 한다. river/ocean/lake water surface
-  continuity는 소유하거나 변경하지 않는다. bed/bank relief는 selected river 주변의 finite distance와
-  strong near-bank valley signal이 있는 좁은 band에만 적용하며, Q 기반 widening은 기본적으로 24 block
-  안쪽에서 fully active, 50 block에서 0으로 fade되는 cap을 따른다. broad valley 주변 지형을 macro
-  noise처럼 흔들면 안 된다.
+- selected river의 valley, bank, bed는 macro_field에서 이미 반영된 `combined_macro_height`로만
+  소비한다. heightfield는 river hint를 terrain carve source로 쓰지 않고 water hint, terrain kind,
+  diagnostics, same-context smoothing에만 사용한다.
 - Perlin relief는 `HeightfieldPerlinConfig.enabled`일 때만 적용하며 기본값은 비활성화다.
 - column conversion은 deterministic하고 병렬 실행 순서에 영향을 받지 않아야 한다.
 
@@ -74,9 +73,9 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 - `mapping.rs`: macro scalar를 block height로 바꾸고 contour/snap 규칙을 적용한다.
 - `column.rs`: 단일 `MacroFieldSample`을 하나의 `HeightfieldColumn`으로 변환하고, water/river helper를 조합한다.
 - `water.rs`: ocean/lake water level과 standing-water bed helper를 계산한다.
-- `river.rs`: bounded river bed/bank relief helper와 river water hint descent/suppression 정책을 소유한다.
-  descent 뒤에는 같은 river core/flow/distance context를 공유하는 active river 이웃에 한해 riverbed
-  cross-section step을 1 block으로 제한하는 downcut-only guard를 적용한다.
+- `river.rs`: river water hint descent/suppression과 same-context riverbed step smoothing을 소유한다.
+  descent 뒤에는 같은 river core/flow/distance context를 공유하는 active river 이웃에 한해 이미 resolve된
+  riverbed cross-section step을 1 block으로 제한하는 downcut-only guard를 적용한다.
 - `stats.rs`: heightfield tile 진단 통계와 neighbor-delta 계측을 계산한다.
 - `column_tests.rs`: `column.rs`의 module-local regression tests를 보관한다.
 
@@ -210,10 +209,11 @@ macro height는 `-0.5..0.0` 범위에서 `-1024..0` block으로, 양수 macro he
 이 scale은 preview 렌더링에서만 세로 비율을 속이는 값이 아니라, macro field contour 추출,
 pixelize integer column resolve, heightfield band resolve가 공유하는 block-height domain이다.
 
-`combined_macro_height`는 이미 macro elevation, ridge raise, broad river shoulder valley, lake flatten을
-합친 pre-Perlin 값이다. 따라서 pixelize/heightfield stage는 river channel carve를 다시 강하게 중복 적용하지 않는다.
-river plan에서 온 narrow river bed 정보는 `river_core_strength`가 있는 column에서 water hint와 terrain kind hint로 보존하고, 실제
-channel carve/water body 폭은 후속 surface/voxel 단계에서 확정한다.
+`combined_macro_height`는 이미 macro elevation, ridge raise, broad river shoulder valley, river core
+center bed profile, deterministic riverbed variation, lake flatten을 합친 pre-heightfield 값이다. 따라서
+pixelize/heightfield stage는 river channel carve를 다시 적용하지 않는다. river plan에서 온 narrow river
+bed 정보는 `river_core_strength`가 있는 column에서 water hint와 terrain kind hint로 보존하며, terrain
+bed 자체는 macro_field-resolved source height를 따른다.
 
 입력 `PixelizedColumn`은 stage 11 `MacroFieldTile`에서 온 source macro scalar를 보존해야 한다.
 connected ocean coast의 land-side scalar가 낮은 양수에서 시작한다면 그 source는 `macro_map`의 coastal
@@ -296,33 +296,16 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
 - river water hint를 shoreline ocean/lake ramp 기준으로 사용하지 않는다.
 - `river_core_strength >= river_water_threshold`인 high-core column만 `River` hint가 될 수 있다.
   기본 threshold는 broad valley shoulder가 곧바로 물/강바닥으로 승격되지 않도록 높게 유지한다.
-  `river_shoulder_strength`는 broad valley lowering과 local bank/shoulder relief gate로만 쓰이며,
-  shoulder만 있는 column은 water column, river terrain kind, river bed depth를 만들지 않는다.
-  river column은 macro_field의 bed-depth hint를 읽어 terrain bed를 water surface와 분리한다. 이 hint는
-  river plan의 Q 기반 `bed_depth_blocks`에서 온 값이므로 heightfield가 다시 임의의 큰 상수로 증폭하지
-  않는다. 상류 수원부는 얕은 1-block 안팎 stream과 작은 V-cut 감각으로 시작하고, 하류로 갈수록 Q에
-  비례해 더 깊은 bed와 더 큰 water depth를 허용한다.
-  다만 selected river source bed가 이미 block-space sea level 아래(`y < 0`)이면 heightfield는 river
-  bed depth를 추가로 subtract하지 않는다. 해당 column은 river terrain/water diagnostics를 유지하지만,
-  below-sea base terrain은 source bed 그대로 보존한다.
-  ocean/lake-owned mouth column은 source bed가 이미 standing-water level 아래일 때만 river bed hint를
-  적용한다. above-sea ocean-owned column은 river diagnostics를 보존할 수 있지만,
-  `river_core_strength` threshold를 넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다.
+  `river_shoulder_strength`는 broad valley diagnostic/context일 뿐, heightfield-local bank carve gate가
+  아니다. shoulder만 있는 column은 water column, river terrain kind, river bed depth를 만들지 않는다.
+  river column의 terrain bed는 macro_field가 넘긴 `combined_macro_height`에서 온다. `river_bed_depth_hint`는
+  water depth와 diagnostic을 위한 hint로만 쓰이며 terrain height에서 다시 subtract하지 않는다. 상류/하류
+  bed 깊이, V/U 단면, bed randomness는 macro_field가 이미 source height에 반영해야 한다.
+  ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
+  넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
-  high-core river bed와 adjacent bank/shoulder에는 deterministic multi-scale value-noise relief를 기본
-  적용한다. bed relief는 broad/medium/small scale noise와 약한 longitudinal ripple을 섞어 1-block snap
-  이후에도 완전히 일률적인 ramp가 되지 않게 하며, downcut 폭은 river bed depth, flow, roughness, gravel
-  hint에 비례하는 bounded range 안으로 제한한다. 이 relief는 contour source에 먼저 들어가지만 water
-  level 계산은 relief 없는 bed 기준을 사용하므로, 수면을 뚫거나 한 column 이웃 river water continuity를
-  깨지 않는다. Q-driven bed/bank influence는 heightfield-local relief 기준으로 50 block 안팎을 넘지
-  않는다.
-  adjacent bank/shoulder relief는 broad river valley guide 전체가 아니라 finite river distance 안의
-  near-bank band에만 들어간다. 낮은 `river_shoulder_strength`만 남아 있는 넓은 주변 지형은 macro_field의
-  broad-valley lowering만 보존하고 heightfield-local noise를 추가하지 않는다. near-bank relief는
-  24..50 block 거리 fade를 사용해 downstream/high-Q 강이 heightfield stage에서 과도하게 넓은 noisy
-  corridor가 되지 않게 한다.
   integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
   이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
   hydrology water surface solve나 final water solve가 아니라 stage 13 vertical slice용 안전 장치다. river water는 하구의
@@ -436,9 +419,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   position, bottom/top `y`, sampled column count를 기록해야 한다.
 - Perlin micro relief와 ocean bed Perlin relief는 `--perlin` preview flag 또는 명시적으로 enabled
   config를 전달한 경우에만 보인다. 기본 preview와 기본 `HeightfieldConfig`에서는
-  `micro_relief_blocks = 0`이다. 다만 selected river bed와 adjacent bank/shoulder의 deterministic
-  multi-scale relief는 기본으로 켜져 있어 완전히 uniform한 river bed나 일정한 ramp-shaped bed를 피한다.
-  enabled config에서는 exact sea level
+  `micro_relief_blocks = 0`이다. River bed/shoulder의 deterministic variation은 heightfield preview가
+  아니라 macro_field source에서 온다. enabled config에서는 exact sea level
   border, Perlin max displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상
   ocean-owned dry terrain이 ordinary land와 같은 micro relief map을 사용한다. ocean bed relief는 sea
   level 아래 terrain bed에만 적용하며 sea-level water surface는 움직이지 않는다.
@@ -507,18 +489,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
 18. Lake와 genuinely submerged ocean source의 land micro relief는 0이고, river column
     `micro_relief_blocks`도 river continuity 보호를 위해 0이다. exact sea level border, Perlin max
     displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상 ocean-owned dry
-    terrain은 ordinary land와 같은 micro relief map을 사용한다. 단, Perlin이 enabled이면 sea level 아래
-    ocean terrain bed, river terrain bed, river bank/shoulder field에는 별도 bounded Perlin offset을 적용할
-    수 있다. bed offset은 water level 계산에 쓰는 기준 bed나 ocean sea-level surface를 움직이지 않아야 한다.
-19. 기본 deterministic river bed/bank relief는 water surface solve가 아니다. world-space x/z,
-    river core/shoulder strength, flow, roughness, gravel hint만 읽고 terrain bed/shoulder를 bounded offset으로 흔든다.
-    river water_y, ocean sea level, lake water level을 직접 바꾸면 회귀다. bed/bank offset은 contour
-    selection 전에 들어가야 하며, finite selected-river distance와 near-bank valley strength gate를
-    통과해야 한다. 단, selected river source bed가 이미 sea level 아래이면 river bed depth subtraction과
-    bed-local relief를 적용하지 않아야 한다. Q-driven local relief width는 24 block 안쪽 fully active,
-    50 block에서 0으로 fade되는 cap을 넘기지 않는다. broad surrounding valley terrain에 post-contour
-    noise를 더하면 회귀다.
-20. ocean/lake-owned river-mouth bed hints must not threshold-cut above-sea source beds. The
-    standing-water mouth carve is a below-sea source-bed policy; above-sea ocean-owned source
-    columns keep ordinary ocean bed resolve and do not create river bed depth solely because
-    `river_core_strength` crosses the river threshold.
+    terrain은 ordinary land와 같은 micro relief map을 사용한다. Perlin이 enabled여도 river terrain bed,
+    river bank, river shoulder에는 별도 heightfield-local offset을 적용하면 안 된다.
+19. River bed/bank/shoulder relief와 Q-driven river morphology는 macro_field가 `combined_macro_height`에
+    bake해야 한다. heightfield가 `river_bed_depth_hint`, `river_shoulder_strength`, roughness, gravel hint를
+    terrain-height offset으로 다시 쓰면 회귀다.
+20. ocean/lake-owned river-mouth bed hints must not threshold-cut above-sea source beds. Above-sea
+    ocean-owned source columns keep ordinary ocean bed resolve and do not create river bed depth solely
+    because `river_core_strength` crosses the river threshold.

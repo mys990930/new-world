@@ -52,8 +52,9 @@ tile로 굽는다.
 - `macro_field`: selected `RiverPlan` geometry를 tile-local raster/cache influence로 굽고, broad
   valley lowering과 downstream hint channel만 제공한다. hydrology routing, selected river 수정,
   final water surface solve, voxel/material output은 소유하지 않는다.
-- `heightfield`: column realization 단계에서 bounded local river bed/bank relief와 integer water hints를
-  적용한다. macro routing을 다시 풀거나 최종 material/voxel channel을 확정하지 않는다.
+- `heightfield`: macro_field/pixelize가 넘긴 river-resolved height를 block column으로 소비하고,
+  integer water hints와 tile-local smoothing만 적용한다. river bed/bank/valley carve를 다시 풀거나
+  최종 material/voxel channel을 확정하지 않는다.
 
 ---
 
@@ -198,14 +199,17 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - 각 sample cell은 실제 물/강바닥 corridor인 `river_core_strength`와 broad valley context guide인
      `river_shoulder_strength`를 분리해 보존한다. `river_valley_strength`는 기존 preview/tool 호환을 위한
      legacy aggregate diagnostic이며 water/bed eligibility의 source가 아니다. combined height에는
-     `river_shoulder_strength` 기반 contextual valley modulation만 반영한다. nearest rounded river
+     `river_shoulder_strength` 기반 contextual valley modulation과 `river_core_strength` 중심부의 bed
+     downcut을 함께 반영한다. nearest rounded river
      source polyline의 누적 arc length에서 결정적인 `river_longitudinal_blocks` hint도 함께 저장하지만,
      이 값은 downstream diagnostic/hint이며 combined height에 직접 noise/bias로 더하지 않는다. segment나
      confluence ownership이 바뀌는 곳에서 longitudinal hint가 hard switch하면 1-block contour가 강
      진행방향과 수직인 직선 seam처럼 읽히기 때문이다. broad valley height는 source macro elevation을
      보존하되, river boundary shape 전체를 균일하게 내리는 fixed floor보다 projected centerline과 주변
      source elevation의 상대 relief를 우선해 낮춘다. 그래서 combined contour는 river를 가로지르는 cut
-     mark가 아니라 river axis와 함께 눕는 낮은 골짜기 맥락으로 읽혀야 한다. narrow bed 단면은 macro field에서 직접 완성하지 않는다.
+     mark가 아니라 river axis와 함께 눕는 낮은 골짜기 맥락으로 읽혀야 한다. narrow bed의 중심부 downcut과
+     deterministic non-uniformity도 이 단계에서 baked source height로 들어가야 하며, heightfield가 이를
+     다시 파면 안 된다.
    - 이 구조의 목표는 기존 `O(samples * candidate curves * curve segments)` distance query를
      `O(curve source rasterization + samples)` 계열의 bounded tile pass로 바꾸는 것이다.
    - 현재 launch 구현은 ridge/coast/river influence를 이 raster pass로 처리한다.
@@ -287,11 +291,12 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - river 전용 noisy curve나 새 river topology를 만들지 않는다.
    - lake boundary/internal/adjacent edge는 hydrology stage에서 selected river가 이미 금지한다.
    - macro_field가 combined height에 반영하는 값은 `river_shoulder_strength` 기반 valley context
-     modulation이다. 이 modulation은 nearest rounded centerline projection의 source elevation context와
-     flow-scaled shoulder strength를 읽고, `river_longitudinal_blocks`는 downstream diagnostic/hint로만
-     보존한다. global x/z projection이나 edge-local arc length를 combined height의 직접 floor-noise source로
-     쓰지 않으므로 broad shoulder 등고선이 river를 가로지르는 반복 slab/band로 고정되면 회귀다. 좁은 river bed,
-     U/V 단면, cutbank/gravel 편향은 이 단계에서 완성하지 않는다.
+     modulation과 `river_core_strength` 기반 center bed downcut이다. 이 modulation은 nearest rounded
+     centerline projection의 source elevation context와 flow-scaled shoulder/core strength를 읽고,
+     `river_longitudinal_blocks`는 downstream diagnostic/hint로만 보존한다. global x/z projection이나
+     edge-local arc length를 combined height의 직접 floor-noise source로 쓰지 않으므로 broad shoulder
+     등고선이 river를 가로지르는 반복 slab/band로 고정되면 회귀다. 좁은 river bed 중심부, U/V 단면의
+     깊이감, roughness/gravel 기반의 작은 비균일성은 이 단계에서 source height로 baked되어야 한다.
    - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
      `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를
@@ -308,10 +313,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      elevation 자체를 보존한 채 relief compression과 stronger centerline pull 중심으로 감산한다. lowland/near-sea
      floor bias는 source relief 또는 projected centerline drop이 있을 때만 매우 약하게 들어가며, high-Q shoulder
      height modulation도 capped logarithmic profile을 읽어 broad valley가 river boundary shape 그대로 균일하게
-     내려앉지 않게 한다. macro_field의 broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
-     이 단계에서 shoulder strength 변화가 source relief를 상쇄할 정도로 깊게 적용되면 contour slab/vertical
-     seam이 생긴다. centerline은 valley 방향성 hint일 뿐 cross-section을 평평하게 만드는 target height가
-     아니다. 단, sea-level 근처 source는 river mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.
+     내려앉지 않게 한다. macro_field의 broad shoulder lowering은 heightfield에서 다시 파지 않아도
+     valley로 읽힐 만큼 충분히 들어가야 하지만, shoulder strength 변화가 source relief를 상쇄할 정도로
+     균일하게 깊어지면 contour slab/vertical seam이 생긴다. centerline은 valley 방향성 hint일 뿐
+     cross-section을 평평하게 만드는 target height가 아니다. 단, sea-level 근처 source는 river
+     mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.
    - river raster pass는 shoulder/core sample마다 가장 가까운 rounded centerline projection과 river
      chain 누적 arc length 기반 `river_longitudinal_blocks`도 보존한다. 이 값은 downstream hint로 유지되지만
      combined height의 직접 floor-noise source가 아니다. 같은 connected river component 안에서 넓은 shoulder
@@ -326,10 +332,10 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      valley topology나 서로 다른 river component ownership을 바꾸지 않는다.
    - 상류 broad-valley context modulation은 land/broad valley가 과하게 넓게 파이지 않도록 낮은 Q에서 좁은
      shoulder로 적용한다. 이 조정은 combined macro height의 broad valley width/profile을 줄이며,
-     center carve strength와 heightfield가 읽는 river bed/water depth hint는 유지하되, core depth hint는
-     이전보다 조금 더 깊게 전달한다.
-   - 깊이 정보는 현재 단순 diagnostic hint로 전달하며, 현실적인 단면 carve는 heightfield/water/surface
-     단계에서 다시 설계한다.
+     center bed downcut과 river bed/water depth hint는 유지한다.
+   - 깊이 정보는 diagnostic hint로도 전달하지만, 현실적인 단면 carve의 terrain-height source는
+     macro_field combined height다. heightfield/water/surface 단계는 이 source를 소비하고 water/material
+     출력을 정리할 뿐 같은 Q를 이용해 terrain을 다시 파지 않는다.
 8. final cell context를 sample 위치에 맞춰 raster/cache한다.
    - final temperature, final hydration, hydrology role, water proximity, rain shadow, biome influence는
      stage 8에서 이미 resolve된 값이다.
@@ -347,14 +353,19 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - protected mask에 닿은 feature는 rejection/attenuation diagnostic을 남기고, river/lake/coast
      continuity를 깨는 contribution을 만들면 안 된다.
 10. 아래 계열로 combined macro height를 계산한다. 이 단계의 river contribution은 최종 물/복셀
-   channel carve가 아니라 heightfield가 읽을 broad valley context guide이며, preview에서 보여야 한다.
+   channel fill은 아니지만, heightfield가 소비할 실제 river valley/core bed terrain source이며 preview에서
+   보여야 한다.
 
 ```text
 combined_macro_height =
     ocean_bathymetry_shape(macro_elevation + ridge_raise + meso_delta)        for ocean-owned samples
-    river_shoulder_context(macro_elevation, centerline_elevation) + ridge_raise + meso_delta
+    river_shoulder_context(macro_elevation, centerline_elevation)
+      - river_core_center_downcut(core_strength, bed_depth_hint, position)
+      + ridge_raise + meso_delta
                                                                     for ordinary non-lake samples
-    river_shoulder_context(macro_elevation, centerline_elevation) + ridge_raise + meso_delta
+    river_shoulder_context(macro_elevation, centerline_elevation)
+      - river_core_center_downcut(core_strength, bed_depth_hint, position)
+      + ridge_raise + meso_delta
       - lake_u_bed_carve                                         for lake/wetland samples
 ```
 
@@ -363,9 +374,9 @@ combined_macro_height =
 ridge guide는 여전히 별도 channel과 stats로 확인할 수 있으며, 이후 stage에서 연결된 broad mountain
 elevation model을 설계한 뒤 재도입한다.
 
-`combined_macro_height`는 최종 terrain height가 아니다. 하지만 stage 10 meso contribution까지는 이미
-bake된 pre-Perlin terrain source다. 이후 Perlin micro relief와 heightfield/water surface composition이
-이 값을 읽는다.
+`combined_macro_height`는 최종 material/voxel fill이 아니다. 하지만 stage 10 meso contribution과 river
+valley/core bed morphology까지 이미 bake된 pre-heightfield terrain source다. 이후 heightfield/water surface
+composition은 이 값을 읽어 column resolve와 post-process smoothing만 수행한다.
 
 Ocean은 lake flatten을 공유하지 않는다. `OceanBasin`/`CoastOcean` sample은 macro_map에서 넘어온
 source `macro_elevation`을 그대로 시작점으로 읽는다. source가 `0` 이상이면 ocean-owned sample이라도
@@ -546,8 +557,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 5. river valley는 hydrology selected segment를 번역한 river plan만 읽어야 하며, macro river candidate를 강으로 해석하면 안 된다.
 6. river morphology는 river plan의 reach parameter를 따라야 한다. broad valley width/depth와 narrow
    bed width/depth는 selected/display flow와 reach type에 비례해야 하며, 고정 폭 corridor를 모든 강에
-   적용하면 안 된다. macro_field combined height는 broad valley를 주로 반영하고, narrow river bed를
-   강하게 직접 파서 bend blob을 만들면 안 된다.
+   적용하면 안 된다. macro_field combined height는 broad valley와 core bed depth를 모두 반영하되,
+   narrow river bed를 원형 blob 집합처럼 직접 찍어내면 안 된다. heightfield가 이 morphology를 다시
+   계산하거나 재-carve하면 회귀다.
 7. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 8. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 9. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
@@ -642,8 +654,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   최대 이동량을 제한하는 작은 scalar다. 기본값은 `0.012`이다. 낮은 flow에서는 직접 감산 depth를 주로
   죽이는 방식이 아니라, river_plan의 좁은 broad-valley width와 raster profile로 valley context 범위를 줄인다.
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
-  `640` blocks다. 실제 narrow bed depth는 combined height에 직접 과하게 새기지 않고
-  heightfield/water/surface stage가 읽는 hint로 남긴다.
+  `640` blocks다. 실제 narrow bed depth는 core center profile을 통해 combined height에 반영하고,
+  같은 bed-depth 값은 heightfield/water/surface stage가 읽는 diagnostic/water-depth hint로도 남긴다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.

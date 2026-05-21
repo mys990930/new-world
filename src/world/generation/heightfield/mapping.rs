@@ -1,4 +1,3 @@
-use super::super::graph::WorldPlanePoint;
 use super::super::macro_field::MacroFieldSample;
 use super::{HeightfieldConfig, HeightfieldContourConfig};
 
@@ -50,50 +49,4 @@ pub(super) fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig
 
 pub(super) fn snap_height_to_block(value: f32) -> i32 {
     value.floor() as i32
-}
-
-pub(super) fn heightfield_value_noise_2d(
-    position: WorldPlanePoint,
-    scale_blocks: f32,
-    salt: u64,
-) -> f32 {
-    let scale = scale_blocks.max(1.0);
-    let x = position.x / scale;
-    let z = position.z / scale;
-    let x0 = x.floor() as i32;
-    let z0 = z.floor() as i32;
-    let tx = smootherstep(x - x0 as f32);
-    let tz = smootherstep(z - z0 as f32);
-    let a = signed_lattice_noise(x0, z0, salt);
-    let b = signed_lattice_noise(x0 + 1, z0, salt);
-    let c = signed_lattice_noise(x0, z0 + 1, salt);
-    let d = signed_lattice_noise(x0 + 1, z0 + 1, salt);
-    let top = a + (b - a) * tx;
-    let bottom = c + (d - c) * tx;
-
-    top + (bottom - top) * tz
-}
-
-pub(super) fn signed_lattice_noise(x: i32, z: i32, salt: u64) -> f32 {
-    let mut value = salt;
-    value ^= (x as i64 as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value ^= (z as i64 as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
-    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    let unit = ((value ^ (value >> 31)) as f64 / u64::MAX as f64) as f32;
-    unit * 2.0 - 1.0
-}
-
-fn smootherstep(value: f32) -> f32 {
-    let t = value.clamp(0.0, 1.0);
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
-
-pub(super) fn smoothstep01(value: f32) -> f32 {
-    let t = value.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-pub(super) fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
 }

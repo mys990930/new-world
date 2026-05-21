@@ -19,8 +19,8 @@ use crate::world::generation::graph::{VoronoiGraphPatch, WorldPlanePoint};
 use crate::world::generation::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use crate::world::generation::river_plan::RiverPlan;
 use height::{
-    combine_macro_height, combine_macro_height_with_river_longitudinal, envelope, is_lake_surface,
-    ridge_envelope, roughened_distance,
+    combine_macro_height_with_river_profile, envelope, is_lake_surface, ridge_envelope,
+    roughened_distance,
 };
 use influence::{MacroFieldInfluenceSample, macro_field_stats, rasterize_influence_fields};
 use ocean::prune_isolated_ocean_fragments;
@@ -119,7 +119,7 @@ pub fn sample_macro_field_point(
     let river_core_strength = river_influence.core_strength;
     let river_shoulder_strength = river_influence.shoulder_strength;
     let river_valley_strength = river_influence.valley_strength;
-    let combined_macro_height = combine_macro_height(
+    let combined_macro_height = combine_macro_height_with_river_profile(
         macro_elevation,
         ocean_mask,
         coast_mask,
@@ -128,7 +128,12 @@ pub fn sample_macro_field_point(
         owner_sample.lake_lowering_factor,
         ridge_influence,
         river_shoulder_strength,
+        river_core_strength,
         river_flow_hint,
+        river_influence.bed_depth_hint,
+        None,
+        river_longitudinal_blocks,
+        Some(position),
         config,
     );
 
@@ -196,7 +201,7 @@ fn sample_macro_field_point_with_influence(
     let river_core_strength = influence.river_core_strength;
     let river_shoulder_strength = influence.river_shoulder_strength;
     let river_valley_strength = influence.river_valley_strength;
-    let combined_macro_height = combine_macro_height_with_river_longitudinal(
+    let combined_macro_height = combine_macro_height_with_river_profile(
         macro_elevation,
         ocean_mask,
         coast_mask,
@@ -205,9 +210,12 @@ fn sample_macro_field_point_with_influence(
         owner_sample.lake_lowering_factor,
         ridge_influence,
         river_shoulder_strength,
+        river_core_strength,
         river_flow_hint,
+        influence.river_bed_depth_hint,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
+        Some(position),
         config,
     );
 

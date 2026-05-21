@@ -1,7 +1,9 @@
 # heightfield/river
 
-`river.rs` owns the heightfield-local interpretation of macro-field river hints: bounded bed/bank relief helpers, river water hint descent/suppression, and a narrow same-context riverbed continuity guard across a heightfield tile.
+`river.rs` owns only heightfield post-processing for river columns: river water hint descent/suppression and the narrow same-context riverbed step guard across a heightfield tile.
 
-`river_core_strength` gates river bed/water behavior. `river_shoulder_strength` gates only the non-water bank/shoulder relief around the selected river corridor. Near the core threshold, high-shoulder non-water banks receive a bounded lowering toward the channel so the lower river does not read as a vertical wall at the first river column. `river_valley_strength` remains a compatibility diagnostic aggregate and is not used to create river water.
+River valley shape, bank lowering, core bed depth, and deterministic river-bed variation are upstream responsibilities baked into `MacroFieldSample.combined_macro_height` by `macro_field`. Heightfield must not reinterpret `river_shoulder_strength`, `river_bed_depth_hint`, or Q as a new terrain carve.
 
-It does not own broad river valley carving or final water solving. It may adjust or suppress river water hints for continuity. After water descent, active river neighbors with nearly identical core strength, flow hint, and river distance may downcut only the higher bed so same-context lower-channel cross-section steps stay within one block; this guard must not move water surfaces, reinterpret hydrology topology, or use standing-water/ocean transitions as riverbed evidence.
+`river_core_strength` gates river water/terrain-kind eligibility. `river_bed_depth_hint` is preserved as a diagnostic and water-depth hint so the resolved macro bed can carry water, but it does not subtract terrain height in this stage.
+
+After river water descent, active river neighbors with nearly identical core strength, flow hint, and river distance may lower only the higher already-resolved bed so same-context lower-channel cross-section steps stay within one block. This is a smoothing guard, not a river morphology pass.

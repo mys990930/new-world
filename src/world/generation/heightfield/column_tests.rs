@@ -1,7 +1,4 @@
 use super::super::mapping::resolve_contour_band_height;
-use super::super::river::{
-    deterministic_river_bank_variation_blocks, deterministic_river_bed_variation_blocks,
-};
 use super::super::stats::neighbor_indices;
 use super::*;
 use crate::world::generation::graph::WorldPlanePoint;
@@ -144,7 +141,7 @@ fn enabled_perlin_keeps_micro_relief_zero_for_water_and_river_columns() {
 }
 
 #[test]
-fn enabled_perlin_can_perturb_river_bed_without_moving_water_surface() {
+fn enabled_perlin_does_not_recut_macro_resolved_river_bed() {
     let mut sample = sample_with_river(37.0, -91.0, 0.25, 0.82);
     sample.river_core_strength = 1.0;
     sample.river_shoulder_strength = 1.0;
@@ -158,24 +155,18 @@ fn enabled_perlin_can_perturb_river_bed_without_moving_water_surface() {
     };
     let enabled = heightfield_column_from_sample(&sample, enabled_config);
 
-    assert_ne!(
-        perlin::river_bed_relief_blocks(&sample, enabled_config.perlin),
-        0.0
-    );
+    assert_eq!(enabled.surface_y, disabled.surface_y);
     assert_eq!(
         enabled.water_level_blocks, disabled.water_level_blocks,
-        "river bed Perlin should not move the river water surface"
-    );
-    assert_eq!(
-        enabled.water_level_blocks, disabled.water_level_blocks,
-        "river bed Perlin should not move the river water surface"
+        "river bed Perlin is no longer a heightfield river-carve input"
     );
     assert_eq!(enabled.micro_relief_blocks, 0.0);
 }
 
 #[test]
-fn enabled_perlin_can_perturb_river_bank_surface() {
+fn enabled_perlin_does_not_recut_river_bank_surface() {
     let mut sample = sample(91.0, -37.0, 0.18, 0.0, 0.0, 0.0, 0.0);
+    sample.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.60;
     sample.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
     sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
     sample.river_distance_blocks = 36.0;
@@ -189,10 +180,7 @@ fn enabled_perlin_can_perturb_river_bank_surface() {
     };
     let enabled = heightfield_column_from_sample(&sample, enabled_config);
 
-    assert_ne!(
-        perlin::river_bank_relief_blocks(&sample, enabled_config.perlin),
-        0.0
-    );
+    assert_eq!(enabled.surface_y, disabled.surface_y);
     assert_eq!(enabled.water_level_blocks, None);
     assert_eq!(enabled.terrain_kind, HeightfieldTerrainKind::Land);
     assert_eq!(
@@ -365,11 +353,11 @@ fn default_contour_snap_preserves_raw_block_scale() {
 }
 
 #[test]
-fn default_river_corridor_uses_same_gap_but_can_cut_bed() {
+fn default_river_corridor_consumes_macro_resolved_bed_without_extra_cut() {
     let config = HeightfieldConfig::default();
-    let land =
-        heightfield_column_from_sample(&sample(0.0, 0.0, 0.01000, 0.0, 0.0, 0.0, 0.0), config);
-    let mut river_sample = sample_with_river(0.0, 0.0, 0.01000, 0.75);
+    let plain =
+        heightfield_column_from_sample(&sample(0.0, 0.0, 0.00400, 0.0, 0.0, 0.0, 0.0), config);
+    let mut river_sample = sample_with_river(0.0, 0.0, 0.00400, 0.75);
     river_sample.river_bed_depth_hint = 1.0;
     let river = heightfield_column_from_sample(&river_sample, config);
 
@@ -377,11 +365,9 @@ fn default_river_corridor_uses_same_gap_but_can_cut_bed() {
         config.contour.min_gap_blocks, config.contour.river_min_gap_blocks,
         "default launch slice uses the same zero-block gap for land and river corridors"
     );
-    assert!(
-        river.surface_height_blocks < land.surface_height_blocks,
-        "river bed hint should cut the bed below the surrounding land: land={} river={}",
-        land.surface_height_blocks,
-        river.surface_height_blocks
+    assert_eq!(
+        river.surface_height_blocks, plain.surface_height_blocks,
+        "heightfield must consume the macro-resolved river bed instead of applying an extra local cut"
     );
     assert!(
         river.water_level_blocks.is_some(),
@@ -408,8 +394,8 @@ fn river_corridor_gap_can_still_override_general_land_gap() {
         "wider configured land gap should still hold ordinary terrain back"
     );
     assert!(
-        river.surface_height_blocks < land.surface_height_blocks,
-        "river corridors keep the smaller gap and then apply river bed carve: land={} river={}",
+        river.surface_height_blocks > land.surface_height_blocks,
+        "river corridors keep the smaller gap only as resolve policy; they must not add a bed carve: land={} river={}",
         land.surface_height_blocks,
         river.surface_height_blocks
     );
@@ -1019,13 +1005,13 @@ fn final_visible_heights_are_integer_blocks() {
 #[test]
 fn river_water_steps_down_to_standing_water_without_large_jumps() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 32.0);
-    let mut first = sample_with_river(0.0, 0.0, 0.006, 0.22);
+    let mut first = sample_with_river(0.0, 0.0, -0.0010, 0.22);
     first.river_bed_depth_hint = 0.25;
-    let mut second = sample_with_river(32.0, 0.0, 0.005, 0.42);
+    let mut second = sample_with_river(32.0, 0.0, -0.0012, 0.42);
     second.river_bed_depth_hint = 0.35;
-    let mut third = sample_with_river(64.0, 0.0, 0.004, 0.62);
+    let mut third = sample_with_river(64.0, 0.0, -0.0014, 0.62);
     third.river_bed_depth_hint = 0.45;
-    let mut fourth = sample_with_river(96.0, 0.0, 0.003, 0.82);
+    let mut fourth = sample_with_river(96.0, 0.0, -0.0016, 0.82);
     fourth.river_bed_depth_hint = 0.55;
     let samples = vec![
         first,
@@ -1144,72 +1130,6 @@ fn river_bed_depth_scales_with_flow_hint() {
 }
 
 #[test]
-fn deterministic_river_bed_variation_does_not_move_water_surface() {
-    let mut left = sample_with_river(37.0, -91.0, 0.20, 0.62);
-    left.river_bed_depth_hint = 0.46;
-    left.river_bank_roughness_hint = 0.80;
-    left.river_gravel_hint = 0.55;
-    let mut right = left;
-    right.position = WorldPlanePoint::new(53.0, -91.0);
-
-    let left_variation = deterministic_river_bed_variation_blocks(&left);
-    let right_variation = deterministic_river_bed_variation_blocks(&right);
-    let left_column = heightfield_column_from_sample(&left, HeightfieldConfig::default());
-    let right_column = heightfield_column_from_sample(&right, HeightfieldConfig::default());
-
-    assert_ne!(
-        left_variation, right_variation,
-        "river bed variation should be deterministic but not uniform across neighboring bed samples"
-    );
-    assert_eq!(
-        left_column.water_y, right_column.water_y,
-        "bed variation must not perturb the river water surface"
-    );
-}
-
-#[test]
-fn river_bed_variation_survives_integer_snap_across_bed_samples() {
-    let config = HeightfieldConfig::default();
-    let mut base = sample_with_river(0.0, 0.0, 0.20, 0.72);
-    base.river_bed_depth_hint = 0.42;
-    base.river_bank_roughness_hint = 0.90;
-    base.river_gravel_hint = 0.70;
-    base.river_cutbank_hint = 0.55;
-
-    let surfaces = [0.0, 11.0, 23.0, 37.0, 52.0, 71.0]
-        .into_iter()
-        .map(|x| {
-            let mut sample = base;
-            sample.position = WorldPlanePoint::new(x, -91.0);
-            heightfield_column_from_sample(&sample, config).surface_y
-        })
-        .collect::<Vec<_>>();
-    let first = surfaces[0];
-
-    assert!(
-        surfaces.iter().any(|surface| *surface != first),
-        "river bed variation should be strong enough to survive 1-block snapping: {surfaces:?}"
-    );
-}
-
-#[test]
-fn deterministic_river_bank_variation_is_available_by_default() {
-    let mut bank = sample_with_river(41.0, 19.0, 0.24, 0.42);
-    bank.river_core_strength = 0.0;
-    bank.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
-    bank.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.70;
-    bank.river_distance_blocks = 32.0;
-    bank.river_bank_roughness_hint = 0.90;
-    bank.river_gravel_hint = 0.60;
-
-    assert_ne!(
-        deterministic_river_bank_variation_blocks(&bank),
-        0.0,
-        "river shoulders should have deterministic default relief even when optional Perlin is disabled"
-    );
-}
-
-#[test]
 fn river_shoulder_strength_does_not_create_water_or_bed_core() {
     let mut shoulder = sample(64.0, 0.0, 0.18, 0.0, 0.0, 0.0, 0.0);
     shoulder.river_core_strength = 0.0;
@@ -1228,7 +1148,7 @@ fn river_shoulder_strength_does_not_create_water_or_bed_core() {
 }
 
 #[test]
-fn high_shoulder_lower_river_bank_slopes_toward_core_without_water() {
+fn high_shoulder_does_not_recut_river_bank_in_heightfield() {
     let mut bank = sample_with_river(0.0, 0.0, 47.0 / DEFAULT_HEIGHTFIELD_MAX_BLOCKS, 0.73);
     bank.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.40;
     bank.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
@@ -1252,11 +1172,9 @@ fn high_shoulder_lower_river_bank_slopes_toward_core_without_water() {
     assert_eq!(bank_column.terrain_kind, HeightfieldTerrainKind::Land);
     assert_eq!(bank_column.water_level_blocks, None);
     assert_eq!(bank_column.river_bed_depth_blocks, 0.0);
-    assert!(
-        plain_column.surface_y - bank_column.surface_y >= 3,
-        "high river shoulder just outside the core should form a sloped lower bank instead of an uncut wall: plain={} bank={}",
-        plain_column.surface_y,
-        bank_column.surface_y
+    assert_eq!(
+        bank_column.surface_y, plain_column.surface_y,
+        "river bank slope must already be present in macro_field; heightfield should not recut it"
     );
 }
 
@@ -1280,11 +1198,6 @@ fn broad_river_surroundings_do_not_get_default_bank_noise() {
     let plain_column = heightfield_column_from_sample(&plain, HeightfieldConfig::default());
 
     assert_eq!(
-        deterministic_river_bank_variation_blocks(&broad),
-        0.0,
-        "broad surrounding valley should not receive deterministic bank relief"
-    );
-    assert_eq!(
         broad_column.surface_y, plain_column.surface_y,
         "broad surrounding terrain should keep the same contour surface as non-river land"
     );
@@ -1304,17 +1217,26 @@ fn preview_perlin_does_not_reintroduce_broad_river_bank_noise() {
     broad.river_bank_roughness_hint = 1.0;
     broad.river_gravel_hint = 1.0;
 
+    let mut plain = broad;
+    plain.river_core_strength = 0.0;
+    plain.river_shoulder_strength = 0.0;
+    plain.river_valley_strength = 0.0;
+    plain.river_distance_blocks = f32::INFINITY;
+    plain.river_flow_hint = 0.0;
+
+    let broad_column = heightfield_column_from_sample(&broad, config);
+    let plain_column = heightfield_column_from_sample(&plain, config);
+
     assert_eq!(
-        perlin::river_bank_relief_blocks(&broad, config.perlin),
-        0.0,
-        "optional Perlin bank relief must stay local to the selected river bank"
+        broad_column.surface_y, plain_column.surface_y,
+        "preview Perlin must not add a river-specific broad bank relief in heightfield"
     );
 }
 
 #[test]
-fn river_bed_hint_can_cut_below_sea_level_at_ocean_mouth() {
+fn macro_resolved_river_bed_can_stay_below_sea_level_at_ocean_mouth() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 2, 1, 1.0);
-    let mut river = sample_with_river(0.0, 0.0, 0.0, 0.95);
+    let mut river = sample_with_river(0.0, 0.0, -0.006, 0.95);
     river.river_bed_depth_hint = 0.85;
     river.river_bank_roughness_hint = 0.2;
     let samples = vec![river, sample(1.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0)];
@@ -1332,7 +1254,7 @@ fn river_bed_hint_can_cut_below_sea_level_at_ocean_mouth() {
     assert_eq!(river.terrain_kind, HeightfieldTerrainKind::River);
     assert!(
         river.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-        "river bed should stay carved below sea level near the mouth: {}",
+        "macro-resolved river bed should stay below sea level near the mouth: {}",
         river.surface_height_blocks
     );
     assert!(
@@ -1346,7 +1268,7 @@ fn river_bed_hint_can_cut_below_sea_level_at_ocean_mouth() {
 }
 
 #[test]
-fn selected_river_bed_hint_can_cut_ocean_column_below_sea_level() {
+fn below_sea_ocean_mouth_preserves_macro_resolved_bed() {
     let mut mouth = sample_with_river(0.0, 0.0, -0.25, 0.98);
     mouth.ocean_mask = 1.0;
     mouth.river_bed_depth_hint = 0.9;
@@ -1361,7 +1283,7 @@ fn selected_river_bed_hint_can_cut_ocean_column_below_sea_level() {
     );
     assert!(
         column.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-        "selected river bed hint should carve the ocean-mouth bed below y=0: {}",
+        "heightfield should preserve an already below-sea macro-resolved ocean-mouth bed: {}",
         column.surface_height_blocks
     );
     assert_eq!(

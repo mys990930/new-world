@@ -2,12 +2,13 @@
 
 ## Role
 
-`perlin` owns optional small-scale heightfield relief for graph-first heightfield columns.
+`perlin` owns optional small-scale non-river heightfield relief for graph-first heightfield columns.
 
 It is a child of `heightfield`, not a macro terrain owner. It adds optional small deterministic
 block offsets inside the heightfield surface resolve. The default config is disabled, so existing
-heightfield generation and previews keep `micro_relief_blocks = 0`; baseline river bed/bank
-variation, when present, is owned by `heightfield` itself rather than this optional Perlin layer.
+heightfield generation and previews keep `micro_relief_blocks = 0`. River bed, bank, and valley
+variation are not owned here; they must be baked into the macro field before heightfield consumes
+the column.
 
 ## Contract
 
@@ -26,15 +27,9 @@ variation, when present, is owned by `heightfield` itself rather than this optio
   the terrain bed, fades in away from the immediate shoreline, and never moves the sea-level water
   surface. Sea-level or above-sea ocean-owned terrain receives no bed-relief water movement from
   this pass, and ocean bed relief must not create a water column.
-- River columns keep `micro_relief_blocks = 0`, but preview-enabled config may add stronger
-  bounded Perlin offsets to the river terrain bed and the adjacent river bank/shoulder field. These
-  offsets share heightfield's contextual relief placement before contour selection and its local
-  width cap: fully active near the selected river, fading out by about 50 blocks. River water surface
-  height is calculated from the unperturbed bed so this pass does not own water continuity.
-- River bank/shoulder Perlin is gated to the same local responsibility as deterministic
-  heightfield bank relief: finite selected-river distance plus a near-bank valley-strength band.
-  It must not add broad post-contour noise to the surrounding macro valley or expand downstream
-  high-Q influence past the heightfield-local width cap.
+- River columns keep `micro_relief_blocks = 0`; preview-enabled config must not add river-specific
+  bed, bank, or shoulder offsets. If a riverbed needs noise or center-depth variation, `macro_field`
+  must bake that into `combined_macro_height` before heightfield resolve.
 - Land, ridge, and dry basin columns may receive relief.
 
 ## Non-Goals

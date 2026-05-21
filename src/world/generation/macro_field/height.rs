@@ -3,6 +3,7 @@ use crate::world::generation::graph::WorldPlanePoint;
 use crate::world::generation::macro_map::{MacroSite, MacroSurfaceKind};
 
 pub(super) const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
+const RIVER_CORE_HEIGHT_PROFILE_THRESHOLD: f32 = 0.88;
 pub(super) fn lake_boundary_lowering_factor(
     primary: MacroSite,
     distance_to_curve_blocks: f32,
@@ -19,6 +20,7 @@ pub(super) fn lake_boundary_lowering_factor(
     }
 }
 
+#[cfg(test)]
 pub(super) fn combine_macro_height(
     macro_elevation: f32,
     ocean_mask: f32,
@@ -48,6 +50,7 @@ pub(super) fn combine_macro_height(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn combine_macro_height_with_river_longitudinal(
     macro_elevation: f32,
     ocean_mask: f32,
@@ -62,15 +65,61 @@ pub(super) fn combine_macro_height_with_river_longitudinal(
     river_longitudinal_blocks: f32,
     config: MacroFieldTileConfig,
 ) -> f32 {
+    combine_macro_height_with_river_profile(
+        macro_elevation,
+        ocean_mask,
+        _coast_mask,
+        _lake_mask,
+        _dry_basin_mask,
+        lake_lowering_factor,
+        ridge_influence,
+        river_shoulder_strength,
+        0.0,
+        river_flow_hint,
+        0.0,
+        river_centerline_macro_elevation,
+        river_longitudinal_blocks,
+        None,
+        config,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn combine_macro_height_with_river_profile(
+    macro_elevation: f32,
+    ocean_mask: f32,
+    _coast_mask: f32,
+    _lake_mask: f32,
+    _dry_basin_mask: f32,
+    lake_lowering_factor: f32,
+    ridge_influence: f32,
+    river_shoulder_strength: f32,
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    river_bed_depth_hint: f32,
+    river_centerline_macro_elevation: Option<f32>,
+    river_longitudinal_blocks: f32,
+    river_position: Option<WorldPlanePoint>,
+    config: MacroFieldTileConfig,
+) -> f32 {
     let ridge_raise = ridge_influence * config.ridge_height_scale;
-    let river_context_height = river_shoulder_context_height(
+    let shoulder_height = river_shoulder_context_height_with_position(
         macro_elevation,
         river_shoulder_strength,
         river_flow_hint,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
+        river_position,
         config,
     );
+    let core_lowering = river_core_center_lowering(
+        river_core_strength,
+        river_flow_hint,
+        river_bed_depth_hint,
+        river_position,
+        config,
+    );
+    let river_context_height = (shoulder_height - core_lowering).min(shoulder_height);
     let mut height = river_context_height + ridge_raise;
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
@@ -80,12 +129,33 @@ pub(super) fn combine_macro_height_with_river_longitudinal(
     height.clamp(-2.0, 2.0)
 }
 
+#[cfg(test)]
 pub(super) fn river_shoulder_context_height(
     macro_elevation: f32,
     river_shoulder_strength: f32,
     river_flow_hint: f32,
     river_centerline_macro_elevation: Option<f32>,
     river_longitudinal_blocks: f32,
+    config: MacroFieldTileConfig,
+) -> f32 {
+    river_shoulder_context_height_with_position(
+        macro_elevation,
+        river_shoulder_strength,
+        river_flow_hint,
+        river_centerline_macro_elevation,
+        river_longitudinal_blocks,
+        None,
+        config,
+    )
+}
+
+fn river_shoulder_context_height_with_position(
+    macro_elevation: f32,
+    river_shoulder_strength: f32,
+    river_flow_hint: f32,
+    river_centerline_macro_elevation: Option<f32>,
+    river_longitudinal_blocks: f32,
+    river_position: Option<WorldPlanePoint>,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let shoulder = river_shoulder_height_strength(river_shoulder_strength);
@@ -95,8 +165,8 @@ pub(super) fn river_shoulder_context_height(
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
     let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let context_t = shoulder * lerp(0.12, 0.44, log_flow_t);
-    let centerline_t = shoulder * lerp(0.28, 0.92, flow_t);
+    let context_t = shoulder * lerp(0.18, 0.70, log_flow_t);
+    let centerline_t = shoulder * lerp(0.36, 1.00, flow_t);
     let centerline_elevation = river_centerline_macro_elevation
         .filter(|height| height.is_finite())
         .unwrap_or(macro_elevation)
@@ -104,22 +174,70 @@ pub(super) fn river_shoulder_context_height(
     let centerline_drop = (macro_elevation - centerline_elevation).max(0.0);
     let positive_relief = macro_elevation.max(0.0);
     let terrain_context = smoothstep_range(0.01, 0.18, positive_relief + centerline_drop * 0.8);
-    let relief_compression = positive_relief * lerp(0.01, 0.038, log_flow_t);
+    let relief_compression = positive_relief * lerp(0.018, 0.070, log_flow_t);
     let contextual_floor_bias =
-        config.river_carve_scale * lerp(0.01, 0.08, log_flow_t) * terrain_context;
-    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.045, log_flow_t);
+        config.river_carve_scale * lerp(0.012, 0.12, log_flow_t) * terrain_context;
+    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.065, log_flow_t);
     let near_sea_t = 1.0 - smoothstep_range(0.0, 0.025, macro_elevation.max(0.0));
     let near_sea_bias =
-        config.river_carve_scale * lerp(0.0, 0.045, log_flow_t) * near_sea_t * terrain_context;
-    let centerline_pull = centerline_drop * centerline_t * lerp(0.08, 0.32, flow_t);
+        config.river_carve_scale * lerp(0.0, 0.075, log_flow_t) * near_sea_t * terrain_context;
+    let centerline_pull = centerline_drop * centerline_t * lerp(0.12, 0.42, flow_t);
     let _ = river_longitudinal_blocks;
+    let noise_scale = river_context_lowering_noise_scale(river_position, 0.16);
     let broad_lowering =
-        (relief_compression + contextual_floor_bias + below_sea_bias + near_sea_bias) * context_t;
-    let max_context_shift = config.river_carve_scale * lerp(0.28, 0.72, log_flow_t)
-        + centerline_drop * lerp(0.08, 0.28, flow_t);
-    let lowering = (broad_lowering + centerline_pull).min(max_context_shift);
+        (relief_compression + contextual_floor_bias + below_sea_bias + near_sea_bias)
+            * context_t
+            * noise_scale;
+    let max_context_shift = config.river_carve_scale * lerp(0.45, 1.65, log_flow_t)
+        + centerline_drop * lerp(0.12, 0.42, flow_t);
+    let lowering = (broad_lowering + centerline_pull * noise_scale).min(max_context_shift);
 
     (macro_elevation - lowering).min(macro_elevation)
+}
+
+pub(super) fn river_core_center_lowering(
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    river_bed_depth_hint: f32,
+    river_position: Option<WorldPlanePoint>,
+    config: MacroFieldTileConfig,
+) -> f32 {
+    let core_t = smoothstep_range(
+        RIVER_CORE_HEIGHT_PROFILE_THRESHOLD,
+        1.0,
+        river_core_strength.clamp(0.0, 1.0),
+    )
+    .powf(1.18);
+    if core_t <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
+    let log_flow_t = river_shoulder_log_growth(river_flow_hint);
+    let bed_t = river_bed_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.45);
+    let base = config.river_carve_scale * lerp(0.32, 2.05, bed_t);
+    let flow_floor = config.river_carve_scale * lerp(0.18, 0.58, flow_t);
+    let noise_scale = river_context_lowering_noise_scale(river_position, lerp(0.10, 0.22, bed_t));
+    let max_shift = config.river_carve_scale * lerp(0.60, 2.80, bed_t);
+
+    ((base + flow_floor) * core_t * noise_scale).min(max_shift)
+}
+
+fn river_context_lowering_noise_scale(
+    river_position: Option<WorldPlanePoint>,
+    amplitude: f32,
+) -> f32 {
+    let Some(position) = river_position else {
+        return 1.0;
+    };
+    let broad = smooth_value_noise_2d(position, 83.0, 0xD1CE_5EED_0001);
+    let medium = smooth_value_noise_2d(
+        WorldPlanePoint::new(position.x + 31.0, position.z - 47.0),
+        29.0,
+        0xD1CE_5EED_0002,
+    );
+    let noise = (broad * 0.68 + medium * 0.32).clamp(-1.0, 1.0);
+    (1.0 + noise * amplitude.clamp(0.0, 0.35)).clamp(0.65, 1.35)
 }
 
 pub(super) fn river_shoulder_height_strength(strength: f32) -> f32 {
@@ -503,12 +621,90 @@ mod tests {
             "downstream shoulder should still grow from upstream context: upstream={upstream_shift} downstream={downstream_shift}"
         );
         assert!(
-            downstream_shift <= config.river_carve_scale * 1.05,
-            "downstream broad valley context should stay near half of the previous high-Q shift budget: {downstream_shift}"
+            downstream_shift > config.river_carve_scale * 1.45
+                && downstream_shift <= config.river_carve_scale * 1.75,
+            "downstream broad valley context should be visibly carved in macro_field while staying bounded: {downstream_shift}"
         );
         assert!(
             near_sea_shift < downstream_shift * 0.25,
             "fixed floor bias should be terrain-context gated instead of lowering every shoulder sample uniformly: near_sea={near_sea_shift} downstream={downstream_shift}"
+        );
+    }
+
+    #[test]
+    fn river_core_center_profile_deepens_center_more_than_edge() {
+        let config = test_tile_config();
+        let position = WorldPlanePoint::new(37.0, -91.0);
+        let edge = combine_macro_height_with_river_profile(
+            0.24,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.89,
+            0.65,
+            0.60,
+            Some(0.18),
+            128.0,
+            Some(position),
+            config,
+        );
+        let center = combine_macro_height_with_river_profile(
+            0.24,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.65,
+            0.60,
+            Some(0.18),
+            128.0,
+            Some(position),
+            config,
+        );
+
+        assert!(
+            center < edge - config.river_carve_scale * 0.55,
+            "river core center should be cut noticeably below the near-edge core in macro_field: edge={edge} center={center}"
+        );
+    }
+
+    #[test]
+    fn river_core_downcut_has_deterministic_world_space_variation() {
+        let config = test_tile_config();
+        let first = river_core_center_lowering(
+            1.0,
+            0.72,
+            0.58,
+            Some(WorldPlanePoint::new(13.0, 29.0)),
+            config,
+        );
+        let second = river_core_center_lowering(
+            1.0,
+            0.72,
+            0.58,
+            Some(WorldPlanePoint::new(47.0, 29.0)),
+            config,
+        );
+        let repeat = river_core_center_lowering(
+            1.0,
+            0.72,
+            0.58,
+            Some(WorldPlanePoint::new(13.0, 29.0)),
+            config,
+        );
+
+        assert_eq!(first, repeat);
+        assert_ne!(
+            first, second,
+            "macro river downcut should include deterministic non-uniformity instead of a perfectly artificial trough"
         );
     }
 
