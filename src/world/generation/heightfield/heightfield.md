@@ -50,8 +50,10 @@ level의 계단식 block height를 최종 terrain surface로 사용한다는 뜻
 - pixelize가 보존한 `combined_macro_height`와 integer `surface_y`를 block-space surface policy로 연결한다.
 - lake mask와 sea level 아래 ocean bed에서 water level과 water column hint를 만든다.
 - river valley, river bed hint, ridge, dry basin, water mask를 diagnostic terrain kind hint로 보존한다.
-- raw `coast_mask`는 column data로만 보존한다. 현재 baseline에서 coast mask는 별도 heightfield
-  terrain kind, water column, shallow shelf, shoreline bevel, land-side ramp를 만들지 않는다.
+- raw `coast_mask`는 column data로 보존한다. broad coast mask만으로는 water column, shallow shelf,
+  shoreline bevel, land-side ramp를 만들지 않는다. 다만 source `surface_kind`가
+  `MacroSurfaceKind::CoastLand` 또는 `MacroSurfaceKind::CoastIsland`인 land-side coast column은
+  coast terrain kind로 보존하고, 최종 terrain bed가 sea level 아래이면 sea-level water hint를 만든다.
 - meso feature geometry를 다시 해석하지 않고, pixelize가 보존한 macro_field-baked meso channel을
   diagnostic/detail input으로 소비한다.
 - selected river bed와 bank/shoulder에는 world-space deterministic relief를 기본 적용해 완전히 균일한
@@ -279,10 +281,14 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   surface와 terrain bed를 분리하며, macro_field가 제공한
   U자형 lake bed height를 terrain surface로 보존한다. lake bed는 source raw bed를 따르되
   수면에서 과도하게 깊어지지 않도록 depth cap만 적용하고, 수면 바로 아래 완전 flat plane으로 덮어쓰면 안 된다.
-- `coast_mask`는 heightfield baseline에서 diagnostic field다. ocean/lake/river/dry/ridge mask가 없는
-  non-ocean land column은 coast mask가 있어도 일반 land와 같은 floor/snap 정책을 따른다. 따라서
-  negative coast-mask land는 below-sea terrain bed와 `water_y = None`을 보존하고, near-zero positive
-  coast-mask land도 deterministic shelf variation 없이 ordinary contour snap을 따른다.
+- `coast_mask`는 heightfield baseline에서 broad diagnostic field다. ocean/lake/river/dry/ridge mask가
+  없는 non-ocean land column은 coast mask만 있어도 일반 land와 같은 floor/snap 정책을 따른다. 따라서
+  negative coast-mask-only land는 below-sea terrain bed와 `water_y = None`을 보존하고, near-zero positive
+  coast-mask-only land도 deterministic shelf variation 없이 ordinary contour snap을 따른다.
+- source `surface_kind`가 `MacroSurfaceKind::CoastLand` 또는 `MacroSurfaceKind::CoastIsland`인
+  land-side coast column은 terrain kind를 `Coast`로 보존한다. 이 explicit coast land의 final terrain bed가
+  `sea_level_blocks` 아래이면 `water_level_blocks` / `water_y`는 sea level이 된다. bed가 sea level
+  이상이면 water hint를 만들지 않는다. ordinary `Continent` / `Island` negative land는 계속 dry bed다.
 - 일반 land column은 raw block height를 contour lower band로 양자화하며, sea level 아래 source terrain을
   dry land bed로 보존할 수 있다. 즉 water가 아닌 terrain에는 `y = 0` 기본 floor를 적용하지 않는다.
 - 일반 land에는 인접 column 기준 final surface ceiling, ocean shoreline bevel, land-side coast ramp를
@@ -463,9 +469,11 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     heightfield-local shallow fallback plane으로 내리면 회귀다. sea-level 이상 ocean bed에는 water
     column을 만들지 않는다. coast-adjacent continuity와 shelf/slope/basin depth는 macro_field
     bathymetry source가 제공해야 하며, heightfield는 그 source bed를 직접 보존한다.
-    ocean owner가 아닌 coast-mask negative land는 일반 non-water land처럼 below-sea terrain bed와
-    `water_y = None`을 보존해야 한다. coast-connected near-zero positive land도 deterministic
-    shallow-shelf variation 없이 ordinary contour snap을 따라야 한다.
+    ocean owner가 아닌 coast-mask-only negative land는 일반 non-water land처럼 below-sea terrain bed와
+    `water_y = None`을 보존해야 한다. explicit `CoastLand` / `CoastIsland` negative land는 coast
+    terrain kind와 sea-level water를 함께 가져야 하며, ocean terrain kind로 승격되면 안 된다.
+    coast-connected near-zero positive land도 deterministic shallow-shelf variation 없이 ordinary contour
+    snap을 따라야 한다.
     lake visible surface는 lake source elevation에서 derive한 water level이며, 일반 lake bed는 그
     아래의 U자형 terrain bed로 분리된다. lake water를 항상 `y = 0`에 고정하거나 lake bed를 완전 flat
     plane으로 만들면 회귀다.

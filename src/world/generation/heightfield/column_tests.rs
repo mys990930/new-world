@@ -8,6 +8,7 @@ use crate::world::generation::graph::WorldPlanePoint;
 use crate::world::generation::macro_field::{
     MacroFieldSample, MacroFieldTile, MacroFieldTileConfig, MacroFieldTileStats,
 };
+use crate::world::generation::macro_map::MacroSurfaceKind;
 use crate::world::generation::{
     DEFAULT_HEIGHTFIELD_CONTOUR_STEP_BLOCKS, DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
     DEFAULT_HEIGHTFIELD_MIN_BLOCKS, DEFAULT_HEIGHTFIELD_NORMALIZED_MAX,
@@ -617,6 +618,53 @@ fn coast_mask_negative_non_ocean_land_preserves_below_sea_bed_without_water() {
         column.visible_surface_height_blocks(),
         column.surface_height_blocks
     );
+}
+
+#[test]
+fn coastland_below_sea_gets_sea_level_water_without_ocean_kind() {
+    let mut coast = sample(0.0, 0.0, -0.01, 0.0, 0.0, 0.0, 0.0);
+    coast.surface_kind = Some(MacroSurfaceKind::CoastLand);
+    coast.coast_mask = 1.0;
+    let column = heightfield_column_from_sample(&coast, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Coast);
+    assert!(
+        column.surface_y < 0,
+        "below-sea coast land should preserve its terrain bed: {}",
+        column.surface_y
+    );
+    assert_eq!(
+        column.water_level_blocks,
+        Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS)
+    );
+    assert_eq!(column.water_y, Some(0));
+}
+
+#[test]
+fn coastisland_below_sea_gets_sea_level_water_without_ocean_kind() {
+    let mut coast = sample(0.0, 0.0, -0.01, 0.0, 0.0, 0.0, 0.0);
+    coast.surface_kind = Some(MacroSurfaceKind::CoastIsland);
+    coast.coast_mask = 1.0;
+    let column = heightfield_column_from_sample(&coast, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Coast);
+    assert_eq!(column.water_y, Some(0));
+}
+
+#[test]
+fn coastland_above_sea_gets_no_water() {
+    let mut coast = sample(0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0);
+    coast.surface_kind = Some(MacroSurfaceKind::CoastLand);
+    coast.coast_mask = 1.0;
+    let column = heightfield_column_from_sample(&coast, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Coast);
+    assert!(
+        column.surface_y >= 0,
+        "above-sea coast land should preserve its terrain bed: {}",
+        column.surface_y
+    );
+    assert_eq!(column.water_y, None);
 }
 
 #[test]

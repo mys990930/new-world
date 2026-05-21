@@ -8,14 +8,6 @@
 - 사용자가 한 번 서브에이전트 spawn 기반 진행을 요청하면, 이후 작업에서도 매번 다시 말하지 않아도 이 정책을 계속 적용한다.
 - 서브에이전트 간 범위 충돌, 소유권 해석, 정책 판단처럼 사용자 결정이 필요한 지점에서는 임의로 진행하지 않고 멈춰서 사용자에게 묻는다.
 
-## Worker Brief Workflow
-
-- 큰 작업을 worker에게 넘기기 전에는 `temp-worker-docs/` 아래에 concise한 md brief를 먼저 만든다.
-- worker brief에는 목표, 단계별 작업, 각 단계의 최소 context, 참고할 기존 md 링크만 적는다.
-- worker brief는 source of truth가 아니라 실행용 handoff 문서다. 설계 권위는 항상 `context.md`와 `src/<module>/<module>.md` 및 관련 leaf 문서가 가진다.
-- worker는 brief를 읽은 뒤에도 Core Rules의 문서 우선 순서를 따라 `context.md`와 대상 모듈 문서를 다시 확인한다.
-- worker brief가 실제 구현과 어긋나면 같은 작업에서 brief 또는 정식 모듈 문서를 갱신하고 보고한다.
-
 ## Core Rules
 
 이 프로젝트는 **Specification-Driven Development (SDD)** 와 **Test-Driven Development (TDD)** 를 함께 따른다. 문서, 계약, 모듈 경계가 의도된 시스템 동작을 정의하고, 구현과 테스트는 그 문서를 기준으로 개발·검증·정렬한다.

@@ -1,4 +1,5 @@
 use super::super::macro_field::MacroFieldSample;
+use super::super::macro_map::MacroSurfaceKind;
 use super::mapping::{
     contour_config_for_sample, normalized_to_blocks, resolve_contour_band_height,
     snap_height_to_block, snap_to_contour_step,
@@ -33,6 +34,10 @@ pub fn heightfield_column_from_sample(
         resolve_contour_band_height(contour_source_height_blocks, contour);
     let is_ocean = sample.ocean_mask > 0.5;
     let is_lake = sample.lake_mask > 0.5;
+    let is_land_side_coast = matches!(
+        sample.surface_kind,
+        Some(MacroSurfaceKind::CoastLand | MacroSurfaceKind::CoastIsland)
+    );
     let has_core_river_hint =
         sample.river_core_strength >= config.river_water_threshold && sample.river_flow_hint > 0.0;
     let has_standing_water_mouth_bed_hint = (is_ocean || is_lake)
@@ -130,6 +135,9 @@ pub fn heightfield_column_from_sample(
     let surface_height_blocks = surface_y as f32;
     let ocean_water_level_blocks = (is_ocean && surface_height_blocks < config.sea_level_blocks)
         .then_some(snap_height_to_block(config.sea_level_blocks) as f32);
+    let coast_water_level_blocks = (is_land_side_coast
+        && surface_height_blocks < config.sea_level_blocks)
+        .then_some(snap_height_to_block(config.sea_level_blocks) as f32);
     let water_level_blocks = if is_ocean {
         ocean_water_level_blocks
     } else if is_lake {
@@ -138,6 +146,8 @@ pub fn heightfield_column_from_sample(
         )
     } else if is_river_hint {
         river_water_level_blocks
+    } else if is_land_side_coast {
+        coast_water_level_blocks
     } else {
         None
     };
@@ -152,6 +162,8 @@ pub fn heightfield_column_from_sample(
         HeightfieldTerrainKind::River
     } else if is_dry_basin {
         HeightfieldTerrainKind::DryBasin
+    } else if is_land_side_coast {
+        HeightfieldTerrainKind::Coast
     } else if sample.ridge_influence > 0.55 {
         HeightfieldTerrainKind::Ridge
     } else {
