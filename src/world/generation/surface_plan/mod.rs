@@ -32,7 +32,7 @@ impl SurfacePlanConfig {
             default_soil_depth_blocks: 3,
             shallow_soil_depth_blocks: 1,
             deep_soil_depth_blocks: 5,
-            boundary_mix_radius_blocks: 2,
+            boundary_mix_radius_blocks: 5,
             boundary_mix_strength_percent: 36,
             river_water_threshold: 0.88,
             coast_threshold: 0.45,
@@ -966,6 +966,19 @@ fn apply_final_material_boundary_wiggle(
                     continue;
                 };
 
+                if layer > 2
+                    && !final_boundary_wiggle_has_lateral_support(
+                        &snapshot,
+                        width,
+                        height,
+                        x,
+                        z,
+                        neighbor.top_block,
+                    )
+                {
+                    continue;
+                }
+
                 let strength = boundary_mix_strength(layer.max(distance), radius, config);
                 let roll =
                     boundary_mix_roll(current.world_x, current.world_z, neighbor.top_block, config);
@@ -1039,6 +1052,23 @@ fn nearest_final_boundary_wiggle_candidate(
     }
 
     best.map(|(neighbor, distance, _)| (neighbor, distance))
+}
+
+fn final_boundary_wiggle_has_lateral_support(
+    columns: &[SurfaceColumnPlan],
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    source_top_block: &'static str,
+) -> bool {
+    let source_neighbor_count = orthogonal_neighbor_indices(width, height, x, z)
+        .into_iter()
+        .flatten()
+        .filter(|&neighbor_index| columns[neighbor_index].top_block == source_top_block)
+        .count();
+
+    source_neighbor_count >= 2
 }
 
 fn final_boundary_wiggle_candidate_allowed(
@@ -1228,6 +1258,20 @@ fn copy_visual_material(target: &mut SurfaceColumnPlan, source: SurfaceColumnPla
     target.soil_depth_blocks = target.soil_depth_blocks.min(source.soil_depth_blocks);
     target.vegetation_allowed &= source.vegetation_allowed;
     target.cover_phase = source.cover_phase;
+}
+
+fn orthogonal_neighbor_indices(
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+) -> [Option<usize>; 4] {
+    [
+        x.checked_sub(1).map(|nx| z * width + nx),
+        (x + 1 < width).then_some(z * width + x + 1),
+        z.checked_sub(1).map(|nz| nz * width + x),
+        (z + 1 < height).then_some((z + 1) * width + x),
+    ]
 }
 
 fn restore_cross_owner_boundary_swaps(
@@ -3205,8 +3249,13 @@ mod tests {
     fn default_noisy_boundary_mixing_is_modest_boundary_feather() {
         let config = SurfacePlanConfig::default();
 
-        assert_eq!(config.boundary_mix_radius_blocks, 2);
+        assert_eq!(config.boundary_mix_radius_blocks, 5);
         assert_eq!(config.boundary_mix_strength_percent, 36);
+        assert_eq!(boundary_mix_strength(1, 5, config), 36);
+        assert_eq!(boundary_mix_strength(2, 5, config), 28);
+        assert_eq!(boundary_mix_strength(3, 5, config), 21);
+        assert_eq!(boundary_mix_strength(4, 5, config), 14);
+        assert_eq!(boundary_mix_strength(5, 5, config), 7);
     }
 
     #[test]
@@ -3525,6 +3574,86 @@ mod tests {
                 "copied final material must stay attached to an original orthogonal source region"
             );
         }
+    }
+
+    #[test]
+    fn final_boundary_wiggle_limits_long_one_cell_straight_protrusions() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 5,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let mut columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(2, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(3, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(4, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(5, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(6, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let original = columns.clone();
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        apply_final_material_boundary_wiggle(&mut columns, 7, 1, config, Some(&mix_sources));
+
+        let straight_sand_intrusion_blocks = columns
+            .iter()
+            .zip(original.iter())
+            .filter(|(column, original)| {
+                original.top_block == "grass" && column.top_block == "sand"
+            })
+            .count();
+        assert!(
+            straight_sand_intrusion_blocks <= 2,
+            "unsupported one-cell-wide straight material protrusions should not keep growing to the full radius"
+        );
+    }
+
+    #[test]
+    fn final_boundary_wiggle_allows_deeper_layers_with_lateral_support() {
+        let columns = vec![
+            test_plan(0, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(2, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(0, 1, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 1, "sand", SurfaceHydrologyRole::Land),
+            test_plan(2, 1, "grass", SurfaceHydrologyRole::Land),
+            test_plan(0, 2, "grass", SurfaceHydrologyRole::Land),
+            test_plan(1, 2, "grass", SurfaceHydrologyRole::Land),
+            test_plan(2, 2, "grass", SurfaceHydrologyRole::Land),
+        ];
+
+        assert!(
+            final_boundary_wiggle_has_lateral_support(&columns, 3, 3, 2, 1, "sand"),
+            "wide or cornered material fronts should remain eligible for deeper feather layers"
+        );
+        assert!(
+            !final_boundary_wiggle_has_lateral_support(&columns, 3, 3, 2, 2, "sand"),
+            "a one-cell-wide straight front has no lateral support for deeper feather layers"
+        );
     }
 
     #[test]

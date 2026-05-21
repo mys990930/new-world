@@ -314,11 +314,7 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   high-core river bed와 adjacent bank/shoulder에는 deterministic multi-scale value-noise relief를 기본
   적용한다. bed relief는 broad/medium/small scale noise와 약한 longitudinal ripple을 섞어 1-block snap
   이후에도 완전히 일률적인 ramp가 되지 않게 하며, downcut 폭은 river bed depth, flow, roughness, gravel
-  hint에 비례하는 bounded range 안으로 제한한다. selected river core 내부에서는
-  `river_core_strength`가 water threshold에서 중심값 1.0으로 갈수록 별도 center-weighted downcut을
-  추가해 near-edge core보다 중심 bed가 더 깊게 파인다. 이 center profile은 edge/bank threshold를
-  확장하지 않으며, deterministic random relief의 positive raise 한도는 center로 갈수록 줄어 center가
-  지속적으로 얕아 보이지 않게 한다. 이 relief는 contour source에 먼저 들어가지만 water
+  hint에 비례하는 bounded range 안으로 제한한다. 이 relief는 contour source에 먼저 들어가지만 water
   level 계산은 relief 없는 bed 기준을 사용하므로, 수면을 뚫거나 한 column 이웃 river water continuity를
   깨지 않는다. Q-driven bed/bank influence는 heightfield-local relief 기준으로 50 block 안팎을 넘지
   않는다.
@@ -518,9 +514,7 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     river core/shoulder strength, flow, roughness, gravel hint만 읽고 terrain bed/shoulder를 bounded offset으로 흔든다.
     river water_y, ocean sea level, lake water level을 직접 바꾸면 회귀다. bed/bank offset은 contour
     selection 전에 들어가야 하며, finite selected-river distance와 near-bank valley strength gate를
-    통과해야 한다. selected river core center profile은 river water threshold 안쪽에서만 활성화되어
-    center로 갈수록 추가 downcut을 주며, positive random bed raise는 center로 갈수록 더 강하게 제한해야
-    한다. 단, selected river source bed가 이미 sea level 아래이면 river bed depth subtraction과
+    통과해야 한다. 단, selected river source bed가 이미 sea level 아래이면 river bed depth subtraction과
     bed-local relief를 적용하지 않아야 한다. Q-driven local relief width는 24 block 안쪽 fully active,
     50 block에서 0으로 fade되는 cap을 넘기지 않는다. broad surrounding valley terrain에 post-contour
     noise를 더하면 회귀다.

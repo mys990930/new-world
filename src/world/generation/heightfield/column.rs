@@ -7,8 +7,7 @@ use super::mapping::{
 use super::river::{
     deterministic_river_bank_variation_blocks, deterministic_river_bed_variation_blocks,
     river_bank_relief_factor, river_bank_slope_lowering_blocks, river_bed_depth_blocks,
-    river_bed_downcut_variation_limit_blocks, river_bed_raise_variation_limit_blocks,
-    river_core_center_downcut_blocks, river_water_depth_blocks,
+    river_bed_downcut_variation_limit_blocks, river_water_depth_blocks,
 };
 use super::water::{lake_bed_height_blocks, lake_water_level_blocks, ocean_bed_height_blocks};
 use super::{
@@ -64,22 +63,10 @@ pub fn heightfield_column_from_sample(
     let lake_water_level_blocks = is_lake.then(|| lake_water_level_blocks(sample, config));
     let is_dry_basin = sample.dry_basin_mask > 0.5;
     let river_bed_base_height_blocks = surface_height_blocks - river_bed_depth_blocks;
-    let river_core_center_downcut_blocks = if is_river_hint {
-        river_core_center_downcut_blocks(sample, config, river_bed_depth_blocks)
-    } else {
-        0.0
-    };
-    let river_bed_raise_variation_limit_blocks = if is_river_hint {
-        river_bed_raise_variation_limit_blocks(sample, config)
-    } else if has_river_bed_hint {
-        (river_water_depth_blocks(sample) - 1.0).max(0.0)
-    } else {
-        0.0
-    };
     let river_bed_relief_blocks = if is_river_hint {
         perlin::river_bed_relief_blocks(sample, config.perlin).clamp(
             -river_bed_depth_blocks * 0.75,
-            river_bed_raise_variation_limit_blocks,
+            (river_water_depth_blocks(sample) - 1.0).max(0.0),
         )
     } else {
         0.0
@@ -87,8 +74,10 @@ pub fn heightfield_column_from_sample(
     let river_bed_variation_blocks = if has_river_bed_hint {
         let downcut_limit =
             river_bed_downcut_variation_limit_blocks(sample, river_bed_depth_blocks);
-        deterministic_river_bed_variation_blocks(sample)
-            .clamp(-downcut_limit, river_bed_raise_variation_limit_blocks)
+        deterministic_river_bed_variation_blocks(sample).clamp(
+            -downcut_limit,
+            (river_water_depth_blocks(sample) - 1.0).max(0.0),
+        )
     } else {
         0.0
     };
@@ -126,9 +115,7 @@ pub fn heightfield_column_from_sample(
     };
     let surface_height_blocks = if (is_ocean || is_lake) && has_standing_water_mouth_bed_hint {
         let water = lake_water_level_blocks.unwrap_or(config.sea_level_blocks);
-        (water - river_bed_depth_blocks - river_core_center_downcut_blocks
-            + river_bed_variation_blocks)
-            .min(water - 1.0)
+        (water - river_bed_depth_blocks + river_bed_variation_blocks).min(water - 1.0)
     } else if is_ocean {
         ocean_bed_height_blocks(surface_height_blocks + ocean_bed_relief_blocks, config)
     } else if is_lake {
@@ -137,7 +124,6 @@ pub fn heightfield_column_from_sample(
             .unwrap_or(surface_height_blocks)
     } else if is_river_hint {
         river_bed_base_height_blocks + river_bed_relief_blocks + river_bed_variation_blocks
-            - river_core_center_downcut_blocks
     } else {
         surface_height_blocks + river_bank_relief_blocks - river_bank_slope_lowering_blocks
     };

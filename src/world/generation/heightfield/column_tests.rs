@@ -1,7 +1,6 @@
 use super::super::mapping::resolve_contour_band_height;
 use super::super::river::{
     deterministic_river_bank_variation_blocks, deterministic_river_bed_variation_blocks,
-    river_bed_raise_variation_limit_blocks, river_core_center_downcut_blocks,
 };
 use super::super::stats::neighbor_indices;
 use super::*;
@@ -1141,65 +1140,6 @@ fn river_bed_depth_scales_with_flow_hint() {
         lower.water_y.expect("lower water") - lower.surface_y
             > headwater.water_y.expect("headwater water") - headwater.surface_y,
         "larger Q should allow deeper water while keeping the surface separate from bed"
-    );
-}
-
-#[test]
-fn selected_river_core_center_downcuts_below_near_edge_core() {
-    let config = HeightfieldConfig::default();
-    let mut edge = sample_with_river(17.0, -23.0, 0.04, 0.78);
-    edge.river_core_strength = config.river_water_threshold;
-    edge.river_shoulder_strength = config.river_water_threshold;
-    edge.river_valley_strength = config.river_water_threshold;
-    edge.river_distance_blocks = 18.0;
-    edge.river_bed_depth_hint = 0.50;
-    edge.river_bank_roughness_hint = 0.55;
-    edge.river_gravel_hint = 0.40;
-    let mut center = edge;
-    center.river_core_strength = 1.0;
-    center.river_shoulder_strength = 1.0;
-    center.river_valley_strength = 1.0;
-    center.river_distance_blocks = 0.0;
-
-    let edge_column = heightfield_column_from_sample(&edge, config);
-    let center_column = heightfield_column_from_sample(&center, config);
-    let center_downcut =
-        river_core_center_downcut_blocks(&center, config, center_column.river_bed_depth_blocks);
-
-    assert_eq!(edge_column.terrain_kind, HeightfieldTerrainKind::River);
-    assert_eq!(center_column.terrain_kind, HeightfieldTerrainKind::River);
-    assert!(
-        center_downcut > 0.0,
-        "core-center profile should add a deterministic downcut"
-    );
-    assert_eq!(
-        center_column.water_y, edge_column.water_y,
-        "center profile should deepen the bed without moving the river water surface"
-    );
-    assert!(
-        center_column.surface_y <= edge_column.surface_y - 2,
-        "river center should cut deeper than the near-edge core: edge={} center={} downcut={}",
-        edge_column.surface_y,
-        center_column.surface_y,
-        center_downcut
-    );
-}
-
-#[test]
-fn selected_river_core_center_limits_positive_random_raise() {
-    let config = HeightfieldConfig::default();
-    let mut edge = sample_with_river(29.0, 11.0, 0.04, 0.82);
-    edge.river_core_strength = config.river_water_threshold;
-    edge.river_bed_depth_hint = 0.55;
-    let mut center = edge;
-    center.river_core_strength = 1.0;
-
-    let edge_limit = river_bed_raise_variation_limit_blocks(&edge, config);
-    let center_limit = river_bed_raise_variation_limit_blocks(&center, config);
-
-    assert!(
-        center_limit < edge_limit,
-        "center random relief should have less positive raise room than the near-edge core: edge={edge_limit} center={center_limit}"
     );
 }
 
