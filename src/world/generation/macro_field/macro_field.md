@@ -370,19 +370,15 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
 
 ```text
 combined_macro_height =
-    river_resolved_source =
-      river_shoulder_context(macro_elevation, centerline_elevation)
-        - river_core_center_downcut(core_strength, bed_depth_hint, position)
-        + ridge_raise + meso_delta
-
-    ocean_bathymetry_shape(
-      estuary_mouth_bathymetry(river_resolved_source))
-                                                                    for ocean-owned samples
-    estuary_mouth_bathymetry(river_resolved_source)
-                                                                    for explicit coast/ocean-mouth samples
-    river_resolved_source
+    ocean_bathymetry_shape(macro_elevation + ridge_raise + meso_delta)        for ocean-owned samples
+    river_shoulder_context(macro_elevation, centerline_elevation)
+      - river_core_center_downcut(core_strength, bed_depth_hint, position)
+      + ridge_raise + meso_delta
                                                                     for ordinary non-lake samples
-    river_resolved_source - lake_u_bed_carve                       for lake/wetland samples
+    river_shoulder_context(macro_elevation, centerline_elevation)
+      - river_core_center_downcut(core_strength, bed_depth_hint, position)
+      + ridge_raise + meso_delta
+      - lake_u_bed_carve                                         for lake/wetland samples
 ```
 
 `ridge_height_scale`의 launch 기본값은 `0`이다. 즉 현재 `combined_macro_height`는 ridge guide를
@@ -395,16 +391,10 @@ valley/core bed morphology까지 이미 bake된 pre-heightfield terrain source�
 composition은 이 값을 읽어 column resolve와 post-process smoothing만 수행한다.
 
 Ocean은 lake flatten을 공유하지 않는다. `OceanBasin`/`CoastOcean` sample은 macro_map에서 넘어온
-source `macro_elevation`을 그대로 시작점으로 읽는다. 일반 source가 `0` 이상이면 ocean-owned sample이라도
-terrain bed를 해수면 이하로 강제하지 않고 source height를 보존한다. 단, selected river influence가
-coast/ocean context와 겹치는 하구 주변은 예외다. 이때 macro_field는 river core를 downstream cell로
-확장하지 않고, coast/ocean 쪽 positive source bed를 bounded estuary bathymetry로 `combined_macro_height <= 0`
-까지 낮춰 heightfield의 기존 ocean water policy가 자연스럽게 적용될 수 있게 한다. 이 lowering은
-river shoulder/core strength, flow/depth hint, near-sea source height, coast/ocean mask를 함께 요구하며,
-lake/dry-basin mask와 flow가 없는 river diagnostic은 제외한다. ordinary coast/ocean 또는 ordinary
-inland river context만으로는 발동하지 않는다. 얕은 음수 source도
-고정 shallow plane으로 점프하지 않고 signed source depth에 가깝게 유지되어 coast->sea y continuity를
-보존한다. 더 깊은 음수 source만 continental shelf -> continental slope -> ocean basin처럼 읽히는 S-curve
+source `macro_elevation`을 그대로 시작점으로 읽는다. source가 `0` 이상이면 ocean-owned sample이라도
+terrain bed를 해수면 이하로 강제하지 않고 source height를 보존한다. 얕은 음수 source도 고정 shallow
+plane으로 점프하지 않고 signed source depth에 가깝게 유지되어 coast->sea y continuity를 보존한다.
+더 깊은 음수 source만 continental shelf -> continental slope -> ocean basin처럼 읽히는 S-curve
 bathymetry로 변환한다. continental shelf는 좁게 유지하고, 그 뒤의 중간
 음수 구간은 slope처럼 빠르게 깊어지며, 큰 음수 구간은 basin depth를 유지해야 한다. ocean combined
 height가 단일 얕은 값으로 눌리면 macro_map의 deep/shallow ocean 신호가 사라지므로 회귀다.
@@ -422,14 +412,10 @@ river가 연결되지 않아도 lake footprint는 유지한다. lake bed는 `mac
 전체 lake를 눌러 완전 평면 바닥을 만들면 회귀다. 다만 hydrology가 selected flow를 연결한 경우에는
 기존 lake boundary/internal/adjacent edge 금지와 inlet/outlet marker 계약을 그대로 따라야 한다.
 
-Coast mask는 기본적으로 진단과 downstream surface/water policy를 위한 channel이며 단독으로는
-`combined_macro_height`를 낮추거나 blend하지 않는다. explicit coast boundary는 coast mask/influence
-source로 남지만, macro_field는 일반 coast-specific boundary profile을 적용하지 않는다. 예외는 selected
-river influence가 coast/ocean context와 만나는 하구 fan이다. 이 경우 coast mask는 water-side context gate로만
-쓰이고, river로 승격하지 않은 shoreline/downstream sample의 source bed를 sea level 아래로 잇는
-estuary bathymetry에 참여한다. lake/dry-basin sample과 flow가 없는 river diagnostic은 이 예외에
-참여하지 않는다. 해안 바로 안쪽 contour가 어떻게 변하는지는 `macro_map` source elevation과 이 제한된
-하구 carve를 분리해 진단한다.
+Coast mask는 진단과 downstream surface/water policy를 위한 channel이며 `combined_macro_height`를
+낮추거나 blend하지 않는다. explicit coast boundary는 coast mask/influence source로 남지만, macro_field는
+coast-specific boundary profile을 적용하지 않는다. 해안 바로 안쪽 contour가 어떻게 변하는지는
+`macro_map` source elevation으로 진단한다.
 
 11. 필요한 경우 `combined_macro_height`에서 contour 진단 layer를 추출한다.
    - contour 추출은 Marching Squares 기반이다.
@@ -599,10 +585,6 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
 13. explicit coast boundary는 coast mask/influence source로 남지만, elevation은 local macro_map
     source interpolation field를 읽는다. macro_field가 connected ocean과 non-ocean terrain 사이에
     별도 coast-specific height profile이나 hard owner plateau를 적용하면 회귀다.
-14. selected river mouth continuity는 river core ownership을 downstream cell로 넓혀 해결하지 않는다.
-    coast/ocean context와 selected river influence가 겹치는 near-sea sample만 bounded estuary
-    bathymetry로 낮추며, ordinary coast/ocean source와 inland river source는 이 helper만으로 물/강
-    ownership이 바뀌면 안 된다.
 
 ---
 
