@@ -675,21 +675,16 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 terminal endpoint 이후
   downstream 방향의 fan/estuary guide를 내부 influence channel로 굽는다. 이 guide는 시작부에서 기존
   terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
-  안에서 얕은 shelf 형태로 퍼진다. low-Q mouth는 fan tail, lateral spread, 최소 downstream reach를
-  더 강하게 보존해 작은 강도 가까운 connected ocean source까지 끊기지 않게 한다. 마지막 river segment가
-  아주 짧거나 mouth source가 sea level보다 높으면 fan 전용 bed-depth hint와 near-sea gate를 낮춰
-  하구 시작점에서 deep trench target으로 급락하지 않게 한다. fan height profile은 high positive coast
-  bank를 억지로 `combined_macro_height <= 0`까지 자르지 않고, sea level 근처의 얕은 shelf만 연속적으로
-  연다. adjacent block 기준 fan cross-slope는 30도 이내(대략 y 1당 x/z 2-3 이상)를 유지해야 한다.
-  deterministic world-space roughness는 fan edge만 흔들며 selected river segment, hydrology adjacency,
-  surface owner mask를 바꾸지 않는다. selected river topology를 downstream cell로 연장하지는 않지만,
-  강한 near-sea estuary fan center는 `river_core_strength`, `river_shoulder_strength`,
-  `river_valley_strength`, `river_flow_hint`, `river_bed_depth_hint` diagnostic/water hint를 export해
-  heightfield가 carving 위에 river water hint를 얹을 수 있게 한다. 이 water hint는 combined height에
-  river core carve를 한 번 더 적용하는 source가 아니며, height 합성은 selected river corridor와 별도의
-  estuary shelf influence만 읽는다. fan edge의 약한 strength는 target depth와 water hint가 함께 약화해
-  경계에서 고립된 water block speckle이나 갑작스러운 한 블록 수면 불일치를 만들지 않아야 한다. lake,
-  wetland, dry basin, ordinary inland/no-flow sample은 이 guide의 carve 대상이 아니다.
+  안에서 얕은 shelf 형태로 퍼진다. low-Q mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도
+  coast/ocean source 쪽으로 끊기지 않게 하고, 마지막 river segment가 아주 짧으면 fan 전용 bed-depth
+  hint를 낮춰 하구 시작점에서 deep trench target으로 급락하지 않게 한다. deterministic world-space
+  roughness는 fan edge만 흔들며 selected
+  river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. `river_core_strength` 또는
+  selected river water corridor를 downstream cell로 승격하지 않고, height 합성에서 estuary influence만
+  읽어 coast/ocean near-sea source를 `combined_macro_height <= 0` 쪽으로 열어 준다. fan edge의 약한
+  strength는 target depth도 함께 약화해 경계에서 고립된 water block speckle이나 갑작스러운 한 블록
+  수면 불일치를 만들지 않아야 한다. lake, wetland, dry basin, ordinary inland/no-flow sample은 이
+  guide의 carve 대상이 아니다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.

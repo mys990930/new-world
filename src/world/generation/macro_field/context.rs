@@ -504,13 +504,13 @@ pub(super) fn estuary_fan_length_blocks(
     flow_hint: f32,
 ) -> f32 {
     let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
-    let low_flow_reach_floor = 320.0 - flow_t * 96.0;
-    let valley_reach = broad_valley_width_blocks.max(8.0) * (1.55 + flow_t * 1.35);
-    let bed_reach = bed_width_blocks.max(1.0) * (8.0 + flow_t * 4.0);
+    let low_flow_reach_floor = 144.0 - flow_t * 40.0;
+    let valley_reach = broad_valley_width_blocks.max(8.0) * (1.15 + flow_t * 1.20);
+    let bed_reach = bed_width_blocks.max(1.0) * (4.5 + flow_t * 3.5);
     valley_reach
         .max(bed_reach)
         .max(low_flow_reach_floor)
-        .clamp(192.0, 1024.0)
+        .clamp(96.0, 768.0)
 }
 
 pub(super) fn estuary_bed_depth_hint(
@@ -906,7 +906,7 @@ mod tests {
         let downstream = estuary_fan_length_blocks(96.0, 280.0, 0.85);
 
         assert!(
-            headwater >= 300.0,
+            headwater >= 128.0,
             "low-Q river mouths still need enough fan reach to meet nearby connected ocean: {headwater}"
         );
         assert!(
