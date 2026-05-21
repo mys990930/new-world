@@ -129,7 +129,6 @@ pub(super) fn combine_macro_height_with_river_profile(
         0.0,
         0.0,
         0.0,
-        0.0,
         config,
     )
 }
@@ -154,7 +153,6 @@ pub(super) fn combine_macro_height_with_estuary_profile(
     river_longitudinal_blocks: f32,
     river_position: Option<WorldPlanePoint>,
     estuary_strength: f32,
-    estuary_progress: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
     config: MacroFieldTileConfig,
@@ -207,7 +205,6 @@ pub(super) fn combine_macro_height_with_estuary_profile(
         lake_lowering_factor,
         _dry_basin_mask,
         estuary_strength,
-        estuary_progress,
         estuary_flow_hint,
         estuary_bed_depth_hint,
         config,
@@ -229,7 +226,6 @@ pub(super) fn estuary_fan_macro_height(
     lake_lowering_factor: f32,
     dry_basin_mask: f32,
     estuary_strength: f32,
-    estuary_progress: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
     config: MacroFieldTileConfig,
@@ -249,14 +245,11 @@ pub(super) fn estuary_fan_macro_height(
 
     let flow_t = smoothstep01(estuary_flow_hint.clamp(0.0, 1.0));
     let bed_t = estuary_bed_depth_hint.clamp(0.0, 1.0);
-    let progress = estuary_progress.clamp(0.0, 1.0);
     let active = smoothstep01(strength) * water_context;
-    let downstream_grade = smoothstep01(progress);
-    let sea_opening = height.max(0.0) * downstream_grade;
-    let slope_depth_budget =
-        config.river_carve_scale * lerp(0.08, 0.52, flow_t) + bed_t * lerp(0.0015, 0.012, flow_t);
-    let below_sea_depth = slope_depth_budget * downstream_grade;
-    let lowering = (sea_opening + below_sea_depth) * active;
+    let shallow_shelf_depth =
+        config.river_carve_scale * lerp(0.35, 1.15, flow_t) + bed_t * lerp(0.006, 0.026, flow_t);
+    let target = -shallow_shelf_depth * lerp(0.45, 1.0, active);
+    let lowering = (height - target).max(0.0) * active;
 
     (height - lowering).min(height)
 }
@@ -1097,15 +1090,12 @@ mod tests {
     #[test]
     fn estuary_fan_lowers_only_coast_or_ocean_near_sea_source() {
         let config = test_tile_config();
-        let coast = estuary_fan_macro_height(
-            0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, config,
-        );
-        let ocean = estuary_fan_macro_height(
-            0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 1.0, 0.85, 0.70, config,
-        );
-        let ordinary = estuary_fan_macro_height(
-            0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, config,
-        );
+        let coast =
+            estuary_fan_macro_height(0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+        let ocean =
+            estuary_fan_macro_height(0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, config);
+        let ordinary =
+            estuary_fan_macro_height(0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
 
         assert!(
             coast <= 0.0,
@@ -1122,42 +1112,12 @@ mod tests {
     }
 
     #[test]
-    fn estuary_fan_lowering_is_gradient_limited_by_downstream_progress() {
-        let config = test_tile_config();
-        let start = estuary_fan_macro_height(
-            0.036, 0.036, 0.0, 1.0, 0.0, 0.0, 0.90, 0.0, 0.60, 0.55, config,
-        );
-        let middle = estuary_fan_macro_height(
-            0.036, 0.036, 0.0, 1.0, 0.0, 0.0, 0.90, 0.5, 0.60, 0.55, config,
-        );
-        let end = estuary_fan_macro_height(
-            0.036, 0.036, 0.0, 1.0, 0.0, 0.0, 0.90, 1.0, 0.60, 0.55, config,
-        );
-
-        assert!(
-            start > middle && middle > end,
-            "estuary fan should descend with downstream progress: start={start} middle={middle} end={end}"
-        );
-        assert!(
-            start - middle <= config.river_carve_scale * 2.2
-                && middle - end <= config.river_carve_scale * 2.2,
-            "estuary fan should limit per-progress height drops instead of snapping to a deep target: start={start} middle={middle} end={end}"
-        );
-        assert!(
-            end <= 0.0 && end > -config.river_carve_scale * 1.5,
-            "estuary fan should open near-sea source to water with a shallow slope budget, not a deep mouth trench: {end}"
-        );
-    }
-
-    #[test]
     fn estuary_fan_excludes_lake_and_dry_basin_sources() {
         let config = test_tile_config();
-        let lake = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, config,
-        );
-        let dry = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.85, 0.70, config,
-        );
+        let lake =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 0.85, 0.70, config);
+        let dry =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, config);
 
         assert_eq!(lake, 0.020);
         assert_eq!(dry, 0.020);
