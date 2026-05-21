@@ -32,8 +32,8 @@ impl SurfacePlanConfig {
             default_soil_depth_blocks: 3,
             shallow_soil_depth_blocks: 1,
             deep_soil_depth_blocks: 5,
-            boundary_mix_radius_blocks: 1,
-            boundary_mix_strength_percent: 28,
+            boundary_mix_radius_blocks: 2,
+            boundary_mix_strength_percent: 36,
             river_water_threshold: 0.88,
             coast_threshold: 0.45,
             ridge_threshold: 0.55,
@@ -3184,11 +3184,11 @@ mod tests {
     }
 
     #[test]
-    fn default_noisy_boundary_mixing_is_one_block_sparse_support() {
+    fn default_noisy_boundary_mixing_is_modest_boundary_feather() {
         let config = SurfacePlanConfig::default();
 
-        assert_eq!(config.boundary_mix_radius_blocks, 1);
-        assert_eq!(config.boundary_mix_strength_percent, 28);
+        assert_eq!(config.boundary_mix_radius_blocks, 2);
+        assert_eq!(config.boundary_mix_strength_percent, 36);
     }
 
     #[test]

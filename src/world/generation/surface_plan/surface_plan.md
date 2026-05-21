@@ -391,8 +391,8 @@ priority를 함께 보고 실제 block을 배치한다.
 - rocky/exposure material override는 현재 기본 resolve에서 비활성이다. `terrain_ruggedness`,
   `ridge_influence`, `RockyCoast` biome, river bank roughness hint는 active water/sediment rule을 제외하고
   land/coast top material을 `gravel`/`wet_gravel`/`rock`/`exposed_rock`으로 승격하지 않는다.
-- `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `1`이고
-  `boundary_mix_strength_percent`는 `28`이다. 다만 기본 surface plan preview/generation path처럼
+- `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `2`이고
+  `boundary_mix_strength_percent`는 `36`이다. 다만 기본 surface plan preview/generation path처럼
   `MacroFieldTile` metadata가 연결된 경우, owner-normalization pass가 `MacroFieldSample.nearest_site`별
   non-water top material을 단일화한 뒤 final boundary wiggle pass가 adjacent owner/material edge에서만
   visual material을 작게 흔든다. 제외 대상은 hydrology role 자체가 아니라 `water_y`가 있는 실제 water
@@ -402,7 +402,7 @@ priority를 함께 보고 실제 block을 배치한다.
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
   한다. 또한 서로 다른 owner 사이에서 인접한 non-water final top material이 달라지는 edge는 해당 두
   noisy-owner site를 잇는 `NoisyBoundaryCurve`의 block-edge support 안에 있어야 한다. 같은 owner 내부의
-  final top material conflict는 final boundary wiggle의 1-block visual feather로 허용한다. 이 audit은
+  final top material conflict는 final boundary wiggle의 2-block visual feather로 허용한다. 이 audit은
   ignored unit test로 보존하며, PNG를 만들지 않고 macro field, Perlin-enabled heightfield, surface plan
   column data를 직접 비교한다.
 - seed `42`, chunk `(-73, -40)`의 focused boundary audit은 1-block guard를 둔 column data를 직접 비교해
