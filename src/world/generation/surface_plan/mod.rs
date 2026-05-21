@@ -738,6 +738,13 @@ pub fn generate_surface_plan_area(
         mix_sources.as_deref(),
     );
     normalize_non_water_owner_surface_materials(&mut columns, macro_field, config);
+    apply_final_material_boundary_wiggle(
+        &mut columns,
+        heightfield.width as usize,
+        heightfield.height as usize,
+        config,
+        mix_sources.as_deref(),
+    );
     let stats = surface_plan_stats(&columns);
 
     SurfacePlanArea {
@@ -914,6 +921,140 @@ fn apply_noisy_boundary_mixing(
         }
     }
     restore_cross_owner_boundary_swaps(columns, &original, width, height, mix_sources);
+}
+
+fn apply_final_material_boundary_wiggle(
+    columns: &mut [SurfaceColumnPlan],
+    width: usize,
+    height: usize,
+    config: SurfacePlanConfig,
+    mix_sources: Option<&[SurfaceMixSource]>,
+) {
+    if columns.is_empty()
+        || width == 0
+        || height == 0
+        || config.boundary_mix_radius_blocks == 0
+        || config.boundary_mix_strength_percent == 0
+    {
+        return;
+    }
+
+    let original = columns.to_vec();
+    let mix_sources = mix_sources.filter(|sources| sources.len() == original.len());
+    let radius = usize::from(config.boundary_mix_radius_blocks);
+    for z in 0..height {
+        for x in 0..width {
+            let index = z * width + x;
+            let current = original[index];
+            let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
+            let Some((neighbor, distance)) = nearest_final_boundary_wiggle_candidate(
+                &original,
+                mix_sources,
+                width,
+                height,
+                x,
+                z,
+                radius,
+                current,
+                current_source,
+                config,
+            ) else {
+                continue;
+            };
+
+            let strength = boundary_mix_strength(distance, radius, config);
+            let roll =
+                boundary_mix_roll(current.world_x, current.world_z, neighbor.top_block, config);
+            if roll >= strength {
+                continue;
+            }
+
+            copy_visual_material(&mut columns[index], neighbor);
+        }
+    }
+    restore_cross_owner_boundary_swaps(columns, &original, width, height, mix_sources);
+}
+
+fn nearest_final_boundary_wiggle_candidate(
+    columns: &[SurfaceColumnPlan],
+    mix_sources: Option<&[SurfaceMixSource]>,
+    width: usize,
+    height: usize,
+    x: usize,
+    z: usize,
+    radius: usize,
+    current: SurfaceColumnPlan,
+    current_source: Option<SurfaceMixSource>,
+    config: SurfacePlanConfig,
+) -> Option<(SurfaceColumnPlan, usize)> {
+    let mut best: Option<(SurfaceColumnPlan, usize, u64)> = None;
+    let min_x = x.saturating_sub(radius);
+    let max_x = (x + radius).min(width.saturating_sub(1));
+    let min_z = z.saturating_sub(radius);
+    let max_z = (z + radius).min(height.saturating_sub(1));
+
+    for nz in min_z..=max_z {
+        for nx in min_x..=max_x {
+            if nx == x && nz == z {
+                continue;
+            }
+            let dx = nx.abs_diff(x);
+            let dz = nz.abs_diff(z);
+            let distance = dx + dz;
+            if distance == 0 || distance > radius || (dx != 0 && dz != 0) {
+                continue;
+            }
+            let neighbor_index = nz * width + nx;
+            let neighbor = columns[neighbor_index];
+            let neighbor_source =
+                mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
+            if !boundary_mix_direction_allows(current, neighbor, config) {
+                continue;
+            }
+            if !final_boundary_wiggle_candidate_allowed(
+                current,
+                neighbor,
+                current_source,
+                neighbor_source,
+            ) {
+                continue;
+            }
+            let tie = boundary_candidate_tie_breaker(current, neighbor, config);
+            match best {
+                Some((_, best_distance, best_tie))
+                    if distance > best_distance
+                        || (distance == best_distance && tie >= best_tie) => {}
+                _ => best = Some((neighbor, distance, tie)),
+            }
+        }
+    }
+
+    best.map(|(neighbor, distance, _)| (neighbor, distance))
+}
+
+fn final_boundary_wiggle_candidate_allowed(
+    current: SurfaceColumnPlan,
+    neighbor: SurfaceColumnPlan,
+    current_source: Option<SurfaceMixSource>,
+    neighbor_source: Option<SurfaceMixSource>,
+) -> bool {
+    if current.top_block == neighbor.top_block {
+        return false;
+    }
+    if current.water_y.is_some() || neighbor.water_y.is_some() {
+        return false;
+    }
+    if protected_water_role(current.hydrology_role) || protected_water_role(neighbor.hydrology_role)
+    {
+        return false;
+    }
+    let (Some(current_site), Some(neighbor_site)) = (
+        current_source.and_then(|source| source.owner_site),
+        neighbor_source.and_then(|source| source.owner_site),
+    ) else {
+        return false;
+    };
+    current_site != neighbor_site
 }
 
 fn nearest_mix_candidate(
@@ -1873,10 +2014,6 @@ mod tests {
             "adjacent noisy-owner cells must not mutually exchange top materials across their shared boundary"
         );
         assert_eq!(
-            final_owner_top_audit.conflicting_owner_count, 0,
-            "final non-water top materials must stay singular within each noisy-boundary owner"
-        );
-        assert_eq!(
             final_transition_audit.unsupported_transition_count, 0,
             "final non-water material transitions must lie on the noisy boundary curve between their owner sites"
         );
@@ -2185,18 +2322,8 @@ mod tests {
         assert_eq!(unsupported_local_mix_count, 0);
         assert_eq!(owner_boundary_swap_count, 0);
         assert_eq!(
-            final_owner_top_audit.conflicting_owner_count, 0,
-            "final non-water top materials must stay singular within each noisy-boundary owner"
-        );
-        assert_eq!(
             final_transition_audit.unsupported_transition_count, 0,
             "final non-water material transitions must lie on the noisy boundary curve between their owner sites"
-        );
-        assert!(
-            chunk_owner_top_counts
-                .values()
-                .all(|counts| counts.len() <= 1),
-            "focused chunk final non-water top materials must stay singular within each noisy-boundary owner"
         );
     }
 
@@ -2320,10 +2447,13 @@ mod tests {
                     {
                         continue;
                     }
-
-                    audit.transition_count += 1;
                     let left_sample = samples[index];
                     let right_sample = samples[neighbor_index];
+                    if left_sample.nearest_site == right_sample.nearest_site {
+                        continue;
+                    }
+
+                    audit.transition_count += 1;
                     let midpoint = WorldPlanePoint::new(
                         (left_sample.position.x + right_sample.position.x) * 0.5,
                         (left_sample.position.z + right_sample.position.z) * 0.5,
@@ -2459,14 +2589,21 @@ mod tests {
                 let neighbor = base_columns[neighbor_index];
                 let neighbor_source =
                     mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
+                let same_owner_mix = mix_candidate_allowed_with_sources(
+                    current,
+                    neighbor,
+                    current_source,
+                    neighbor_source,
+                );
+                let final_boundary_wiggle = final_boundary_wiggle_candidate_allowed(
+                    current,
+                    neighbor,
+                    current_source,
+                    neighbor_source,
+                );
                 if neighbor.top_block == final_top_block
                     && boundary_mix_direction_allows(current, neighbor, config)
-                    && mix_candidate_allowed_with_sources(
-                        current,
-                        neighbor,
-                        current_source,
-                        neighbor_source,
-                    )
+                    && (same_owner_mix || final_boundary_wiggle)
                 {
                     return true;
                 }
@@ -2514,14 +2651,21 @@ mod tests {
                 let neighbor = base_columns[neighbor_index];
                 let neighbor_source =
                     mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
+                let same_owner_mix = mix_candidate_allowed_with_sources(
+                    current,
+                    neighbor,
+                    current_source,
+                    neighbor_source,
+                );
+                let final_boundary_wiggle = final_boundary_wiggle_candidate_allowed(
+                    current,
+                    neighbor,
+                    current_source,
+                    neighbor_source,
+                );
                 if neighbor.top_block == final_top_block
                     && boundary_mix_direction_allows(current, neighbor, config)
-                    && mix_candidate_allowed_with_sources(
-                        current,
-                        neighbor,
-                        current_source,
-                        neighbor_source,
-                    )
+                    && (same_owner_mix || final_boundary_wiggle)
                 {
                     return Some((neighbor_index, neighbor));
                 }
@@ -2907,7 +3051,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_surface_plan_area_keeps_noisy_owner_material_boundaries() {
+    fn generate_surface_plan_area_keeps_owner_interiors_but_wiggles_boundary_material() {
         let heightfield = heightfield_tile(
             2,
             1,
@@ -2939,7 +3083,10 @@ mod tests {
         let audit = audit_final_non_water_tops_by_owner(&macro_field.samples, &area.columns);
 
         assert_eq!(area.columns[0].top_block, "sand");
-        assert_eq!(area.columns[1].top_block, "grass");
+        assert_eq!(
+            area.columns[1].top_block, "sand",
+            "final material-only wiggle may step the adjacent coast material across the owner edge"
+        );
         assert_eq!(audit.checked_column_count, 2);
         assert_eq!(audit.owner_count, 2);
         assert_eq!(audit.conflicting_owner_count, 0);
@@ -3187,6 +3334,130 @@ mod tests {
             columns[1].top_block, "grass",
             "local material breakup must not copy material across the macro owner boundary"
         );
+    }
+
+    #[test]
+    fn final_boundary_wiggle_can_cross_owner_sites_after_normalization() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 1,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let heightfield = heightfield_tile(
+            2,
+            1,
+            vec![
+                column(0.0, 0.0, HeightfieldTerrainKind::Land),
+                column(1.0, 0.0, HeightfieldTerrainKind::Land),
+            ],
+        );
+        let mut coast_owner = sample(0.0, 0.0, GraphBiomeKind::SandyCoast);
+        let mut grass_owner = sample(1.0, 0.0, GraphBiomeKind::TemperateGrassland);
+        coast_owner.nearest_site = Some(VoronoiSiteId(1));
+        grass_owner.nearest_site = Some(VoronoiSiteId(2));
+        let macro_field = MacroFieldTile {
+            config: MacroFieldTileConfig::new(0.0, 0.0, 2, 1, 1.0),
+            samples: vec![coast_owner, grass_owner],
+            stats: MacroFieldTileStats::default(),
+        };
+
+        let area = generate_surface_plan_area(&heightfield, Some(&macro_field), config);
+
+        assert_ne!(
+            (area.columns[0].top_block, area.columns[1].top_block),
+            ("sand", "grass"),
+            "final edge wiggle should visually step one normalized owner material across the boundary"
+        );
+        assert!(
+            area.columns[0].top_block == area.columns[1].top_block,
+            "one-way final edge wiggle should avoid pair swaps"
+        );
+    }
+
+    #[test]
+    fn final_boundary_wiggle_does_not_change_height_water_or_role() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 1,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let mut columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Coast),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        columns[0].surface_y = 12;
+        columns[1].surface_y = 24;
+        let original = columns.clone();
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        apply_final_material_boundary_wiggle(&mut columns, 2, 1, config, Some(&mix_sources));
+
+        for (column, original) in columns.iter().zip(original) {
+            assert_eq!(column.surface_y, original.surface_y);
+            assert_eq!(column.water_y, original.water_y);
+            assert_eq!(column.hydrology_role, original.hydrology_role);
+        }
+    }
+
+    #[test]
+    fn final_boundary_wiggle_does_not_cross_active_water_boundaries() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 1,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let mut columns = vec![
+            test_plan(0, 0, "silt", SurfaceHydrologyRole::Ocean),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        columns[0].water_y = Some(5);
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        apply_final_material_boundary_wiggle(&mut columns, 2, 1, config, Some(&mix_sources));
+
+        assert_eq!(columns[0].top_block, "silt");
+        assert_eq!(columns[0].water_y, Some(5));
+        assert_eq!(columns[1].top_block, "grass");
+        assert_eq!(columns[1].water_y, None);
+    }
+
+    #[test]
+    fn final_boundary_wiggle_restores_mutual_adjacent_owner_swaps() {
+        let mut columns = vec![
+            test_plan(0, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "sand", SurfaceHydrologyRole::Land),
+        ];
+        let original = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        restore_cross_owner_boundary_swaps(&mut columns, &original, 2, 1, Some(&mix_sources));
+
+        assert_eq!(columns[0].top_block, "sand");
+        assert_eq!(columns[1].top_block, "grass");
     }
 
     #[test]

@@ -197,11 +197,18 @@ fringe처럼 hydrology role은 남아 있지만 실제 물 column이 아닌 표�
 Voronoi owner cell 내부의 일반 표면이 `sand`/`wet_sand`나 `grass`/`sand`처럼 넓은 덩어리로 갈라지면
 회귀다.
 
+owner 내부 정규화가 끝난 뒤에는 작은 final material-only boundary wiggle pass를 한 번 더 적용한다. 이
+pass는 인접 owner/material 경계의 비활성 non-water surface column 사이에서만 orthogonal neighbor의
+visual material fields(`top_block`과 대응되는 visual companion block fields)를 deterministic하게 복사할 수
+있다. 이 단계는 owner site, biome, `surface_y`, `water_y`, `hydrology_role`을 바꾸지 않으며 active water
+column 경계는 넘지 않는다. 서로 맞닿은 두 owner column이 서로의 base top material을 맞교환하는 경우는
+checkerboard artifact를 피하기 위해 base material로 되돌린다.
+
 `boundary_mix_radius_blocks`는 macro owner metadata가 없는 fallback 또는 실제 water bed 같은 protected column을
 위한 보조 pass로 남아 있지만, macro-field 기반 preview/generation path에서는 noisy-owner 정규화가 최종
-non-water top material을 다시 닫는다. 서로 다른 owner site 사이의 material copy는 계속 금지되고,
-shared boundary 양쪽의 두 owner column이 서로의 base top material을 맞교환한 상태가 되면 그 pair는
-base material로 되돌린다.
+owner interior material을 먼저 닫은 뒤 shared boundary 주변만 visual-only로 다시 흔든다. owner 내부
+mix는 서로 다른 owner site 사이의 material copy를 계속 금지하고, final boundary wiggle만 제한적으로 owner
+경계를 넘는다.
 
 ---
 
@@ -374,7 +381,8 @@ priority를 함께 보고 실제 block을 배치한다.
 
 - graph-first surface/material resolve launch slice가 `SurfaceColumnPlan`을 생성한다.
 - biome 기본 palette, ocean/lake/river/wetland/coast/dry-basin override를 적용한 뒤,
-  `MacroFieldSample.nearest_site` 기준으로 non-water noisy-owner top material을 단일화한다.
+  `MacroFieldSample.nearest_site` 기준으로 non-water noisy-owner top material을 단일화하고, 마지막에
+  adjacent owner/material edge 주변에 material-only boundary wiggle을 적용한다.
 - `MacroFieldTile` compatibility input이 연결된 area path는 heightfield/macro-field row-major length,
   dimensions, sample positions가 일치하지 않으면 panic으로 중단한다. 이 검증은 preview나 audit이 서로
   다른 좌표 footprint를 같은 column처럼 비교하는 회귀를 막기 위한 launch-scope contract다.
@@ -385,16 +393,20 @@ priority를 함께 보고 실제 block을 배치한다.
   land/coast top material을 `gravel`/`wet_gravel`/`rock`/`exposed_rock`으로 승격하지 않는다.
 - `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `1`이고
   `boundary_mix_strength_percent`는 `28`이다. 다만 기본 surface plan preview/generation path처럼
-  `MacroFieldTile` metadata가 연결된 경우, final pass가 `MacroFieldSample.nearest_site`별 non-water top
-  material을 단일화한다. 제외 대상은 hydrology role 자체가 아니라 `water_y`가 있는 실제 water column이다.
+  `MacroFieldTile` metadata가 연결된 경우, owner-normalization pass가 `MacroFieldSample.nearest_site`별
+  non-water top material을 단일화한 뒤 final boundary wiggle pass가 adjacent owner/material edge에서만
+  visual material을 작게 흔든다. 제외 대상은 hydrology role 자체가 아니라 `water_y`가 있는 실제 water
+  column이다.
 - seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
   noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
-  한다. 또한 인접한 non-water final top material이 달라지는 모든 edge는 해당 두 noisy-owner site를 잇는
-  `NoisyBoundaryCurve`의 block-edge support 안에 있어야 한다. 이 audit은 ignored unit test로 보존하며,
-  PNG를 만들지 않고 macro field, Perlin-enabled heightfield, surface plan column data를 직접 비교한다.
+  한다. 또한 서로 다른 owner 사이에서 인접한 non-water final top material이 달라지는 edge는 해당 두
+  noisy-owner site를 잇는 `NoisyBoundaryCurve`의 block-edge support 안에 있어야 한다. 같은 owner 내부의
+  final top material conflict는 final boundary wiggle의 1-block visual feather로 허용한다. 이 audit은
+  ignored unit test로 보존하며, PNG를 만들지 않고 macro field, Perlin-enabled heightfield, surface plan
+  column data를 직접 비교한다.
 - seed `42`, chunk `(-73, -40)`의 focused boundary audit은 1-block guard를 둔 column data를 직접 비교해
   noisy owner site, biome, base top block, final top block, local mix source neighbor를 출력한다. 이 audit
   역시 preview 이미지 없이 adjacent owner pair의 mutual material swap이 없는지,
-  final non-water top material이 같은 noisy owner site 안에서 하나뿐인지, 그리고 material transition edge가
-  noisy boundary curve 자체의 block-edge support로 지지되는지 검사한다.
+  서로 다른 owner 사이의 material transition edge가 noisy boundary curve 자체의 block-edge support로
+  지지되는지 검사한다.
