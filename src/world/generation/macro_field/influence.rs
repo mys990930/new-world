@@ -8,7 +8,7 @@ use super::river::{
     river_boundary_roughness_blocks, river_boundary_roughness_offset,
     river_core_strength_for_roughened_distance, river_hints_from_strength,
     river_shoulder_radius_blocks, river_valley_strength_for_roughened_distance,
-    river_water_radius_blocks, squared_distance,
+    river_water_radius_blocks, signed_side, squared_distance,
 };
 use super::types::{MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats};
 use crate::world::generation::boundary::NoisyBoundaryCurve;
@@ -484,6 +484,69 @@ pub(super) fn segment_longitudinal_blocks(
         .copied()
         .unwrap_or(start);
     source.longitudinal_start_blocks + lerp(start, end, t.clamp(0.0, 1.0))
+}
+
+fn river_segment_bend_strength(source: &RiverRasterWorkSource, segment_index: usize) -> f32 {
+    if source.points.len() < 3 || segment_index + 1 >= source.points.len() {
+        return 0.0;
+    }
+    let start = source.points[segment_index];
+    let end = source.points[segment_index + 1];
+    let start_turn = segment_index
+        .checked_sub(1)
+        .map(|previous| signed_turn_strength(source.points[previous], start, end))
+        .unwrap_or(0.0);
+    let end_turn = source
+        .points
+        .get(segment_index + 2)
+        .map(|next| signed_turn_strength(start, end, *next))
+        .unwrap_or(0.0);
+
+    (start_turn + end_turn).clamp(-1.0, 1.0)
+}
+
+fn river_bend_bar_hints(
+    position: WorldPlanePoint,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    bend_strength: f32,
+    core_strength: f32,
+    shoulder_strength: f32,
+    flow_hint: f32,
+) -> (f32, f32) {
+    let bend = bend_strength.clamp(-1.0, 1.0);
+    if bend.abs() <= 0.08 {
+        return (0.0, 0.0);
+    }
+    let side = signed_side(position, start, end);
+    if side.abs() <= f32::EPSILON {
+        return (0.0, 0.0);
+    }
+
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let bend_t = smoothstep01((bend.abs() - 0.08) / 0.72);
+    let active_strength = core_strength.max(shoulder_strength * 0.72).clamp(0.0, 1.0);
+    let inside_bend = (side * bend) < 0.0;
+    if inside_bend {
+        (active_strength * bend_t * lerp(0.18, 0.34, flow_t), 0.0)
+    } else {
+        (0.0, active_strength * bend_t * lerp(0.24, 0.44, flow_t))
+    }
+}
+
+fn signed_turn_strength(a: WorldPlanePoint, b: WorldPlanePoint, c: WorldPlanePoint) -> f32 {
+    let ab_x = b.x - a.x;
+    let ab_z = b.z - a.z;
+    let bc_x = c.x - b.x;
+    let bc_z = c.z - b.z;
+    let ab_len = (ab_x * ab_x + ab_z * ab_z).sqrt();
+    let bc_len = (bc_x * bc_x + bc_z * bc_z).sqrt();
+    let denom = ab_len * bc_len;
+    if denom <= f32::EPSILON {
+        0.0
+    } else {
+        ((ab_x * bc_z - ab_z * bc_x) / denom).clamp(-1.0, 1.0)
+    }
 }
 
 pub(super) fn rounded_river_raster_points(
@@ -973,6 +1036,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
         let centerline_position = nearest_point_on_segment(position, start, end);
         let centerline_t = projected_t_on_segment(position, start, end);
         let longitudinal_blocks = segment_longitudinal_blocks(source, segment_index, centerline_t);
+        let bend_strength = river_segment_bend_strength(source, segment_index);
         let mut profile_sum = 0.0;
         let mut core_sum = 0.0;
         let mut shoulder_sum = 0.0;
@@ -1012,14 +1076,23 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             let valley_strength = core_strength.max(shoulder_strength);
             let hints =
                 river_hints_from_strength(core_strength, source.flow_hint, source.bed_depth_blocks);
+            let (gravel_bend, cutbank_bend) = river_bend_bar_hints(
+                subpixel,
+                start,
+                end,
+                bend_strength,
+                core_strength,
+                shoulder_strength,
+                source.flow_hint,
+            );
             closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
             core_sum += core_strength;
             shoulder_sum += shoulder_strength;
             profile_sum += valley_strength;
             bed_sum += hints.bed_depth_hint;
             rough_sum += hints.bank_roughness_hint;
-            gravel_sum += hints.gravel_hint;
-            cutbank_sum += hints.cutbank_hint;
+            gravel_sum += hints.gravel_hint.max(gravel_bend);
+            cutbank_sum += hints.cutbank_hint.max(cutbank_bend);
         }
         let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
         if anti_aliased_strength <= 0.0 {
@@ -1415,6 +1488,53 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
+
+    #[test]
+    fn bend_bar_hints_separate_inside_gravel_from_outside_cutbank() {
+        let source = RiverRasterWorkSource {
+            edge: VoronoiEdgeId(7),
+            points: vec![
+                WorldPlanePoint::new(0.0, 0.0),
+                WorldPlanePoint::new(64.0, 0.0),
+                WorldPlanePoint::new(64.0, 64.0),
+            ],
+            cumulative_lengths: vec![0.0, 64.0, 128.0],
+            longitudinal_start_blocks: 0.0,
+            flow_hint: 0.72,
+            water_width_blocks: 48.0,
+            valley_width_blocks: 160.0,
+            bed_depth_blocks: 12.0,
+            component_id: 0,
+        };
+        let bend = river_segment_bend_strength(&source, 0);
+        let (inside_gravel, inside_cutbank) = river_bend_bar_hints(
+            WorldPlanePoint::new(32.0, 12.0),
+            source.points[0],
+            source.points[1],
+            bend,
+            0.95,
+            0.80,
+            source.flow_hint,
+        );
+        let (outside_gravel, outside_cutbank) = river_bend_bar_hints(
+            WorldPlanePoint::new(32.0, -12.0),
+            source.points[0],
+            source.points[1],
+            bend,
+            0.95,
+            0.80,
+            source.flow_hint,
+        );
+
+        assert!(
+            inside_gravel > inside_cutbank,
+            "inside bend should bias toward gravel bar: gravel={inside_gravel} cutbank={inside_cutbank}"
+        );
+        assert!(
+            outside_cutbank > outside_gravel,
+            "outside bend should bias toward stronger cutbank carve: gravel={outside_gravel} cutbank={outside_cutbank}"
+        );
+    }
 
     #[test]
     fn ridge_influence_is_higher_near_ridge_curve_than_far_sample() {

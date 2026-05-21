@@ -77,6 +77,9 @@ pub(super) fn combine_macro_height_with_river_longitudinal(
         0.0,
         river_flow_hint,
         0.0,
+        0.0,
+        0.0,
+        0.0,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
         None,
@@ -97,6 +100,9 @@ pub(super) fn combine_macro_height_with_river_profile(
     river_core_strength: f32,
     river_flow_hint: f32,
     river_bed_depth_hint: f32,
+    river_bank_roughness_hint: f32,
+    river_gravel_hint: f32,
+    river_cutbank_hint: f32,
     river_centerline_macro_elevation: Option<f32>,
     river_longitudinal_blocks: f32,
     river_position: Option<WorldPlanePoint>,
@@ -117,6 +123,12 @@ pub(super) fn combine_macro_height_with_river_profile(
         river_bed_depth_hint,
         river_position,
         config,
+    ) * river_morphology_lowering_scale(
+        river_position,
+        river_flow_hint,
+        river_bank_roughness_hint,
+        river_gravel_hint,
+        river_cutbank_hint,
     );
     let bank_lowering = river_bed_bank_lowering(
         river_shoulder_strength,
@@ -126,6 +138,13 @@ pub(super) fn combine_macro_height_with_river_profile(
     );
     let core_lowering =
         river_core_profile_lowering(river_core_strength, river_flow_hint, core_budget);
+    let gravel_bar_fill = river_gravel_bar_fill(
+        river_core_strength,
+        river_flow_hint,
+        river_gravel_hint,
+        core_budget,
+    );
+    let core_lowering = (core_lowering - gravel_bar_fill).max(0.0);
     let river_context_height =
         (shoulder_height - bank_lowering.max(core_lowering)).min(shoulder_height);
     let mut height = river_context_height + ridge_raise;
@@ -302,6 +321,50 @@ fn river_core_downcut_budget(
     let max_shift = config.river_carve_scale * lerp(0.22, 2.55, bed_t);
 
     ((base + flow_floor) * low_flow_guard * noise_scale).min(max_shift)
+}
+
+fn river_morphology_lowering_scale(
+    river_position: Option<WorldPlanePoint>,
+    river_flow_hint: f32,
+    river_bank_roughness_hint: f32,
+    river_gravel_hint: f32,
+    river_cutbank_hint: f32,
+) -> f32 {
+    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
+    let rough = river_bank_roughness_hint.clamp(0.0, 1.0);
+    let gravel = river_gravel_hint.clamp(0.0, 1.0);
+    let cutbank = river_cutbank_hint.clamp(0.0, 1.0);
+    let random_amp = lerp(0.16, 0.08, flow_t) + rough * 0.08;
+    let random_scale = river_position
+        .map(|position| {
+            let broad =
+                smooth_value_noise_2d(position, lerp(96.0, 220.0, flow_t), 0xD1CE_5EED_0101);
+            let local = smooth_value_noise_2d(
+                WorldPlanePoint::new(position.x - 53.0, position.z + 79.0),
+                lerp(28.0, 64.0, flow_t),
+                0xD1CE_5EED_0102,
+            );
+            1.0 + (broad * 0.70 + local * 0.30).clamp(-1.0, 1.0) * random_amp
+        })
+        .unwrap_or(1.0);
+    let bend_scale = 1.0 + cutbank * lerp(0.18, 0.34, flow_t) - gravel * lerp(0.24, 0.38, flow_t);
+
+    (random_scale * bend_scale).clamp(0.52, 1.42)
+}
+
+fn river_gravel_bar_fill(
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    river_gravel_hint: f32,
+    core_budget: f32,
+) -> f32 {
+    let gravel = river_gravel_hint.clamp(0.0, 1.0);
+    if gravel <= f32::EPSILON || core_budget <= f32::EPSILON {
+        return 0.0;
+    }
+    let core_t = river_core_cross_section_strength(river_core_strength, river_flow_hint);
+    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
+    core_budget * core_t * gravel * lerp(0.10, 0.22, flow_t)
 }
 
 fn river_context_lowering_noise_scale(
@@ -728,6 +791,9 @@ mod tests {
             0.89,
             0.65,
             0.60,
+            0.0,
+            0.0,
+            0.0,
             Some(0.18),
             128.0,
             Some(position),
@@ -745,6 +811,9 @@ mod tests {
             1.0,
             0.65,
             0.60,
+            0.0,
+            0.0,
+            0.0,
             Some(0.18),
             128.0,
             Some(position),
@@ -810,6 +879,81 @@ mod tests {
         assert!(
             high_q_mid > low_q_mid * 2.0,
             "the same cross-section position should be much broader at high Q than at low Q: low={low_q_mid} high={high_q_mid}"
+        );
+    }
+
+    #[test]
+    fn river_morphology_hints_reduce_inside_bar_and_deepen_cutbank() {
+        let config = test_tile_config();
+        let position = WorldPlanePoint::new(23.0, -41.0);
+        let base = combine_macro_height_with_river_profile(
+            0.24,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.94,
+            0.97,
+            0.72,
+            0.58,
+            0.35,
+            0.0,
+            0.0,
+            Some(0.16),
+            128.0,
+            Some(position),
+            config,
+        );
+        let gravel_bar = combine_macro_height_with_river_profile(
+            0.24,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.94,
+            0.97,
+            0.72,
+            0.58,
+            0.35,
+            0.90,
+            0.0,
+            Some(0.16),
+            128.0,
+            Some(position),
+            config,
+        );
+        let cutbank = combine_macro_height_with_river_profile(
+            0.24,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.94,
+            0.97,
+            0.72,
+            0.58,
+            0.35,
+            0.0,
+            0.90,
+            Some(0.16),
+            128.0,
+            Some(position),
+            config,
+        );
+
+        assert!(
+            gravel_bar > base,
+            "gravel-bar hints should weaken local riverbed downcut: base={base} gravel={gravel_bar}"
+        );
+        assert!(
+            cutbank < base,
+            "cutbank hints should strengthen local riverbed downcut: base={base} cutbank={cutbank}"
         );
     }
 

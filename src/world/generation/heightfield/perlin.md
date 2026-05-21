@@ -2,7 +2,7 @@
 
 ## Role
 
-`perlin` owns optional small-scale non-river heightfield relief for graph-first heightfield columns.
+`perlin` owns optional small-scale heightfield relief for graph-first heightfield columns.
 
 It is a child of `heightfield`, not a macro terrain owner. It adds optional small deterministic
 block offsets inside the heightfield surface resolve. The default config is disabled, so existing
@@ -27,9 +27,11 @@ the column.
   the terrain bed, fades in away from the immediate shoreline, and never moves the sea-level water
   surface. Sea-level or above-sea ocean-owned terrain receives no bed-relief water movement from
   this pass, and ocean bed relief must not create a water column.
-- River columns keep `micro_relief_blocks = 0`; preview-enabled config must not add river-specific
-  bed, bank, or shoulder offsets. If a riverbed needs noise or center-depth variation, `macro_field`
-  must bake that into `combined_macro_height` before heightfield resolve.
+- River core columns may receive a small bounded bed relief when Perlin is enabled. This relief is
+  applied before contour-band resolve, uses the same deterministic world-space Perlin map family as
+  land, and is capped below ordinary land relief so it reads as noisy riverbed contour descent rather
+  than a second river carve. Broad river bank/shoulder morphology and Q-driven depth still belong to
+  `macro_field`; this pass only perturbs the already resolved river core source before snapping.
 - Land, ridge, and dry basin columns may receive relief.
 
 ## Non-Goals

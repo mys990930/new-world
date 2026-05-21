@@ -306,7 +306,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
-  integer river water height는 별도 hint로 유지하고, 인접 river/standing-water surface와 비교해 한 column
+  integer river water height는 별도 hint로 유지하고, high-Q water가 bank 위로 솟는 것을 막기 위해
+  먼저 adjacent non-river, non-water local bank surface를 ceiling으로 읽는다. 같은 flow/core context를
+  공유하는 river core neighbor는 lateral water step을 0으로 제한해 수면이 core 안에 고인 하나의 표면으로
+  읽히게 한다. 이후 인접 river/standing-water surface와 비교해 한 column
   이웃 사이에서 한 block보다 크게 급락하지 않도록 preliminary descent pass를 적용한다. 이 pass는 full
   hydrology water surface solve나 final water solve가 아니라 stage 13 vertical slice용 안전 장치다. river water는 하구의
   standing ocean/lake water 쪽으로 점진적으로 수렴해야 하며, 같은 river component 전체가 sea level `y = 0`에
@@ -486,11 +489,12 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     문제를 줄인다.
 17. Perlin micro relief는 seed, generator version, world-space x/z로만 결정되어야 하며 chunk-local
     random state나 병렬 실행 순서에 의존하면 안 된다.
-18. Lake와 genuinely submerged ocean source의 land micro relief는 0이고, river column
-    `micro_relief_blocks`도 river continuity 보호를 위해 0이다. exact sea level border, Perlin max
+18. Lake와 genuinely submerged ocean source의 land micro relief는 0이다. river core column은
+    Perlin enabled config에서만 작은 bounded bed relief를 받을 수 있고, 이는 contour resolve 전에
+    적용되어 강바닥 등고선 계단감을 줄이는 preview/detail perturbation이다. exact sea level border, Perlin max
     displacement depth 정도의 shallow ocean-owned below-sea border band, 그리고 그 이상 ocean-owned dry
-    terrain은 ordinary land와 같은 micro relief map을 사용한다. Perlin이 enabled여도 river terrain bed,
-    river bank, river shoulder에는 별도 heightfield-local offset을 적용하면 안 된다.
+    terrain은 ordinary land와 같은 micro relief map을 사용한다. Perlin이 enabled여도 river bank,
+    river shoulder에는 별도 heightfield-local offset을 적용하면 안 된다.
 19. River bed/bank/shoulder relief와 Q-driven river morphology는 macro_field가 `combined_macro_height`에
     bake해야 한다. heightfield가 `river_bed_depth_hint`, `river_shoulder_strength`, roughness, gravel hint를
     terrain-height offset으로 다시 쓰면 회귀다.

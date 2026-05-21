@@ -124,7 +124,7 @@ fn preview_perlin_applies_micro_relief_before_contour_band() {
 }
 
 #[test]
-fn enabled_perlin_keeps_micro_relief_zero_for_water_and_river_columns() {
+fn enabled_perlin_keeps_micro_relief_zero_for_standing_water_but_perturbs_river_core() {
     let config = HeightfieldConfig {
         perlin: HeightfieldPerlinConfig::preview_enabled(42, 1),
         ..HeightfieldConfig::default()
@@ -137,11 +137,19 @@ fn enabled_perlin_keeps_micro_relief_zero_for_water_and_river_columns() {
 
     assert_eq!(ocean.micro_relief_blocks, 0.0);
     assert_eq!(lake.micro_relief_blocks, 0.0);
-    assert_eq!(river.micro_relief_blocks, 0.0);
+    assert_ne!(
+        river.micro_relief_blocks, 0.0,
+        "river core should receive bounded bed relief before contour resolve"
+    );
+    assert!(
+        river.micro_relief_blocks.abs() <= config.perlin.max_abs_blocks * 0.55,
+        "river core relief should stay lower than ordinary land relief: {}",
+        river.micro_relief_blocks
+    );
 }
 
 #[test]
-fn enabled_perlin_does_not_recut_macro_resolved_river_bed() {
+fn enabled_perlin_perturbs_macro_resolved_river_bed_before_contour() {
     let mut sample = sample_with_river(37.0, -91.0, 0.25, 0.82);
     sample.river_core_strength = 1.0;
     sample.river_shoulder_strength = 1.0;
@@ -155,12 +163,20 @@ fn enabled_perlin_does_not_recut_macro_resolved_river_bed() {
     };
     let enabled = heightfield_column_from_sample(&sample, enabled_config);
 
-    assert_eq!(enabled.surface_y, disabled.surface_y);
+    assert_ne!(enabled.micro_relief_blocks, 0.0);
     assert_eq!(
-        enabled.water_level_blocks, disabled.water_level_blocks,
-        "river bed Perlin is no longer a heightfield river-carve input"
+        enabled.contour_guided_surface_height_blocks,
+        resolve_contour_band_height(
+            enabled.raw_surface_height_blocks + enabled.micro_relief_blocks,
+            enabled_config.contour,
+        ),
+        "river bed Perlin should perturb the same pre-contour source as land"
     );
-    assert_eq!(enabled.micro_relief_blocks, 0.0);
+    assert!(
+        (enabled.surface_y - disabled.surface_y).abs()
+            <= enabled_config.perlin.max_abs_blocks as i32,
+        "river Perlin should stay bounded instead of acting like a second carve pass"
+    );
 }
 
 #[test]
@@ -1055,6 +1071,46 @@ fn river_water_steps_down_to_standing_water_without_large_jumps() {
         tile.stats.max_river_water_neighbor_delta_blocks
     );
     assert_eq!(tile.stats.river_uphill_flow_neighbor_count, 0);
+}
+
+#[test]
+fn high_flow_river_water_pools_inside_core_without_overtopping_banks() {
+    let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 32.0);
+    let mut left_edge = sample_with_river(32.0, 0.0, -0.001, 0.92);
+    left_edge.river_core_strength = 0.90;
+    left_edge.river_bed_depth_hint = 0.80;
+    let mut center = sample_with_river(64.0, 0.0, -0.004, 0.92);
+    center.river_core_strength = 1.0;
+    center.river_bed_depth_hint = 0.90;
+    let mut right_edge = sample_with_river(96.0, 0.0, -0.001, 0.92);
+    right_edge.river_core_strength = 0.90;
+    right_edge.river_bed_depth_hint = 0.80;
+    let left_bank = sample(0.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0);
+    let right_bank = sample(128.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0);
+    let macro_tile = MacroFieldTile {
+        config,
+        samples: vec![left_bank, left_edge, center, right_edge, right_bank],
+        stats: MacroFieldTileStats::default(),
+    };
+
+    let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+    let water = (1..=3)
+        .map(|x| tile.column(x, 0).expect("river").water_y.expect("water"))
+        .collect::<Vec<_>>();
+    let bank_cap = tile
+        .column(0, 0)
+        .expect("left bank")
+        .surface_y
+        .min(tile.column(4, 0).expect("right bank").surface_y);
+
+    assert!(
+        water.windows(2).all(|pair| pair[0] == pair[1]),
+        "same-flow river core should pool to one lateral surface instead of stepping over the bed: {water:?}"
+    );
+    assert!(
+        water.iter().all(|level| *level <= bank_cap),
+        "river water must stay contained by the local bank ceiling: water={water:?} bank={bank_cap}"
+    );
 }
 
 #[test]

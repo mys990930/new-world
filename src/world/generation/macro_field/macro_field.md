@@ -303,6 +303,12 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      bank/riverbed profile에 baseline으로 적용해, 물 가장자리와 강둑이 core와 같은 계열로 낮아지되
      broad valley 전체가 균일하게 내려앉지 않게 한다. low-Q depth budget은 별도 guard로 줄여
      headwater가 깊은 단층처럼 패이지 않아야 한다.
+     downcut budget은 river별로 완전히 같은 strength를 쓰지 않고, world-space coherent noise와
+     bank roughness로 짧고 긴 스케일의 deterministic variation을 받는다. rounded river segment의
+     local bend sign을 읽어 bend 안쪽은 `river_gravel_hint`를 키워 덜 깊게 깎이는 gravel-bar 성향을
+     주고, 바깥쪽은 `river_cutbank_hint`를 키워 조금 더 깊게 깎이는 cutbank 성향을 준다. 이 값들은
+     topology나 river width를 바꾸는 source가 아니라 combined height lowering scale만 조절하는
+     morphology hint다.
    - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
      `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를

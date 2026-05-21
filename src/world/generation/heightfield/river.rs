@@ -15,14 +15,17 @@ pub(super) fn river_bed_depth_blocks(sample: &MacroFieldSample) -> f32 {
 
 pub(super) fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
     let bed_depth = river_bed_depth_blocks(sample);
-    (bed_depth * (0.78 + flow * 0.17)).clamp(1.0, bed_depth.max(1.0))
+    let fill_ratio = (0.70 + flow * 0.10 - rough * 0.05).clamp(0.58, 0.82);
+    (bed_depth * fill_ratio).clamp(1.0, bed_depth.max(1.0))
 }
 
 pub(super) fn apply_river_water_descent(
     columns: &mut [HeightfieldColumn],
     width: usize,
     height: usize,
+    sea_level_blocks: f32,
 ) {
     if columns.is_empty() || width == 0 || height == 0 {
         return;
@@ -32,7 +35,10 @@ pub(super) fn apply_river_water_descent(
         .iter()
         .map(|column| column.water_y)
         .collect::<Vec<_>>();
+    let sea_level_y = sea_level_blocks.round() as i32;
+    clamp_river_water_to_local_bank(columns, &mut water_y, width, height, sea_level_y);
     limit_river_water_neighbor_delta(columns, &mut water_y, width, height);
+    clamp_river_water_to_local_bank(columns, &mut water_y, width, height, sea_level_y);
     apply_same_context_river_bed_step_limit(columns, width, height);
 
     for (index, column) in columns.iter_mut().enumerate() {
@@ -50,6 +56,39 @@ pub(super) fn apply_river_water_descent(
             column.water_level_blocks = None;
             column.river_water_height_blocks = None;
         }
+    }
+}
+
+fn clamp_river_water_to_local_bank(
+    columns: &[HeightfieldColumn],
+    water_y: &mut [Option<i32>],
+    width: usize,
+    height: usize,
+    sea_level_y: i32,
+) {
+    for index in 0..columns.len() {
+        if !matches!(columns[index].terrain_kind, HeightfieldTerrainKind::River) {
+            continue;
+        }
+        let Some(current) = water_y[index] else {
+            continue;
+        };
+        let mut ceiling = None::<i32>;
+        for neighbor in neighbor_indices(index, width, height) {
+            let neighbor_column = columns[neighbor];
+            if is_local_bank_ceiling_candidate(neighbor_column, sea_level_y) {
+                ceiling = Some(
+                    ceiling
+                        .map(|value| value.min(neighbor_column.surface_y))
+                        .unwrap_or(neighbor_column.surface_y),
+                );
+            }
+        }
+        let Some(ceiling) = ceiling else {
+            continue;
+        };
+        let clamped = current.min(ceiling.max(sea_level_y));
+        water_y[index] = Some(clamped);
     }
 }
 
@@ -76,9 +115,17 @@ fn limit_river_water_neighbor_delta(
                 if matches!(
                     columns[neighbor].terrain_kind,
                     HeightfieldTerrainKind::River
-                ) && columns[index].river_flow_hint > columns[neighbor].river_flow_hint + 0.01
-                {
-                    allowed = allowed.min(neighbor_water);
+                ) {
+                    let step = if same_core_pool_context(columns[index], columns[neighbor]) {
+                        0
+                    } else if columns[index].river_flow_hint
+                        > columns[neighbor].river_flow_hint + 0.01
+                    {
+                        0
+                    } else {
+                        1
+                    };
+                    allowed = allowed.min(neighbor_water.saturating_add(step));
                 } else {
                     allowed = allowed.min(neighbor_water.saturating_add(1));
                 }
@@ -92,6 +139,31 @@ fn limit_river_water_neighbor_delta(
             break;
         }
     }
+}
+
+fn is_local_bank_ceiling_candidate(column: HeightfieldColumn, sea_level_y: i32) -> bool {
+    !matches!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::River
+            | HeightfieldTerrainKind::Ocean
+            | HeightfieldTerrainKind::Lake
+    ) && column.water_y.is_none()
+        && column.surface_y >= sea_level_y
+}
+
+fn same_core_pool_context(a: HeightfieldColumn, b: HeightfieldColumn) -> bool {
+    let distance_delta =
+        if a.river_distance_blocks.is_finite() && b.river_distance_blocks.is_finite() {
+            (a.river_distance_blocks - b.river_distance_blocks).abs()
+        } else {
+            f32::INFINITY
+        };
+    matches!(a.terrain_kind, HeightfieldTerrainKind::River)
+        && matches!(b.terrain_kind, HeightfieldTerrainKind::River)
+        && a.river_core_strength >= 0.88
+        && b.river_core_strength >= 0.88
+        && (a.river_flow_hint - b.river_flow_hint).abs() <= 0.015
+        && distance_delta >= 0.5
 }
 
 fn apply_same_context_river_bed_step_limit(

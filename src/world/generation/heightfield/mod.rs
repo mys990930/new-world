@@ -172,6 +172,7 @@ pub fn generate_heightfield_tile(
         &mut columns,
         macro_tile.config.width as usize,
         macro_tile.config.height as usize,
+        config.sea_level_blocks,
     );
     let stats = stats::heightfield_stats(&columns, config);
 
