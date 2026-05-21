@@ -86,10 +86,10 @@ pipeline은 더 세분화될 수 있지만, 반드시 아래 대원칙을 지켜
 - heightfield / voxel-column realization은 pixelized column output을 downstream input으로 소비한다.
   새 path에서 heightfield는 first chunk-aligned pixel resolve를 다시 수행하거나 `MacroFieldTile`을
   직접 resample하지 않는다. heightfield는 meso feature geometry를 다시 탐색하지 않고
-  macro_field/pixelize가 보존한 meso-baked column value와 optional Perlin micro relief를 소비한다.
-- material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다. 현재 launch
-  저장 slice에서는 surface/material/vegetation plan을 stub으로 두고, `PixelizedColumn.surface_y`와
-  `water_y`만 읽어 비물 지형은 `grass`, 물은 `water`로 채운다.
+  macro_field/pixelize가 보존한 meso-baked column value와 Perlin micro relief를 소비한다.
+- material, water, vegetation은 plan으로 만든 뒤 마지막 voxel fill에서 함께 반영한다. 현재
+  graph-first created-world slice는 surface/material plan을 연결해 top/subsurface/base/underwater/water
+  block policy를 반영한다. vegetation placement는 아직 stub이다.
 
 ---
 
@@ -226,6 +226,6 @@ region cache의 내부 의미를 직접 결정하지 않는다.
 
 - 현재는 v2 pipeline vertical slice 단계다.
 - legacy generation entrypoint는 migration 동안 `world::generation`을 통해 re-export된다.
-- graph-first `pixelize`와 launch `voxel` fill이 연결되어 `world_create`가 bounded created-world dump를
-  저장할 수 있다.
-- surface/material/vegetation은 아직 stub이며, 최종 block palette policy는 들어오지 않았다.
+- graph-first `pixelize`, Perlin-enabled `heightfield`, `surface_plan`, and `voxel` fill이 연결되어
+  `world_create`와 runtime create-world job이 bounded created-world dump를 저장할 수 있다.
+- vegetation은 아직 stub이며, runtime live fallback은 아직 legacy generation entrypoint를 사용한다.

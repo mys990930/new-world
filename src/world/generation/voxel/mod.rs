@@ -1,7 +1,9 @@
 use rayon::prelude::*;
 
 use crate::world::legacy::chunk::{BlockId, ChunkData};
-use crate::world::legacy::coord::{CHUNK_EDGE, CHUNK_EDGE_I32, CHUNK_VOLUME, ChunkCoord};
+use crate::world::legacy::coord::{
+    CHUNK_EDGE, CHUNK_EDGE_I32, CHUNK_VOLUME, ChunkCoord, WorldBlockCoord, world_to_chunk_local,
+};
 use crate::world::legacy::meta::WorldMeta;
 use crate::world::legacy::registry::BlockRegistry;
 
@@ -11,7 +13,7 @@ use super::graph::{
     VoronoiGraphConfig, VoronoiGraphPatchRequest, generate_voronoi_graph_patch,
     graph_region_for_world_block,
 };
-use super::heightfield::HeightfieldConfig;
+use super::heightfield::{HeightfieldConfig, HeightfieldPerlinConfig, generate_heightfield_tile};
 use super::hydrology::solve_hydrology;
 use super::macro_field::{MacroFieldTileConfig, generate_macro_field_tile};
 use super::macro_map::{MacroMapConfig, generate_macro_map};
@@ -19,6 +21,7 @@ use super::pixelize::{
     PixelizeConfig, PixelizedChunkArea, PixelizedColumn, generate_pixelized_chunk_area,
 };
 use super::river_plan::{RiverPlanConfig, build_river_plan};
+use super::surface_plan::{SurfaceColumnPlan, SurfacePlanConfig, generate_surface_plan_area};
 use super::{DEFAULT_GRAPH_PADDING_REGIONS, apply_headwater_source_hydration_to_biomes};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,10 +35,11 @@ pub struct GraphFirstVoxelBuildConfig {
 
 impl GraphFirstVoxelBuildConfig {
     pub fn new(seed: u64, generator_version: u32) -> Self {
-        Self {
-            land_bias: MacroMapConfig::new(seed, generator_version).land_bias,
-            ..Self::default()
-        }
+        let mut config = Self::default();
+        config.land_bias = MacroMapConfig::new(seed, generator_version).land_bias;
+        config.pixelize.heightfield.perlin =
+            HeightfieldPerlinConfig::preview_enabled(seed, generator_version);
+        config
     }
 }
 
@@ -46,7 +50,10 @@ impl Default for GraphFirstVoxelBuildConfig {
             site_spacing_blocks: DEFAULT_SITE_SPACING_BLOCKS,
             land_bias: MacroMapConfig::new(0, 0).land_bias,
             pixelize: PixelizeConfig {
-                heightfield: HeightfieldConfig::default(),
+                heightfield: HeightfieldConfig {
+                    perlin: HeightfieldPerlinConfig::preview_enabled(0, 0),
+                    ..HeightfieldConfig::default()
+                },
             },
             fill: GraphFirstVoxelFillConfig::default(),
         }
@@ -78,6 +85,12 @@ pub struct GraphFirstVoxelColumnPlan {
     pub local_z: u8,
     pub terrain_top_y: i32,
     pub water_top_y: Option<i32>,
+    pub top_block_key: &'static str,
+    pub subsurface_block_key: &'static str,
+    pub base_block_key: &'static str,
+    pub underwater_top_block_key: &'static str,
+    pub water_block_key: &'static str,
+    pub soil_depth_blocks: u8,
 }
 
 impl GraphFirstVoxelColumnPlan {
@@ -144,6 +157,7 @@ impl GraphFirstVoxelPlan {
 pub enum GraphFirstVoxelError {
     InvalidChunkRange,
     MissingBlockKey(&'static str),
+    MismatchedSurfacePlan,
 }
 
 impl std::fmt::Display for GraphFirstVoxelError {
@@ -152,6 +166,9 @@ impl std::fmt::Display for GraphFirstVoxelError {
             Self::InvalidChunkRange => f.write_str("invalid graph-first voxel chunk range"),
             Self::MissingBlockKey(key) => {
                 write!(f, "graph-first voxel fill requires block key `{key}`")
+            }
+            Self::MismatchedSurfacePlan => {
+                f.write_str("graph-first voxel fill requires matching heightfield/surface columns")
             }
         }
     }
@@ -239,12 +256,15 @@ pub fn build_graph_first_voxel_plan(
         &boundary,
         MacroFieldTileConfig::new(min_world_x as f32, min_world_z as f32, width, height, 1.0),
     );
+    let heightfield = generate_heightfield_tile(&macro_tile, config.pixelize.heightfield);
+    let surface = generate_surface_plan_area(
+        &heightfield,
+        Some(&macro_tile),
+        SurfacePlanConfig::new(meta.seed, meta.generator_version),
+    );
     let pixelized = generate_pixelized_chunk_area(&macro_tile, config.pixelize);
 
-    Ok(build_graph_first_voxel_plan_from_pixelized_area(
-        &pixelized,
-        config.fill,
-    ))
+    build_graph_first_voxel_plan_from_pixelized_area_and_surface(&pixelized, &surface, config.fill)
 }
 
 pub fn build_graph_first_voxel_plan_from_pixelized_area(
@@ -254,7 +274,7 @@ pub fn build_graph_first_voxel_plan_from_pixelized_area(
     let columns = area
         .columns
         .par_iter()
-        .map(|column| graph_first_voxel_column_from_pixelized_column(*column))
+        .map(|column| graph_first_voxel_column_from_pixelized_column(*column, fill))
         .collect::<Vec<_>>();
 
     GraphFirstVoxelPlan {
@@ -269,8 +289,40 @@ pub fn build_graph_first_voxel_plan_from_pixelized_area(
     }
 }
 
+pub fn build_graph_first_voxel_plan_from_pixelized_area_and_surface(
+    area: &PixelizedChunkArea,
+    surface: &super::surface_plan::SurfacePlanArea,
+    fill: GraphFirstVoxelFillConfig,
+) -> Result<GraphFirstVoxelPlan, GraphFirstVoxelError> {
+    if area.width != surface.width
+        || area.height != surface.height
+        || area.columns.len() != surface.columns.len()
+    {
+        return Err(GraphFirstVoxelError::MismatchedSurfacePlan);
+    }
+
+    let columns = area
+        .columns
+        .par_iter()
+        .zip(surface.columns.par_iter())
+        .map(|(pixel, surface)| graph_first_voxel_column_from_surface(*pixel, *surface, fill))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GraphFirstVoxelPlan {
+        min_chunk_x: area.min_chunk_x,
+        max_chunk_x: area.max_chunk_x,
+        min_chunk_z: area.min_chunk_z,
+        max_chunk_z: area.max_chunk_z,
+        width: area.width,
+        height: area.height,
+        columns,
+        fill,
+    })
+}
+
 pub fn graph_first_voxel_column_from_pixelized_column(
     column: PixelizedColumn,
+    fill: GraphFirstVoxelFillConfig,
 ) -> GraphFirstVoxelColumnPlan {
     let terrain_top_y = match column.water_y {
         Some(water_y) if water_y >= column.surface_y => column.surface_y.min(water_y - 1),
@@ -286,7 +338,50 @@ pub fn graph_first_voxel_column_from_pixelized_column(
         local_z: column.local_z,
         terrain_top_y,
         water_top_y: column.water_y,
+        top_block_key: fill.terrain_block_key,
+        subsurface_block_key: fill.terrain_block_key,
+        base_block_key: fill.terrain_block_key,
+        underwater_top_block_key: fill.terrain_block_key,
+        water_block_key: fill.water_block_key,
+        soil_depth_blocks: 0,
     }
+}
+
+fn graph_first_voxel_column_from_surface(
+    column: PixelizedColumn,
+    surface: SurfaceColumnPlan,
+    fill: GraphFirstVoxelFillConfig,
+) -> Result<GraphFirstVoxelColumnPlan, GraphFirstVoxelError> {
+    if column.world_x != surface.world_x
+        || column.world_z != surface.world_z
+        || column.surface_y != surface.surface_y
+        || column.water_y != surface.water_y
+    {
+        return Err(GraphFirstVoxelError::MismatchedSurfacePlan);
+    }
+
+    let terrain_top_y = match surface.water_y {
+        Some(water_y) if water_y >= surface.surface_y => surface.surface_y.min(water_y - 1),
+        _ => surface.surface_y,
+    };
+    let (chunk, local) = world_to_chunk_local(WorldBlockCoord(column.world_x, 0, column.world_z));
+
+    Ok(GraphFirstVoxelColumnPlan {
+        world_x: column.world_x,
+        world_z: column.world_z,
+        chunk_x: chunk.0,
+        chunk_z: chunk.2,
+        local_x: local.x,
+        local_z: local.z,
+        terrain_top_y,
+        water_top_y: surface.water_y,
+        top_block_key: surface.top_block,
+        subsurface_block_key: surface.subsurface_block,
+        base_block_key: surface.base_block,
+        underwater_top_block_key: surface.underwater_top_block,
+        water_block_key: fill.water_block_key,
+        soil_depth_blocks: surface.soil_depth_blocks,
+    })
 }
 
 pub fn voxelize_graph_first_chunk(
@@ -294,12 +389,6 @@ pub fn voxelize_graph_first_chunk(
     plan: &GraphFirstVoxelPlan,
     registry: &BlockRegistry,
 ) -> Result<ChunkData, GraphFirstVoxelError> {
-    let terrain_id = registry.block_id(plan.fill.terrain_block_key).ok_or(
-        GraphFirstVoxelError::MissingBlockKey(plan.fill.terrain_block_key),
-    )?;
-    let water_id = registry.block_id(plan.fill.water_block_key).ok_or(
-        GraphFirstVoxelError::MissingBlockKey(plan.fill.water_block_key),
-    )?;
     let chunk_min_y = coord.1 * CHUNK_EDGE_I32;
     let mut blocks = vec![BlockId::AIR; CHUNK_VOLUME];
 
@@ -309,10 +398,11 @@ pub fn voxelize_graph_first_chunk(
             else {
                 continue;
             };
+            let palette = VoxelColumnBlockIds::resolve(*column, registry)?;
             for local_y in 0..CHUNK_EDGE as u8 {
                 let world_y = chunk_min_y + i32::from(local_y);
                 blocks[linear_index(local_x, local_y, local_z)] =
-                    block_for_world_y(world_y, *column, terrain_id, water_id);
+                    block_for_world_y(world_y, *column, palette);
             }
         }
     }
@@ -320,19 +410,61 @@ pub fn voxelize_graph_first_chunk(
     Ok(ChunkData::from_blocks(coord, blocks))
 }
 
+#[derive(Debug, Clone, Copy)]
+struct VoxelColumnBlockIds {
+    top: BlockId,
+    subsurface: BlockId,
+    base: BlockId,
+    underwater_top: BlockId,
+    water: BlockId,
+}
+
+impl VoxelColumnBlockIds {
+    fn resolve(
+        column: GraphFirstVoxelColumnPlan,
+        registry: &BlockRegistry,
+    ) -> Result<Self, GraphFirstVoxelError> {
+        Ok(Self {
+            top: block_id(registry, column.top_block_key)?,
+            subsurface: block_id(registry, column.subsurface_block_key)?,
+            base: block_id(registry, column.base_block_key)?,
+            underwater_top: block_id(registry, column.underwater_top_block_key)?,
+            water: block_id(registry, column.water_block_key)?,
+        })
+    }
+}
+
+fn block_id(registry: &BlockRegistry, key: &'static str) -> Result<BlockId, GraphFirstVoxelError> {
+    registry
+        .block_id(key)
+        .ok_or(GraphFirstVoxelError::MissingBlockKey(key))
+}
+
 fn block_for_world_y(
     world_y: i32,
     column: GraphFirstVoxelColumnPlan,
-    terrain_id: BlockId,
-    water_id: BlockId,
+    palette: VoxelColumnBlockIds,
 ) -> BlockId {
     if world_y <= column.terrain_top_y {
-        terrain_id
+        if world_y == column.terrain_top_y {
+            if column
+                .water_top_y
+                .is_some_and(|water_top_y| water_top_y > column.terrain_top_y)
+            {
+                palette.underwater_top
+            } else {
+                palette.top
+            }
+        } else if world_y >= column.terrain_top_y - i32::from(column.soil_depth_blocks) {
+            palette.subsurface
+        } else {
+            palette.base
+        }
     } else if column
         .water_top_y
         .is_some_and(|water_top_y| world_y <= water_top_y)
     {
-        water_id
+        palette.water
     } else {
         BlockId::AIR
     }
@@ -427,7 +559,10 @@ mod tests {
         column.surface_y = -8;
         column.water_y = Some(0);
 
-        let plan = graph_first_voxel_column_from_pixelized_column(column);
+        let plan = graph_first_voxel_column_from_pixelized_column(
+            column,
+            GraphFirstVoxelFillConfig::default(),
+        );
 
         assert_eq!(plan.terrain_top_y, -8);
         assert_eq!(plan.water_top_y, Some(0));

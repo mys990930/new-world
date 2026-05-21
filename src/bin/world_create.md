@@ -22,8 +22,8 @@
 
 1. Build `WorldMeta` and `BlockRegistry`.
 2. Build one graph-first voxel plan for the requested x/z chunk footprint.
-3. The plan internally runs graph, macro map, hydrology, noisy boundary, macro field, and pixelize once
-   for that bounded footprint.
+3. The plan internally runs graph, macro map, hydrology, noisy boundary, macro field,
+   Perlin-enabled heightfield, surface plan, and pixelize once for that bounded footprint.
 4. Iterate the requested `x/z` chunk stacks, with independent stacks eligible for parallel generation.
 5. Voxelize each requested `y` chunk from the shared graph-first plan and save it through
    `world::storage`.
@@ -38,6 +38,8 @@
   - selected hydrology
   - noisy boundary
   - macro field tile
+  - Perlin-enabled heightfield
+  - surface plan area
   - pixelized chunk area
   - graph-first voxel plan assembly
 - These stages must be evaluated once for the requested x/z footprint and then reused for all requested vertical chunks.
@@ -49,11 +51,13 @@
   - manifest sorting remains deterministic after generation
   - every y stack reuses the same graph-first `GraphFirstVoxelPlan`
 
-## Launch Fill Policy
+## Fill Policy
 
-- surface/material and vegetation are stubs in this binary's current graph-first path.
+- Perlin micro relief is enabled through the default graph-first build config.
+- Surface/material policy is resolved before voxel fill and contributes top, subsurface, base, and
+  underwater top block keys.
 - Water columns write the registry `water` block up to `water_y`.
-- Every non-water terrain block writes the registry `grass` block.
+- Vegetation placement is still stubbed.
 - Air remains air above terrain/water.
 
 ## Default Vertical Window

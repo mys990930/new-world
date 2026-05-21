@@ -124,6 +124,7 @@ GraphHydrologyGraph::segments_for_edge(edge: VoronoiEdgeId) -> impl Iterator<Ite
 graph_generation_stages() -> &'static [GraphGenerationStage]
 build_graph_first_voxel_plan(meta, min_chunk_x, max_chunk_x, min_chunk_z, max_chunk_z, config) -> Result<GraphFirstVoxelPlan, GraphFirstVoxelError>
 voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, registry: &BlockRegistry) -> Result<ChunkData, GraphFirstVoxelError>
+create_graph_first_world_to_directory_with_progress(root, config, block_registry, report_progress) -> Result<CreatedWorldManifest, GraphFirstCreatedWorldError>
 ```
 
 ---
@@ -215,14 +216,14 @@ voxelize_graph_first_chunk(coord: ChunkCoord, plan: &GraphFirstVoxelPlan, regist
   feature plan 계약을 문서화한다. `macro_field`는 이 plan을 읽어 meso raise/carve/flatten/roughness
   contribution을 sample channel과 combined height에 bake해야 한다.
 - 현재 `heightfield` leaf는 `MacroFieldTile`을 column-oriented heightfield cache로 변환하는 vertical
-  slice를 제공한다. rewrite target에서는 pixelize가 보존한 meso-baked column 값을 읽고, meso geometry를
-  다시 해석하지 않는다.
-- 현재 `voxel` leaf는 launch용 graph-first voxel fill을 제공한다. `PixelizedChunkArea`를
-  `GraphFirstVoxelPlan`으로 변환하고, `surface_y`/`water_y`를 읽어 `grass`와 `water`만으로
-  `ChunkData`를 채운다.
-- `world_create`는 graph-first plan을 사용해 bounded created-world dump를 저장할 수 있다.
-- 아직 구현되지 않은 것: Perlin micro relief 실제 합성, final surface/material resolve,
-  vegetation placement, 최종 voxel palette policy.
+  slice를 제공한다. graph-first build config는 Perlin micro relief를 기본 활성화하며, rewrite target에서는
+  pixelize가 보존한 meso-baked column 값을 읽고 meso geometry를 다시 해석하지 않는다.
+- 현재 `voxel` leaf는 graph-first voxel fill을 제공한다. `PixelizedChunkArea`와 `SurfacePlanArea`를
+  `GraphFirstVoxelPlan`으로 변환하고, surface/material policy의 top/subsurface/base/underwater/water
+  block을 사용해 `ChunkData`를 채운다.
+- `world_create`와 runtime create-world job은 graph-first plan을 사용해 bounded created-world dump를 저장할 수 있다.
+- 아직 구현되지 않은 것: vegetation placement, runtime generation cache 기반 live fallback replacement,
+  최종 cave/void/feature voxel priority.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 더 안정화된 뒤 legacy runtime generation을 대체한다.
 - planned `new-world-textmode` support should expose a structured per-chunk observer view containing cell biome, chunk weather scalar state, surface condition, ecology events, and world update records while keeping console formatting outside `world`.
 - old atlas `LocalWeatherState` remains a migration bridge until chunk-scoped weather state replaces weather consumers.

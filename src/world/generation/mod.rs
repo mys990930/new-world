@@ -1,5 +1,6 @@
 pub mod biome;
 pub mod boundary;
+pub mod created;
 pub mod field;
 pub mod graph;
 pub mod heightfield;
@@ -28,6 +29,10 @@ pub use boundary::{
     DEFAULT_BOUNDARY_MAX_SITE_SPAN_FRACTION, DEFAULT_BOUNDARY_MAX_VISIBLE_AMPLITUDE_BLOCKS,
     DEFAULT_BOUNDARY_MIN_VISIBLE_AMPLITUDE_BLOCKS, DEFAULT_BOUNDARY_SUBDIVISION_LEVELS,
     NoisyBoundaryCurve, generate_noisy_boundaries,
+};
+#[allow(unused_imports)]
+pub use created::{
+    GraphFirstCreatedWorldError, create_graph_first_world_to_directory_with_progress,
 };
 #[allow(unused_imports)]
 pub use field::{

@@ -438,9 +438,10 @@ cargo run --bin world_create -- 42 --center-x 0 --center-z 0 --radius 16 --outpu
 
 - Notes:
   - Direct world creation now uses the graph-first launch path:
-    graph/macro/hydrology/boundary/macro-field/pixelize -> `GraphFirstVoxelPlan` -> `ChunkData`.
-  - surface/material and vegetation are intentionally stubbed; water columns are `water`, all other
-    terrain is `grass`.
+    graph/macro/hydrology/boundary/macro-field/heightfield/surface-plan/pixelize ->
+    `GraphFirstVoxelPlan` -> `ChunkData`.
+  - Perlin micro relief and surface/material policy are enabled for the graph-first plan; vegetation
+    placement is still stubbed.
   - See [world_create.md](./world_create.md).
 
 ## Cross-Tool Suggestions

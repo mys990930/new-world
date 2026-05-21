@@ -84,6 +84,7 @@ NOT:
 - default runtime config uses up to two workers from available CPU parallelism so independent chunk load/mesh/minimap jobs can make progress while leaving CPU headroom for input and rendering
 - job system startup and shutdown are logged with worker/queue configuration so hangs can be separated from missing window/surface startup
 - the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, `BuildChunkMesh`, `BuildMinimapChunkColumn`, and `ResolveRegionClassArea`
+- `CreateWorld` delegates graph-first bounded created-world dump generation to `world`, including chunk storage and manifest writing
 - `CreateWorld` can emit lightweight `CreateWorldProgress` snapshots before its final `WorldCreated`/`JobFailed` result; routing throttles those snapshots so UI feedback does not spam the main thread
 - gameplay can use limited result draining so bursty mesh completions do not force all renderer uploads into one frame
 - slow worker jobs are logged by default; `NEW_WORLD_TRACE_JOBS=1` enables full worker start/finish tracing

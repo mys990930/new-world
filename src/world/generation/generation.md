@@ -201,15 +201,18 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
     - 새 path에서 heightfield는 first chunk-aligned pixel resolve를 소유하지 않고, `MacroFieldTile`을 직접
       resample하지 않는다.
     - heightfield는 meso feature geometry를 다시 탐색하지 않고, macro_field/pixelize가 보존한
-      meso-baked column 값과 optional Perlin micro relief를 소비한다.
+      meso-baked column 값과 Perlin micro relief를 소비한다.
 14. biome/material/water/coast surface plan을 만든다.
-    - 현재 launch slice에서는 이 단계를 stub으로 둔다. 실제 biome material policy를 확장하지 않고,
-      downstream voxel fill은 비물 지형을 임시로 `grass`로만 채운다.
+    - 현재 graph-first created-world path는 `HeightfieldTile`과 `MacroFieldTile`을
+      `generate_surface_plan_area`로 넘겨 biome/material/water/coast surface policy를 만든다.
+      vegetation은 아직 생성하지 않는다.
 15. vegetation/feature placement plan을 만든다.
     - 현재 launch slice에서는 vegetation placement를 생성하지 않는다.
 16. heightfield, water, surface, vegetation plan을 한 번에 `ChunkData`로 voxel fill한다.
-    - 현재 구현된 graph-first 저장 경로는 `PixelizedChunkArea`의 `surface_y`/`water_y`를 얇은
-      `GraphFirstVoxelPlan`으로 변환하고, `water`와 `grass`만 사용해 `ChunkData`를 만든다.
+    - 현재 구현된 graph-first 저장 경로는 bounded x/z 영역에서 `MacroFieldTile`,
+      Perlin-enabled `HeightfieldTile`, `SurfacePlanArea`, `PixelizedChunkArea`를 만든 뒤
+      `GraphFirstVoxelPlan`에 surface block policy를 축약 저장한다. `voxelize_graph_first_chunk`는
+      water/top/subsurface/base/underwater-top block을 사용해 `ChunkData`를 채운다.
 
 ---
 
@@ -285,18 +288,18 @@ topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은
   변환하는 새 handoff를 정의한다. 현재 구현은 `generate_pixelized_chunk_area`로 one-block spacing
   macro field tile을 deterministic row-major `PixelizedColumn` sequence로 옮기며, preview는 각
   pixel이 하나의 resolved voxel column인 `pixelize_preview`로 검사한다.
-- stage 13 heightfield / voxel-column realization: 현재 구현은 아직 compatibility vertical slice로
-  `MacroFieldTile`을 직접 읽어 `HeightfieldTile` column cache로 변환한다. rewrite target은
+- stage 13 heightfield / voxel-column realization: 현재 구현은 compatibility vertical slice로
+  `MacroFieldTile`을 직접 읽어 `HeightfieldTile` column cache로 변환한다. graph-first runtime
+  build config는 Perlin micro relief를 기본 활성화해 heightfield column에 반영한다. rewrite target은
   `PixelizedChunkArea` / `PixelizedColumn`을 downstream input으로 소비하는 것이다. heightfield는
   meso feature geometry를 다시 해석하지 않고, pixelize가 보존한 meso-baked source scalar와 integer
-  block height contract를 소비해야 한다. Perlin micro relief는 optional downstream detail이며
-  macro ownership을 뒤집으면 안 된다.
-- stage 14/15 surface/material/vegetation: 현재 graph-first 저장 vertical slice에서는 명시적인 stub이다.
-  material resolve는 비물 지형 `grass`, 물 `water`로만 축약되며 vegetation placement는 생성하지 않는다.
+  block height contract를 소비해야 한다. Perlin micro relief는 macro ownership을 뒤집으면 안 된다.
+- stage 14/15 surface/material/vegetation: graph-first created-world path는 구현된 `surface_plan`을
+  호출해 biome/material/water/coast block policy를 만든다. vegetation placement는 아직 생성하지 않는다.
 - stage 16 voxel fill: `src/world/generation/voxel/mod.rs`는 `PixelizedChunkArea`를
-  `GraphFirstVoxelPlan`으로 옮긴 뒤 `voxelize_graph_first_chunk`로 `ChunkData`를 채운다. 같은 x/z
-  column plan을 vertical chunk stack이 공유하며, `world_create`는 이 경로로 bounded dump를 저장할 수
-  있다.
+  surface-aware `GraphFirstVoxelPlan`으로 옮긴 뒤 `voxelize_graph_first_chunk`로 `ChunkData`를
+  채운다. 같은 x/z column plan을 vertical chunk stack이 공유하며, `world_create`와 runtime
+  create-world job은 이 경로로 bounded dump를 저장할 수 있다.
 
 런타임에서는 위 stage를 chunk마다 반복 실행하지 않는다. `pipeline/pipeline.md`의 runtime cache
 contract에 따라 graph region cache, macro map cache, hydrology cache, river plan cache,
@@ -315,6 +318,7 @@ column/window만 sample해 `ChunkData`를 채운다.
 - `surface_plan/surface_plan.md`: biome, material, water/coast/wetland policy resolve
 - `vegetation/vegetation.md`: vegetation과 surface feature placement plan
 - `voxel/voxel.md`: column plan을 `ChunkData`로 채우는 graph-first voxel fill
+- `created.md`: graph-first output을 bounded created-world dump로 저장하는 world-owned helper
 - `preview/preview.md`: stage별 topdown preview binary 입력/출력 계약
 
 빈 leaf 구현 파일은 만들지 않는다. 새 leaf를 실제로 구현할 때 같은 폴더에 대응 문서를 먼저 두고,

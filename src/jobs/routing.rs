@@ -1,5 +1,5 @@
 use crate::world::{
-    CreateWorldProgress, build_chunk_mesh, create_world_to_directory_with_progress,
+    CreateWorldProgress, build_chunk_mesh, create_graph_first_world_to_directory_with_progress,
     generate_atlas_fields, generate_atlas_structure, generate_chunk, load_created_world_chunk,
     resolve_region_classes, sample_topdown_chunk_column,
 };
@@ -48,10 +48,10 @@ pub(crate) fn execute(request: JobRequest, mut emit_progress: impl FnMut(JobResu
                 }
             };
 
-            match create_world_to_directory_with_progress(
+            match create_graph_first_world_to_directory_with_progress(
                 root.as_path(),
                 config,
-                registry.as_ref(),
+                registry.clone(),
                 &mut report_progress,
             ) {
                 Ok(manifest) => {
