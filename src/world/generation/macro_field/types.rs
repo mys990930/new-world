@@ -87,6 +87,7 @@ pub struct MacroFieldSample {
     pub river_bank_roughness_hint: f32,
     pub river_gravel_hint: f32,
     pub river_cutbank_hint: f32,
+    pub river_mouth_strength: f32,
     pub combined_macro_height: f32,
 }
 

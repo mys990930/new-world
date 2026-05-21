@@ -1407,6 +1407,34 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
 }
 
 #[test]
+fn mouth_hint_allows_above_sea_ocean_owned_river_water() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
+    mouth.ocean_mask = 1.0;
+    mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    mouth.river_bed_depth_hint = 0.82;
+    mouth.river_bank_roughness_hint = 0.25;
+    mouth.river_mouth_strength = 0.85;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::River);
+    assert!(
+        column.water_level_blocks.is_some(),
+        "mouth hint should allow a high-core river water column over an above-sea ocean-owned bed"
+    );
+    assert!(
+        column.water_level_blocks.expect("mouth water") > column.surface_height_blocks,
+        "river mouth water must sit above its resolved bed"
+    );
+    assert!(
+        column.river_bed_depth_blocks > 0.0,
+        "mouth river terrain should preserve the river bed depth diagnostic"
+    );
+}
+
+#[test]
 fn low_strength_river_hint_does_not_override_above_sea_ocean_column() {
     let mut mouth = sample_with_river(0.0, 0.0, 0.004, 0.96);
     mouth.ocean_mask = 1.0;
@@ -1582,6 +1610,7 @@ fn sample(
         river_bank_roughness_hint: 0.0,
         river_gravel_hint: 0.0,
         river_cutbank_hint: 0.0,
+        river_mouth_strength: 0.0,
         combined_macro_height: height,
     }
 }

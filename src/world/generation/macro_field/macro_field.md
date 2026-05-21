@@ -50,8 +50,9 @@ tile로 굽는다.
 - `RiverPlan` / `hydrology`: topology, selected river decisions, canonical Q/display discharge,
   reach type, broad-valley width/depth, and narrow bed/water morphology source.
 - `macro_field`: selected `RiverPlan` geometry를 tile-local raster/cache influence로 굽고, broad
-  valley lowering과 downstream hint channel만 제공한다. hydrology routing, selected river 수정,
-  final water surface solve, voxel/material output은 소유하지 않는다.
+  valley lowering, downstream hint channel, 그리고 selected river core가 ocean/coast context와 만나는
+  좁은 `river_mouth_strength` channel만 제공한다. hydrology routing, selected river 수정, final water
+  surface solve, voxel/material output은 소유하지 않는다.
 - `heightfield`: macro_field/pixelize가 넘긴 river-resolved height를 block column으로 소비하고,
   integer water hints와 tile-local smoothing만 적용한다. river bed/bank/valley carve를 다시 풀거나
   최종 material/voxel channel을 확정하지 않는다.
@@ -119,6 +120,7 @@ MacroFieldSample {
     river_bank_roughness_hint,
     river_gravel_hint,
     river_cutbank_hint,
+    river_mouth_strength,
     meso_raise_strength,
     meso_carve_strength,
     meso_flatten_strength,
@@ -330,6 +332,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      균일하게 깊어지면 contour slab/vertical seam이 생긴다. centerline은 valley 방향성 hint일 뿐
      cross-section을 평평하게 만드는 target height가 아니다. 단, sea-level 근처 source는 river
      mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.
+   - selected river의 high-core corridor가 ocean-owned 또는 explicit coast context와 만나고 lake가 아닐 때
+     `river_mouth_strength`를 만든다. 이 값은 river_plan topology를 한 edge 더 연장하지 않고, positive
+     above-sea ocean/coast-owned mouth bed가 water policy를 완전히 끊지 않도록 combined height를 해수면
+     근처로 부드럽게 낮추는 launch-scope hint다. ordinary positive ocean source와 lake/wetland source는
+     이 hint 없이 dry/source bed 정책을 유지한다.
    - river raster pass는 shoulder/core sample마다 가장 가까운 rounded centerline projection과 river
      chain 누적 arc length 기반 `river_longitudinal_blocks`도 보존한다. 이 값은 downstream hint로 유지되지만
      combined height의 직접 floor-noise source가 아니다. 같은 connected river component 안에서 넓은 shoulder
@@ -668,6 +675,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
   `640` blocks다. 실제 narrow bed depth는 core center profile을 통해 combined height에 반영하고,
   같은 bed-depth 값은 heightfield/water/surface stage가 읽는 diagnostic/water-depth hint로도 남긴다.
+  selected river core가 ocean/coast context에 닿는 non-lake sample은 `river_mouth_strength`를 보존하고,
+  positive above-sea mouth bed를 부드럽게 낮춰 heightfield water policy가 완전히 끊기지 않게 한다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.
