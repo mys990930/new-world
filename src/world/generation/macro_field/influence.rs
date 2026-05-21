@@ -1,8 +1,10 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-use super::context::MacroFieldRasterContext;
-use super::height::{envelope, lerp, ridge_envelope, roughened_distance, smoothstep01};
+use super::context::{EstuaryFanRef, MacroFieldRasterContext};
+use super::height::{
+    boundary_roughness_offset, envelope, lerp, ridge_envelope, roughened_distance, smoothstep01,
+};
 use super::river::{
     nearest_point_on_segment, point_segment_distance, projected_t_on_segment,
     river_boundary_roughness_blocks, river_boundary_roughness_offset,
@@ -19,6 +21,7 @@ pub(super) const RIVER_CORE_STRENGTH_THRESHOLD: f32 = 0.88;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
 pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
+pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -44,6 +47,9 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) river_bank_roughness_hint: f32,
     pub(super) river_gravel_hint: f32,
     pub(super) river_cutbank_hint: f32,
+    pub(super) estuary_strength: f32,
+    pub(super) estuary_flow_hint: f32,
+    pub(super) estuary_bed_depth_hint: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +68,9 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) river_bank_roughness_hint: Vec<f32>,
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
+    pub(super) estuary_strength: Vec<f32>,
+    pub(super) estuary_flow_hint: Vec<f32>,
+    pub(super) estuary_bed_depth_hint: Vec<f32>,
     pub(super) stats: MacroFieldInfluenceStats,
 }
 
@@ -112,6 +121,9 @@ impl MacroFieldInfluenceFields {
             river_bank_roughness_hint: self.river_bank_roughness_hint[index].clamp(0.0, 1.0),
             river_gravel_hint: self.river_gravel_hint[index].clamp(0.0, 1.0),
             river_cutbank_hint: self.river_cutbank_hint[index].clamp(0.0, 1.0),
+            estuary_strength: self.estuary_strength[index].clamp(0.0, 1.0),
+            estuary_flow_hint: self.estuary_flow_hint[index].clamp(0.0, 1.0),
+            estuary_bed_depth_hint: self.estuary_bed_depth_hint[index].clamp(0.0, 1.0),
         }
     }
 }
@@ -153,6 +165,7 @@ pub(super) fn rasterize_influence_fields(
         config.river_radius_blocks,
     );
     smooth_river_concave_cusps(&mut river, config.width as usize, config.height as usize);
+    let estuary = rasterize_estuary_fan_field(&context.estuary_fans, config);
     let stats = MacroFieldInfluenceStats {
         ridge_source_curve_count: ridge_sources.len(),
         river_source_curve_count: river_sources.len(),
@@ -177,7 +190,102 @@ pub(super) fn rasterize_influence_fields(
         river_bank_roughness_hint: river.river_bank_roughness_hint,
         river_gravel_hint: river.river_gravel_hint,
         river_cutbank_hint: river.river_cutbank_hint,
+        estuary_strength: estuary.strength,
+        estuary_flow_hint: estuary.flow_hint,
+        estuary_bed_depth_hint: estuary.bed_depth_hint,
         stats,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct EstuaryFanField {
+    pub(super) strength: Vec<f32>,
+    pub(super) flow_hint: Vec<f32>,
+    pub(super) bed_depth_hint: Vec<f32>,
+}
+
+pub(super) fn rasterize_estuary_fan_field(
+    fans: &[EstuaryFanRef],
+    config: MacroFieldTileConfig,
+) -> EstuaryFanField {
+    let sample_count = config.sample_count();
+    if fans.is_empty() {
+        return EstuaryFanField {
+            strength: vec![0.0; sample_count],
+            flow_hint: vec![0.0; sample_count],
+            bed_depth_hint: vec![0.0; sample_count],
+        };
+    }
+
+    let samples = (0..sample_count)
+        .into_par_iter()
+        .map(|index| {
+            let position = config.sample_position(index);
+            fans.iter()
+                .map(|fan| estuary_fan_sample(*fan, position))
+                .fold(EstuaryFanSample::default(), strongest_estuary_sample)
+        })
+        .collect::<Vec<_>>();
+
+    EstuaryFanField {
+        strength: samples.iter().map(|sample| sample.strength).collect(),
+        flow_hint: samples.iter().map(|sample| sample.flow_hint).collect(),
+        bed_depth_hint: samples.iter().map(|sample| sample.bed_depth_hint).collect(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(super) struct EstuaryFanSample {
+    pub(super) strength: f32,
+    pub(super) flow_hint: f32,
+    pub(super) bed_depth_hint: f32,
+}
+
+pub(super) fn estuary_fan_sample(
+    fan: EstuaryFanRef,
+    position: WorldPlanePoint,
+) -> EstuaryFanSample {
+    let dx = position.x - fan.origin.x;
+    let dz = position.z - fan.origin.z;
+    let along = dx * fan.direction_x + dz * fan.direction_z;
+    if along < 0.0 || along > fan.length_blocks {
+        return EstuaryFanSample::default();
+    }
+
+    let lateral = (dx * -fan.direction_z + dz * fan.direction_x).abs();
+    let progress = (along / fan.length_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let half_width = estuary_fan_half_width_blocks(fan, progress);
+    let edge_noise = boundary_roughness_offset(
+        position,
+        ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS * (0.45 + progress * 0.75),
+        0xE57A_27F4_0001,
+    );
+    let rough_lateral = (lateral + edge_noise).max(0.0);
+    let cross = 1.0 - smoothstep01((rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
+    if cross <= f32::EPSILON {
+        return EstuaryFanSample::default();
+    }
+
+    let along_strength = 1.0 - smoothstep01(progress);
+    let shelf_tail = 1.0 - smoothstep01((progress - 0.72) / 0.28);
+    let strength = (cross * along_strength.max(shelf_tail * 0.35)).clamp(0.0, 1.0);
+    EstuaryFanSample {
+        strength,
+        flow_hint: fan.flow_hint,
+        bed_depth_hint: fan.bed_depth_hint,
+    }
+}
+
+pub(super) fn estuary_fan_half_width_blocks(fan: EstuaryFanRef, progress: f32) -> f32 {
+    let t = smoothstep01(progress.clamp(0.0, 1.0));
+    lerp(fan.start_half_width_blocks, fan.end_half_width_blocks, t)
+}
+
+fn strongest_estuary_sample(left: EstuaryFanSample, right: EstuaryFanSample) -> EstuaryFanSample {
+    if right.strength > left.strength {
+        right
+    } else {
+        left
     }
 }
 
@@ -2400,6 +2508,44 @@ mod tests {
         assert!(
             trunk.river_valley_strength[shoulder] > headwater.river_valley_strength[shoulder],
             "downstream thick polyline should keep a wider flat/shoulder bed than headwater"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_profile_widens_downstream() {
+        let fan = EstuaryFanRef {
+            segment_id: 1,
+            origin: WorldPlanePoint::new(0.0, 0.0),
+            direction_x: 1.0,
+            direction_z: 0.0,
+            start_half_width_blocks: 12.0,
+            end_half_width_blocks: 72.0,
+            length_blocks: 180.0,
+            flow_hint: 0.82,
+            bed_depth_hint: 0.55,
+        };
+
+        let start_edge = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 18.0));
+        let downstream_same_offset = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 18.0));
+        let downstream_wide_edge = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 48.0));
+
+        assert_eq!(
+            estuary_fan_half_width_blocks(fan, 0.0),
+            fan.start_half_width_blocks
+        );
+        assert!(
+            estuary_fan_half_width_blocks(fan, 0.75) > fan.start_half_width_blocks * 3.0,
+            "estuary fan should spread wider downstream instead of remaining a raw line"
+        );
+        assert!(
+            downstream_same_offset.strength > start_edge.strength,
+            "the same lateral offset should be more included after the fan widens: start={} downstream={}",
+            start_edge.strength,
+            downstream_same_offset.strength
+        );
+        assert!(
+            downstream_wide_edge.strength > 0.0,
+            "downstream fan should retain a broad shallow shelf influence"
         );
     }
 

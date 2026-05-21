@@ -15,6 +15,7 @@ use crate::world::generation::boundary::{BoundaryCache, BoundaryJunction, NoisyB
 use crate::world::generation::graph::{
     VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint,
 };
+use crate::world::generation::hydrology::GraphDrainageNodeKind;
 use crate::world::generation::macro_map::{GraphMacroMap, MacroSite};
 use crate::world::generation::river_plan::RiverPlan;
 
@@ -41,6 +42,7 @@ pub struct MacroFieldRasterContext<'a> {
     pub(super) ridge_grid: CurveIndexGrid,
     pub(super) river_curves: Vec<RiverCurveRef>,
     pub(super) river_grid: CurveIndexGrid,
+    pub(super) estuary_fans: Vec<EstuaryFanRef>,
 }
 
 impl<'a> MacroFieldRasterContext<'a> {
@@ -101,6 +103,12 @@ impl<'a> MacroFieldRasterContext<'a> {
             *chain_lengths.entry(plan.chain_id).or_insert(0.0) +=
                 plan.segment_length_blocks.max(0.0);
         }
+        let terminal_chain_ids = river_plan
+            .chains
+            .iter()
+            .filter(|chain| chain.terminal_kind == Some(GraphDrainageNodeKind::CoastOutlet))
+            .map(|chain| (chain.id, chain.segment_ids.last().copied()))
+            .collect::<HashMap<_, _>>();
         let mut river_curves = river_plan
             .segments
             .iter()
@@ -124,6 +132,50 @@ impl<'a> MacroFieldRasterContext<'a> {
             })
             .collect::<Vec<_>>();
         river_curves.sort_by_key(|river| river.edge.0);
+        let mut estuary_fans = river_plan
+            .segments
+            .iter()
+            .filter_map(|plan| {
+                let terminal_segment = terminal_chain_ids
+                    .get(&plan.chain_id)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|segment_id| segment_id == plan.segment_id);
+                if !terminal_segment {
+                    return None;
+                }
+                let endpoints = river_plan.endpoints(plan.segment_id)?;
+                let dx = endpoints.to_position.x - endpoints.from_position.x;
+                let dz = endpoints.to_position.z - endpoints.from_position.z;
+                let length = (dx * dx + dz * dz).sqrt();
+                if length <= f32::EPSILON {
+                    return None;
+                }
+                let flow_hint = flow_hint_from_plan(plan);
+                let flow_t = flow_hint.clamp(0.0, 1.0);
+                let start_half_width_blocks = (plan.bed_width_blocks * 0.55)
+                    .max(6.0)
+                    .min(plan.broad_valley_width_blocks.max(8.0));
+                let end_half_width_blocks = (start_half_width_blocks
+                    + plan.broad_valley_width_blocks * (0.55 + flow_t * 0.95))
+                    .max(start_half_width_blocks * 2.0);
+                let length_blocks = (plan.broad_valley_width_blocks * (1.10 + flow_t * 1.30))
+                    .max(plan.bed_width_blocks * 3.0)
+                    .clamp(64.0, 768.0);
+                Some(EstuaryFanRef {
+                    segment_id: plan.segment_id.0,
+                    origin: endpoints.downstream_position,
+                    direction_x: dx / length,
+                    direction_z: dz / length,
+                    start_half_width_blocks,
+                    end_half_width_blocks,
+                    length_blocks,
+                    flow_hint,
+                    bed_depth_hint: (plan.bed_depth_blocks / 40.0).clamp(0.0, 1.0),
+                })
+            })
+            .collect::<Vec<_>>();
+        estuary_fans.sort_by_key(|fan| fan.segment_id);
         let mut boundary_edges = macro_map
             .edges
             .iter()
@@ -157,6 +209,7 @@ impl<'a> MacroFieldRasterContext<'a> {
             ridge_grid,
             river_curves,
             river_grid,
+            estuary_fans,
         }
     }
 
@@ -425,6 +478,19 @@ pub(super) struct RiverCurveRef {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct EstuaryFanRef {
+    pub(super) segment_id: u64,
+    pub(super) origin: WorldPlanePoint,
+    pub(super) direction_x: f32,
+    pub(super) direction_z: f32,
+    pub(super) start_half_width_blocks: f32,
+    pub(super) end_half_width_blocks: f32,
+    pub(super) length_blocks: f32,
+    pub(super) flow_hint: f32,
+    pub(super) bed_depth_hint: f32,
 }
 
 #[derive(Debug, Clone, Copy)]

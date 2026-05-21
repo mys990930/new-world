@@ -50,8 +50,8 @@ tile로 굽는다.
 - `RiverPlan` / `hydrology`: topology, selected river decisions, canonical Q/display discharge,
   reach type, broad-valley width/depth, and narrow bed/water morphology source.
 - `macro_field`: selected `RiverPlan` geometry를 tile-local raster/cache influence로 굽고, broad
-  valley lowering과 downstream hint channel만 제공한다. hydrology routing, selected river 수정,
-  final water surface solve, voxel/material output은 소유하지 않는다.
+  valley lowering, terminal 하구 fan guide, downstream hint channel만 제공한다. hydrology routing,
+  selected river 수정, final water surface solve, voxel/material output은 소유하지 않는다.
 - `heightfield`: macro_field/pixelize가 넘긴 river-resolved height를 block column으로 소비하고,
   integer water hints와 tile-local smoothing만 적용한다. river bed/bank/valley carve를 다시 풀거나
   최종 material/voxel channel을 확정하지 않는다.
@@ -572,6 +572,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    적용하면 안 된다. macro_field combined height는 broad valley와 core bed depth를 모두 반영하되,
    narrow river bed를 원형 blob 집합처럼 직접 찍어내면 안 된다. heightfield가 이 morphology를 다시
    계산하거나 재-carve하면 회귀다.
+   terminal coast outlet 하구 fan은 이 river morphology를 이어받는 macro_field-local carve guide일
+   뿐이며, hydrology/river_plan selected segment topology를 연장하거나 downstream/coast/ocean cell을
+   `River`로 승격하면 안 된다.
 7. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 8. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 9. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
@@ -668,6 +671,15 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   기본 river influence radius는 downstream absolute water width와 broad shoulder를 담을 수 있도록
   `640` blocks다. 실제 narrow bed depth는 core center profile을 통해 combined height에 반영하고,
   같은 bed-depth 값은 heightfield/water/surface stage가 읽는 diagnostic/water-depth hint로도 남긴다.
+  selected river chain이 `CoastOutlet` terminal에서 끝나는 마지막 segment는 river topology를
+  downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 terminal endpoint 이후
+  downstream 방향의 fan/estuary guide를 내부 influence channel로 굽는다. 이 guide는 시작부에서 기존
+  terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
+  안에서 얕은 shelf 형태로 퍼진다. deterministic world-space roughness는 fan edge만 흔들며 selected
+  river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. `river_core_strength` 또는
+  selected river water corridor를 downstream cell로 승격하지 않고, height 합성에서 estuary influence만
+  읽어 coast/ocean near-sea source를 `combined_macro_height <= 0` 쪽으로 열어 준다. lake, wetland,
+  dry basin, ordinary inland/no-flow sample은 이 guide의 carve 대상이 아니다.
 - lake/wetland lowering은 hard lake ownership mask가 아니라 noisy lake boundary 거리 기반 lowering
   factor로 양쪽에서 연속 전이한다. dry basin mask/statistics는 유지하지만 별도 dry-basin floor/rim
   height profile은 적용하지 않는다.

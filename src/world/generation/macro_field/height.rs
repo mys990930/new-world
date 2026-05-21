@@ -108,6 +108,55 @@ pub(super) fn combine_macro_height_with_river_profile(
     river_position: Option<WorldPlanePoint>,
     config: MacroFieldTileConfig,
 ) -> f32 {
+    combine_macro_height_with_estuary_profile(
+        macro_elevation,
+        ocean_mask,
+        _coast_mask,
+        _lake_mask,
+        _dry_basin_mask,
+        lake_lowering_factor,
+        ridge_influence,
+        river_shoulder_strength,
+        river_core_strength,
+        river_flow_hint,
+        river_bed_depth_hint,
+        river_bank_roughness_hint,
+        river_gravel_hint,
+        river_cutbank_hint,
+        river_centerline_macro_elevation,
+        river_longitudinal_blocks,
+        river_position,
+        0.0,
+        0.0,
+        0.0,
+        config,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn combine_macro_height_with_estuary_profile(
+    macro_elevation: f32,
+    ocean_mask: f32,
+    coast_mask: f32,
+    _lake_mask: f32,
+    _dry_basin_mask: f32,
+    lake_lowering_factor: f32,
+    ridge_influence: f32,
+    river_shoulder_strength: f32,
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    river_bed_depth_hint: f32,
+    river_bank_roughness_hint: f32,
+    river_gravel_hint: f32,
+    river_cutbank_hint: f32,
+    river_centerline_macro_elevation: Option<f32>,
+    river_longitudinal_blocks: f32,
+    river_position: Option<WorldPlanePoint>,
+    estuary_strength: f32,
+    estuary_flow_hint: f32,
+    estuary_bed_depth_hint: f32,
+    config: MacroFieldTileConfig,
+) -> f32 {
     let ridge_raise = ridge_influence * config.ridge_height_scale;
     let shoulder_height = river_shoulder_context_height_with_position(
         macro_elevation,
@@ -148,12 +197,61 @@ pub(super) fn combine_macro_height_with_river_profile(
     let river_context_height =
         (shoulder_height - bank_lowering.max(core_lowering)).min(shoulder_height);
     let mut height = river_context_height + ridge_raise;
+    height = estuary_fan_macro_height(
+        height,
+        macro_elevation,
+        ocean_mask,
+        coast_mask,
+        lake_lowering_factor,
+        _dry_basin_mask,
+        estuary_strength,
+        estuary_flow_hint,
+        estuary_bed_depth_hint,
+        config,
+    );
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
     } else if lake_lowering_factor > 0.0 {
         height = lake_bed_macro_height(height, lake_lowering_factor, config);
     }
     height.clamp(-2.0, 2.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn estuary_fan_macro_height(
+    height: f32,
+    macro_elevation: f32,
+    ocean_mask: f32,
+    coast_mask: f32,
+    lake_lowering_factor: f32,
+    dry_basin_mask: f32,
+    estuary_strength: f32,
+    estuary_flow_hint: f32,
+    estuary_bed_depth_hint: f32,
+    config: MacroFieldTileConfig,
+) -> f32 {
+    let strength = estuary_strength.clamp(0.0, 1.0);
+    if strength <= f32::EPSILON || lake_lowering_factor > 0.0 || dry_basin_mask > 0.5 {
+        return height;
+    }
+
+    let near_sea_t = 1.0 - smoothstep_range(0.015, 0.14, macro_elevation.max(0.0));
+    let water_context = ocean_mask
+        .clamp(0.0, 1.0)
+        .max(coast_mask.clamp(0.0, 1.0) * near_sea_t);
+    if water_context <= f32::EPSILON {
+        return height;
+    }
+
+    let flow_t = smoothstep01(estuary_flow_hint.clamp(0.0, 1.0));
+    let bed_t = estuary_bed_depth_hint.clamp(0.0, 1.0);
+    let active = smoothstep01(strength) * water_context;
+    let shallow_shelf_depth =
+        config.river_carve_scale * lerp(0.35, 1.15, flow_t) + bed_t * lerp(0.006, 0.026, flow_t);
+    let target = -shallow_shelf_depth * lerp(0.45, 1.0, active);
+    let lowering = (height - target).max(0.0) * active;
+
+    (height - lowering).min(height)
 }
 
 #[cfg(test)]
@@ -987,6 +1085,42 @@ mod tests {
             first, second,
             "macro river downcut should include deterministic non-uniformity instead of a perfectly artificial trough"
         );
+    }
+
+    #[test]
+    fn estuary_fan_lowers_only_coast_or_ocean_near_sea_source() {
+        let config = test_tile_config();
+        let coast =
+            estuary_fan_macro_height(0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+        let ocean =
+            estuary_fan_macro_height(0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, config);
+        let ordinary =
+            estuary_fan_macro_height(0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+
+        assert!(
+            coast <= 0.0,
+            "estuary fan should open near-sea coast source to sea level or below: {coast}"
+        );
+        assert!(
+            ocean <= 0.0,
+            "estuary fan should keep ocean-side mouth bed connected below sea level: {ocean}"
+        );
+        assert_eq!(
+            ordinary, 0.035,
+            "ordinary land/no-flow samples must not be carved by estuary fan strength alone"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_excludes_lake_and_dry_basin_sources() {
+        let config = test_tile_config();
+        let lake =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 0.85, 0.70, config);
+        let dry =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, config);
+
+        assert_eq!(lake, 0.020);
+        assert_eq!(dry, 0.020);
     }
 
     #[test]
