@@ -276,7 +276,9 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   level `y = 0`으로 둔다.
   heightfield는 source bed가 sea level 이상으로 들어온 ocean column을 임의의 shallow fallback plane으로
   내리지 않는다. ocean source bed를 coast-adjacent sea level 근처에서 자연스럽게 이어지게 만드는 책임은
-  앞 단계의 macro_field bathymetry가 갖는다. 기존처럼 terrain bed 자체를 `y = 0` 또는 단일 shallow
+  앞 단계의 macro_field bathymetry가 갖는다. selected river mouth가 coast/ocean 쪽 positive source를
+  sea level 아래로 이어야 할 때도 heightfield가 river 판정을 확장하거나 terrain을 새로 carve하지 않고,
+  macro_field가 넘긴 `combined_macro_height`를 그대로 소비한다. 기존처럼 terrain bed 자체를 `y = 0` 또는 단일 shallow
   plane으로 평면화하지 않는다. 일반 lake column도 water
   surface와 terrain bed를 분리하며, macro_field가 제공한
   U자형 lake bed height를 terrain surface로 보존한다. lake bed는 source raw bed를 따르되
