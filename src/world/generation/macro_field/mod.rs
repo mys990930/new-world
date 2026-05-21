@@ -20,7 +20,7 @@ use crate::world::generation::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use crate::world::generation::river_plan::RiverPlan;
 use height::{
     combine_macro_height_with_estuary_profile, combine_macro_height_with_river_profile, envelope,
-    is_lake_surface, ridge_envelope, roughened_distance,
+    is_lake_surface, ridge_envelope, roughened_distance, smoothstep_range,
 };
 use influence::{MacroFieldInfluenceSample, macro_field_stats, rasterize_influence_fields};
 use ocean::prune_isolated_ocean_fragments;
@@ -201,9 +201,29 @@ fn sample_macro_field_point_with_influence(
     let river_centerline_macro_elevation = influence
         .river_centerline_position
         .map(|centerline| context.owner_sample(centerline, config).macro_elevation);
-    let river_core_strength = influence.river_core_strength;
-    let river_shoulder_strength = influence.river_shoulder_strength;
-    let river_valley_strength = influence.river_valley_strength;
+    let selected_river_core_strength = influence.river_core_strength;
+    let selected_river_shoulder_strength = influence.river_shoulder_strength;
+    let estuary_water_strength = estuary_mouth_water_strength(
+        influence.estuary_strength,
+        macro_elevation,
+        ocean_mask,
+        coast_mask,
+        lake_mask,
+        dry_basin_mask,
+    );
+    let river_core_strength = selected_river_core_strength.max(estuary_water_strength);
+    let river_shoulder_strength =
+        selected_river_shoulder_strength.max(estuary_water_strength * 0.85);
+    let river_valley_strength = influence.river_valley_strength.max(estuary_water_strength);
+    let river_flow_hint = river_flow_hint.max(influence.estuary_flow_hint * estuary_water_strength);
+    let river_distance_blocks = if estuary_water_strength > selected_river_core_strength {
+        river_distance_blocks.min(0.0)
+    } else {
+        river_distance_blocks
+    };
+    let river_bed_depth_hint = influence
+        .river_bed_depth_hint
+        .max(influence.estuary_bed_depth_hint * estuary_water_strength * 0.55);
     let combined_macro_height = combine_macro_height_with_estuary_profile(
         macro_elevation,
         ocean_mask,
@@ -212,9 +232,9 @@ fn sample_macro_field_point_with_influence(
         dry_basin_mask,
         owner_sample.lake_lowering_factor,
         ridge_influence,
-        river_shoulder_strength,
-        river_core_strength,
-        river_flow_hint,
+        selected_river_shoulder_strength,
+        selected_river_core_strength,
+        influence.river_flow_hint,
         influence.river_bed_depth_hint,
         influence.river_bank_roughness_hint,
         influence.river_gravel_hint,
@@ -246,12 +266,28 @@ fn sample_macro_field_point_with_influence(
         river_distance_blocks,
         river_flow_hint,
         river_longitudinal_blocks,
-        river_bed_depth_hint: influence.river_bed_depth_hint,
+        river_bed_depth_hint,
         river_bank_roughness_hint: influence.river_bank_roughness_hint,
         river_gravel_hint: influence.river_gravel_hint,
         river_cutbank_hint: influence.river_cutbank_hint,
         combined_macro_height,
     }
+}
+
+fn estuary_mouth_water_strength(
+    estuary_strength: f32,
+    macro_elevation: f32,
+    ocean_mask: f32,
+    coast_mask: f32,
+    lake_mask: f32,
+    dry_basin_mask: f32,
+) -> f32 {
+    if lake_mask > 0.5 || dry_basin_mask > 0.5 {
+        return 0.0;
+    }
+    let near_sea_t = 1.0 - smoothstep_range(0.002, 0.020, macro_elevation.max(0.0));
+    let water_context = ocean_mask.clamp(0.0, 1.0).max(coast_mask.clamp(0.0, 1.0));
+    smoothstep_range(0.14, 0.30, estuary_strength.clamp(0.0, 1.0)) * near_sea_t * water_context
 }
 
 #[cfg(test)]
@@ -318,6 +354,30 @@ mod tests {
                 && (-2.0..=2.0).contains(&sample.combined_macro_height)
         }));
         assert!(tile.stats.min_combined_macro_height <= tile.stats.max_combined_macro_height);
+    }
+
+    #[test]
+    fn estuary_mouth_water_hint_covers_near_sea_fan_center() {
+        let water_strength = estuary_mouth_water_strength(0.34, 0.004, 0.0, 1.0, 0.0, 0.0);
+
+        assert!(
+            water_strength >= 0.88,
+            "near-sea estuary fan center should export enough river-core hint for heightfield water: {water_strength}"
+        );
+    }
+
+    #[test]
+    fn estuary_mouth_water_hint_stays_out_of_high_bank_and_lake_contexts() {
+        let high_bank = estuary_mouth_water_strength(0.80, 0.030, 0.0, 1.0, 0.0, 0.0);
+        let lake = estuary_mouth_water_strength(0.80, 0.004, 0.0, 1.0, 1.0, 0.0);
+        let weak_edge = estuary_mouth_water_strength(0.16, 0.004, 0.0, 1.0, 0.0, 0.0);
+
+        assert_eq!(high_bank, 0.0);
+        assert_eq!(lake, 0.0);
+        assert!(
+            weak_edge < 0.88,
+            "weak fan edge should not become a full river-water column by itself: {weak_edge}"
+        );
     }
 
     #[test]

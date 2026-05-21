@@ -254,7 +254,7 @@ pub(super) fn estuary_fan_sample(
 
     let lateral = (dx * -fan.direction_z + dz * fan.direction_x).abs();
     let progress = (along / fan.length_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
-    let half_width = estuary_fan_half_width_blocks(fan, progress);
+    let half_width = estuary_fan_half_width_blocks(fan, progress) * 1.45;
     let edge_noise = boundary_roughness_offset(
         position,
         ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS * (0.45 + progress * 0.75),
@@ -271,7 +271,7 @@ pub(super) fn estuary_fan_sample(
     let inlet_blend = 0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28;
     let along_strength = 1.0 - smoothstep01(progress);
     let shelf_tail = 1.0 - smoothstep01((progress - 0.78) / 0.22);
-    let tail_floor = 0.48 - flow_t * 0.12;
+    let tail_floor = 0.58 - flow_t * 0.14;
     let strength =
         (cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
     EstuaryFanSample {

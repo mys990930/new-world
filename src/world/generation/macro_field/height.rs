@@ -228,29 +228,27 @@ pub(super) fn estuary_fan_macro_height(
     estuary_strength: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
-    config: MacroFieldTileConfig,
+    _config: MacroFieldTileConfig,
 ) -> f32 {
     let strength = estuary_strength.clamp(0.0, 1.0);
     if strength <= f32::EPSILON || lake_lowering_factor > 0.0 || dry_basin_mask > 0.5 {
         return height;
     }
 
-    let near_sea_t = 1.0 - smoothstep_range(0.015, 0.14, macro_elevation.max(0.0));
-    let water_context = ocean_mask
-        .clamp(0.0, 1.0)
-        .max(coast_mask.clamp(0.0, 1.0) * near_sea_t);
+    let near_sea_t = 1.0 - smoothstep_range(0.002, 0.018, macro_elevation.max(0.0));
+    let water_context = ocean_mask.clamp(0.0, 1.0).max(coast_mask.clamp(0.0, 1.0)) * near_sea_t;
     if water_context <= f32::EPSILON {
         return height;
     }
 
     let flow_t = smoothstep01(estuary_flow_hint.clamp(0.0, 1.0));
     let bed_t = estuary_bed_depth_hint.clamp(0.0, 1.0);
-    let active = smoothstep01(strength) * water_context;
-    let shallow_shelf_depth =
-        config.river_carve_scale * lerp(0.35, 1.15, flow_t) + bed_t * lerp(0.006, 0.026, flow_t);
-    let edge_t = smoothstep_range(0.20, 0.92, active);
-    let target = -shallow_shelf_depth * lerp(0.16, 1.0, edge_t);
-    let lowering = (height - target).max(0.0) * active;
+    let active = strength * water_context;
+    let shallow_shelf_depth_blocks = lerp(0.45, 1.45, flow_t) + bed_t * lerp(0.10, 1.35, flow_t);
+    let shallow_shelf_depth = shallow_shelf_depth_blocks / 2048.0;
+    let edge_t = smoothstep_range(0.08, 0.92, active);
+    let target = -shallow_shelf_depth * edge_t;
+    let lowering = (height - target).max(0.0) * edge_t * near_sea_t;
 
     (height - lowering).min(height)
 }
@@ -644,6 +642,8 @@ mod tests {
     use crate::world::generation::graph::{
         VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId, WorldPlanePoint,
     };
+    use crate::world::generation::macro_field::context::EstuaryFanRef;
+    use crate::world::generation::macro_field::influence::estuary_fan_sample;
     use crate::world::generation::macro_field::test_support::*;
     use crate::world::generation::macro_field::{
         MacroFieldRasterContext, MacroFieldTileConfig, generate_macro_field_tile,
@@ -1092,11 +1092,11 @@ mod tests {
     fn estuary_fan_lowers_only_coast_or_ocean_near_sea_source() {
         let config = test_tile_config();
         let coast =
-            estuary_fan_macro_height(0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+            estuary_fan_macro_height(0.002, 0.002, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
         let ocean =
-            estuary_fan_macro_height(0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, config);
+            estuary_fan_macro_height(0.001, 0.001, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, config);
         let ordinary =
-            estuary_fan_macro_height(0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+            estuary_fan_macro_height(0.002, 0.002, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
 
         assert!(
             coast <= 0.0,
@@ -1107,7 +1107,7 @@ mod tests {
             "estuary fan should keep ocean-side mouth bed connected below sea level: {ocean}"
         );
         assert_eq!(
-            ordinary, 0.035,
+            ordinary, 0.002,
             "ordinary land/no-flow samples must not be carved by estuary fan strength alone"
         );
     }
@@ -1116,9 +1116,9 @@ mod tests {
     fn estuary_fan_edge_strength_does_not_snap_water_boundary_below_sea() {
         let config = test_tile_config();
         let weak_edge =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, config);
+            estuary_fan_macro_height(0.002, 0.002, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, config);
         let core =
-            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+            estuary_fan_macro_height(0.002, 0.002, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
 
         assert!(
             weak_edge > 0.0,
@@ -1127,6 +1127,69 @@ mod tests {
         assert!(
             core <= 0.0,
             "full estuary fan core should still open the near-sea mouth to water: {core}"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_does_not_force_high_coast_bank_to_sea_level() {
+        let config = test_tile_config();
+        let high_bank =
+            estuary_fan_macro_height(0.026, 0.026, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+
+        assert!(
+            high_bank > 0.020,
+            "estuary fan should not cut a high positive coast bank straight down to sea level: {high_bank}"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_adjacent_block_grade_stays_under_thirty_degrees() {
+        let config = test_tile_config();
+        let fan = EstuaryFanRef {
+            segment_id: 11,
+            origin: WorldPlanePoint::new(0.0, 0.0),
+            direction_x: 1.0,
+            direction_z: 0.0,
+            start_half_width_blocks: 10.0,
+            end_half_width_blocks: 42.0,
+            length_blocks: 320.0,
+            flow_hint: 0.48,
+            bed_depth_hint: 0.36,
+        };
+        let mut max_delta_blocks = 0.0_f32;
+        let mut previous_height = None::<f32>;
+        let mut center_height = None::<f32>;
+
+        for lateral in -56..=56 {
+            let sample = estuary_fan_sample(fan, WorldPlanePoint::new(112.0, lateral as f32));
+            let height = estuary_fan_macro_height(
+                0.002,
+                0.002,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                sample.strength,
+                sample.flow_hint,
+                sample.bed_depth_hint,
+                config,
+            ) * 2048.0;
+            if lateral == 0 {
+                center_height = Some(height);
+            }
+            if let Some(previous) = previous_height {
+                max_delta_blocks = max_delta_blocks.max((height - previous).abs());
+            }
+            previous_height = Some(height);
+        }
+
+        assert!(
+            max_delta_blocks <= 0.58,
+            "adjacent estuary fan samples should stay below a 30 degree grade: max_delta={max_delta_blocks}"
+        );
+        assert!(
+            center_height.expect("center sample") <= 0.0,
+            "estuary fan center should still open a shallow water-covered mouth"
         );
     }
 
