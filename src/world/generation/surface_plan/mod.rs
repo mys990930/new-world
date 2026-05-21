@@ -942,34 +942,39 @@ fn apply_final_material_boundary_wiggle(
     let original = columns.to_vec();
     let mix_sources = mix_sources.filter(|sources| sources.len() == original.len());
     let radius = usize::from(config.boundary_mix_radius_blocks);
-    for z in 0..height {
-        for x in 0..width {
-            let index = z * width + x;
-            let current = original[index];
-            let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
-            let Some((neighbor, distance)) = nearest_final_boundary_wiggle_candidate(
-                &original,
-                mix_sources,
-                width,
-                height,
-                x,
-                z,
-                radius,
-                current,
-                current_source,
-                config,
-            ) else {
-                continue;
-            };
+    for layer in 1..=radius {
+        let snapshot = columns.to_vec();
+        for z in 0..height {
+            for x in 0..width {
+                let index = z * width + x;
+                let current = snapshot[index];
+                let current_base = original[index];
+                let current_source = mix_sources.and_then(|sources| sources.get(index).copied());
+                let Some((neighbor, distance)) = nearest_final_boundary_wiggle_candidate(
+                    &snapshot,
+                    &original,
+                    mix_sources,
+                    width,
+                    height,
+                    x,
+                    z,
+                    current,
+                    current_base,
+                    current_source,
+                    config,
+                ) else {
+                    continue;
+                };
 
-            let strength = boundary_mix_strength(distance, radius, config);
-            let roll =
-                boundary_mix_roll(current.world_x, current.world_z, neighbor.top_block, config);
-            if roll >= strength {
-                continue;
+                let strength = boundary_mix_strength(layer.max(distance), radius, config);
+                let roll =
+                    boundary_mix_roll(current.world_x, current.world_z, neighbor.top_block, config);
+                if roll >= strength {
+                    continue;
+                }
+
+                copy_visual_material(&mut columns[index], neighbor);
             }
-
-            copy_visual_material(&mut columns[index], neighbor);
         }
     }
     restore_cross_owner_boundary_swaps(columns, &original, width, height, mix_sources);
@@ -977,21 +982,22 @@ fn apply_final_material_boundary_wiggle(
 
 fn nearest_final_boundary_wiggle_candidate(
     columns: &[SurfaceColumnPlan],
+    original: &[SurfaceColumnPlan],
     mix_sources: Option<&[SurfaceMixSource]>,
     width: usize,
     height: usize,
     x: usize,
     z: usize,
-    radius: usize,
     current: SurfaceColumnPlan,
+    current_base: SurfaceColumnPlan,
     current_source: Option<SurfaceMixSource>,
     config: SurfacePlanConfig,
 ) -> Option<(SurfaceColumnPlan, usize)> {
     let mut best: Option<(SurfaceColumnPlan, usize, u64)> = None;
-    let min_x = x.saturating_sub(radius);
-    let max_x = (x + radius).min(width.saturating_sub(1));
-    let min_z = z.saturating_sub(radius);
-    let max_z = (z + radius).min(height.saturating_sub(1));
+    let min_x = x.saturating_sub(1);
+    let max_x = (x + 1).min(width.saturating_sub(1));
+    let min_z = z.saturating_sub(1);
+    let max_z = (z + 1).min(height.saturating_sub(1));
 
     for nz in min_z..=max_z {
         for nx in min_x..=max_x {
@@ -1001,11 +1007,12 @@ fn nearest_final_boundary_wiggle_candidate(
             let dx = nx.abs_diff(x);
             let dz = nz.abs_diff(z);
             let distance = dx + dz;
-            if distance == 0 || distance > radius || (dx != 0 && dz != 0) {
+            if distance != 1 || (dx != 0 && dz != 0) {
                 continue;
             }
             let neighbor_index = nz * width + nx;
             let neighbor = columns[neighbor_index];
+            let neighbor_base = original[neighbor_index];
             let neighbor_source =
                 mix_sources.and_then(|sources| sources.get(neighbor_index).copied());
             if !boundary_mix_direction_allows(current, neighbor, config) {
@@ -1014,6 +1021,8 @@ fn nearest_final_boundary_wiggle_candidate(
             if !final_boundary_wiggle_candidate_allowed(
                 current,
                 neighbor,
+                current_base,
+                neighbor_base,
                 current_source,
                 neighbor_source,
             ) {
@@ -1035,6 +1044,8 @@ fn nearest_final_boundary_wiggle_candidate(
 fn final_boundary_wiggle_candidate_allowed(
     current: SurfaceColumnPlan,
     neighbor: SurfaceColumnPlan,
+    current_base: SurfaceColumnPlan,
+    neighbor_base: SurfaceColumnPlan,
     current_source: Option<SurfaceMixSource>,
     neighbor_source: Option<SurfaceMixSource>,
 ) -> bool {
@@ -1054,7 +1065,10 @@ fn final_boundary_wiggle_candidate_allowed(
     ) else {
         return false;
     };
-    current_site != neighbor_site
+    if current_site != neighbor_site {
+        return true;
+    }
+    neighbor.top_block != neighbor_base.top_block && neighbor.top_block != current_base.top_block
 }
 
 fn nearest_mix_candidate(
@@ -2598,6 +2612,8 @@ mod tests {
                 let final_boundary_wiggle = final_boundary_wiggle_candidate_allowed(
                     current,
                     neighbor,
+                    current,
+                    neighbor,
                     current_source,
                     neighbor_source,
                 );
@@ -2658,6 +2674,8 @@ mod tests {
                     neighbor_source,
                 );
                 let final_boundary_wiggle = final_boundary_wiggle_candidate_allowed(
+                    current,
+                    neighbor,
                     current,
                     neighbor,
                     current_source,
@@ -3375,6 +3393,141 @@ mod tests {
     }
 
     #[test]
+    fn final_boundary_wiggle_does_not_copy_distance_two_without_adjacency() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 2,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(2, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        let candidate = nearest_final_boundary_wiggle_candidate(
+            &columns,
+            &columns,
+            Some(&mix_sources),
+            3,
+            1,
+            0,
+            0,
+            columns[0],
+            columns[0],
+            Some(mix_sources[0]),
+            config,
+        );
+
+        assert!(
+            candidate.is_none(),
+            "final boundary wiggle must not jump over an unchanged column to create a detached speckle"
+        );
+    }
+
+    #[test]
+    fn final_boundary_wiggle_keeps_boundary_adjacent_copy_candidate() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 2,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        let left_candidate = nearest_final_boundary_wiggle_candidate(
+            &columns,
+            &columns,
+            Some(&mix_sources),
+            2,
+            1,
+            0,
+            0,
+            columns[0],
+            columns[0],
+            Some(mix_sources[0]),
+            config,
+        );
+        let right_candidate = nearest_final_boundary_wiggle_candidate(
+            &columns,
+            &columns,
+            Some(&mix_sources),
+            2,
+            1,
+            1,
+            0,
+            columns[1],
+            columns[1],
+            Some(mix_sources[1]),
+            config,
+        );
+
+        assert!(
+            left_candidate.is_some() || right_candidate.is_some(),
+            "one side of an orthogonally adjacent owner/material boundary should remain eligible"
+        );
+    }
+
+    #[test]
+    fn final_boundary_wiggle_copied_material_remains_orthogonally_attached() {
+        let config = SurfacePlanConfig {
+            boundary_mix_radius_blocks: 2,
+            boundary_mix_strength_percent: 100,
+            ..SurfacePlanConfig::new(7, 2)
+        };
+        let mut columns = vec![
+            test_plan(0, 0, "sand", SurfaceHydrologyRole::Land),
+            test_plan(1, 0, "grass", SurfaceHydrologyRole::Land),
+            test_plan(2, 0, "grass", SurfaceHydrologyRole::Land),
+        ];
+        let original = columns.clone();
+        let mix_sources = vec![
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(1)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+            SurfaceMixSource {
+                owner_site: Some(VoronoiSiteId(2)),
+            },
+        ];
+
+        apply_final_material_boundary_wiggle(&mut columns, 3, 1, config, Some(&mix_sources));
+
+        for (index, column) in columns.iter().enumerate() {
+            if column.top_block == original[index].top_block {
+                continue;
+            }
+            assert!(
+                has_orthogonal_original_neighbor_with_top(&original, 3, 1, index, column.top_block),
+                "copied final material must stay attached to an original orthogonal source region"
+            );
+        }
+    }
+
+    #[test]
     fn final_boundary_wiggle_does_not_change_height_water_or_role() {
         let config = SurfacePlanConfig {
             boundary_mix_radius_blocks: 1,
@@ -3547,6 +3700,26 @@ mod tests {
         assert_eq!(columns[0].water_y, Some(5));
         assert_eq!(columns[1].top_block, "grass");
         assert_eq!(columns[1].water_y, None);
+    }
+
+    fn has_orthogonal_original_neighbor_with_top(
+        columns: &[SurfaceColumnPlan],
+        width: usize,
+        height: usize,
+        index: usize,
+        top_block: &'static str,
+    ) -> bool {
+        let x = index % width;
+        let z = index / width;
+        [
+            x.checked_sub(1).map(|nx| z * width + nx),
+            (x + 1 < width).then_some(z * width + x + 1),
+            z.checked_sub(1).map(|nz| nz * width + x),
+            (z + 1 < height).then_some((z + 1) * width + x),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|neighbor_index| columns[neighbor_index].top_block == top_block)
     }
 
     fn assert_known(block: &'static str) {

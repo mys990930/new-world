@@ -200,9 +200,12 @@ Voronoi owner cell 내부의 일반 표면이 `sand`/`wet_sand`나 `grass`/`sand
 owner 내부 정규화가 끝난 뒤에는 작은 final material-only boundary wiggle pass를 한 번 더 적용한다. 이
 pass는 인접 owner/material 경계의 비활성 non-water surface column 사이에서만 orthogonal neighbor의
 visual material fields(`top_block`과 대응되는 visual companion block fields)를 deterministic하게 복사할 수
-있다. 이 단계는 owner site, biome, `surface_y`, `water_y`, `hydrology_role`을 바꾸지 않으며 active water
-column 경계는 넘지 않는다. 서로 맞닿은 두 owner column이 서로의 base top material을 맞교환하는 경우는
-checkerboard artifact를 피하기 위해 base material로 되돌린다.
+있다. final feather는 connected-boundary rule을 따른다. 즉 복사 source는 항상 대상 column에
+orthogonally adjacent해야 하며, radius가 2 이상이면 이전 layer에서 붙어서 넘어온 material을 통해 한 칸씩
+자란다. 직접 distance-2 jump로 떨어진 한두 block짜리 material speckle을 만들 수 없다. 이 단계는 owner
+site, biome, `surface_y`, `water_y`, `hydrology_role`을 바꾸지 않으며 active water column 경계는 넘지
+않는다. 서로 맞닿은 두 owner column이 서로의 base top material을 맞교환하는 경우는 checkerboard artifact를
+피하기 위해 base material로 되돌린다.
 
 `boundary_mix_radius_blocks`는 macro owner metadata가 없는 fallback 또는 실제 water bed 같은 protected column을
 위한 보조 pass로 남아 있지만, macro-field 기반 preview/generation path에서는 noisy-owner 정규화가 최종
@@ -395,8 +398,9 @@ priority를 함께 보고 실제 block을 배치한다.
   `boundary_mix_strength_percent`는 `36`이다. 다만 기본 surface plan preview/generation path처럼
   `MacroFieldTile` metadata가 연결된 경우, owner-normalization pass가 `MacroFieldSample.nearest_site`별
   non-water top material을 단일화한 뒤 final boundary wiggle pass가 adjacent owner/material edge에서만
-  visual material을 작게 흔든다. 제외 대상은 hydrology role 자체가 아니라 `water_y`가 있는 실제 water
-  column이다.
+  visual material을 작게 흔든다. 이 final pass는 connected/attached feather만 허용하므로 source material과
+  orthogonally 맞닿은 material layer를 통해서만 자라며, 고립된 distance-2 복사는 하지 않는다. 제외 대상은
+  hydrology role 자체가 아니라 `water_y`가 있는 실제 water column이다.
 - seed `42`, center chunk `(-70, -32)`, radius `8` 기본 preview footprint의 contract data audit은
   noisy-owner base resolve와 final local-mix resolve를 둘 다 검사한다. `unsupported_local_mix_count = 0`이어야
   하며, final top material이 base material과 다를 경우 반드시 bounded orthogonal local mix 후보가 있어야
