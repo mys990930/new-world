@@ -412,12 +412,18 @@ fn river_core_downcut_budget(
 ) -> f32 {
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
     let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let bed_t = river_bed_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.34);
+    let explicit_bed_t = river_bed_depth_hint.clamp(0.0, 1.0);
+    let flow_depth_floor = (log_flow_t * 0.34).min(explicit_bed_t + 0.06);
+    let bed_t = explicit_bed_t.max(flow_depth_floor);
     let low_flow_guard = lerp(0.54, 1.0, smoothstep_range(0.06, 0.42, river_flow_hint));
     let base = config.river_carve_scale * lerp(0.04, 1.76, bed_t);
-    let flow_floor = config.river_carve_scale * lerp(0.03, 0.48, flow_t);
+    let depth_floor_t = smoothstep_range(0.04, 0.30, bed_t);
+    let flow_floor = config.river_carve_scale * lerp(0.03, 0.48, flow_t) * depth_floor_t;
     let noise_scale = river_context_lowering_noise_scale(river_position, lerp(0.08, 0.21, bed_t));
-    let max_shift = config.river_carve_scale * lerp(0.22, 2.55, bed_t);
+    let grade_limited_shift = config.river_carve_scale * (0.08 + bed_t.powf(1.35) * 2.10);
+    let normal_shift = config.river_carve_scale * lerp(0.22, 2.55, bed_t);
+    let grade_limit_t = 1.0 - smoothstep_range(0.28, 0.46, bed_t);
+    let max_shift = lerp(normal_shift, grade_limited_shift, grade_limit_t);
 
     ((base + flow_floor) * low_flow_guard * noise_scale).min(max_shift)
 }
@@ -644,6 +650,8 @@ mod tests {
     use crate::world::generation::graph::{
         VoronoiCornerId, VoronoiEdgeId, VoronoiSiteId, WorldPlanePoint,
     };
+    use crate::world::generation::macro_field::context::terminal_river_depth_scale;
+    use crate::world::generation::macro_field::river::river_hints_from_strength;
     use crate::world::generation::macro_field::test_support::*;
     use crate::world::generation::macro_field::{
         MacroFieldRasterContext, MacroFieldTileConfig, generate_macro_field_tile,
@@ -962,6 +970,62 @@ mod tests {
         assert!(
             off_center < center * 0.22,
             "low-Q river core should stay narrow and V-shaped across the section: center={center} off_center={off_center}"
+        );
+    }
+
+    #[test]
+    fn short_terminal_river_segment_centerline_grade_stays_under_thirty_degrees() {
+        let config = test_tile_config();
+        let segment_length_blocks = 24.0;
+        let planned_depth_blocks = 32.0;
+        let flow_hint = 0.90;
+        let depth_scale = terminal_river_depth_scale(planned_depth_blocks, segment_length_blocks);
+        let bed_hint = river_hints_from_strength(1.0, flow_hint, planned_depth_blocks)
+            .bed_depth_hint
+            * depth_scale;
+        let mut heights = Vec::new();
+        let mut max_delta_blocks = 0.0_f32;
+        let mut previous_height = None::<f32>;
+
+        for x in 0..=segment_length_blocks as i32 {
+            let position = WorldPlanePoint::new(x as f32, 0.0);
+            let height = combine_macro_height_with_river_profile(
+                0.004,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                flow_hint,
+                bed_hint,
+                0.0,
+                0.0,
+                0.0,
+                Some(0.004),
+                x as f32,
+                Some(position),
+                config,
+            ) * 2048.0;
+            if let Some(previous) = previous_height {
+                max_delta_blocks = max_delta_blocks.max((height - previous).abs());
+            }
+            previous_height = Some(height);
+            heights.push(height);
+        }
+
+        eprintln!(
+            "short terminal centerline heights blocks={heights:?} max_delta={max_delta_blocks:.3} bed_hint={bed_hint:.3}"
+        );
+        assert!(
+            max_delta_blocks <= 0.58,
+            "adjacent short-terminal riverbed samples should stay below a 30 degree grade: max_delta={max_delta_blocks}"
+        );
+        assert!(
+            heights.iter().copied().fold(f32::INFINITY, f32::min) >= -12.0,
+            "short terminal river segment should open a shallow mouth bed instead of a deep trench: {heights:?}"
         );
     }
 

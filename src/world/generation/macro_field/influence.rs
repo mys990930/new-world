@@ -153,6 +153,7 @@ pub(super) fn rasterize_influence_fields(
             water_width_blocks: river.water_width_blocks,
             valley_width_blocks: river.valley_width_blocks,
             bed_depth_blocks: river.bed_depth_blocks,
+            terminal_depth_scale: river.terminal_depth_scale,
             component_id: 0,
         })
         .collect::<Vec<_>>();
@@ -524,6 +525,7 @@ pub(super) struct RiverRasterSource<'a> {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
+    pub(super) terminal_depth_scale: f32,
     pub(super) component_id: usize,
 }
 
@@ -537,6 +539,7 @@ pub(super) struct RiverRasterWorkSource {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
+    pub(super) terminal_depth_scale: f32,
     pub(super) component_id: usize,
 }
 
@@ -563,6 +566,7 @@ pub(super) fn rounded_river_raster_sources(
                 water_width_blocks: source.water_width_blocks,
                 valley_width_blocks: source.valley_width_blocks,
                 bed_depth_blocks: source.bed_depth_blocks,
+                terminal_depth_scale: source.terminal_depth_scale,
                 component_id: source.component_id,
             }
         })
@@ -1202,7 +1206,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             core_sum += core_strength;
             shoulder_sum += shoulder_strength;
             profile_sum += valley_strength;
-            bed_sum += hints.bed_depth_hint;
+            bed_sum += hints.bed_depth_hint * source.terminal_depth_scale.clamp(0.0, 1.0);
             rough_sum += hints.bank_roughness_hint;
             gravel_sum += hints.gravel_hint.max(gravel_bend);
             cutbank_sum += hints.cutbank_hint.max(cutbank_bend);
@@ -1617,6 +1621,7 @@ mod tests {
             water_width_blocks: 48.0,
             valley_width_blocks: 160.0,
             bed_depth_blocks: 12.0,
+            terminal_depth_scale: 1.0,
             component_id: 0,
         };
         let bend = river_segment_bend_strength(&source, 0);
@@ -1646,6 +1651,61 @@ mod tests {
         assert!(
             outside_cutbank > outside_gravel,
             "outside bend should bias toward stronger cutbank carve: gravel={outside_gravel} cutbank={outside_cutbank}"
+        );
+    }
+
+    #[test]
+    fn terminal_depth_scale_reduces_bed_hint_without_changing_core_width() {
+        let curve = test_noisy_curve(
+            703,
+            vec![
+                WorldPlanePoint::new(0.0, 8.0),
+                WorldPlanePoint::new(32.0, 8.0),
+            ],
+        );
+        let config = MacroFieldTileConfig::new(0.0, 0.0, 33, 17, 1.0);
+        let normal = rasterize_curve_anti_aliased_polyline_field(
+            &[RiverRasterSource {
+                edge: curve.edge,
+                points: &curve.points,
+                longitudinal_start_blocks: 0.0,
+                flow_hint: 0.90,
+                water_width_blocks: 64.0,
+                valley_width_blocks: 160.0,
+                bed_depth_blocks: 32.0,
+                terminal_depth_scale: 1.0,
+                component_id: 0,
+            }],
+            config,
+            128.0,
+        );
+        let capped = rasterize_curve_anti_aliased_polyline_field(
+            &[RiverRasterSource {
+                edge: curve.edge,
+                points: &curve.points,
+                longitudinal_start_blocks: 0.0,
+                flow_hint: 0.90,
+                water_width_blocks: 64.0,
+                valley_width_blocks: 160.0,
+                bed_depth_blocks: 32.0,
+                terminal_depth_scale: 0.25,
+                component_id: 0,
+            }],
+            config,
+            128.0,
+        );
+        let center = 8 * 33 + 16;
+
+        assert!(
+            (normal.river_core_strength[center] - capped.river_core_strength[center]).abs()
+                <= 0.001,
+            "terminal depth cap must not narrow the selected river core"
+        );
+        assert!(
+            capped.river_bed_depth_hint[center] < normal.river_bed_depth_hint[center] * 0.35,
+            "terminal depth cap should only reduce the depth hint: normal={} capped={}",
+            normal.river_bed_depth_hint[center],
+            capped.river_bed_depth_hint[center]
         );
     }
 

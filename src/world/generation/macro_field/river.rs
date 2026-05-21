@@ -297,9 +297,10 @@ pub(super) fn river_hints_from_strength(
     let valley = valley_strength.clamp(0.0, 1.0);
     let flow = flow_hint.clamp(0.0, 1.0);
     let planned_depth_hint = (planned_bed_depth_blocks.max(0.0) / 36.0).clamp(0.0, 1.0);
+    let flow_depth_floor = river_depth_factor(flow) * 0.50;
+    let depth_hint = planned_depth_hint.max(flow_depth_floor.min(planned_depth_hint + 0.035));
     RiverInfluenceHints {
-        bed_depth_hint: (valley * planned_depth_hint.max(river_depth_factor(flow) * 0.50))
-            .clamp(0.0, 1.0),
+        bed_depth_hint: (valley * depth_hint).clamp(0.0, 1.0),
         bank_roughness_hint: (valley * (1.0 - flow * 0.45)).clamp(0.0, 1.0),
         gravel_hint: (valley * (0.65 - flow * 0.25)).clamp(0.0, 1.0),
         cutbank_hint: 0.0,
