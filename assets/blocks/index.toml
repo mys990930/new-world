@@ -3,7 +3,7 @@
 # - texture paths and block definition paths are resolved relative to this file.
 # - layer 0 is reserved for the built-in white texture used by debug cubes and tint-only draws.
 
-tile_size = 16
+tile_size = 32
 
 block_files = [
   "defs/air.toml",
