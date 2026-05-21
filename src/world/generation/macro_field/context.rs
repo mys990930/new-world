@@ -128,19 +128,6 @@ impl<'a> MacroFieldRasterContext<'a> {
                         water_width_blocks: plan.bed_width_blocks,
                         valley_width_blocks: plan.broad_valley_width_blocks,
                         bed_depth_blocks: plan.bed_depth_blocks,
-                        terminal_depth_scale: if terminal_chain_ids
-                            .get(&plan.chain_id)
-                            .copied()
-                            .flatten()
-                            .is_some_and(|segment_id| segment_id == plan.segment_id)
-                        {
-                            terminal_river_depth_scale(
-                                plan.bed_depth_blocks,
-                                plan.segment_length_blocks,
-                            )
-                        } else {
-                            1.0
-                        },
                     })
             })
             .collect::<Vec<_>>();
@@ -496,7 +483,6 @@ pub(super) struct RiverCurveRef {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
-    pub(super) terminal_depth_scale: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -536,23 +522,6 @@ pub(super) fn estuary_bed_depth_hint(
         ((terminal_segment_length_blocks.max(0.0) - 48.0) / (192.0 - 48.0)).clamp(0.0, 1.0),
     );
     depth_hint * (0.42 + length_t * 0.58)
-}
-
-pub(super) fn terminal_river_depth_scale(
-    bed_depth_blocks: f32,
-    terminal_segment_length_blocks: f32,
-) -> f32 {
-    if bed_depth_blocks <= f32::EPSILON {
-        return 1.0;
-    }
-
-    let max_drop_blocks = (terminal_segment_length_blocks.max(0.0) / 3.0).max(1.0);
-    let grade_scale = (max_drop_blocks / bed_depth_blocks).clamp(0.18, 1.0);
-    let length_t = smoothstep01(
-        ((terminal_segment_length_blocks.max(0.0) - 64.0) / (224.0 - 64.0)).clamp(0.0, 1.0),
-    );
-
-    grade_scale + (1.0 - grade_scale) * length_t
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -958,26 +927,6 @@ mod tests {
         assert!(
             long > 0.75,
             "long final segments keep the planned river-mouth bed depth hint: {long}"
-        );
-    }
-
-    #[test]
-    fn short_terminal_segment_caps_selected_river_depth_scale() {
-        let short = terminal_river_depth_scale(32.0, 24.0);
-        let medium = terminal_river_depth_scale(32.0, 96.0);
-        let long = terminal_river_depth_scale(32.0, 256.0);
-
-        assert!(
-            short <= 0.30,
-            "a short final selected river segment must not carry full ocean-mouth depth immediately: {short}"
-        );
-        assert!(
-            medium > short,
-            "terminal river depth cap should relax as the final segment gets enough run: short={short} medium={medium}"
-        );
-        assert!(
-            long >= 0.99,
-            "long terminal river segments can keep their planned bed depth: {long}"
         );
     }
 
