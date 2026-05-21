@@ -306,9 +306,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      낮은 broad-tail 값도 hard cutoff로 0 처리하지 않는다. cutoff boundary가 생기면 block-height contour가
      river 진행 방향과 무관한 직선 onset seam처럼 읽히기 때문이다. shoulder lowering은 source macro
      elevation 자체를 보존한 채 relief compression과 stronger centerline pull 중심으로 감산한다. lowland/near-sea
-     floor bias는 source relief 또는 projected centerline drop이 있을 때만 매우 약하게 들어가며, high-Q shoulder
+     floor bias는 source relief 또는 projected centerline drop이 있을 때만 약하게 들어가며, high-Q shoulder
      height modulation도 capped logarithmic profile을 읽어 broad valley가 river boundary shape 그대로 균일하게
-     내려앉지 않게 한다. macro_field의 broad shoulder lowering은 의도적으로 얕다. 강한 단면 carve와 bed 형성은 heightfield 책임이며,
+     내려앉지 않게 한다. macro_field의 broad shoulder lowering은 이전보다 더 명확한 valley signal을
+     남기지만, fixed floor가 아니라 source relief와 centerline context에 묶인 bounded lowering이어야 한다.
+     강한 단면 carve와 bed 형성은 heightfield 책임이며,
      이 단계에서 shoulder strength 변화가 source relief를 상쇄할 정도로 깊게 적용되면 contour slab/vertical
      seam이 생긴다. centerline은 valley 방향성 hint일 뿐 cross-section을 평평하게 만드는 target height가
      아니다. 단, sea-level 근처 source는 river mouth/coast continuity를 위해 작은 추가 bias를 받을 수 있다.

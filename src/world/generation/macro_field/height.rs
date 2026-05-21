@@ -95,8 +95,8 @@ pub(super) fn river_shoulder_context_height(
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
     let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let context_t = shoulder * lerp(0.12, 0.44, log_flow_t);
-    let centerline_t = shoulder * lerp(0.28, 0.92, flow_t);
+    let context_t = shoulder * lerp(0.18, 0.70, log_flow_t);
+    let centerline_t = shoulder * lerp(0.36, 1.00, flow_t);
     let centerline_elevation = river_centerline_macro_elevation
         .filter(|height| height.is_finite())
         .unwrap_or(macro_elevation)
@@ -104,19 +104,19 @@ pub(super) fn river_shoulder_context_height(
     let centerline_drop = (macro_elevation - centerline_elevation).max(0.0);
     let positive_relief = macro_elevation.max(0.0);
     let terrain_context = smoothstep_range(0.01, 0.18, positive_relief + centerline_drop * 0.8);
-    let relief_compression = positive_relief * lerp(0.01, 0.038, log_flow_t);
+    let relief_compression = positive_relief * lerp(0.018, 0.070, log_flow_t);
     let contextual_floor_bias =
-        config.river_carve_scale * lerp(0.01, 0.08, log_flow_t) * terrain_context;
-    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.045, log_flow_t);
+        config.river_carve_scale * lerp(0.012, 0.12, log_flow_t) * terrain_context;
+    let below_sea_bias = (-macro_elevation).max(0.0) * lerp(0.0, 0.060, log_flow_t);
     let near_sea_t = 1.0 - smoothstep_range(0.0, 0.025, macro_elevation.max(0.0));
     let near_sea_bias =
-        config.river_carve_scale * lerp(0.0, 0.045, log_flow_t) * near_sea_t * terrain_context;
-    let centerline_pull = centerline_drop * centerline_t * lerp(0.08, 0.32, flow_t);
+        config.river_carve_scale * lerp(0.0, 0.070, log_flow_t) * near_sea_t * terrain_context;
+    let centerline_pull = centerline_drop * centerline_t * lerp(0.12, 0.42, flow_t);
     let _ = river_longitudinal_blocks;
     let broad_lowering =
         (relief_compression + contextual_floor_bias + below_sea_bias + near_sea_bias) * context_t;
-    let max_context_shift = config.river_carve_scale * lerp(0.28, 0.72, log_flow_t)
-        + centerline_drop * lerp(0.08, 0.28, flow_t);
+    let max_context_shift = config.river_carve_scale * lerp(0.45, 1.65, log_flow_t)
+        + centerline_drop * lerp(0.12, 0.42, flow_t);
     let lowering = (broad_lowering + centerline_pull).min(max_context_shift);
 
     (macro_elevation - lowering).min(macro_elevation)
@@ -503,8 +503,9 @@ mod tests {
             "downstream shoulder should still grow from upstream context: upstream={upstream_shift} downstream={downstream_shift}"
         );
         assert!(
-            downstream_shift <= config.river_carve_scale * 1.05,
-            "downstream broad valley context should stay near half of the previous high-Q shift budget: {downstream_shift}"
+            downstream_shift >= config.river_carve_scale * 1.45
+                && downstream_shift <= config.river_carve_scale * 1.75,
+            "downstream broad valley context should be visible without returning to the old wide uniform floor: {downstream_shift}"
         );
         assert!(
             near_sea_shift < downstream_shift * 0.25,

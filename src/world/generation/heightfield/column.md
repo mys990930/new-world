@@ -6,6 +6,8 @@ Ocean/lake ownership is resolved before river ownership at this layer, but reusa
 
 River ownership is driven by `river_core_strength`, not the broad `river_shoulder_strength` or legacy `river_valley_strength` aggregate. Shoulder-only columns can keep land/bank relief context, but they must not become river water or receive core bed depth. When a shoulder-only column is immediately outside a strong lower-channel core, column conversion may apply bounded bank lowering so the bank slopes toward the water/bed instead of staying as an uncut wall.
 
+For selected river columns, column conversion applies the heightfield-local center profile after the river-plan bed depth has been resolved. The profile deepens high-core center samples before final snap, while river water height is still derived from the unprofiled bed basis so the water surface does not jitter with local bed relief.
+
 Ocean/lake mouth bed hints are only applied when the source bed is already below the standing-water
 level. An above-sea ocean-owned sample can keep river diagnostics, but crossing the river core
 threshold by itself must not cut that column into a below-sea river mouth trench.

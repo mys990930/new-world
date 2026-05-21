@@ -21,6 +21,58 @@ pub(super) fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
     (bed_depth * (0.78 + flow * 0.17)).clamp(1.0, bed_depth.max(1.0))
 }
 
+pub(super) fn river_core_center_profile_factor(
+    sample: &MacroFieldSample,
+    config: HeightfieldConfig,
+) -> f32 {
+    let core = sample.river_core_strength.clamp(0.0, 1.0);
+    let threshold = config.river_water_threshold.clamp(0.0, 0.98);
+    if sample.river_flow_hint <= 0.0 || core <= threshold {
+        return 0.0;
+    }
+
+    smoothstep01((core - threshold) / (1.0 - threshold).max(f32::EPSILON))
+}
+
+pub(super) fn river_core_center_downcut_blocks(
+    sample: &MacroFieldSample,
+    config: HeightfieldConfig,
+    river_bed_depth_blocks: f32,
+) -> f32 {
+    if river_bed_depth_blocks <= 0.0 {
+        return 0.0;
+    }
+
+    let center = river_core_center_profile_factor(sample, config);
+    let flow = sample.river_flow_hint.clamp(0.0, 1.0);
+    let flow_gate = smoothstep01((flow - 0.08) / 0.34);
+    let activity = center * flow_gate;
+    if activity <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
+    let gravel = sample.river_gravel_hint.clamp(0.0, 1.0);
+    let fraction = (lerp(0.14, 0.36, flow_gate) + rough * 0.04 + gravel * 0.03).clamp(0.12, 0.48);
+    let visible_floor = lerp(0.0, 2.0, flow_gate);
+    let downcut = (river_bed_depth_blocks * fraction)
+        .max(visible_floor.min(river_bed_depth_blocks * 0.35))
+        .min(river_bed_depth_blocks * 0.50);
+
+    downcut * activity
+}
+
+pub(super) fn river_bed_raise_variation_limit_blocks(
+    sample: &MacroFieldSample,
+    config: HeightfieldConfig,
+) -> f32 {
+    let center = river_core_center_profile_factor(sample, config);
+    let water_depth = river_water_depth_blocks(sample);
+    let center_raise_scale = lerp(1.0, 0.34, center);
+
+    (water_depth - 1.0).max(0.0) * center_raise_scale
+}
+
 pub(super) fn deterministic_river_bed_variation_blocks(sample: &MacroFieldSample) -> f32 {
     let valley = sample.river_core_strength.clamp(0.0, 1.0);
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
