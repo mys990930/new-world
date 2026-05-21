@@ -398,8 +398,8 @@ priority를 함께 보고 실제 block을 배치한다.
   `ridge_influence`, `RockyCoast` biome, river bank roughness hint는 active water/sediment rule을 제외하고
   land/coast top material을 `gravel`/`wet_gravel`/`rock`/`exposed_rock`으로 승격하지 않는다.
 - `SurfacePlanConfig::default()`의 `boundary_mix_radius_blocks`는 현재 `5`이고
-  `boundary_mix_strength_percent`는 `36`이다. layer falloff는 기본 설정에서 1..5 block 거리별로 대략
-  `36%`, `28%`, `21%`, `14%`, `7%`가 되며 멀수록 intrusion chance가 낮아진다. 다만 기본 surface plan preview/generation path처럼
+  `boundary_mix_strength_percent`는 `70`이다. layer falloff는 기본 설정에서 1..5 block 거리별로 대략
+  `70%`, `56%`, `42%`, `28%`, `14%`가 되며 멀수록 intrusion chance가 낮아진다. 다만 기본 surface plan preview/generation path처럼
   `MacroFieldTile` metadata가 연결된 경우, owner-normalization pass가 `MacroFieldSample.nearest_site`별
   non-water top material을 단일화한 뒤 final boundary wiggle pass가 adjacent owner/material edge에서만
   visual material을 작게 흔든다. 이 final pass는 connected/attached feather만 허용하므로 source material과

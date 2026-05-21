@@ -33,7 +33,7 @@ impl SurfacePlanConfig {
             shallow_soil_depth_blocks: 1,
             deep_soil_depth_blocks: 5,
             boundary_mix_radius_blocks: 5,
-            boundary_mix_strength_percent: 36,
+            boundary_mix_strength_percent: 70,
             river_water_threshold: 0.88,
             coast_threshold: 0.45,
             ridge_threshold: 0.55,
@@ -3250,12 +3250,12 @@ mod tests {
         let config = SurfacePlanConfig::default();
 
         assert_eq!(config.boundary_mix_radius_blocks, 5);
-        assert_eq!(config.boundary_mix_strength_percent, 36);
-        assert_eq!(boundary_mix_strength(1, 5, config), 36);
-        assert_eq!(boundary_mix_strength(2, 5, config), 28);
-        assert_eq!(boundary_mix_strength(3, 5, config), 21);
-        assert_eq!(boundary_mix_strength(4, 5, config), 14);
-        assert_eq!(boundary_mix_strength(5, 5, config), 7);
+        assert_eq!(config.boundary_mix_strength_percent, 70);
+        assert_eq!(boundary_mix_strength(1, 5, config), 70);
+        assert_eq!(boundary_mix_strength(2, 5, config), 56);
+        assert_eq!(boundary_mix_strength(3, 5, config), 42);
+        assert_eq!(boundary_mix_strength(4, 5, config), 28);
+        assert_eq!(boundary_mix_strength(5, 5, config), 14);
     }
 
     #[test]
