@@ -297,6 +297,12 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      edge-local arc length를 combined height의 직접 floor-noise source로 쓰지 않으므로 broad shoulder
      등고선이 river를 가로지르는 반복 slab/band로 고정되면 회귀다. 좁은 river bed 중심부, U/V 단면의
      깊이감, roughness/gravel 기반의 작은 비균일성은 이 단계에서 source height로 baked되어야 한다.
+     core downcut은 Q와 `river_bed_depth_hint`에서 먼저 하나의 target depth budget을 만들고,
+     low-Q에서는 center로 급히 모이는 좁은 V profile, high-Q에서는 중간 단면도 거의 같은 깊이를 갖는
+     넓은 U profile로 섞는다. 같은 depth budget의 절반은 normalized shoulder cap을 읽는 inner
+     bank/riverbed profile에 baseline으로 적용해, 물 가장자리와 강둑이 core와 같은 계열로 낮아지되
+     broad valley 전체가 균일하게 내려앉지 않게 한다. low-Q depth budget은 별도 guard로 줄여
+     headwater가 깊은 단층처럼 패이지 않아야 한다.
    - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
      `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를

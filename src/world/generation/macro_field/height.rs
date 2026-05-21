@@ -112,14 +112,22 @@ pub(super) fn combine_macro_height_with_river_profile(
         river_position,
         config,
     );
-    let core_lowering = river_core_center_lowering(
-        river_core_strength,
+    let core_budget = river_core_downcut_budget(
         river_flow_hint,
         river_bed_depth_hint,
         river_position,
         config,
     );
-    let river_context_height = (shoulder_height - core_lowering).min(shoulder_height);
+    let bank_lowering = river_bed_bank_lowering(
+        river_shoulder_strength,
+        river_core_strength,
+        river_flow_hint,
+        core_budget,
+    );
+    let core_lowering =
+        river_core_profile_lowering(river_core_strength, river_flow_hint, core_budget);
+    let river_context_height =
+        (shoulder_height - bank_lowering.max(core_lowering)).min(shoulder_height);
     let mut height = river_context_height + ridge_raise;
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
@@ -195,6 +203,7 @@ fn river_shoulder_context_height_with_position(
     (macro_elevation - lowering).min(macro_elevation)
 }
 
+#[cfg(test)]
 pub(super) fn river_core_center_lowering(
     river_core_strength: f32,
     river_flow_hint: f32,
@@ -202,25 +211,97 @@ pub(super) fn river_core_center_lowering(
     river_position: Option<WorldPlanePoint>,
     config: MacroFieldTileConfig,
 ) -> f32 {
+    let core_budget = river_core_downcut_budget(
+        river_flow_hint,
+        river_bed_depth_hint,
+        river_position,
+        config,
+    );
+    river_core_profile_lowering(river_core_strength, river_flow_hint, core_budget)
+}
+
+fn river_core_profile_lowering(
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    core_budget: f32,
+) -> f32 {
+    if core_budget <= f32::EPSILON {
+        return 0.0;
+    }
+    core_budget * river_core_cross_section_strength(river_core_strength, river_flow_hint)
+}
+
+fn river_core_cross_section_strength(river_core_strength: f32, river_flow_hint: f32) -> f32 {
     let core_t = smoothstep_range(
         RIVER_CORE_HEIGHT_PROFILE_THRESHOLD,
         1.0,
         river_core_strength.clamp(0.0, 1.0),
-    )
-    .powf(1.18);
+    );
     if core_t <= f32::EPSILON {
         return 0.0;
     }
 
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
-    let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let bed_t = river_bed_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.45);
-    let base = config.river_carve_scale * lerp(0.32, 2.05, bed_t);
-    let flow_floor = config.river_carve_scale * lerp(0.18, 0.58, flow_t);
-    let noise_scale = river_context_lowering_noise_scale(river_position, lerp(0.10, 0.22, bed_t));
-    let max_shift = config.river_carve_scale * lerp(0.60, 2.80, bed_t);
+    let narrow_v = core_t.powf(1.70);
+    let broad_u = smoothstep_range(0.16, 0.56, core_t).powf(0.52);
 
-    ((base + flow_floor) * core_t * noise_scale).min(max_shift)
+    lerp(narrow_v, broad_u, flow_t).clamp(0.0, 1.0)
+}
+
+fn river_bed_bank_lowering(
+    river_shoulder_strength: f32,
+    river_core_strength: f32,
+    river_flow_hint: f32,
+    core_budget: f32,
+) -> f32 {
+    if core_budget <= f32::EPSILON {
+        return 0.0;
+    }
+
+    let bank_t = river_bed_bank_cross_section_strength(
+        river_shoulder_strength,
+        river_core_strength,
+        river_flow_hint,
+    );
+    core_budget * 0.50 * bank_t
+}
+
+fn river_bed_bank_cross_section_strength(
+    river_shoulder_strength: f32,
+    river_core_strength: f32,
+    river_flow_hint: f32,
+) -> f32 {
+    let log_flow_t = river_shoulder_log_growth(river_flow_hint);
+    let shoulder_cap = lerp(0.86, 0.50, log_flow_t).max(0.05);
+    let shoulder_norm = (river_shoulder_strength.clamp(0.0, 1.0) / shoulder_cap).clamp(0.0, 1.0);
+    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
+    let bank_power = lerp(1.45, 0.78, flow_t);
+    let inner_bank = smoothstep_range(0.54, 0.96, shoulder_norm).powf(bank_power);
+    let core_presence = smoothstep_range(
+        RIVER_CORE_HEIGHT_PROFILE_THRESHOLD * 0.74,
+        RIVER_CORE_HEIGHT_PROFILE_THRESHOLD,
+        river_core_strength.clamp(0.0, 1.0),
+    );
+
+    inner_bank.max(core_presence).clamp(0.0, 1.0)
+}
+
+fn river_core_downcut_budget(
+    river_flow_hint: f32,
+    river_bed_depth_hint: f32,
+    river_position: Option<WorldPlanePoint>,
+    config: MacroFieldTileConfig,
+) -> f32 {
+    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
+    let log_flow_t = river_shoulder_log_growth(river_flow_hint);
+    let bed_t = river_bed_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.34);
+    let low_flow_guard = lerp(0.54, 1.0, smoothstep_range(0.06, 0.42, river_flow_hint));
+    let base = config.river_carve_scale * lerp(0.04, 1.76, bed_t);
+    let flow_floor = config.river_carve_scale * lerp(0.03, 0.48, flow_t);
+    let noise_scale = river_context_lowering_noise_scale(river_position, lerp(0.08, 0.21, bed_t));
+    let max_shift = config.river_carve_scale * lerp(0.22, 2.55, bed_t);
+
+    ((base + flow_floor) * low_flow_guard * noise_scale).min(max_shift)
 }
 
 fn river_context_lowering_noise_scale(
@@ -543,7 +624,7 @@ mod tests {
         );
         assert_eq!(
             config.river_carve_scale, 0.012,
-            "default broad-valley context shift should stay block-scale and leave bed depth to heightfield"
+            "default broad-valley context shift should stay block-scale while core bed depth stays macro-field baked"
         );
     }
 
@@ -673,6 +754,62 @@ mod tests {
         assert!(
             center < edge - config.river_carve_scale * 0.55,
             "river core center should be cut noticeably below the near-edge core in macro_field: edge={edge} center={center}"
+        );
+    }
+
+    #[test]
+    fn river_bed_bank_profile_lowers_near_bank_by_half_core_budget() {
+        let config = test_tile_config();
+        let core_budget = river_core_downcut_budget(0.62, 0.55, None, config);
+        let near_bank = river_bed_bank_lowering(0.60, 0.0, 0.62, core_budget);
+        let outer_shoulder = river_bed_bank_lowering(0.18, 0.0, 0.62, core_budget);
+        let core_edge = river_bed_bank_lowering(0.60, 0.89, 0.62, core_budget);
+
+        assert!(
+            near_bank >= core_budget * 0.42 && near_bank <= core_budget * 0.50,
+            "near river bank lowering should be roughly half the core depth budget: budget={core_budget} bank={near_bank}"
+        );
+        assert_eq!(
+            core_edge,
+            core_budget * 0.50,
+            "the immediate riverbed/core edge should share the same half-depth bank baseline"
+        );
+        assert!(
+            outer_shoulder < near_bank * 0.15,
+            "broad valley shoulder should not receive the bed/bank half-depth cut: outer={outer_shoulder} bank={near_bank}"
+        );
+    }
+
+    #[test]
+    fn low_flow_core_is_narrow_v_and_depth_guarded() {
+        let config = test_tile_config();
+        let budget = river_core_downcut_budget(0.04, 3.0 / 40.0, None, config);
+        let center = river_core_profile_lowering(1.0, 0.04, budget);
+        let off_center = river_core_profile_lowering(0.92, 0.04, budget);
+
+        assert!(
+            center < config.river_carve_scale * 0.14,
+            "low-Q headwater core should not downcut so deeply that the cross-section reads like a fault: center={center}"
+        );
+        assert!(
+            off_center < center * 0.22,
+            "low-Q river core should stay narrow and V-shaped across the section: center={center} off_center={off_center}"
+        );
+    }
+
+    #[test]
+    fn high_flow_core_blends_toward_broad_u_section() {
+        let low_q_mid = river_core_cross_section_strength(0.94, 0.04);
+        let high_q_mid = river_core_cross_section_strength(0.94, 0.92);
+        let high_q_center = river_core_cross_section_strength(1.0, 0.92);
+
+        assert!(
+            high_q_mid > high_q_center * 0.75,
+            "high-Q riverbed should keep a wide U-shaped bottom instead of a narrow point: mid={high_q_mid} center={high_q_center}"
+        );
+        assert!(
+            high_q_mid > low_q_mid * 2.0,
+            "the same cross-section position should be much broader at high Q than at low Q: low={low_q_mid} high={high_q_mid}"
         );
     }
 
