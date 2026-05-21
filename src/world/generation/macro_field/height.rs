@@ -248,7 +248,8 @@ pub(super) fn estuary_fan_macro_height(
     let active = smoothstep01(strength) * water_context;
     let shallow_shelf_depth =
         config.river_carve_scale * lerp(0.35, 1.15, flow_t) + bed_t * lerp(0.006, 0.026, flow_t);
-    let target = -shallow_shelf_depth * lerp(0.45, 1.0, active);
+    let edge_t = smoothstep_range(0.20, 0.92, active);
+    let target = -shallow_shelf_depth * lerp(0.16, 1.0, edge_t);
     let lowering = (height - target).max(0.0) * active;
 
     (height - lowering).min(height)
@@ -1108,6 +1109,24 @@ mod tests {
         assert_eq!(
             ordinary, 0.035,
             "ordinary land/no-flow samples must not be carved by estuary fan strength alone"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_edge_strength_does_not_snap_water_boundary_below_sea() {
+        let config = test_tile_config();
+        let weak_edge =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, config);
+        let core =
+            estuary_fan_macro_height(0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, config);
+
+        assert!(
+            weak_edge > 0.0,
+            "weak estuary fan edge samples should taper toward the bank instead of creating one-block water speckles: {weak_edge}"
+        );
+        assert!(
+            core <= 0.0,
+            "full estuary fan core should still open the near-sea mouth to water: {core}"
         );
     }
 

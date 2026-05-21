@@ -152,16 +152,18 @@ impl<'a> MacroFieldRasterContext<'a> {
                     return None;
                 }
                 let flow_hint = flow_hint_from_plan(plan);
-                let flow_t = flow_hint.clamp(0.0, 1.0);
+                let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
                 let start_half_width_blocks = (plan.bed_width_blocks * 0.55)
                     .max(6.0)
                     .min(plan.broad_valley_width_blocks.max(8.0));
                 let end_half_width_blocks = (start_half_width_blocks
                     + plan.broad_valley_width_blocks * (0.55 + flow_t * 0.95))
                     .max(start_half_width_blocks * 2.0);
-                let length_blocks = (plan.broad_valley_width_blocks * (1.10 + flow_t * 1.30))
-                    .max(plan.bed_width_blocks * 3.0)
-                    .clamp(64.0, 768.0);
+                let length_blocks = estuary_fan_length_blocks(
+                    plan.bed_width_blocks,
+                    plan.broad_valley_width_blocks,
+                    flow_hint,
+                );
                 Some(EstuaryFanRef {
                     segment_id: plan.segment_id.0,
                     origin: endpoints.downstream_position,
@@ -171,7 +173,10 @@ impl<'a> MacroFieldRasterContext<'a> {
                     end_half_width_blocks,
                     length_blocks,
                     flow_hint,
-                    bed_depth_hint: (plan.bed_depth_blocks / 40.0).clamp(0.0, 1.0),
+                    bed_depth_hint: estuary_bed_depth_hint(
+                        plan.bed_depth_blocks,
+                        plan.segment_length_blocks,
+                    ),
                 })
             })
             .collect::<Vec<_>>();
@@ -491,6 +496,32 @@ pub(super) struct EstuaryFanRef {
     pub(super) length_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+}
+
+pub(super) fn estuary_fan_length_blocks(
+    bed_width_blocks: f32,
+    broad_valley_width_blocks: f32,
+    flow_hint: f32,
+) -> f32 {
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let low_flow_reach_floor = 144.0 - flow_t * 40.0;
+    let valley_reach = broad_valley_width_blocks.max(8.0) * (1.15 + flow_t * 1.20);
+    let bed_reach = bed_width_blocks.max(1.0) * (4.5 + flow_t * 3.5);
+    valley_reach
+        .max(bed_reach)
+        .max(low_flow_reach_floor)
+        .clamp(96.0, 768.0)
+}
+
+pub(super) fn estuary_bed_depth_hint(
+    bed_depth_blocks: f32,
+    terminal_segment_length_blocks: f32,
+) -> f32 {
+    let depth_hint = (bed_depth_blocks / 40.0).clamp(0.0, 1.0);
+    let length_t = smoothstep01(
+        ((terminal_segment_length_blocks.max(0.0) - 48.0) / (192.0 - 48.0)).clamp(0.0, 1.0),
+    );
+    depth_hint * (0.42 + length_t * 0.58)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -868,6 +899,36 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
+
+    #[test]
+    fn low_flow_estuary_fan_keeps_practical_downstream_reach() {
+        let headwater = estuary_fan_length_blocks(2.0, 14.0, 0.02);
+        let downstream = estuary_fan_length_blocks(96.0, 280.0, 0.85);
+
+        assert!(
+            headwater >= 128.0,
+            "low-Q river mouths still need enough fan reach to meet nearby connected ocean: {headwater}"
+        );
+        assert!(
+            downstream > headwater,
+            "large downstream mouths should still spread farther than the low-Q minimum: headwater={headwater} downstream={downstream}"
+        );
+    }
+
+    #[test]
+    fn short_terminal_segment_caps_estuary_depth_hint() {
+        let short = estuary_bed_depth_hint(32.0, 24.0);
+        let long = estuary_bed_depth_hint(32.0, 256.0);
+
+        assert!(
+            short < long * 0.55,
+            "short final river segments should not force a full-depth estuary trench immediately: short={short} long={long}"
+        );
+        assert!(
+            long > 0.75,
+            "long final segments keep the planned river-mouth bed depth hint: {long}"
+        );
+    }
 
     #[test]
     fn nearest_site_search_does_not_stop_at_first_nonempty_bucket_ring() {

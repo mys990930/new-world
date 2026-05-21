@@ -260,15 +260,20 @@ pub(super) fn estuary_fan_sample(
         ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS * (0.45 + progress * 0.75),
         0xE57A_27F4_0001,
     );
-    let rough_lateral = (lateral + edge_noise).max(0.0);
+    let edge_noise_weight = smoothstep01((lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
+    let rough_lateral = (lateral + edge_noise * edge_noise_weight).max(0.0);
     let cross = 1.0 - smoothstep01((rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
     if cross <= f32::EPSILON {
         return EstuaryFanSample::default();
     }
 
+    let flow_t = smoothstep01(fan.flow_hint.clamp(0.0, 1.0));
+    let inlet_blend = 0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28;
     let along_strength = 1.0 - smoothstep01(progress);
-    let shelf_tail = 1.0 - smoothstep01((progress - 0.72) / 0.28);
-    let strength = (cross * along_strength.max(shelf_tail * 0.35)).clamp(0.0, 1.0);
+    let shelf_tail = 1.0 - smoothstep01((progress - 0.78) / 0.22);
+    let tail_floor = 0.48 - flow_t * 0.12;
+    let strength =
+        (cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
     EstuaryFanSample {
         strength,
         flow_hint: fan.flow_hint,
@@ -2546,6 +2551,35 @@ mod tests {
         assert!(
             downstream_wide_edge.strength > 0.0,
             "downstream fan should retain a broad shallow shelf influence"
+        );
+    }
+
+    #[test]
+    fn low_flow_estuary_fan_tail_remains_connected() {
+        let fan = EstuaryFanRef {
+            segment_id: 2,
+            origin: WorldPlanePoint::new(0.0, 0.0),
+            direction_x: 1.0,
+            direction_z: 0.0,
+            start_half_width_blocks: 6.0,
+            end_half_width_blocks: 28.0,
+            length_blocks: 144.0,
+            flow_hint: 0.03,
+            bed_depth_hint: 0.12,
+        };
+
+        let center_tail = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 0.0));
+        let edge_tail = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 10.0));
+
+        assert!(
+            center_tail.strength > 0.15,
+            "small river mouths should keep a visible downstream fan centerline instead of ending early: {}",
+            center_tail.strength
+        );
+        assert!(
+            edge_tail.strength > 0.0,
+            "small river mouths should still spread laterally near the tail: {}",
+            edge_tail.strength
         );
     }
 
