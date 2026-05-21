@@ -3971,7 +3971,6 @@ mod tests {
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,
-            river_mouth_strength: 0.0,
             combined_macro_height: 0.0,
         }
     }

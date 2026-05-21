@@ -20,7 +20,7 @@ use crate::world::generation::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use crate::world::generation::river_plan::RiverPlan;
 use height::{
     combine_macro_height_with_river_profile, envelope, is_lake_surface, ridge_envelope,
-    river_mouth_strength, roughened_distance,
+    roughened_distance,
 };
 use influence::{MacroFieldInfluenceSample, macro_field_stats, rasterize_influence_fields};
 use ocean::prune_isolated_ocean_fragments;
@@ -119,13 +119,6 @@ pub fn sample_macro_field_point(
     let river_core_strength = river_influence.core_strength;
     let river_shoulder_strength = river_influence.shoulder_strength;
     let river_valley_strength = river_influence.valley_strength;
-    let river_mouth_strength = river_mouth_strength(
-        ocean_mask,
-        coast_mask,
-        lake_mask,
-        river_core_strength,
-        river_flow_hint,
-    );
     let combined_macro_height = combine_macro_height_with_river_profile(
         macro_elevation,
         ocean_mask,
@@ -141,7 +134,6 @@ pub fn sample_macro_field_point(
         river_influence.bank_roughness_hint,
         river_influence.gravel_hint,
         river_influence.cutbank_hint,
-        river_mouth_strength,
         None,
         river_longitudinal_blocks,
         Some(position),
@@ -170,7 +162,6 @@ pub fn sample_macro_field_point(
         river_bank_roughness_hint: river_influence.bank_roughness_hint,
         river_gravel_hint: river_influence.gravel_hint,
         river_cutbank_hint: river_influence.cutbank_hint,
-        river_mouth_strength,
         combined_macro_height,
     }
 }
@@ -213,13 +204,6 @@ fn sample_macro_field_point_with_influence(
     let river_core_strength = influence.river_core_strength;
     let river_shoulder_strength = influence.river_shoulder_strength;
     let river_valley_strength = influence.river_valley_strength;
-    let river_mouth_strength = river_mouth_strength(
-        ocean_mask,
-        coast_mask,
-        lake_mask,
-        river_core_strength,
-        river_flow_hint,
-    );
     let combined_macro_height = combine_macro_height_with_river_profile(
         macro_elevation,
         ocean_mask,
@@ -235,7 +219,6 @@ fn sample_macro_field_point_with_influence(
         influence.river_bank_roughness_hint,
         influence.river_gravel_hint,
         influence.river_cutbank_hint,
-        river_mouth_strength,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
         Some(position),
@@ -264,7 +247,6 @@ fn sample_macro_field_point_with_influence(
         river_bank_roughness_hint: influence.river_bank_roughness_hint,
         river_gravel_hint: influence.river_gravel_hint,
         river_cutbank_hint: influence.river_cutbank_hint,
-        river_mouth_strength,
         combined_macro_height,
     }
 }

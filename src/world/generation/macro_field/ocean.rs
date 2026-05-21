@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use super::height::{combine_macro_height_with_river_profile, river_mouth_strength};
+use super::height::combine_macro_height_with_river_profile;
 use super::types::{MacroFieldSample, MacroFieldTileConfig};
 use crate::world::generation::biome::{GraphBiomeWaterRole, classify_graph_biome};
 use crate::world::generation::macro_map::MacroSurfaceKind;
@@ -128,13 +128,6 @@ fn clear_isolated_ocean_sample(sample: &mut MacroFieldSample, config: MacroField
             sample.biome = Some(classify_graph_biome(context));
         }
     }
-    sample.river_mouth_strength = river_mouth_strength(
-        sample.ocean_mask,
-        sample.coast_mask,
-        sample.lake_mask,
-        sample.river_core_strength,
-        sample.river_flow_hint,
-    );
     sample.combined_macro_height = combine_macro_height_with_river_profile(
         sample.macro_elevation,
         sample.ocean_mask,
@@ -150,7 +143,6 @@ fn clear_isolated_ocean_sample(sample: &mut MacroFieldSample, config: MacroField
         sample.river_bank_roughness_hint,
         sample.river_gravel_hint,
         sample.river_cutbank_hint,
-        sample.river_mouth_strength,
         None,
         sample.river_longitudinal_blocks,
         Some(sample.position),

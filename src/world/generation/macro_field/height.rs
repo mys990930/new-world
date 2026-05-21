@@ -80,7 +80,6 @@ pub(super) fn combine_macro_height_with_river_longitudinal(
         0.0,
         0.0,
         0.0,
-        0.0,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
         None,
@@ -104,7 +103,6 @@ pub(super) fn combine_macro_height_with_river_profile(
     river_bank_roughness_hint: f32,
     river_gravel_hint: f32,
     river_cutbank_hint: f32,
-    river_mouth_strength: f32,
     river_centerline_macro_elevation: Option<f32>,
     river_longitudinal_blocks: f32,
     river_position: Option<WorldPlanePoint>,
@@ -150,64 +148,12 @@ pub(super) fn combine_macro_height_with_river_profile(
     let river_context_height =
         (shoulder_height - bank_lowering.max(core_lowering)).min(shoulder_height);
     let mut height = river_context_height + ridge_raise;
-    height = river_mouth_connection_height(
-        height,
-        if lake_lowering_factor > 0.0 {
-            0.0
-        } else {
-            river_mouth_strength
-        },
-        river_flow_hint,
-        config,
-    );
     if ocean_mask > 0.5 {
         height = ocean_bathymetry_macro_height(height);
     } else if lake_lowering_factor > 0.0 {
         height = lake_bed_macro_height(height, lake_lowering_factor, config);
     }
     height.clamp(-2.0, 2.0)
-}
-
-pub(super) fn river_mouth_strength(
-    ocean_mask: f32,
-    coast_mask: f32,
-    lake_mask: f32,
-    river_core_strength: f32,
-    river_flow_hint: f32,
-) -> f32 {
-    if lake_mask > 0.5 || river_flow_hint <= 0.0 {
-        return 0.0;
-    }
-    let core_gate = smoothstep_range(0.86, 0.98, river_core_strength.clamp(0.0, 1.0));
-    if core_gate <= f32::EPSILON {
-        return 0.0;
-    }
-    let ocean_gate = ocean_mask.clamp(0.0, 1.0);
-    let coast_gate = smoothstep_range(0.42, 0.82, coast_mask.clamp(0.0, 1.0));
-    let mouth_context = ocean_gate.max(coast_gate);
-    let flow_gate = smoothstep_range(0.12, 0.72, river_flow_hint.clamp(0.0, 1.0));
-
-    (core_gate * mouth_context * flow_gate).clamp(0.0, 1.0)
-}
-
-fn river_mouth_connection_height(
-    source_height: f32,
-    river_mouth_strength: f32,
-    river_flow_hint: f32,
-    config: MacroFieldTileConfig,
-) -> f32 {
-    let mouth = river_mouth_strength.clamp(0.0, 1.0);
-    if mouth <= f32::EPSILON {
-        return source_height;
-    }
-
-    let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
-    let target_depth = config.river_carve_scale * lerp(0.16, 0.92, flow_t);
-    let target_height = -target_depth;
-    let near_sea_gate = 1.0 - smoothstep_range(0.08, 0.20, source_height.max(0.0));
-    let pull = mouth * lerp(0.48, 0.88, near_sea_gate);
-
-    lerp(source_height, target_height, pull).min(source_height)
 }
 
 #[cfg(test)]
@@ -848,7 +794,6 @@ mod tests {
             0.0,
             0.0,
             0.0,
-            0.0,
             Some(0.18),
             128.0,
             Some(position),
@@ -866,7 +811,6 @@ mod tests {
             1.0,
             0.65,
             0.60,
-            0.0,
             0.0,
             0.0,
             0.0,
@@ -957,7 +901,6 @@ mod tests {
             0.35,
             0.0,
             0.0,
-            0.0,
             Some(0.16),
             128.0,
             Some(position),
@@ -977,7 +920,6 @@ mod tests {
             0.58,
             0.35,
             0.90,
-            0.0,
             0.0,
             Some(0.16),
             128.0,
@@ -999,7 +941,6 @@ mod tests {
             0.35,
             0.0,
             0.90,
-            0.0,
             Some(0.16),
             128.0,
             Some(position),
@@ -1094,65 +1035,6 @@ mod tests {
         assert!(
             carved < source && carved > 0.0,
             "selected river broad-valley context should lower ocean-owned positive source without snapping it below sea level: {carved}"
-        );
-    }
-
-    #[test]
-    fn river_mouth_strength_requires_water_context_high_core_and_flow() {
-        assert_eq!(river_mouth_strength(0.0, 0.0, 0.0, 1.0, 0.9), 0.0);
-        assert_eq!(river_mouth_strength(1.0, 1.0, 1.0, 1.0, 0.9), 0.0);
-        assert_eq!(river_mouth_strength(1.0, 1.0, 0.0, 0.40, 0.9), 0.0);
-        assert_eq!(river_mouth_strength(1.0, 1.0, 0.0, 1.0, 0.0), 0.0);
-
-        assert!(
-            river_mouth_strength(1.0, 0.0, 0.0, 1.0, 0.9) > 0.0,
-            "ocean-owned high-core selected river should produce a mouth hint"
-        );
-        assert!(
-            river_mouth_strength(0.0, 1.0, 0.0, 1.0, 0.9) > 0.0,
-            "coast-context high-core selected river should produce a mouth hint"
-        );
-    }
-
-    #[test]
-    fn river_mouth_hint_lowers_positive_ocean_bed_without_changing_ordinary_ocean() {
-        let config = test_tile_config();
-        let source = 0.018;
-        let no_mouth = combine_macro_height_with_river_profile(
-            source, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.9, 0.8, 0.0, 0.0, 0.0, 0.0, None,
-            0.0, None, config,
-        );
-        let mouth = combine_macro_height_with_river_profile(
-            source,
-            1.0,
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            1.0,
-            0.9,
-            0.8,
-            0.0,
-            0.0,
-            0.0,
-            river_mouth_strength(1.0, 1.0, 0.0, 1.0, 0.9),
-            None,
-            0.0,
-            None,
-            config,
-        );
-        let ordinary_ocean =
-            combine_macro_height(source, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, config);
-
-        assert_eq!(
-            ordinary_ocean, source,
-            "ordinary positive ocean-owned source must remain dry bed without a mouth hint"
-        );
-        assert!(
-            mouth < no_mouth - config.river_carve_scale * 0.20,
-            "mouth hint should add a narrow sea-connection lowering over ordinary river context: no_mouth={no_mouth} mouth={mouth}"
         );
     }
 

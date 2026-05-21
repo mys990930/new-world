@@ -302,10 +302,7 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   water depth와 diagnostic을 위한 hint로만 쓰이며 terrain height에서 다시 subtract하지 않는다. 상류/하류
   bed 깊이, V/U 단면, bed randomness는 macro_field가 이미 source height에 반영해야 한다.
   ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
-  넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다. 단, macro_field가
-  `river_mouth_strength`를 준 high-core ocean-owned column은 lake가 아닌 경우에 한해 river water/terrain
-  hint 후보가 될 수 있다. 이 예외는 above-sea ocean bed가 하구를 끊는 것을 막기 위한 좁은 연결 정책이며,
-  일반 ocean-owned above-sea column은 계속 dry ocean bed로 남는다.
+  넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
@@ -503,6 +500,4 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     terrain-height offset으로 다시 쓰면 회귀다.
 20. ocean/lake-owned river-mouth bed hints must not threshold-cut above-sea source beds. Above-sea
     ocean-owned source columns keep ordinary ocean bed resolve and do not create river bed depth solely
-    because `river_core_strength` crosses the river threshold. The only heightfield exception is an
-    explicit `river_mouth_strength` from macro_field on a high-core, non-lake mouth column; that exception
-    can create a river water/terrain hint after ordinary ocean water fails to cover the above-sea bed.
+    because `river_core_strength` crosses the river threshold.
