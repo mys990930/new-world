@@ -11,6 +11,7 @@
 - `CreateWorld { root, config, registry }`
 - `LoadChunk { root, coord }`
 - `GenerateChunk { coord, meta, registry }`
+- `UnloadChunk { coord }`
 - `BuildChunkMesh { center, neighbors, registry }`
 - `BuildMinimapChunkColumn { coord, chunks, registry }`
 - `ResolveRegionClassArea { meta, area }`
@@ -71,6 +72,7 @@
 - the current chunk acquisition path now distinguishes created-world load from procedural generation
 - create-world requests coalesce on destination root path so duplicate button presses do not enqueue duplicate directory creation
 - chunk-scoped coalescing still keys on chunk coordinate because the current runtime owns only one active world session
+- `UnloadChunk` is a lightweight lifecycle barrier request: workers do not mutate live world state, but the completed result lets app apply runtime removal through the normal budgeted result path
 - minimap chunk-column rebuilds coalesce on chunk-column `x/z`; app cache keeps a dirty-after-pending bit so later chunk arrivals can schedule one more rebuild if a stale worker result wins the race
 - region-classification resolves coalesce on `AtlasArea` so frame-time environment refresh can submit the focused area repeatedly without duplicating worker work
 - worker and opt-in frame diagnostics use request labels for slow-job and queue-pressure logging

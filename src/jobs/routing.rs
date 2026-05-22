@@ -93,6 +93,7 @@ pub(crate) fn execute(request: JobRequest, mut emit_progress: impl FnMut(JobResu
             coord,
             chunk: generate_chunk(coord, &meta, registry.as_ref()),
         },
+        JobRequest::UnloadChunk { coord } => JobResult::ChunkUnloaded { coord },
         JobRequest::BuildChunkMesh {
             center,
             neighbors,

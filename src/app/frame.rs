@@ -69,9 +69,7 @@ impl GameApp {
         timings.lifecycle_plan_ms = duration_ms(stage_start.elapsed());
         lifecycle_stats = ChunkLifecycleRequestStats::from_lifecycle(&lifecycle);
         self.log_chunk_lifecycle_plan(&lifecycle);
-        let stage_start = Instant::now();
-        self.apply_chunk_unloads(&lifecycle.unload_coords);
-        timings.unload_ms = duration_ms(stage_start.elapsed());
+        timings.unload_ms = 0.0;
         let stage_start = Instant::now();
         if let Err(error) = self.jobs.submit_all(lifecycle.job_requests) {
             eprintln!("[app] jobs submit failed: {:?}", error);
@@ -264,6 +262,12 @@ impl GameApp {
                         );
                     }
                 }
+                JobResult::ChunkUnloaded { coord } => {
+                    stats.unloaded += 1;
+                    let unload_start = Instant::now();
+                    self.apply_chunk_unloads(&[coord]);
+                    stats.unload_apply_ms += duration_ms(unload_start.elapsed());
+                }
                 JobResult::ChunkMeshBuilt { coord, mesh } => {
                     if self.ecs.retains_chunk(coord) && self.world.has_chunk(coord) {
                         let triangles = mesh.triangle_count();
@@ -391,6 +395,7 @@ impl GameApp {
 
         let mut load = 0_usize;
         let mut generate = 0_usize;
+        let mut unload = 0_usize;
         let mut mesh = 0_usize;
         let mut minimap = 0_usize;
         let mut create_world = 0_usize;
@@ -399,6 +404,7 @@ impl GameApp {
                 JobRequest::CreateWorld { .. } => create_world += 1,
                 JobRequest::LoadChunk { .. } => load += 1,
                 JobRequest::GenerateChunk { .. } => generate += 1,
+                JobRequest::UnloadChunk { .. } => unload += 1,
                 JobRequest::BuildChunkMesh { .. } => mesh += 1,
                 JobRequest::BuildMinimapChunkColumn { .. } => minimap += 1,
                 JobRequest::ResolveRegionClassArea { .. } => {}
@@ -406,12 +412,13 @@ impl GameApp {
         }
 
         println!(
-            "[app] chunk lifecycle plan: interest={} retain={} requests={} load={} generate={} mesh={} minimap={} create_world={} unload={} spawn_pending={}",
+            "[app] chunk lifecycle plan: interest={} retain={} requests={} load={} generate={} unload={} mesh={} minimap={} create_world={} unload_coords={} spawn_pending={}",
             lifecycle.interest.len(),
             lifecycle.retain.len(),
             lifecycle.job_requests.len(),
             load,
             generate,
+            unload,
             mesh,
             minimap,
             create_world,
@@ -458,7 +465,7 @@ impl GameApp {
             timings.command_drain_ms
         );
         println!(
-            "[perf] update workload: frame={} lifecycle interest={} retain={} unload={} requests={} [{}] results processed={} load={} gen={} mesh_upload={} mesh_empty={} minimap={} region={} ignored={} failed={} triangles={} upload_ms={:.2} jobs pending={} [{}] running={} [{}] completed={} [{}] intermediate={} available_workers={}/{} shutdown={} minimap_cache cached={} pending={} dirty={}",
+            "[perf] update workload: frame={} lifecycle interest={} retain={} unload={} requests={} [{}] results processed={} load={} gen={} unload={} mesh_upload={} mesh_empty={} minimap={} region={} ignored={} failed={} triangles={} upload_ms={:.2} unload_ms={:.2} jobs pending={} [{}] running={} [{}] completed={} [{}] intermediate={} available_workers={}/{} shutdown={} minimap_cache cached={} pending={} dirty={}",
             self.timing.frame_index,
             lifecycle.interest,
             lifecycle.retain,
@@ -468,6 +475,7 @@ impl GameApp {
             results.processed,
             results.disk_loaded,
             results.generated,
+            results.unloaded,
             results.mesh_uploaded,
             results.mesh_empty,
             results.minimap,
@@ -476,6 +484,7 @@ impl GameApp {
             results.failed,
             results.mesh_triangles,
             results.mesh_upload_ms,
+            results.unload_apply_ms,
             jobs.pending_requests,
             format_job_counts(jobs.pending_by_kind),
             jobs.running_requests,
@@ -554,6 +563,7 @@ struct JobResultApplyStats {
     world_created: usize,
     disk_loaded: usize,
     generated: usize,
+    unloaded: usize,
     mesh_uploaded: usize,
     mesh_empty: usize,
     minimap: usize,
@@ -562,6 +572,7 @@ struct JobResultApplyStats {
     failed: usize,
     mesh_triangles: usize,
     mesh_upload_ms: f64,
+    unload_apply_ms: f64,
 }
 
 impl JobResultApplyStats {
@@ -571,6 +582,7 @@ impl JobResultApplyStats {
         self.world_created += other.world_created;
         self.disk_loaded += other.disk_loaded;
         self.generated += other.generated;
+        self.unloaded += other.unloaded;
         self.mesh_uploaded += other.mesh_uploaded;
         self.mesh_empty += other.mesh_empty;
         self.minimap += other.minimap;
@@ -579,6 +591,7 @@ impl JobResultApplyStats {
         self.failed += other.failed;
         self.mesh_triangles += other.mesh_triangles;
         self.mesh_upload_ms += other.mesh_upload_ms;
+        self.unload_apply_ms += other.unload_apply_ms;
     }
 }
 
@@ -608,10 +621,11 @@ impl ChunkLifecycleRequestStats {
 
 fn format_job_counts(counts: JobRequestCounts) -> String {
     format!(
-        "create_world={} load={} generate={} mesh={} minimap={} region={}",
+        "create_world={} load={} generate={} unload={} mesh={} minimap={} region={}",
         counts.create_world,
         counts.load_chunk,
         counts.generate_chunk,
+        counts.unload_chunk,
         counts.build_chunk_mesh,
         counts.build_minimap_chunk_column,
         counts.resolve_region_class_area

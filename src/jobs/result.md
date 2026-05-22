@@ -12,6 +12,7 @@
 - `WorldCreated { root, manifest }`
 - `ChunkLoaded { coord, chunk }`
 - `ChunkGenerated { coord, chunk }`
+- `ChunkUnloaded { coord }`
 - `ChunkMeshBuilt { coord, mesh }`
 - `MinimapChunkColumnBuilt { coord, patch }`
 - `RegionClassResolved { area, classes }`
@@ -66,6 +67,7 @@
 - create-world and created-world chunk load now use `ExecutionFailed { message }` when directory, manifest, disk read, or decode work fails
 - create-world progress results carry lightweight chunk counters keyed by root path and are intended for app-owned loading UI only
 - app still decides how to log or recover from `JobFailed`
+- `ChunkUnloaded` is a lifecycle completion signal only; app still owns the actual `WorldCore` removal, renderer mesh removal, and minimap cache invalidation
 - minimap chunk-column results are cache data only; app still owns how and when that cache is read by the render bridge
 - region-classification results are cache data only; app/world own when resolved samples enter the live `WorldCore` cache
 - worker diagnostics include result labels so slow minimap, mesh, load, and generation jobs can be separated in logs

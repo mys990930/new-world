@@ -66,7 +66,7 @@ NOT:
 6. runtime region-classification resolves are background work so environment/HUD refresh does not generate atlas structure on the frame thread
 7. progress results are intermediate status events and must not clear running/coalescing state for their request
 8. limited drains preserve deterministic result order and keep undrained results buffered
-9. diagnostics classify minimap and region-classification work separately from load/generate/mesh work
+9. diagnostics classify unload/minimap/region-classification work separately from load/generate/mesh work
 
 ### Submodules
 
@@ -83,9 +83,10 @@ NOT:
 - the current worker pool still uses `std::thread + std::sync::mpsc`
 - default runtime config uses up to two workers from available CPU parallelism so independent chunk load/mesh/minimap jobs can make progress while leaving CPU headroom for input and rendering
 - job system startup and shutdown are logged with worker/queue configuration so hangs can be separated from missing window/surface startup
-- the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, `BuildChunkMesh`, `BuildMinimapChunkColumn`, and `ResolveRegionClassArea`
+- the active request variants are `CreateWorld`, `LoadChunk`, `GenerateChunk`, `UnloadChunk`, `BuildChunkMesh`, `BuildMinimapChunkColumn`, and `ResolveRegionClassArea`
 - `CreateWorld` delegates graph-first bounded created-world dump generation to `world`, including chunk storage and manifest writing
 - `CreateWorld` can emit lightweight `CreateWorldProgress` snapshots before its final `WorldCreated`/`JobFailed` result; routing throttles those snapshots so UI feedback does not spam the main thread
+- `UnloadChunk` routes through the jobs queue as a lightweight completion barrier; live world and renderer removal remain app-owned when `ChunkUnloaded` is drained
 - gameplay can use limited result draining so bursty mesh completions do not force all renderer uploads into one frame
 - slow worker jobs are logged by default; `NEW_WORLD_TRACE_JOBS=1` enables full worker start/finish tracing
 - focused runtime region classification is queued through `ResolveRegionClassArea` and applied as a `WorldCore` cache update after the result is drained

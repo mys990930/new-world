@@ -199,6 +199,7 @@ fn result_coalesce_key(result: &JobResult) -> Option<JobCoalesceKey> {
         }
         JobResult::ChunkLoaded { coord, .. } => Some(JobCoalesceKey::LoadChunk(*coord)),
         JobResult::ChunkGenerated { coord, .. } => Some(JobCoalesceKey::GenerateChunk(*coord)),
+        JobResult::ChunkUnloaded { coord } => Some(JobCoalesceKey::UnloadChunk(*coord)),
         JobResult::ChunkMeshBuilt { coord, .. } => Some(JobCoalesceKey::BuildChunkMesh(*coord)),
         JobResult::MinimapChunkColumnBuilt { coord, .. } => {
             Some(JobCoalesceKey::BuildMinimapChunkColumn(*coord))
@@ -217,6 +218,7 @@ fn add_result_kind(counts: &mut JobRequestCounts, result: &JobResult) {
         }
         JobResult::ChunkLoaded { .. } => counts.load_chunk += 1,
         JobResult::ChunkGenerated { .. } => counts.generate_chunk += 1,
+        JobResult::ChunkUnloaded { .. } => counts.unload_chunk += 1,
         JobResult::ChunkMeshBuilt { .. } => counts.build_chunk_mesh += 1,
         JobResult::MinimapChunkColumnBuilt { .. } => {
             counts.build_minimap_chunk_column += 1;

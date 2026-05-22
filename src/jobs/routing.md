@@ -10,6 +10,7 @@
 - `CreateWorld` -> graph-first created-world directory creation
 - `LoadChunk` -> created-world storage load
 - `GenerateChunk` -> procedural generation
+- `UnloadChunk` -> unload completion signal
 - `BuildChunkMesh` -> meshing
 - `BuildMinimapChunkColumn` -> snapshot-based top-down chunk-column derivation
 - `ResolveRegionClassArea` -> atlas fields/structure generation plus region classification
@@ -56,7 +57,7 @@
 
 ## Notes
 
-- the current routing surface now covers graph-first create-world directory creation, created-world chunk load, procedural generation, meshing, snapshot-based minimap chunk-column derivation, and background region-classification resolves
+- the current routing surface now covers graph-first create-world directory creation, created-world chunk load, procedural generation, unload completion signaling, meshing, snapshot-based minimap chunk-column derivation, and background region-classification resolves
 - create-world and created-world load routes are intentionally fallible worker paths in the current runtime
 - create-world delegates to the world-owned graph-first created-world API, which builds one bounded x/z plan, voxelizes each requested vertical stack, saves chunks through the created-world storage API, and writes the normal created-world manifest
 - create-world progress is throttled by completed chunk count before being forwarded to the worker report channel; the graph-first route reports as parallel stack writes complete

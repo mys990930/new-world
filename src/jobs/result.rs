@@ -26,6 +26,9 @@ pub enum JobResult {
         coord: ChunkCoord,
         chunk: ChunkData,
     },
+    ChunkUnloaded {
+        coord: ChunkCoord,
+    },
     ChunkMeshBuilt {
         coord: ChunkCoord,
         mesh: CpuMesh,
@@ -58,6 +61,7 @@ impl JobResult {
             Self::WorldCreated { .. } => "WorldCreated",
             Self::ChunkLoaded { .. } => "ChunkLoaded",
             Self::ChunkGenerated { .. } => "ChunkGenerated",
+            Self::ChunkUnloaded { .. } => "ChunkUnloaded",
             Self::ChunkMeshBuilt { .. } => "ChunkMeshBuilt",
             Self::MinimapChunkColumnBuilt { .. } => "MinimapChunkColumnBuilt",
             Self::RegionClassResolved { .. } => "RegionClassResolved",
@@ -91,6 +95,9 @@ impl JobResult {
                 "ChunkGenerated(pos=({}, {}, {}))",
                 coord.0, coord.1, coord.2
             ),
+            Self::ChunkUnloaded { coord } => {
+                format!("ChunkUnloaded(pos=({}, {}, {}))", coord.0, coord.1, coord.2)
+            }
             Self::ChunkMeshBuilt { coord, mesh } => format!(
                 "ChunkMeshBuilt(pos=({}, {}, {}) triangles={})",
                 coord.0,
@@ -129,6 +136,7 @@ impl JobResult {
             }
             Self::ChunkLoaded { coord, .. }
             | Self::ChunkGenerated { coord, .. }
+            | Self::ChunkUnloaded { coord }
             | Self::ChunkMeshBuilt { coord, .. } => *coord,
             Self::MinimapChunkColumnBuilt { .. } => {
                 panic!("MinimapChunkColumnBuilt result does not map to a single chunk coordinate")

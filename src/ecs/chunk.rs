@@ -23,6 +23,7 @@ pub struct ChunkStates {
     pub loaded: BTreeSet<ChunkCoord>,
     pub load_requested: BTreeSet<ChunkCoord>,
     pub generation_requested: BTreeSet<ChunkCoord>,
+    pub unload_requested: BTreeSet<ChunkCoord>,
     pub mesh_requested: BTreeSet<ChunkCoord>,
     pub remesh_needed: BTreeSet<ChunkCoord>,
     pub render_ready: BTreeSet<ChunkCoord>,

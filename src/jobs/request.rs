@@ -22,6 +22,9 @@ pub enum JobRequest {
         meta: WorldMeta,
         registry: Arc<BlockRegistry>,
     },
+    UnloadChunk {
+        coord: ChunkCoord,
+    },
     BuildChunkMesh {
         center: ChunkSnapshot,
         neighbors: NeighborChunks,
@@ -43,6 +46,7 @@ pub struct JobRequestCounts {
     pub create_world: usize,
     pub load_chunk: usize,
     pub generate_chunk: usize,
+    pub unload_chunk: usize,
     pub build_chunk_mesh: usize,
     pub build_minimap_chunk_column: usize,
     pub resolve_region_class_area: usize,
@@ -53,6 +57,7 @@ impl JobRequestCounts {
         self.create_world
             + self.load_chunk
             + self.generate_chunk
+            + self.unload_chunk
             + self.build_chunk_mesh
             + self.build_minimap_chunk_column
             + self.resolve_region_class_area
@@ -63,6 +68,7 @@ impl JobRequestCounts {
             JobRequest::CreateWorld { .. } => self.create_world += 1,
             JobRequest::LoadChunk { .. } => self.load_chunk += 1,
             JobRequest::GenerateChunk { .. } => self.generate_chunk += 1,
+            JobRequest::UnloadChunk { .. } => self.unload_chunk += 1,
             JobRequest::BuildChunkMesh { .. } => self.build_chunk_mesh += 1,
             JobRequest::BuildMinimapChunkColumn { .. } => {
                 self.build_minimap_chunk_column += 1;
@@ -78,6 +84,7 @@ impl JobRequestCounts {
             JobCoalesceKey::CreateWorld(_) => self.create_world += 1,
             JobCoalesceKey::LoadChunk(_) => self.load_chunk += 1,
             JobCoalesceKey::GenerateChunk(_) => self.generate_chunk += 1,
+            JobCoalesceKey::UnloadChunk(_) => self.unload_chunk += 1,
             JobCoalesceKey::BuildChunkMesh(_) => self.build_chunk_mesh += 1,
             JobCoalesceKey::BuildMinimapChunkColumn(_) => {
                 self.build_minimap_chunk_column += 1;
@@ -94,6 +101,7 @@ pub(crate) enum JobCoalesceKey {
     CreateWorld(PathBuf),
     LoadChunk(ChunkCoord),
     GenerateChunk(ChunkCoord),
+    UnloadChunk(ChunkCoord),
     BuildChunkMesh(ChunkCoord),
     BuildMinimapChunkColumn(TopdownChunkColumnCoord),
     ResolveRegionClassArea(AtlasArea),
@@ -105,6 +113,7 @@ impl JobRequest {
             Self::CreateWorld { .. } => "CreateWorld",
             Self::LoadChunk { .. } => "LoadChunk",
             Self::GenerateChunk { .. } => "GenerateChunk",
+            Self::UnloadChunk { .. } => "UnloadChunk",
             Self::BuildChunkMesh { .. } => "BuildChunkMesh",
             Self::BuildMinimapChunkColumn { .. } => "BuildMinimapChunkColumn",
             Self::ResolveRegionClassArea { .. } => "ResolveRegionClassArea",
@@ -132,6 +141,9 @@ impl JobRequest {
             ),
             Self::GenerateChunk { coord, .. } => {
                 format!("GenerateChunk(pos=({}, {}, {}))", coord.0, coord.1, coord.2)
+            }
+            Self::UnloadChunk { coord } => {
+                format!("UnloadChunk(pos=({}, {}, {}))", coord.0, coord.1, coord.2)
             }
             Self::BuildChunkMesh { center, .. } => {
                 let coord = center.coord();
@@ -161,7 +173,9 @@ impl JobRequest {
             Self::CreateWorld { .. } => {
                 panic!("CreateWorld request does not map to a single chunk coordinate")
             }
-            Self::LoadChunk { coord, .. } | Self::GenerateChunk { coord, .. } => *coord,
+            Self::LoadChunk { coord, .. }
+            | Self::GenerateChunk { coord, .. }
+            | Self::UnloadChunk { coord } => *coord,
             Self::BuildChunkMesh { center, .. } => center.coord(),
             Self::BuildMinimapChunkColumn { .. } => {
                 panic!("BuildMinimapChunkColumn request does not map to a single chunk coordinate")
@@ -177,6 +191,7 @@ impl JobRequest {
             Self::CreateWorld { root, .. } => JobCoalesceKey::CreateWorld(root.clone()),
             Self::LoadChunk { coord, .. } => JobCoalesceKey::LoadChunk(*coord),
             Self::GenerateChunk { coord, .. } => JobCoalesceKey::GenerateChunk(*coord),
+            Self::UnloadChunk { coord } => JobCoalesceKey::UnloadChunk(*coord),
             Self::BuildChunkMesh { center, .. } => JobCoalesceKey::BuildChunkMesh(center.coord()),
             Self::BuildMinimapChunkColumn { coord, .. } => {
                 JobCoalesceKey::BuildMinimapChunkColumn(*coord)

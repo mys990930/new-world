@@ -29,6 +29,11 @@ impl EcsRuntime {
         let unload_coords = planned_unload_coords(&chunk_states, &retain);
 
         let mut requests = Vec::new();
+        for coord in &unload_coords {
+            requests.push(JobRequest::UnloadChunk { coord: *coord });
+            chunk_states.unload_requested.insert(*coord);
+        }
+
         let ordered_interest = ordered_interest_coords(&interest, target_chunk);
         let mut acquisition_requests = 0_usize;
         for coord in &ordered_interest {
@@ -115,6 +120,9 @@ impl EcsRuntime {
                     chunk_states.remesh_needed.remove(coord);
                 }
             }
+            JobResult::ChunkUnloaded { coord } => {
+                chunk_states.unload_requested.remove(coord);
+            }
             JobResult::ChunkMeshBuilt { coord, .. } => {
                 chunk_states.mesh_requested.remove(coord);
                 if chunk_states.retain.contains(coord) {
@@ -134,6 +142,9 @@ impl EcsRuntime {
                 JobRequest::GenerateChunk { coord, .. } => {
                     chunk_states.generation_requested.remove(coord);
                 }
+                JobRequest::UnloadChunk { coord } => {
+                    chunk_states.unload_requested.remove(coord);
+                }
                 JobRequest::BuildChunkMesh { center, .. } => {
                     chunk_states.mesh_requested.remove(&center.coord());
                 }
@@ -150,6 +161,7 @@ impl EcsRuntime {
         chunk_states.loaded.remove(&coord);
         chunk_states.load_requested.remove(&coord);
         chunk_states.generation_requested.remove(&coord);
+        chunk_states.unload_requested.remove(&coord);
         chunk_states.mesh_requested.remove(&coord);
         chunk_states.remesh_needed.remove(&coord);
         chunk_states.render_ready.remove(&coord);
@@ -190,6 +202,9 @@ fn sync_loaded_chunk_states(chunk_states: &mut ChunkStates, world: &WorldCore) {
         .generation_requested
         .retain(|coord| !world.has_chunk(*coord));
     chunk_states
+        .unload_requested
+        .retain(|coord| world.has_chunk(*coord));
+    chunk_states
         .remesh_needed
         .retain(|coord| world.has_chunk(*coord));
     chunk_states
@@ -211,7 +226,7 @@ fn planned_unload_coords(
     chunk_states
         .loaded
         .iter()
-        .filter(|coord| !retain.contains(coord))
+        .filter(|coord| !retain.contains(coord) && !chunk_states.unload_requested.contains(coord))
         .copied()
         .collect()
 }
@@ -541,6 +556,49 @@ mod tests {
         let plan = runtime.plan_chunk_lifecycle(&world, None);
 
         assert!(plan.unload_coords.contains(&far));
+        assert!(
+            plan.job_requests.iter().any(
+                |request| matches!(request, JobRequest::UnloadChunk { coord } if *coord == far)
+            )
+        );
+    }
+
+    #[test]
+    fn lifecycle_plan_does_not_duplicate_pending_unload_requests() {
+        let mut world = test_world();
+        let mut runtime = EcsRuntime::new();
+        let far = ChunkCoord(5, 0, 0);
+        world.insert_chunk(far, ChunkData::new_empty(far));
+        {
+            let mut chunk_states = runtime.world_mut().resource_mut::<ChunkStates>();
+            chunk_states.loaded.insert(far);
+            chunk_states.unload_requested.insert(far);
+        }
+
+        let plan = runtime.plan_chunk_lifecycle(&world, None);
+
+        assert!(!plan.unload_coords.contains(&far));
+        assert!(
+            !plan.job_requests.iter().any(
+                |request| matches!(request, JobRequest::UnloadChunk { coord } if *coord == far)
+            )
+        );
+    }
+
+    #[test]
+    fn chunk_unloaded_result_clears_pending_unload_request() {
+        let mut runtime = EcsRuntime::new();
+        let coord = ChunkCoord(5, 0, 0);
+        runtime
+            .world_mut()
+            .resource_mut::<ChunkStates>()
+            .unload_requested
+            .insert(coord);
+
+        runtime.apply_job_result(&JobResult::ChunkUnloaded { coord });
+
+        let chunk_states = runtime.world().resource::<ChunkStates>();
+        assert!(!chunk_states.unload_requested.contains(&coord));
     }
 
     #[test]
