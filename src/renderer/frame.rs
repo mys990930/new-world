@@ -498,6 +498,16 @@ impl Renderer {
                     stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
 
+                if let Some((vertex_buffer, index_buffer, index_count)) =
+                    dynamic_cube_buffers.as_ref()
+                {
+                    render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                }
+
                 if !frame.occlusion_blocks.is_empty() {
                     render_pass.set_bind_group(1, &backend.environment_fade_bind_group, &[]);
                     render_pass.set_pipeline(&backend.terrain_fade_pipeline);
@@ -525,16 +535,6 @@ impl Renderer {
                         render_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
                         stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                     }
-                }
-
-                if let Some((vertex_buffer, index_buffer, index_count)) =
-                    dynamic_cube_buffers.as_ref()
-                {
-                    render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
-                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
-                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
 
                 render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
