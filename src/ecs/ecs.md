@@ -87,6 +87,7 @@
   - plain wheel becomes quickslot cycling for the active manipulation mode
   - left click requests primary action
   - right click requests block placement
+  - `Space` requests a frame-local jump
   - `Q/E` request quarter-turn camera rotation
   - `Y` requests camera recenter
   - `Tab` requests manipulation-mode toggle
@@ -113,6 +114,7 @@
   - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
   - normal walking currently targets `7` blocks/s
   - holding Shift sprints at `11` blocks/s
+  - pressing Space while grounded starts a jump targeting a `2` block rise under the current gravity setting
   - road speed and difficult-terrain slowdown remain future world/material-aware movement policies
 - local player visual state
   - the collision body remains `PlayerBody`; the visible avatar is a separate voxel-part rig
@@ -235,6 +237,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - the local-player voxel visual state is separate from `PlayerBody`; app bridge expands it into a six-part animated voxel avatar instead of the old single dummy cube
+- the default voxel avatar rig fills the same `2x2x4` local bounds as `PlayerBody`, so visual scale and collision scale match
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary

@@ -9,6 +9,7 @@ pub struct EcsInputSnapshot {
     pub move_screen_x: i8,
     pub move_screen_y: i8,
     pub sprint_down: bool,
+    pub jump_just_pressed: bool,
     pub zoom_scroll_delta: f32,
     pub quickslot_scroll_steps: i8,
     pub primary_down: bool,

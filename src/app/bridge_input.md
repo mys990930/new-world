@@ -25,11 +25,13 @@
 - input meaning still belongs to ECS after the snapshot is created
 - this bridge maps raw controls only; it does not mutate gameplay state directly
 - `Ctrl + wheel` stays zoom while plain wheel stays quickslot cycling
+- Space is copied as a frame-local jump press; grounded checks and movement rules stay in ECS
 
 ## Invariants
 
 - `Q/E` normalization must keep the existing ECS quarter-turn sign convention
 - focus and activity state must travel with the frame snapshot
+- Space jump state must use `just_pressed` rather than held state so holding Space does not relaunch every frame
 - direct quickslot selection stays a frame-local discrete field rather than UI-owned state
 
 ## Related Modules

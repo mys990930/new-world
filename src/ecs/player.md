@@ -31,6 +31,7 @@
 - `PlayerMovementConfig`
 - `PlayerCommandBuffer`
 - `PlayerInventory`
+- `EcsInputSnapshot.jump_just_pressed`
 - local player entity id
 - `WorldCore` for world-aware motion helpers
 
@@ -54,9 +55,11 @@
 - `MoveWorldIntent` is copied into the local player horizontal velocity channels
 - base walking speed is `7` blocks/s, matching the current target walking band of `6.4..7.6` blocks/s
 - holding Shift uses sprint speed `11` blocks/s, matching the current target sprint band of `9.6..11.6` blocks/s
+- pressing Space while grounded applies a vertical launch velocity calculated from gravity and `jump_height_blocks`
+- the default jump target is `2` blocks above the takeoff height, using `sqrt(2 * gravity * jump_height_blocks)`
 - road speed and difficult-terrain slowdown are documented future policies and are not applied yet
 - vertical velocity is preserved across frames so gravity and falling can accumulate
-- inventory-open state blocks movement intent generation and leaves horizontal velocity at zero
+- inventory-open state blocks movement intent generation and jump launch, and leaves horizontal velocity at zero
 - world-aware motion then resolves:
   - horizontal movement against solid world blocks
   - one-block automatic step-up
@@ -68,6 +71,7 @@
 
 - `Transform.translation` is interpreted as body-center position
 - `PlayerBody.half_extents` is currently `[1.0, 2.0, 1.0]`, meaning a `2x2x4` block body
+- `PlayerMovementConfig.jump_height_blocks` is currently `2.0`
 - `MoveWorldIntent` is the continuous world-space movement channel
 - discrete actions stay in `PlayerCommandBuffer`
 - missing world chunks are treated as blocking in the current collision helper so the player does not walk into unloaded space
@@ -94,5 +98,5 @@
 - the current minimal implementation spawns one local player during bootstrap
 - bootstrap and created-world reload now stage a spawn anchor first; app snaps the local player onto a safe loaded surface once jobs have streamed enough nearby chunk data into `WorldCore`
 - the current walking speed is `7.0` world units per second and hold-Shift sprint speed is `11.0` world units per second
-- the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet
-- the next visual-player step should consume locomotion/physics state without changing this collision helper or `PlayerBody` dimensions
+- the current locomotion slice is intentionally minimal: no slope handling beyond one-block step-up and no network prediction yet
+- the visual-player rig consumes locomotion/physics state without changing this collision helper or `PlayerBody` dimensions

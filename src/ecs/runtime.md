@@ -42,7 +42,7 @@
 3. register systems for `pre`, `update`, `post`, and `fixed`
 4. let app drive the phase boundaries
 5. let app call world-aware helpers for:
-   - local player collision / gravity motion
+   - local player collision / gravity / jump motion
    - player-local environment snapshot refresh
    - selection raycast updates
 

@@ -74,6 +74,7 @@ impl Default for FrameDeltaSeconds {
 pub struct PlayerMovementConfig {
     pub walk_units_per_second: f32,
     pub sprint_units_per_second: f32,
+    pub jump_height_blocks: f32,
     pub gravity_units_per_second_sq: f32,
     pub terminal_fall_speed: f32,
     pub max_step_height: f32,
@@ -84,6 +85,7 @@ impl Default for PlayerMovementConfig {
         Self {
             walk_units_per_second: 7.0,
             sprint_units_per_second: 11.0,
+            jump_height_blocks: 2.0,
             gravity_units_per_second_sq: 28.0,
             terminal_fall_speed: 32.0,
             max_step_height: 1.0,
@@ -169,7 +171,13 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
     }
 
     let movement = *ecs_world.resource::<PlayerMovementConfig>();
-    let sprint_down = ecs_world.resource::<EcsInputSnapshot>().sprint_down;
+    let input = ecs_world.resource::<EcsInputSnapshot>().clone();
+    let inventory_open = ecs_world
+        .get::<PlayerInventory>(entity)
+        .is_some_and(|inventory| inventory.inventory_open);
+    let jump_requested =
+        input.active && input.focused && input.jump_just_pressed && !inventory_open;
+    let sprint_down = input.sprint_down;
     let mut query = ecs_world.query_filtered::<(
         &mut Transform,
         &mut Velocity,
@@ -205,7 +213,9 @@ pub(crate) fn simulate_local_player_motion(ecs_world: &mut World, world: &WorldC
     }
 
     let grounded_before_vertical = is_grounded(world, position, body);
-    if grounded_before_vertical {
+    if grounded_before_vertical && jump_requested {
+        velocity.linear[1] = jump_initial_velocity(movement);
+    } else if grounded_before_vertical {
         if velocity.linear[1] < 0.0 {
             velocity.linear[1] = 0.0;
         }
@@ -312,6 +322,10 @@ fn horizontal_motion_delta(velocity: [f32; 3], speed: f32, frame_delta: f32) -> 
         horizontal[0] * inv_length * distance,
         horizontal[1] * inv_length * distance,
     ]
+}
+
+fn jump_initial_velocity(movement: PlayerMovementConfig) -> f32 {
+    (2.0 * movement.gravity_units_per_second_sq * movement.jump_height_blocks.max(0.0)).sqrt()
 }
 
 fn move_horizontally_with_step_up(
@@ -626,5 +640,52 @@ mod tests {
         let blocked =
             move_horizontally_with_step_up(&world, [20.0, 3.0, 20.5], [4.0, 0.0], body, 1.0);
         assert!(blocked[0] < 23.0);
+    }
+
+    #[test]
+    fn space_jump_launches_grounded_player_upward() {
+        let mut ecs_world = World::new();
+        ecs_world.insert_resource(LocalPlayerEntity::default());
+        ecs_world.insert_resource(FrameDeltaSeconds(0.016));
+        ecs_world.insert_resource(PlayerMovementConfig::default());
+        ecs_world.insert_resource(MoveWorldIntent::default());
+        ecs_world.insert_resource(EcsInputSnapshot {
+            jump_just_pressed: true,
+            focused: true,
+            active: true,
+            ..EcsInputSnapshot::default()
+        });
+        let entity = spawn_default_player(&mut ecs_world);
+        let world = solid_world();
+
+        assert!(place_local_player_on_surface(
+            &mut ecs_world,
+            &world,
+            [16.0, 16.0]
+        ));
+        simulate_local_player_motion(&mut ecs_world, &world);
+
+        let transform = ecs_world.get::<Transform>(entity).copied().unwrap();
+        let velocity = ecs_world.get::<Velocity>(entity).copied().unwrap();
+        let physics = ecs_world
+            .get::<PlayerPhysicsState>(entity)
+            .copied()
+            .unwrap();
+
+        assert!(transform.translation[1] > 3.0);
+        assert!(
+            (velocity.linear[1] - jump_initial_velocity(PlayerMovementConfig::default())).abs()
+                < 1e-5
+        );
+        assert!(!physics.grounded);
+    }
+
+    #[test]
+    fn default_jump_velocity_targets_two_block_rise() {
+        let movement = PlayerMovementConfig::default();
+        let velocity = jump_initial_velocity(movement);
+        let expected = (2.0 * movement.gravity_units_per_second_sq * 2.0).sqrt();
+
+        assert!((velocity - expected).abs() < 1e-5);
     }
 }

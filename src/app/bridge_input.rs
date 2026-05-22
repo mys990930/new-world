@@ -22,6 +22,7 @@ impl GameApp {
             ),
             sprint_down: input.pressed_keys.contains(&KeyCode::ShiftLeft)
                 || input.pressed_keys.contains(&KeyCode::ShiftRight),
+            jump_just_pressed: jump_just_pressed(&input.just_pressed_keys),
             zoom_scroll_delta: if input.modifiers.control {
                 input.wheel_delta.1
             } else {
@@ -58,6 +59,10 @@ fn axis(negative: bool, positive: bool) -> i8 {
 
 fn camera_rotation_axis(q_pressed: bool, e_pressed: bool) -> i8 {
     axis(e_pressed, q_pressed)
+}
+
+fn jump_just_pressed(keys: &HashSet<KeyCode>) -> bool {
+    keys.contains(&KeyCode::Space)
 }
 
 fn wheel_steps(delta_y: f32) -> i8 {
@@ -101,5 +106,10 @@ mod tests {
     #[test]
     fn e_rotation_maps_to_negative_quarter_turn() {
         assert_eq!(camera_rotation_axis(false, true), -1);
+    }
+
+    #[test]
+    fn space_maps_to_jump() {
+        assert!(jump_just_pressed(&HashSet::from([KeyCode::Space])));
     }
 }

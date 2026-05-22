@@ -58,6 +58,10 @@
   - `Airborne` when not grounded
 - the animation clock advances from ECS frame delta and is exported with the visual state
 - the default rig is code-authored data, not an external atlas or sprite dependency
+- the default rig occupies the same local `2x2x4` bounds as `PlayerBody`:
+  - x: `-1.0..1.0`
+  - y: `-2.0..2.0`
+  - z: within `-1.0..1.0`
 - part poses are local to the player root; app bridge is responsible for composing root, facing, animation offset, and renderer DTOs
 
 ## Invariants
@@ -86,7 +90,7 @@
 ## Current Implementation
 
 1. `PlayerBody` remains the physical source of truth; `VoxelPlayerVisualState` is a derived snapshot for app bridge reads.
-2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs.
+2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs sized to the `2x2x4` collision body.
 3. The app bridge expands the rig into multiple dynamic actor cube instances, replacing the old single white player cube; renderer-owned shadow maps handle the ground shadow.
 4. Procedural animation offsets are applied in the app bridge:
    - idle bob
