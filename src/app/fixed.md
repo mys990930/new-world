@@ -37,7 +37,7 @@
 2. accumulator >= fixed_dt 인 동안 반복
 3. ecs가 이번 tick의 simulation 대상/범위와 player-centered active chunk observer scope를 계산한다
 4. cached region classification이 있는 경우에만 active-region time/weather cell input을 구성한다
-5. ECS가 선택한 chunk scope를 world-owned observer API로 읽어 ecology chunk input을 구성한다
+5. ECS가 선택한 chunk scope 중 cached region classification이 있는 chunk만 ecology/weather chunk input으로 구성한다
 6. simulation이 결과를 계산한다
 7. world에 structured result를 반영한다
 8. structured events를 textmode/diagnostic adapter가 소비할 수 있도록 보존하거나 전달한다
@@ -85,7 +85,7 @@
 - later에는 subsystem별 fixed rate 분리도 가능하다
 - 현재 구현은 fixed tick마다 ECS `SimClock`/`ActiveSimRegion`/`ActiveChunkObserverScope`를 갱신하고, `SimulationCore::step_all(...)`로 time simulation과 ecology observer simulation을 실행한다
 - time/weather cell input은 game-minute 경계에서만 만들어지며, region classification cache가 준비되지 않은 경우 calendar advance만 진행하고 local climate/weather update는 다음 cached tick으로 미룬다
-- ecology input은 ECS가 선택한 `3x3` chunk scope를 사용한다. 현재 app runtime은 graph biome cache가 아직 없으므로 `WorldCore::observe_chunk_surface_condition(...)`의 legacy biome을 `GraphBiomeKind`로 compatibility mapping한다.
+- ecology/weather chunk input은 ECS가 선택한 `3x3` chunk scope를 사용하되, runtime frame thread에서는 uncached atlas region classification을 동기 생성하지 않는다. cache miss chunk는 해당 fixed tick에서 건너뛰고, app-owned region resolve job이 cache를 채운 뒤 다음 tick부터 input에 포함한다.
 - `new-world-textmode`는 diagnostic binary라서 app runtime mapping 대신 graph-first `GraphMacroMap.biomes`를 직접 샘플한다.
 - renderer environment sync는 legacy atlas `LocalWeatherState`가 아니라 world-owned `ChunkWeatherState`를 우선 사용한다. player-focus chunk의 `cloud`, `rain`, `temperature`, `moisture`, `kind`를 calendar time-of-day와 합쳐 `RenderEnvironment`로 변환한다.
 - chunk weather presentation은 scene 전체가 뿌옇게 씻기지 않도록 낮은 기본 fog density와 약한 height falloff에서 출발하되, cloud/moisture/rain/storm scalar가 fog, tint, wetness, saturation, direct light를 점진적으로 조정한다.

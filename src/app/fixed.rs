@@ -228,12 +228,13 @@ fn ecology_chunk_inputs_from_world(
     active_chunks
         .iter()
         .copied()
-        .map(|coord| {
-            let observation = world.observe_chunk_surface_condition(coord);
-            EcologySimChunkInput {
+        .filter_map(|coord| {
+            let atlas = atlas_coord_for_chunk(coord);
+            let region = world.sample_cached_region_class_atlas(atlas)?;
+            Some(EcologySimChunkInput {
                 coord,
-                biome: graph_biome_for_runtime_compat(observation.cell_biome),
-            }
+                biome: graph_biome_for_runtime_compat(region.biome_family),
+            })
         })
         .collect()
 }
@@ -246,21 +247,18 @@ fn weather_chunk_inputs_from_world(
     active_chunks
         .iter()
         .copied()
-        .map(|coord| {
-            let observation = world.observe_chunk_surface_condition(coord);
+        .filter_map(|coord| {
             let atlas = atlas_coord_for_chunk(coord);
-            let region = world
-                .sample_cached_region_class_atlas(atlas)
-                .unwrap_or_else(|| world.sample_region_class_atlas(atlas));
-            WeatherSimChunkInput {
+            let region = world.sample_cached_region_class_atlas(atlas)?;
+            Some(WeatherSimChunkInput {
                 coord,
-                biome: graph_biome_for_runtime_compat(observation.cell_biome),
+                biome: graph_biome_for_runtime_compat(region.biome_family),
                 context: graph_biome_context_for_runtime_compat(region),
                 previous_weather: world
                     .chunk_weather(coord)
                     .unwrap_or_else(|| ChunkWeatherState::clear(tick_index)),
                 neighbor_weather: chunk_weather_neighbors(world, coord),
-            }
+            })
         })
         .collect()
 }
@@ -671,6 +669,11 @@ mod tests {
             ChunkCoord(1, 0, 1),
         ];
 
+        assert!(ecology_chunk_inputs_from_world(&world, &chunks).is_empty());
+
+        let area =
+            AtlasArea::new(AtlasCoord::new(-1, -1), 2, 2).expect("test atlas area must be valid");
+        let _ = world.resolve_region_class_area(area);
         let inputs = ecology_chunk_inputs_from_world(&world, &chunks);
 
         assert_eq!(inputs.len(), chunks.len());
@@ -679,7 +682,10 @@ mod tests {
             assert_eq!(
                 input.biome,
                 graph_biome_for_runtime_compat(
-                    world.observe_chunk_surface_condition(coord).cell_biome
+                    world
+                        .sample_cached_region_class_atlas(atlas_coord_for_chunk(coord))
+                        .expect("test cached region class")
+                        .biome_family
                 )
             );
         }
