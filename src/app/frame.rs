@@ -9,6 +9,7 @@ const MAX_CHUNK_MESH_UPLOADS_PER_FRAME: usize = 1;
 const MAX_EMPTY_CHUNK_MESH_REMOVES_PER_FRAME: usize = 8;
 const CHUNK_LIFECYCLE_LOG_INTERVAL_FRAMES: u64 = 30;
 const SLOW_RENDER_UPLOAD_LOG_THRESHOLD: Duration = Duration::from_millis(8);
+const DEFAULT_UPDATE_HITCH_LOG_THRESHOLD_MS: f64 = 33.0;
 
 impl GameApp {
     pub fn update(&mut self) {
@@ -110,6 +111,12 @@ impl GameApp {
             &result_stats,
             &lifecycle_stats,
         );
+        self.log_update_hitch_if_needed(
+            update_start.elapsed(),
+            &timings,
+            &result_stats,
+            &lifecycle_stats,
+        );
     }
 
     pub fn render(&mut self) {
@@ -164,6 +171,17 @@ impl GameApp {
                 height
             );
         }
+        self.log_render_hitch_if_needed(
+            total,
+            bridge_ms,
+            draw_ms,
+            draw_scene,
+            visible_chunks,
+            cube_instances,
+            ui_sprites,
+            width,
+            height,
+        );
     }
 
     fn collect_job_results_with_budget(&mut self, budget: &mut usize) -> JobResultApplyStats {
@@ -183,7 +201,9 @@ impl GameApp {
             ..JobResultApplyStats::default()
         };
         for result in results {
+            let ecs_apply_start = Instant::now();
             self.ecs.apply_job_result(&result);
+            stats.ecs_apply_result_ms += duration_ms(ecs_apply_start.elapsed());
 
             match result {
                 JobResult::CreateWorldProgress {
@@ -226,17 +246,21 @@ impl GameApp {
                 JobResult::ChunkLoaded { coord, chunk } => {
                     if self.ecs.retains_chunk(coord) {
                         stats.disk_loaded += 1;
+                        let insert_start = Instant::now();
                         self.world.insert_chunk(coord, chunk);
+                        stats.world_insert_ms += duration_ms(insert_start.elapsed());
                         println!(
-                            "[app] chunk loaded: pos=({}, {}, {}) source=disk",
-                            coord.0, coord.1, coord.2
+                            "[app] chunk loaded: frame={} pos=({}, {}, {}) source=disk",
+                            self.timing.frame_index, coord.0, coord.1, coord.2
                         );
+                        let minimap_queue_start = Instant::now();
                         self.refresh_minimap_chunk_column_after_world_change(
                             crate::world::TopdownChunkColumnCoord {
                                 chunk_x: coord.0,
                                 chunk_z: coord.2,
                             },
                         );
+                        stats.minimap_queue_ms += duration_ms(minimap_queue_start.elapsed());
                     } else {
                         stats.ignored += 1;
                         println!(
@@ -248,17 +272,21 @@ impl GameApp {
                 JobResult::ChunkGenerated { coord, chunk } => {
                     if self.ecs.retains_chunk(coord) {
                         stats.generated += 1;
+                        let insert_start = Instant::now();
                         self.world.insert_chunk(coord, chunk);
+                        stats.world_insert_ms += duration_ms(insert_start.elapsed());
                         println!(
-                            "[app] chunk loaded: pos=({}, {}, {}) source=generated",
-                            coord.0, coord.1, coord.2
+                            "[app] chunk loaded: frame={} pos=({}, {}, {}) source=generated",
+                            self.timing.frame_index, coord.0, coord.1, coord.2
                         );
+                        let minimap_queue_start = Instant::now();
                         self.refresh_minimap_chunk_column_after_world_change(
                             crate::world::TopdownChunkColumnCoord {
                                 chunk_x: coord.0,
                                 chunk_z: coord.2,
                             },
                         );
+                        stats.minimap_queue_ms += duration_ms(minimap_queue_start.elapsed());
                     } else {
                         stats.ignored += 1;
                         println!(
@@ -303,12 +331,16 @@ impl GameApp {
                 }
                 JobResult::MinimapChunkColumnBuilt { coord, patch } => {
                     stats.minimap += 1;
+                    let minimap_apply_start = Instant::now();
                     self.handle_minimap_chunk_column_built(coord, patch);
+                    stats.minimap_apply_ms += duration_ms(minimap_apply_start.elapsed());
                 }
                 JobResult::RegionClassResolved { area: _, classes } => {
                     stats.region_class_resolved += 1;
+                    let region_apply_start = Instant::now();
                     self.world.cache_region_class_map(&classes);
                     self.sync_renderer_environment_from_world();
+                    stats.region_apply_ms += duration_ms(region_apply_start.elapsed());
                 }
                 JobResult::JobFailed { request, error } => {
                     stats.failed += 1;
@@ -322,12 +354,14 @@ impl GameApp {
 
     fn apply_pending_chunk_mesh_commits(&mut self) -> JobResultApplyStats {
         let mut stats = JobResultApplyStats::default();
+        stats.mesh_commit_pending_before = self.pending_chunk_mesh_commits.len();
         let byte_budget = self.renderer.config().upload_budget_bytes_per_frame;
         let mut uploaded = 0_usize;
         let mut removed = 0_usize;
         let mut uploaded_bytes = 0_usize;
 
         while let Some(commit) = self.pending_chunk_mesh_commits.pop_front() {
+            stats.mesh_commit_visited += 1;
             match commit {
                 PendingChunkMeshCommit::Upsert {
                     coord,
@@ -343,6 +377,7 @@ impl GameApp {
                         && uploaded > 0
                         && uploaded_bytes.saturating_add(bytes) > byte_budget;
                     if uploaded >= MAX_CHUNK_MESH_UPLOADS_PER_FRAME || budget_exceeded {
+                        stats.mesh_commit_deferred += 1;
                         self.pending_chunk_mesh_commits.push_front(
                             PendingChunkMeshCommit::Upsert {
                                 coord,
@@ -368,16 +403,24 @@ impl GameApp {
                         uploaded += 1;
                         uploaded_bytes = uploaded_bytes.saturating_add(bytes);
                         stats.mesh_uploaded += 1;
+                        stats.mesh_upload_bytes = stats.mesh_upload_bytes.saturating_add(bytes);
                         stats.mesh_triangles += triangles;
+                        stats.record_mesh_upload_sample(upload_ms, triangles, bytes);
                         if upload_elapsed >= SLOW_RENDER_UPLOAD_LOG_THRESHOLD {
                             println!(
-                                "[perf] slow mesh upload: pos=({}, {}, {}) triangles={} bytes={} elapsed_ms={:.2}",
-                                coord.0, coord.1, coord.2, triangles, bytes, upload_ms
+                                "[perf] slow mesh upload: frame={} pos=({}, {}, {}) triangles={} bytes={} elapsed_ms={:.2}",
+                                self.timing.frame_index,
+                                coord.0,
+                                coord.1,
+                                coord.2,
+                                triangles,
+                                bytes,
+                                upload_ms
                             );
                         }
                         println!(
-                            "[app] chunk mesh uploaded: pos=({}, {}, {}) triangles={} bytes={}",
-                            coord.0, coord.1, coord.2, triangles, bytes
+                            "[app] chunk mesh uploaded: frame={} pos=({}, {}, {}) triangles={} bytes={}",
+                            self.timing.frame_index, coord.0, coord.1, coord.2, triangles, bytes
                         );
                     }
                 }
@@ -387,6 +430,7 @@ impl GameApp {
                         continue;
                     }
                     if removed >= MAX_EMPTY_CHUNK_MESH_REMOVES_PER_FRAME {
+                        stats.mesh_commit_deferred += 1;
                         self.pending_chunk_mesh_commits
                             .push_front(PendingChunkMeshCommit::Remove { coord });
                         break;
@@ -396,13 +440,14 @@ impl GameApp {
                     removed += 1;
                     stats.mesh_empty += 1;
                     println!(
-                        "[app] chunk mesh empty: pos=({}, {}, {})",
-                        coord.0, coord.1, coord.2
+                        "[app] chunk mesh empty: frame={} pos=({}, {}, {})",
+                        self.timing.frame_index, coord.0, coord.1, coord.2
                     );
                 }
             }
         }
 
+        stats.mesh_commit_pending_after = self.pending_chunk_mesh_commits.len();
         stats
     }
 
@@ -581,6 +626,134 @@ impl GameApp {
         );
     }
 
+    fn log_update_hitch_if_needed(
+        &self,
+        total: Duration,
+        timings: &AppUpdateTimings,
+        results: &JobResultApplyStats,
+        lifecycle: &ChunkLifecycleRequestStats,
+    ) {
+        let total_ms = duration_ms(total);
+        let frame_dt_ms = duration_ms(self.timing.frame_dt);
+        let threshold_ms = update_hitch_log_threshold_ms();
+        if total_ms < threshold_ms && frame_dt_ms < threshold_ms * 2.0 {
+            return;
+        }
+
+        let jobs = self.jobs.diagnostic_snapshot();
+        let minimap = self.minimap.diagnostic_snapshot();
+        let (slowest_stage, slowest_ms) = slowest_update_stage(timings);
+        println!(
+            "[hitch] update frame={} total_ms={:.2} frame_dt_ms={:.2} threshold_ms={:.2} slowest_stage={} slowest_ms={:.2}",
+            self.timing.frame_index, total_ms, frame_dt_ms, threshold_ms, slowest_stage, slowest_ms
+        );
+        println!(
+            "[hitch] update stages: shortcuts={:.2} fixed={:.2} input={:.2} ecs_pre={:.2} ecs_update={:.2} collect_jobs={:.2}+{:.2} spawn={:.2}+{:.2} motion={:.2} ecs_post={:.2} lifecycle={:.2} submit={:.2} mesh_commit={:.2} env={:.2} selection={:.2} click={:.2} command={:.2}",
+            timings.shortcuts_ms,
+            timings.fixed_ms,
+            timings.bridge_input_ms,
+            timings.ecs_pre_ms,
+            timings.ecs_update_ms,
+            timings.collect_jobs_ms,
+            timings.collect_jobs_after_submit_ms,
+            timings.spawn_ms,
+            timings.spawn_after_submit_ms,
+            timings.player_motion_ms,
+            timings.ecs_post_ms,
+            timings.lifecycle_plan_ms,
+            timings.submit_jobs_ms,
+            timings.chunk_mesh_commit_ms,
+            timings.environment_ms,
+            timings.selection_ms,
+            timings.click_log_ms,
+            timings.command_drain_ms
+        );
+        println!(
+            "[hitch] results: processed={} load={} gen={} unload={} mesh_queued={} mesh_upload={} mesh_empty={} mesh_pending_before={} mesh_pending_after={} mesh_visited={} mesh_deferred={} mesh_bytes={} mesh_upload_ms={:.2} mesh_upload_max_ms={:.2} mesh_upload_max_triangles={} mesh_upload_max_bytes={} ecs_apply_ms={:.2} world_insert_ms={:.2} minimap_queue_ms={:.2} minimap_apply_ms={:.2} region_apply_ms={:.2} unload_apply_ms={:.2} minimap={} region={} ignored={} failed={}",
+            results.processed,
+            results.disk_loaded,
+            results.generated,
+            results.unloaded,
+            results.mesh_queued,
+            results.mesh_uploaded,
+            results.mesh_empty,
+            results.mesh_commit_pending_before,
+            results.mesh_commit_pending_after,
+            results.mesh_commit_visited,
+            results.mesh_commit_deferred,
+            results.mesh_upload_bytes,
+            results.mesh_upload_ms,
+            results.mesh_upload_max_ms,
+            results.mesh_upload_max_triangles,
+            results.mesh_upload_max_bytes,
+            results.ecs_apply_result_ms,
+            results.world_insert_ms,
+            results.minimap_queue_ms,
+            results.minimap_apply_ms,
+            results.region_apply_ms,
+            results.unload_apply_ms,
+            results.minimap,
+            results.region_class_resolved,
+            results.ignored,
+            results.failed
+        );
+        println!(
+            "[hitch] pressure: lifecycle interest={} retain={} unload={} requests={} [{}] jobs pending={} [{}] running={} [{}] completed={} [{}] intermediate={} workers={}/{} shutdown={} minimap_cache cached={} pending={} dirty={}",
+            lifecycle.interest,
+            lifecycle.retain,
+            lifecycle.unload,
+            lifecycle.requests.total(),
+            format_job_counts(lifecycle.requests),
+            jobs.pending_requests,
+            format_job_counts(jobs.pending_by_kind),
+            jobs.running_requests,
+            format_job_counts(jobs.running_by_kind),
+            jobs.completed_results,
+            format_job_counts(jobs.completed_by_kind),
+            jobs.intermediate_results,
+            jobs.available_workers,
+            jobs.worker_count,
+            jobs.shutdown_requested,
+            minimap.cached_columns,
+            minimap.pending_columns,
+            minimap.dirty_columns
+        );
+    }
+
+    fn log_render_hitch_if_needed(
+        &self,
+        total: Duration,
+        bridge_ms: f64,
+        draw_ms: f64,
+        draw_scene: bool,
+        visible_chunks: usize,
+        cube_instances: usize,
+        ui_sprites: usize,
+        width: u32,
+        height: u32,
+    ) {
+        let total_ms = duration_ms(total);
+        let threshold_ms = update_hitch_log_threshold_ms();
+        if total_ms < threshold_ms {
+            return;
+        }
+
+        println!(
+            "[hitch] render frame={} total_ms={:.2} threshold_ms={:.2} bridge_ms={:.2} draw_ms={:.2} draw_scene={} visible_chunks={} cube_instances={} ui_sprites={} surface={}x{}",
+            self.timing.frame_index,
+            total_ms,
+            threshold_ms,
+            bridge_ms,
+            draw_ms,
+            draw_scene,
+            visible_chunks,
+            cube_instances,
+            ui_sprites,
+            width,
+            height
+        );
+    }
+
     fn log_clicked_block(&self) {
         let input = self.platform.raw_input_state();
         if !input.left_just_pressed && !input.right_just_pressed {
@@ -648,12 +821,25 @@ struct JobResultApplyStats {
     mesh_queued: usize,
     mesh_uploaded: usize,
     mesh_empty: usize,
+    mesh_commit_pending_before: usize,
+    mesh_commit_pending_after: usize,
+    mesh_commit_visited: usize,
+    mesh_commit_deferred: usize,
+    mesh_upload_bytes: usize,
+    mesh_upload_max_triangles: usize,
+    mesh_upload_max_bytes: usize,
     minimap: usize,
     region_class_resolved: usize,
     ignored: usize,
     failed: usize,
     mesh_triangles: usize,
     mesh_upload_ms: f64,
+    mesh_upload_max_ms: f64,
+    ecs_apply_result_ms: f64,
+    world_insert_ms: f64,
+    minimap_queue_ms: f64,
+    minimap_apply_ms: f64,
+    region_apply_ms: f64,
     unload_apply_ms: f64,
 }
 
@@ -668,13 +854,42 @@ impl JobResultApplyStats {
         self.mesh_queued += other.mesh_queued;
         self.mesh_uploaded += other.mesh_uploaded;
         self.mesh_empty += other.mesh_empty;
+        self.mesh_commit_pending_before = self
+            .mesh_commit_pending_before
+            .max(other.mesh_commit_pending_before);
+        self.mesh_commit_pending_after = self
+            .mesh_commit_pending_after
+            .max(other.mesh_commit_pending_after);
+        self.mesh_commit_visited += other.mesh_commit_visited;
+        self.mesh_commit_deferred += other.mesh_commit_deferred;
+        self.mesh_upload_bytes = self
+            .mesh_upload_bytes
+            .saturating_add(other.mesh_upload_bytes);
+        if other.mesh_upload_max_ms > self.mesh_upload_max_ms {
+            self.mesh_upload_max_ms = other.mesh_upload_max_ms;
+            self.mesh_upload_max_triangles = other.mesh_upload_max_triangles;
+            self.mesh_upload_max_bytes = other.mesh_upload_max_bytes;
+        }
         self.minimap += other.minimap;
         self.region_class_resolved += other.region_class_resolved;
         self.ignored += other.ignored;
         self.failed += other.failed;
         self.mesh_triangles += other.mesh_triangles;
         self.mesh_upload_ms += other.mesh_upload_ms;
+        self.ecs_apply_result_ms += other.ecs_apply_result_ms;
+        self.world_insert_ms += other.world_insert_ms;
+        self.minimap_queue_ms += other.minimap_queue_ms;
+        self.minimap_apply_ms += other.minimap_apply_ms;
+        self.region_apply_ms += other.region_apply_ms;
         self.unload_apply_ms += other.unload_apply_ms;
+    }
+
+    fn record_mesh_upload_sample(&mut self, upload_ms: f64, triangles: usize, bytes: usize) {
+        if upload_ms > self.mesh_upload_max_ms {
+            self.mesh_upload_max_ms = upload_ms;
+            self.mesh_upload_max_triangles = triangles;
+            self.mesh_upload_max_bytes = bytes;
+        }
     }
 }
 
@@ -718,6 +933,45 @@ fn format_job_counts(counts: JobRequestCounts) -> String {
 fn estimate_world_mesh_upload_bytes(mesh: &crate::world::CpuMesh) -> usize {
     std::mem::size_of_val(mesh.vertices.as_slice())
         .saturating_add(std::mem::size_of_val(mesh.indices.as_slice()))
+}
+
+fn slowest_update_stage(timings: &AppUpdateTimings) -> (&'static str, f64) {
+    let stages = [
+        ("shortcuts", timings.shortcuts_ms),
+        ("fixed", timings.fixed_ms),
+        ("bridge_input", timings.bridge_input_ms),
+        ("ecs_pre", timings.ecs_pre_ms),
+        ("ecs_update", timings.ecs_update_ms),
+        ("collect_jobs_before_submit", timings.collect_jobs_ms),
+        (
+            "collect_jobs_after_submit",
+            timings.collect_jobs_after_submit_ms,
+        ),
+        ("spawn_before_submit", timings.spawn_ms),
+        ("spawn_after_submit", timings.spawn_after_submit_ms),
+        ("player_motion", timings.player_motion_ms),
+        ("ecs_post", timings.ecs_post_ms),
+        ("lifecycle_plan", timings.lifecycle_plan_ms),
+        ("submit_jobs", timings.submit_jobs_ms),
+        ("mesh_commit", timings.chunk_mesh_commit_ms),
+        ("environment", timings.environment_ms),
+        ("selection", timings.selection_ms),
+        ("click_log", timings.click_log_ms),
+        ("command_drain", timings.command_drain_ms),
+    ];
+
+    stages
+        .into_iter()
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .unwrap_or(("none", 0.0))
+}
+
+fn update_hitch_log_threshold_ms() -> f64 {
+    std::env::var("NEW_WORLD_HITCH_LOG_MS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(DEFAULT_UPDATE_HITCH_LOG_THRESHOLD_MS)
 }
 
 fn trace_frame_perf_logs_enabled() -> bool {

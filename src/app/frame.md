@@ -27,7 +27,8 @@
 - update world-and-viewport-based selection state
 - log the clicked block key when a click lands on the current raycast target
 - log chunk load/unload transitions when runtime world residency actually changes
-- log throttled chunk lifecycle request summaries, mesh upload/skip outcomes, create-world progress, and periodic pending-spawn wait state for startup diagnosis
+- log throttled chunk lifecycle request summaries, frame-tagged mesh upload/skip outcomes, create-world progress, and periodic pending-spawn wait state for startup diagnosis
+- log update/render hitch diagnostics when a frame exceeds the configured threshold, including per-stage timings, job queue pressure, minimap cache pressure, mesh commit queue state, and slowest upload sample
 - optionally log update/render frame diagnostics with per-stage timings, job queue class counts, minimap cache state, and mesh upload timing
 - build render-ready frame DTOs, including atlas-backed UI sprites, and call the renderer
 
@@ -56,6 +57,7 @@
 - updated app-owned minimap cache
 - optional console logging for clicked blocks and chunk residency transitions
 - diagnostic console logging for chunk request/result flow and pending spawned-world placement
+- diagnostic console logging for update/render hitches when frame work exceeds the hitch threshold
 - optional diagnostic console logging for app update/render stage timing and job/minimap pressure
 - one renderer frame attempt
 
@@ -97,6 +99,7 @@
 - block logging is click-triggered so the console does not flood every frame
 - chunk load/unload logging is tied to actual residency changes, not to every lifecycle plan recomputation
 - chunk lifecycle plan logging is throttled while requests are active and still emitted for unload activity so normal idle frames do not flood the console
+- hitch logging must be sparse by default and only emit when update/render time crosses `NEW_WORLD_HITCH_LOG_MS` or the built-in threshold
 - opt-in update/render frame diagnostics should report enough stage timing to separate ECS, jobs result application, queued renderer mesh commit, minimap/region cache pressure, and draw/present cost
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
@@ -127,4 +130,5 @@
 - startup diagnosis logs now separate window/surface startup, lifecycle request planning, disk/generated chunk arrival, mesh upload, stale-result ignores, and delayed player placement
 - gameplay job result application is budgeted per frame, and renderer mesh commits use an additional upload/removal budget, which spreads bursty chunk load/mesh/minimap completions across frames instead of uploading all finished meshes at once
 - update/render frame perf logs are ignored by default; `NEW_WORLD_TRACE_FRAME_LOGS=1` opts into the per-frame `[perf] update/render frame` diagnostics
+- hitch diagnostics are enabled by default for frames over 33 ms; `NEW_WORLD_HITCH_LOG_MS=<milliseconds>` adjusts that threshold without enabling per-frame trace logs
 - focused region classification now runs as `ResolveRegionClassArea`; worker time may appear in job diagnostics, but ECS/app environment refreshes read cached samples only and stay non-blocking on the main frame
