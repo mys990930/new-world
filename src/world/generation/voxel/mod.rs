@@ -352,11 +352,7 @@ fn graph_first_voxel_column_from_surface(
     surface: SurfaceColumnPlan,
     fill: GraphFirstVoxelFillConfig,
 ) -> Result<GraphFirstVoxelColumnPlan, GraphFirstVoxelError> {
-    if column.world_x != surface.world_x
-        || column.world_z != surface.world_z
-        || column.surface_y != surface.surface_y
-        || column.water_y != surface.water_y
-    {
+    if column.world_x != surface.world_x || column.world_z != surface.world_z {
         return Err(GraphFirstVoxelError::MismatchedSurfacePlan);
     }
 

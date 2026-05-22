@@ -208,5 +208,9 @@ preview는 stage 12의 layout contract를 확인하는 표면이다. preview ren
   vertical slice와 같은 `surface_y` / `water_y` 결과를 낸다.
 - river concave-cusp cleanup now belongs to `macro_field`; area conversion does not mutate source
   river strengths or promote additional river water hints after the parallel per-sample conversion.
-- 기존 `heightfield` 구현은 아직 `MacroFieldTile`을 직접 읽는 compatibility vertical slice다. 다음
-  rewrite 단계에서는 `PixelizedChunkArea` / `PixelizedColumn`을 소비하도록 옮긴다.
+- 기존 `heightfield` 구현은 아직 `MacroFieldTile`을 직접 읽는 compatibility vertical slice다.
+  `PixelizedColumn.surface_y` / `water_y`는 이 per-column compatibility resolve의 hint이며,
+  `generate_heightfield_tile`이 area-level river descent 같은 후처리를 적용한 뒤 생성한
+  `SurfacePlanArea`와는 다를 수 있다. surface-aware voxel fill은 position/footprint는
+  `PixelizedChunkArea`에서, 최종 height/water/material은 `SurfacePlanArea`에서 읽는다. 다음 rewrite
+  단계에서는 `PixelizedChunkArea` / `PixelizedColumn`을 소비하도록 옮긴다.

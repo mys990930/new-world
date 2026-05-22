@@ -73,8 +73,11 @@ VegetationPlacements {
 }
 ```
 
-graph-first voxel plan은 `PixelizedColumn`의 위치/height handoff와 `SurfaceColumnPlan`의 material
-handoff를 합쳐 아래 column plan으로 축약한다.
+graph-first voxel plan은 `PixelizedColumn`의 위치/footprint handoff와 `SurfaceColumnPlan`의 최종
+height/material handoff를 합쳐 아래 column plan으로 축약한다. surface-aware path에서는
+`SurfaceColumnPlan.surface_y` / `water_y`가 authoritative 하다. `PixelizedColumn.surface_y` /
+`water_y`는 compatibility hint이며, heightfield tile이 river descent 같은 area-level post-process를
+적용한 뒤에는 surface plan과 달라질 수 있다.
 
 ```text
 PixelizedColumn {
@@ -201,8 +204,9 @@ VegetationPlacement {
 ## 현재 구현 상태
 
 - `src/world/generation/voxel/mod.rs`는 graph-first launch voxel fill을 구현한다.
-- `GraphFirstVoxelPlan`은 `PixelizedChunkArea`와 `SurfacePlanArea`에서 변환되며, surface/material은
-  현재 구현된 policy를 반영한다. vegetation은 아직 stub이다.
+- `GraphFirstVoxelPlan`은 `PixelizedChunkArea`와 `SurfacePlanArea`에서 변환되며, pixelized area는
+  world/chunk/local footprint를 제공하고 surface plan은 최종 height/water/material policy를 제공한다.
+  vegetation은 아직 stub이다.
 - terrain은 surface plan의 `top_block`, `subsurface_block`, `base_block`, `underwater_top_block`을
   사용하고, water hint가 있는 column은 registry의 `water` block을 사용한다.
 - `world_create`는 이 graph-first plan을 사용해 bounded created-world dump를 저장할 수 있다.
