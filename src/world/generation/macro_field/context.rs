@@ -537,13 +537,9 @@ pub(super) fn estuary_fan_length_blocks(
 
 pub(super) fn estuary_bed_depth_hint(
     bed_depth_blocks: f32,
-    terminal_segment_length_blocks: f32,
+    _terminal_segment_length_blocks: f32,
 ) -> f32 {
-    let depth_hint = (bed_depth_blocks / 40.0).clamp(0.0, 1.0);
-    let length_t = smoothstep01(
-        ((terminal_segment_length_blocks.max(0.0) - 48.0) / (192.0 - 48.0)).clamp(0.0, 1.0),
-    );
-    depth_hint * (0.42 + length_t * 0.58)
+    (bed_depth_blocks / 40.0).clamp(0.0, 1.0)
 }
 
 pub(super) fn estuary_water_depth_hint(bed_depth_blocks: f32, flow_hint: f32) -> f32 {
@@ -970,13 +966,13 @@ mod tests {
     }
 
     #[test]
-    fn short_terminal_segment_caps_estuary_depth_hint() {
+    fn estuary_depth_hint_preserves_terminal_bed_context() {
         let short = estuary_bed_depth_hint(32.0, 24.0);
         let long = estuary_bed_depth_hint(32.0, 256.0);
 
         assert!(
-            short < long * 0.55,
-            "short final river segments should not force a full-depth estuary trench immediately: short={short} long={long}"
+            (short - long).abs() <= f32::EPSILON,
+            "estuary fan slope is height-profile responsibility; the depth hint should keep terminal river context: short={short} long={long}"
         );
         assert!(
             long > 0.75,
@@ -986,12 +982,12 @@ mod tests {
 
     #[test]
     fn estuary_water_depth_hint_keeps_terminal_water_depth_separate_from_bed_carve() {
-        let short_bed = estuary_bed_depth_hint(32.0, 24.0);
+        let bed = estuary_bed_depth_hint(32.0, 24.0);
         let water = estuary_water_depth_hint(32.0, 0.82);
 
         assert!(
-            water > short_bed,
-            "water continuation should use terminal river water depth even when the fan bed carve is slope-limited: bed={short_bed} water={water}"
+            water > 0.0 && water < bed,
+            "water continuation should remain a separate filled-surface depth hint above the terminal bed: bed={bed} water={water}"
         );
         assert!(
             water < 1.0,

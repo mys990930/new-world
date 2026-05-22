@@ -4,6 +4,7 @@ use crate::world::generation::macro_map::{MacroSite, MacroSurfaceKind};
 
 pub(super) const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
 const ESTUARY_FAN_FINAL_DEPTH_SCALE: f32 = 0.5;
+const ESTUARY_FAN_DEPTH_GRADE_BLOCKS_PER_BLOCK: f32 = 0.36;
 const RIVER_CORE_HEIGHT_PROFILE_THRESHOLD: f32 = 0.88;
 pub(super) fn lake_boundary_lowering_factor(
     primary: MacroSite,
@@ -255,10 +256,18 @@ pub(super) fn estuary_fan_macro_height(
         + bed_t * lerp(0.006, 0.026, flow_t))
         * 2048.0
         * ESTUARY_FAN_FINAL_DEPTH_SCALE;
-    let start_depth_blocks = lerp(1.5, 3.5, flow_t);
-    let slope_limited_depth_blocks =
-        (start_depth_blocks + estuary_along_blocks.max(0.0) / 2.5).max(0.0);
-    let shallow_shelf_depth = raw_shelf_depth_blocks.min(slope_limited_depth_blocks) / 2048.0;
+    let terminal_entry_depth_blocks =
+        river_core_downcut_budget(estuary_flow_hint, bed_t, None, config) * 2048.0;
+    let final_shelf_depth_blocks = raw_shelf_depth_blocks.max(terminal_entry_depth_blocks);
+    let shallow_start_floor_blocks = lerp(1.5, 3.5, flow_t);
+    let entry_depth_blocks = terminal_entry_depth_blocks
+        .max(shallow_start_floor_blocks)
+        .min(final_shelf_depth_blocks.max(shallow_start_floor_blocks));
+    let slope_limited_depth_blocks = (entry_depth_blocks
+        + estuary_along_blocks.max(0.0) * ESTUARY_FAN_DEPTH_GRADE_BLOCKS_PER_BLOCK)
+        .min(final_shelf_depth_blocks.max(entry_depth_blocks))
+        .max(0.0);
+    let shallow_shelf_depth = slope_limited_depth_blocks / 2048.0;
     let edge_t = smoothstep_range(0.20, 0.92, active);
     let target = -shallow_shelf_depth * lerp(0.16, 1.0, edge_t);
     let lowering = (height - target).max(0.0) * active;
@@ -1147,8 +1156,12 @@ mod tests {
     }
 
     #[test]
-    fn estuary_fan_start_depth_is_slope_limited() {
+    fn estuary_fan_start_depth_matches_terminal_river_context() {
         let config = test_tile_config();
+        let flow_hint = 0.90;
+        let bed_depth_hint = 0.70;
+        let terminal_depth_blocks =
+            river_core_downcut_budget(flow_hint, bed_depth_hint, None, config) * 2048.0;
         let mut heights = Vec::new();
         let mut max_delta_blocks = 0.0_f32;
         let mut previous_height = None::<f32>;
@@ -1162,8 +1175,8 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                0.90,
-                0.70,
+                flow_hint,
+                bed_depth_hint,
                 along as f32,
                 config,
             ) * 2048.0;
@@ -1180,13 +1193,13 @@ mod tests {
             "estuary fan start should not fall faster than a 30 degree grade: max_delta={max_delta_blocks}"
         );
         assert!(
-            heights[0] >= -4.0,
-            "estuary fan origin should start shallow instead of snapping to the sea-bottom target: {heights:?}"
+            (heights[0] + terminal_depth_blocks).abs() <= 0.001,
+            "estuary fan origin should match the terminal river floor context instead of forming a transition step: heights={heights:?} terminal_depth={terminal_depth_blocks}"
         );
     }
 
     #[test]
-    fn estuary_fan_final_depth_uses_half_scaled_shelf_target() {
+    fn estuary_fan_final_depth_keeps_terminal_floor_or_half_scaled_shelf_target() {
         let config = test_tile_config();
         let flow_hint = 0.90;
         let bed_depth_hint = 0.70;
@@ -1194,6 +1207,8 @@ mod tests {
         let unscaled_shelf_depth_blocks = (config.river_carve_scale * lerp(0.35, 1.15, flow_t)
             + bed_depth_hint * lerp(0.006, 0.026, flow_t))
             * 2048.0;
+        let terminal_depth_blocks =
+            river_core_downcut_budget(flow_hint, bed_depth_hint, None, config) * 2048.0;
         let final_height_blocks = estuary_fan_macro_height(
             0.0,
             0.0,
@@ -1207,11 +1222,12 @@ mod tests {
             4096.0,
             config,
         ) * 2048.0;
-        let expected_height_blocks = -unscaled_shelf_depth_blocks * ESTUARY_FAN_FINAL_DEPTH_SCALE;
+        let expected_height_blocks = -(unscaled_shelf_depth_blocks * ESTUARY_FAN_FINAL_DEPTH_SCALE)
+            .max(terminal_depth_blocks);
 
         assert!(
             (final_height_blocks - expected_height_blocks).abs() <= 0.001,
-            "estuary fan final reach should use the scaled shelf depth: final={final_height_blocks}, expected={expected_height_blocks}"
+            "estuary fan final reach should not rise above terminal river floor while still using the scaled shelf when deeper: final={final_height_blocks}, expected={expected_height_blocks}"
         );
     }
 
