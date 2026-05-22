@@ -48,6 +48,7 @@
 - `CameraGpuState`
 - `RenderTextureArraySource`
 - `RenderCubeInstance`
+- future oriented dynamic voxel-part DTOs, if axis-aligned cube instances are not expressive enough
 - `RenderUiSprite`
 - `RenderUiTextureSource`
 - `RenderStats`
@@ -134,6 +135,7 @@ NOT:
 - Offscreen preview rendering currently reuses the terrain shader and texture-array contract, but skips live-surface present and dynamic gameplay overlays.
 - Fixed block terrain keeps its chunk-mesh reuse advantages even when moving entities are present; dynamic entity cost is additive rather than replacing the static-terrain path.
 - For future animated voxel creatures, precreated data is still useful: the recommended direction is to select among `(pose_id, facing_octant)` render assets or part poses, rather than treating every animation frame as a fully procedural free-rotation mesh build.
+- The first local-player voxel avatar should arrive as bridge-produced dynamic cube instances; renderer changes should be limited to a DTO extension for oriented parts if the axis-aligned approximation is not readable enough.
 - Water triangles are now renderer-split into a translucent terrain partition so semi-transparent water can render after opaque terrain without changing the app bridge DTO shape.
 - Exposed water surface height remains world-owned geometry; the renderer only shades and blends the lowered mesh it receives.
 - Foliage triangles remain in the opaque terrain partition, but the terrain and shadow shaders discard pixels below the foliage alpha threshold so cutout leaves/vines write depth and cast cutout sun shadows.

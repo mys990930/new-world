@@ -7,6 +7,7 @@ mod input;
 mod inventory;
 mod jobs;
 mod player;
+mod player_visual;
 mod runtime;
 mod selection;
 
@@ -40,6 +41,11 @@ pub use inventory::{
 };
 #[allow(unused_imports)]
 pub use player::{LocalPlayerEntity, Player, PlayerBody, PlayerPhysicsState, Transform, Velocity};
+#[allow(unused_imports)]
+pub use player_visual::{
+    VOXEL_PLAYER_PART_COUNT, VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart,
+    VoxelPlayerPartPose, VoxelPlayerVisualState, default_voxel_player_part_poses,
+};
 pub use runtime::EcsRuntime;
 #[allow(unused_imports)]
 pub use selection::SelectionState;

@@ -23,6 +23,7 @@ use super::player::{
     stage_local_player_for_chunk_loading, sync_local_player_velocity_system,
     update_move_world_intent_system,
 };
+use super::player_visual::{VoxelPlayerVisualState, local_player_visual_state};
 use super::selection::{SelectionState, update_selection_from_world};
 use crate::simulation::SimulationResult;
 use crate::world::WorldCore;
@@ -178,6 +179,10 @@ impl EcsRuntime {
     pub fn local_player_physics_state(&self) -> Option<PlayerPhysicsState> {
         let entity = self.world.resource::<LocalPlayerEntity>().0?;
         self.world.get::<PlayerPhysicsState>(entity).copied()
+    }
+
+    pub fn local_player_visual_state(&self) -> Option<VoxelPlayerVisualState> {
+        local_player_visual_state(&self.world)
     }
 
     pub fn local_player_inventory(&self) -> Option<PlayerInventory> {

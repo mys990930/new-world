@@ -40,6 +40,7 @@
 - local player `Velocity`
 - local player `Transform`
 - local player `PlayerPhysicsState`
+- local player visual snapshot through `player_visual.rs`
 
 ## State Transition Rules
 
@@ -71,6 +72,7 @@
 - discrete actions stay in `PlayerCommandBuffer`
 - missing world chunks are treated as blocking in the current collision helper so the player does not walk into unloaded space
 - pending created-world spawn placement should be retried by app after streamed chunk jobs mutate `WorldCore`, not by ECS polling disk or jobs directly
+- `PlayerBody` stays gameplay/collision-owned; visual voxel-player proportions and animation state live in `player_visual.rs`
 
 ## Non-Responsibilities
 
@@ -85,6 +87,7 @@
 - `command.rs`
 - `camera.rs`
 - `chunk.rs`
+- `player_visual.rs`
 
 ## Notes
 
@@ -92,3 +95,4 @@
 - bootstrap and created-world reload now stage a spawn anchor first; app snaps the local player onto a safe loaded surface once jobs have streamed enough nearby chunk data into `WorldCore`
 - the current walking speed is `7.0` world units per second and hold-Shift sprint speed is `11.0` world units per second
 - the current locomotion slice is intentionally minimal: no jump, no slope handling beyond one-block step-up, and no network prediction yet
+- the next visual-player step should consume locomotion/physics state without changing this collision helper or `PlayerBody` dimensions

@@ -65,6 +65,7 @@
 - visible-sun and shadow-map calculations are renderer-local and derive from current render state only
 - orthographic fog should be based on focal-area distance rather than raw eye distance, because the quarter-view eye sits far away only to define the view basis
 - UI overlay and gameplay preview cubes remain separate DTO channels even when they visually describe the same gameplay state
+- moving voxel-player parts arrive as app-bridge-authored render DTOs; renderer frame code draws them without choosing animation state or facing
 
 ## Related Modules
 
@@ -83,3 +84,4 @@
 - the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames
 - dynamic cube previews may use alpha-blended shading so ECS build previews can appear translucent without changing UI sprite ownership
 - dynamic cubes no longer assume a single white texture layer; bridge-selected preview cubes may now sample real block top/bottom/side layers while still applying tint/alpha in shader
+- the current dynamic cube path is axis-aligned; animated voxel limbs may initially approximate motion with offsets/bob or later use an explicit oriented-part DTO extension

@@ -32,6 +32,7 @@
 - `LocalEnvironmentStatus`
 - local player inventory / manipulation state
 - local player body/transform snapshot for app bridge
+- local player voxel visual snapshot for app bridge
 - local player environment snapshot for app HUD bridge
 
 ## Process
@@ -53,6 +54,7 @@
 - `MoveWorldIntent`
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
+- local-player visual state remains component-derived and is exposed through a helper rather than stored as an independent source of truth
 - `ToolCatalog`
 - `CameraState`
  - `LocalPlayerEntity`
@@ -100,6 +102,7 @@ EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_physics_state() -> Option<PlayerPhysicsState>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
+EcsRuntime::local_player_visual_state() -> Option<VoxelPlayerVisualState>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
 EcsRuntime::update_local_environment_from_world(world: &WorldCore)
@@ -126,6 +129,7 @@ EcsRuntime::visible_chunks() -> Vec<ChunkCoord>
 - `inventory.rs`
 - `camera.rs`
 - `player.rs`
+- `player_visual.rs`
 - `selection.rs`
 - `chunk.rs`
 - `jobs.rs`
