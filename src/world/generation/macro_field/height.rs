@@ -3,6 +3,7 @@ use crate::world::generation::graph::WorldPlanePoint;
 use crate::world::generation::macro_map::{MacroSite, MacroSurfaceKind};
 
 pub(super) const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
+const ESTUARY_FAN_FINAL_DEPTH_SCALE: f32 = 0.5;
 const RIVER_CORE_HEIGHT_PROFILE_THRESHOLD: f32 = 0.88;
 pub(super) fn lake_boundary_lowering_factor(
     primary: MacroSite,
@@ -252,7 +253,8 @@ pub(super) fn estuary_fan_macro_height(
     let active = smoothstep01(strength) * water_context;
     let raw_shelf_depth_blocks = (config.river_carve_scale * lerp(0.35, 1.15, flow_t)
         + bed_t * lerp(0.006, 0.026, flow_t))
-        * 2048.0;
+        * 2048.0
+        * ESTUARY_FAN_FINAL_DEPTH_SCALE;
     let start_depth_blocks = lerp(1.5, 3.5, flow_t);
     let slope_limited_depth_blocks =
         (start_depth_blocks + estuary_along_blocks.max(0.0) / 2.5).max(0.0);
@@ -1180,6 +1182,36 @@ mod tests {
         assert!(
             heights[0] >= -4.0,
             "estuary fan origin should start shallow instead of snapping to the sea-bottom target: {heights:?}"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_final_depth_uses_half_scaled_shelf_target() {
+        let config = test_tile_config();
+        let flow_hint = 0.90;
+        let bed_depth_hint = 0.70;
+        let flow_t = smoothstep01(flow_hint);
+        let unscaled_shelf_depth_blocks = (config.river_carve_scale * lerp(0.35, 1.15, flow_t)
+            + bed_depth_hint * lerp(0.006, 0.026, flow_t))
+            * 2048.0;
+        let final_height_blocks = estuary_fan_macro_height(
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            flow_hint,
+            bed_depth_hint,
+            4096.0,
+            config,
+        ) * 2048.0;
+        let expected_height_blocks = -unscaled_shelf_depth_blocks * ESTUARY_FAN_FINAL_DEPTH_SCALE;
+
+        assert!(
+            (final_height_blocks - expected_height_blocks).abs() <= 0.001,
+            "estuary fan final reach should use the scaled shelf depth: final={final_height_blocks}, expected={expected_height_blocks}"
         );
     }
 

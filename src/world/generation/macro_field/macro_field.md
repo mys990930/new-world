@@ -681,7 +681,8 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   endpoint 이후의 downstream 누적 거리(`estuary_along_blocks`)도 함께 저장하며, height 합성은 시작부
   허용 depth를 얕게 잡고 거리당 완만하게만 증가시킨다. 따라서 terminal river/core/broad-valley budget을
   다시 조정하지 않고도 짧은 마지막 segment의 estuary 시작부가 바다 shelf 목표 높이로 즉시 snap되지
-  않아야 한다. deterministic world-space
+  않아야 한다. 최종 도달 shelf target도 river carve/depth hint에서 계산한 raw fan depth를 그대로 쓰지
+  않고 절반 스케일로 낮춰, 하구 연결부가 과도하게 깊은 trench로 끝나지 않게 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. `river_core_strength` 또는
   selected river water corridor를 downstream cell로 승격하지 않고, height 합성에서 estuary influence만
