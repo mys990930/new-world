@@ -42,7 +42,7 @@
 - The current gameplay slice uses a weak perspective ray that starts at the camera eye and passes through a cursor-selected point on the quarter-view focus plane.
 - if the inventory is open, selection is cleared so world interaction previews do not compete with the inventory UI
 - interaction mode emits preview blocks when the hit point is inside the current tool reach; if no tool is selected, it falls back to a default single-block preview at player reach
-- build mode emits a placement preview when the adjacent cell is empty and the preview is inside build reach, even if the current block quickslot is empty
+- build mode emits a placement preview when the selected build quickslot contains a block, the adjacent cell is empty, and the preview is inside build reach
 - If focus, activity, viewport, or cursor validity checks fail, selection is cleared.
 - If raycast misses, selection is cleared.
 
@@ -71,5 +71,5 @@
 ## Notes
 
 - Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.
-- the current preview slice is intentionally visual only: no real digging, harvesting, or block placement happens yet
-- preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps them to actual selected-block textures or a default fallback block texture
+- interaction preview remains visual only; build preview is now also the placement target consumed by app-owned command application
+- preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps them to actual selected-block textures

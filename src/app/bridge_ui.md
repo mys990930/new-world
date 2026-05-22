@@ -14,7 +14,7 @@
 - build world-select screen sprites from app-owned layout state
 - build the world-select loading popup progress bar and counter label from app-owned layout geometry
 - keep shared pixel-atlas panel / text helper functions in one place
-- emit sprites against `assets/ui/new_world_pixel_ui_atlas.png`, the generated 16x8 pixel UI atlas used by the main menu and overlays
+- emit sprites against `assets/ui/new_world_pixel_ui_atlas.png`, the generated 16x16 pixel UI atlas used by the main menu, overlays, and build quickslot block icons
 
 ## Inputs
 
@@ -26,6 +26,7 @@
 - world-select popup progress label text prepared by app UI layout
 - current viewport size
 - block registry data needed for minimap colors and inventory labels
+- block registry data needed for minimap colors, inventory labels, and block icon selection
 
 ## Outputs
 
@@ -42,6 +43,7 @@
 - UI sprite geometry must stay aligned with the app-owned layout data used for interaction
 - minimap rendering must consume app-owned cached viewport data rather than scanning live world state
 - inventory and quickbar presentation may read ECS inventory snapshots, but they must not own or mutate inventory state
+- build quickslots render block icon sprites from the lower half of the UI atlas instead of replacing gameplay/world block texture ownership
 - current chunk presentation may derive a read-only chunk coordinate from the player transform, but it must not drive lifecycle policy
 - local environment status text may read ECS snapshots, but this layer must not query `WorldCore` or simulation directly
 - renderer environment weather presentation is handled by `fixed.rs`; this UI bridge only formats the ECS-local HUD snapshot and does not map chunk weather scalars into render lighting

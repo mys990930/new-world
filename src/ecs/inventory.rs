@@ -8,6 +8,18 @@ pub const QUICKSLOT_COUNT: usize = 10;
 pub const GENERAL_SLOT_COUNT: usize = 40;
 pub const PLAYER_REACH_BLOCKS: f32 = 6.0;
 pub const BUILD_REACH_BLOCKS: f32 = 6.0;
+const DEFAULT_BUILD_BLOCKS: [BlockId; QUICKSLOT_COUNT] = [
+    BlockId::GRASS,
+    BlockId::DIRT,
+    BlockId::STONE,
+    BlockId::new(4),
+    BlockId::new(5),
+    BlockId::new(6),
+    BlockId::new(7),
+    BlockId::new(10),
+    BlockId::new(11),
+    BlockId::new(12),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ManipulationMode {
@@ -150,13 +162,10 @@ impl Default for PlayerInventory {
         inventory.tool_quickslots[0] = Some(InventorySlot::tool(ToolKind::Shovel));
         inventory.tool_quickslots[1] = Some(InventorySlot::tool(ToolKind::Pickaxe));
 
-        inventory.block_quickslots[0] = Some(InventorySlot::block(BlockId::GRASS, 64));
-        inventory.block_quickslots[1] = Some(InventorySlot::block(BlockId::DIRT, 96));
-        inventory.block_quickslots[2] = Some(InventorySlot::block(BlockId::STONE, 128));
-
-        inventory.general_slots[0] = Some(InventorySlot::block(BlockId::DIRT, 255));
-        inventory.general_slots[1] = Some(InventorySlot::block(BlockId::STONE, 192));
-        inventory.general_slots[2] = Some(InventorySlot::block(BlockId::GRASS, 128));
+        for (index, block) in DEFAULT_BUILD_BLOCKS.into_iter().enumerate() {
+            inventory.block_quickslots[index] = Some(InventorySlot::block(block, 64));
+            inventory.general_slots[index] = Some(InventorySlot::block(block, 64));
+        }
 
         inventory
     }
@@ -193,7 +202,14 @@ impl PlayerInventory {
             .get(self.selected_block_slot as usize)
             .copied()
             .flatten()
-            .filter(|slot| matches!(slot.item, InventoryItem::Block(_)))
+            .filter(|slot| slot.count > 0 && matches!(slot.item, InventoryItem::Block(_)))
+    }
+
+    pub fn selected_block_id(self) -> Option<BlockId> {
+        self.selected_block().and_then(|slot| match slot.item {
+            InventoryItem::Block(block) => Some(block),
+            InventoryItem::Tool(_) => None,
+        })
     }
 
     pub fn set_active_selected_slot(&mut self, slot_index: u8) {
@@ -257,6 +273,26 @@ pub(crate) fn local_player_inventory(world: &World) -> Option<PlayerInventory> {
     world.get::<PlayerInventory>(entity).copied()
 }
 
+pub(crate) fn consume_selected_block(world: &mut World) -> Option<InventorySlot> {
+    let entity = world.resource::<LocalPlayerEntity>().0?;
+    let mut inventory = world.get_mut::<PlayerInventory>(entity)?;
+    if !matches!(inventory.manipulation_mode, ManipulationMode::Build) {
+        return None;
+    }
+
+    let selected_block_slot = inventory.selected_block_slot as usize;
+    let slot = inventory.block_quickslots.get_mut(selected_block_slot)?;
+    let consumed = slot
+        .as_mut()
+        .filter(|slot| slot.count > 0 && matches!(slot.item, InventoryItem::Block(_)))?;
+    let previous = *consumed;
+    consumed.count = consumed.count.saturating_sub(1);
+    if consumed.count == 0 {
+        *slot = None;
+    }
+    Some(previous)
+}
+
 #[cfg(test)]
 mod tests {
     use bevy_ecs::prelude::{Schedule, World};
@@ -297,5 +333,49 @@ mod tests {
         assert_eq!(inventory.selected_tool_slot, 9);
         assert_eq!(inventory.selected_block_slot, 1);
         assert_eq!(inventory.manipulation_mode, ManipulationMode::Build);
+    }
+
+    #[test]
+    fn default_inventory_starts_with_one_stack_per_build_quickslot() {
+        let inventory = PlayerInventory::default();
+
+        assert!(inventory.block_quickslots.iter().all(Option::is_some));
+        assert!(
+            inventory
+                .block_quickslots
+                .iter()
+                .flatten()
+                .all(|slot| slot.count == 64 && matches!(slot.item, InventoryItem::Block(_)))
+        );
+        assert_eq!(inventory.selected_block_id(), Some(BlockId::GRASS));
+    }
+
+    #[test]
+    fn consuming_selected_block_decrements_build_stack() {
+        let mut world = World::new();
+        world.insert_resource(LocalPlayerEntity::default());
+        let mut inventory = PlayerInventory {
+            manipulation_mode: ManipulationMode::Build,
+            ..PlayerInventory::default()
+        };
+        inventory.block_quickslots[0] = Some(InventorySlot::block(BlockId::DIRT, 2));
+        let entity = world.spawn((Player, inventory)).id();
+        world.resource_mut::<LocalPlayerEntity>().0 = Some(entity);
+
+        let consumed = consume_selected_block(&mut world);
+
+        assert_eq!(
+            consumed.map(|slot| slot.item),
+            Some(InventoryItem::Block(BlockId::DIRT))
+        );
+        assert_eq!(
+            world
+                .get::<PlayerInventory>(entity)
+                .unwrap()
+                .block_quickslots[0]
+                .unwrap()
+                .count,
+            1
+        );
     }
 }

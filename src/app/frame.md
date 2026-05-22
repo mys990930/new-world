@@ -25,6 +25,7 @@
 - refresh the ECS-owned local environment snapshot from the latest world state
 - queue a focused region-classification resolve when the local environment cache is missing
 - update world-and-viewport-based selection state
+- apply frame-local player commands that require app/world coordination, including build-mode block placement through `WorldEdit::SetBlock`
 - log the clicked block key when a click lands on the current raycast target
 - log chunk load/unload transitions when runtime world residency actually changes
 - log throttled chunk lifecycle request summaries, frame-tagged mesh upload/skip outcomes, create-world progress, and periodic pending-spawn wait state for startup diagnosis
@@ -57,6 +58,7 @@
 - updated app-owned minimap cache
 - optional console logging for clicked blocks and chunk residency transitions
 - diagnostic console logging for chunk request/result flow and pending spawned-world placement
+- applied block placement edits, selected-stack consumption, minimap column refresh, and remesh invalidation
 - diagnostic console logging for update/render hitches when frame work exceeds the hitch threshold
 - optional diagnostic console logging for app update/render stage timing and job/minimap pressure
 - one renderer frame attempt
@@ -102,6 +104,7 @@
 - hitch logging must be sparse by default and only emit when update/render time crosses `NEW_WORLD_HITCH_LOG_MS` or the built-in threshold
 - opt-in update/render frame diagnostics should report enough stage timing to separate ECS, jobs result application, queued renderer mesh commit, minimap/region cache pressure, and draw/present cost
 - renderer receives render-ready DTOs only
+- block placement must pass through ECS command/selection/inventory state and world-owned `WorldEdit`; app only coordinates the cross-module application and follow-up remesh/minimap work
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 - job progress events may update app-owned UI state while gameplay is suspended, but must not mutate world/ECS chunk residency
 - world-select create/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI

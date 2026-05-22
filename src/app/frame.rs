@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
 
 use super::{GameApp, state::PendingChunkMeshCommit};
+use crate::ecs::{InventoryItem, ManipulationMode, PlayerCommand};
 use crate::jobs::{JobRequest, JobRequestCounts, JobResult};
 use crate::renderer::RenderFrameInput;
+use crate::world::{ChunkCoord, WorldBlockCoord, WorldEdit};
 
 const MAX_GAMEPLAY_JOB_RESULTS_PER_FRAME: usize = 4;
 const MAX_CHUNK_MESH_UPLOADS_PER_FRAME: usize = 1;
@@ -103,7 +105,7 @@ impl GameApp {
         timings.click_log_ms = duration_ms(stage_start.elapsed());
 
         let stage_start = Instant::now();
-        let _ = self.ecs.drain_player_commands();
+        self.apply_player_commands();
         timings.command_drain_ms = duration_ms(stage_start.elapsed());
         self.log_update_perf_if_needed(
             update_start.elapsed(),
@@ -503,6 +505,121 @@ impl GameApp {
                 self.world.loaded_chunk_bounds()
             );
         }
+    }
+
+    fn apply_player_commands(&mut self) {
+        for command in self.ecs.drain_player_commands() {
+            if matches!(command, PlayerCommand::PlaceBlock) {
+                self.try_place_selected_block();
+            }
+        }
+    }
+
+    fn try_place_selected_block(&mut self) {
+        let Some(inventory) = self.ecs.local_player_inventory() else {
+            return;
+        };
+        if !matches!(inventory.manipulation_mode, ManipulationMode::Build) {
+            return;
+        }
+        let Some(slot) = inventory.selected_block() else {
+            return;
+        };
+        let InventoryItem::Block(block) = slot.item else {
+            return;
+        };
+        if block.is_air() || slot.count == 0 {
+            return;
+        }
+
+        let selection = self.ecs.selection_state();
+        let Some(pos) = selection.build_preview_block else {
+            return;
+        };
+        if self
+            .world
+            .get_block(pos)
+            .is_some_and(|existing| !existing.is_air())
+        {
+            return;
+        }
+        if self.placement_intersects_local_player(pos) {
+            return;
+        }
+
+        let result = self.world.apply_edit(WorldEdit::SetBlock { pos, block });
+        if !result.applied {
+            if let Some(error) = result.error {
+                eprintln!(
+                    "[app] block placement failed: pos=({}, {}, {}) block={} error={:?}",
+                    pos.0,
+                    pos.1,
+                    pos.2,
+                    block.raw(),
+                    error
+                );
+            }
+            return;
+        }
+
+        let _ = self.ecs.consume_selected_build_block();
+        self.ecs
+            .mark_chunks_for_remesh(result.remesh_chunks.iter().copied());
+        self.refresh_minimap_after_changed_chunks(&result.changed_chunks);
+        println!(
+            "[app] block placed: pos=({}, {}, {}) block={} remesh_chunks={}",
+            pos.0,
+            pos.1,
+            pos.2,
+            block.raw(),
+            result.remesh_chunks.len()
+        );
+    }
+
+    fn refresh_minimap_after_changed_chunks(&mut self, chunks: &[ChunkCoord]) {
+        let mut columns = std::collections::BTreeSet::new();
+        for coord in chunks {
+            columns.insert(crate::world::TopdownChunkColumnCoord {
+                chunk_x: coord.0,
+                chunk_z: coord.2,
+            });
+        }
+        for column in columns {
+            self.refresh_minimap_chunk_column_after_world_change(column);
+        }
+    }
+
+    fn placement_intersects_local_player(&self, block: WorldBlockCoord) -> bool {
+        let Some(transform) = self.ecs.local_player_transform() else {
+            return false;
+        };
+        let Some(body) = self.ecs.local_player_body() else {
+            return false;
+        };
+
+        let block_min = [block.0 as f32, block.1 as f32, block.2 as f32];
+        let block_max = [
+            block.0 as f32 + 1.0,
+            block.1 as f32 + 1.0,
+            block.2 as f32 + 1.0,
+        ];
+        let player_min = [
+            transform.translation[0] - body.half_extents[0],
+            transform.translation[1] - body.half_extents[1],
+            transform.translation[2] - body.half_extents[2],
+        ];
+        let player_max = [
+            transform.translation[0] + body.half_extents[0],
+            transform.translation[1] + body.half_extents[1],
+            transform.translation[2] + body.half_extents[2],
+        ];
+
+        block_min[0] < player_max[0]
+            && block_max[0] > player_min[0]
+            && block_min[1] < player_max[1]
+            && block_max[1] > player_min[1]
+            && block_min[2] < player_max[2]
+            && block_max[2] > player_min[2]
     }
 
     fn log_chunk_lifecycle_plan(&self, lifecycle: &crate::ecs::ChunkLifecyclePlan) {

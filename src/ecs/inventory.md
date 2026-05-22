@@ -62,7 +62,8 @@
 - wheel cycling and `1..0` direct slot selection affect only the active mode's quickslot index
 - the current player reach for both interaction and build preview is `6` blocks
 - if no interaction tool is selected, ECS still falls back to a default single-block interaction preview at player reach
-- if no build quickslot block is selected, ECS still emits a placement-preview coordinate; the app bridge chooses a default block texture for rendering
+- build preview and placement require the selected build quickslot to contain a block stack
+- successful app-owned block placement consumes one item from the selected build stack
 
 ## Invariants
 
@@ -74,7 +75,7 @@
 
 - raw input capture
 - renderer layout or sprite emission
-- actual world block edits
+- actual world block edit application
 
 ## Related Modules
 
@@ -85,5 +86,5 @@
 
 ## Notes
 
-- the current initial loadout is intentionally small: shovel + pickaxe in the tool quickbar, plus a few common block stacks in the build quickbar/general slots
+- the current initial loadout is prototype-friendly: shovel + pickaxe in the tool quickbar, plus one stack each of ten common terrain blocks in the build quickbar and general slots
 - current tool preview rules are minimal and visual only: pickaxe highlights a single target block, shovel highlights a small face-oriented area, and the no-tool fallback also highlights a single target block

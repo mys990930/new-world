@@ -115,6 +115,9 @@ pub fn update_selection_from_world(
                     }
                 }
                 ManipulationMode::Build => {
+                    if player_inventory.selected_block_id().is_none() {
+                        return;
+                    }
                     let preview_block = adjacent_block(hit.block, hit.face);
                     if distance3(
                         player_transform.translation,

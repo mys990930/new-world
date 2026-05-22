@@ -177,6 +177,7 @@ EcsRuntime::camera_state() -> CameraState
 EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
+EcsRuntime::consume_selected_build_block() -> Option<InventorySlot>
 EcsRuntime::local_player_visual_state() -> Option<VoxelPlayerVisualState>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
@@ -193,6 +194,7 @@ EcsRuntime::plan_chunk_lifecycle(
     world: &WorldCore,
     created_world: Option<&CreatedWorldSource>,
 ) -> ChunkLifecyclePlan
+EcsRuntime::mark_chunks_for_remesh(coords)
 ```
 
 ### Dependencies
@@ -242,7 +244,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
-- interaction/build preview now exists, but actual block breaking/placement and inventory drag/drop are still future work
+- interaction/build preview now exists, and build-mode right click can place the selected block stack through app-owned world-edit coordination; block breaking and inventory drag/drop are still future work
 - the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
 - fixed update now also derives a replaceable player-centered `3x3` `ActiveChunkObserverScope`; app uses it to build world-biome ecology inputs without making simulation own the accumulator or scope policy
 - time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries

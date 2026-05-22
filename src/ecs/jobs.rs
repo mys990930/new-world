@@ -179,6 +179,18 @@ impl EcsRuntime {
         self.world().resource::<ChunkStates>().visible_chunks()
     }
 
+    pub fn mark_chunks_for_remesh<I>(&mut self, coords: I)
+    where
+        I: IntoIterator<Item = ChunkCoord>,
+    {
+        let mut chunk_states = self.world_mut().resource_mut::<ChunkStates>();
+        for coord in coords {
+            if chunk_states.loaded.contains(&coord) {
+                chunk_states.remesh_needed.insert(coord);
+            }
+        }
+    }
+
     fn focused_player_chunk(&self) -> ChunkCoord {
         let world = self
             .local_player_transform()

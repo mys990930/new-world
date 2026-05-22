@@ -15,7 +15,8 @@ use super::fixed::{
 };
 use super::input::{EcsInputSnapshot, interpret_input_system};
 use super::inventory::{
-    PlayerInventory, ToolCatalog, apply_inventory_commands_system, local_player_inventory,
+    InventorySlot, PlayerInventory, ToolCatalog, apply_inventory_commands_system,
+    consume_selected_block, local_player_inventory,
 };
 use super::player::{
     FrameDeltaSeconds, LocalPlayerEntity, PlayerBody, PlayerMovementConfig, PlayerPhysicsState,
@@ -192,6 +193,10 @@ impl EcsRuntime {
 
     pub fn local_player_inventory(&self) -> Option<PlayerInventory> {
         local_player_inventory(&self.world)
+    }
+
+    pub fn consume_selected_build_block(&mut self) -> Option<InventorySlot> {
+        consume_selected_block(&mut self.world)
     }
 
     pub fn simulate_local_player_motion(&mut self, world: &WorldCore) {
