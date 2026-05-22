@@ -54,7 +54,8 @@
 - `MoveWorldIntent`
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
-- local-player visual state remains component-derived and is exposed through a helper rather than stored as an independent source of truth
+- `VoxelPlayerAnimationClock`
+- local-player visual state remains component/resource-derived and is exposed through a helper rather than stored as an independent source of truth
 - `ToolCatalog`
 - `CameraState`
  - `LocalPlayerEntity`
@@ -67,7 +68,7 @@
 - `LocalEnvironmentStatus`
 - current frame schedule:
   - pre: clear command buffer, clear frame camera impulses
-  - update: input interpretation -> inventory command application -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync
+  - update: input interpretation -> inventory command application -> camera command application -> camera zoom input application -> move intent generation -> local player horizontal velocity sync -> voxel player animation clock advance
   - post: camera follow update
 - current fixed schedule:
   - fixed: advance `SimClock` -> refresh `ActiveSimRegion` from the local player transform

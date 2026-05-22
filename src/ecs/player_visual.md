@@ -12,37 +12,51 @@
 - `VoxelPlayerVisualState`
 - `VoxelPlayerAnimationState`
 - `VoxelPlayerFacingOctant`
+- `VoxelPlayerAnimationClock`
 
 ### Rig / Pose Description
 - `VoxelPlayerPart`
 - `VoxelPlayerPartPose`
 - `default_voxel_player_part_poses()`
+- `VOXEL_PLAYER_SKIN_COLOR`
+- `VOXEL_PLAYER_SHIRT_COLOR`
+- `VOXEL_PLAYER_PANTS_COLOR`
 
 ## Inputs
 
 - local player `Transform`
 - local player `Velocity`
 - local player `PlayerPhysicsState`
+- `EcsInputSnapshot.sprint_down`
+- `PlayerMovementConfig`
+- `FrameDeltaSeconds`
 - `LocalPlayerEntity`
-- frame/fixed time in later animation work
 
 ## Outputs
 
 - render-facing player root translation
 - render-facing 8-octant direction
 - coarse animation state such as idle, walk, sprint, or airborne
+- current visual animation clock seconds
+- display horizontal speed in gameplay units per second
 - default voxel body-part layout that app bridge can expand into dynamic cubes
 
 ## State Transition Rules
 
 - gameplay collision remains driven by `PlayerBody`; visual parts must fit inside or intentionally decorate around that body
 - visual state is derived from ECS-owned player movement and physics state, not renderer-side velocity inference
-- facing uses horizontal velocity when the player is moving and preserves a deterministic default when stationary
+- facing uses horizontal velocity when the player is moving and preserves deterministic north when stationary
+- facing octants use the project-wide `north = +Z` convention:
+  - `0`: north / `+Z`
+  - `2`: east / `+X`
+  - `4`: south / `-Z`
+  - `6`: west / `-X`
 - initial animation states are intentionally coarse:
   - `Idle` when grounded and nearly stationary
-  - `Walk` when grounded and moving below sprint-scale speed
-  - `Sprint` when grounded and moving at sprint-scale speed
+  - `Walk` when grounded and moving without held sprint
+  - `Sprint` when grounded, moving, and `sprint_down` is held
   - `Airborne` when not grounded
+- the animation clock advances from ECS frame delta and is exported with the visual state
 - the default rig is code-authored data, not an external atlas or sprite dependency
 - part poses are local to the player root; app bridge is responsible for composing root, facing, animation offset, and renderer DTOs
 
@@ -51,7 +65,7 @@
 - ECS owns gameplay-facing visual state selection
 - renderer must not infer player intent, movement state, or facing from raw transform deltas
 - app bridge may approximate the rig with axis-aligned cube instances until renderer supports rotated dynamic parts
-- future animation must remain deterministic from explicit ECS state plus time, so multiplayer/server replay can reproduce visual state selection
+- animation remains deterministic from explicit ECS state plus `VoxelPlayerAnimationClock`, so multiplayer/server replay can reproduce visual state selection
 - visual scaffolding must not change `PlayerBody`, collision, spawn placement, selection, or camera follow semantics
 
 ## Non-Responsibilities
@@ -69,17 +83,17 @@
 - `../app/bridge.md`
 - `../renderer/renderer.md`
 
-## Implementation Plan
+## Current Implementation
 
-1. Keep `PlayerBody` as the physical source of truth and add a separate `VoxelPlayerVisualState` snapshot for app bridge reads.
-2. Start with a code-authored six-part rig: head, torso, left/right arms, and left/right legs.
-3. Bridge the rig to multiple dynamic cube instances, replacing the current single white player cube while retaining the existing ground shadow.
-4. Add procedural animation offsets in the bridge or a small ECS helper:
+1. `PlayerBody` remains the physical source of truth; `VoxelPlayerVisualState` is a derived snapshot for app bridge reads.
+2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs.
+3. The app bridge expands the rig into multiple dynamic cube instances, replacing the old single white player cube while retaining the existing ground shadow.
+4. Procedural animation offsets are applied in the app bridge:
    - idle bob
    - mirrored arm/leg swing for walk and sprint
    - airborne tuck / raised-arm pose
 5. If axis-aligned limb approximation is not expressive enough, extend renderer DTOs with an oriented dynamic cube instance while keeping gameplay-facing pose selection in ECS.
-6. Add deterministic tests for visual-state classification, facing octant selection, and bridge-emitted part count before replacing the dummy cube path.
+6. Deterministic tests cover visual-state classification, facing octant selection, bridge-emitted part count, limb animation movement, and facing rotation.
 
 ## Notes
 

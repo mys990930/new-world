@@ -42,6 +42,7 @@
 - `MoveWorldIntent`
 - `FrameDeltaSeconds`
 - `PlayerMovementConfig`
+- `VoxelPlayerAnimationClock`
 - `ToolCatalog`
 - `CameraState`
 - `LocalPlayerEntity`
@@ -115,7 +116,8 @@
   - road speed and difficult-terrain slowdown remain future world/material-aware movement policies
 - local player visual state
   - the collision body remains `PlayerBody`; the visible avatar is a separate voxel-part rig
-  - ECS derives render-facing animation class, grounded flag, horizontal speed, and 8-octant facing from player components
+  - ECS derives render-facing animation class, grounded flag, display horizontal speed, 8-octant facing, and animation clock from player components/resources
+  - render-facing octants follow the project-wide `north = +Z` convention
   - app bridge owns conversion from that visual state and rig data into renderer DTOs
   - renderer must not infer gameplay-facing pose or facing from transform deltas
 - time / season / weather consumption
@@ -219,7 +221,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS-side command/request buffers
 - inventory.rs: player inventory/component state, manipulation mode, quickslot selection, and tool definitions
 - player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
-- player_visual.rs: local player render-facing voxel state, part rig scaffold, and pose/facing contract
+- player_visual.rs: local player render-facing voxel state, animation clock, rig resource data, and pose/facing contract
 - camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
 - selection.rs: world-raycast-based hover target state, tool preview, and build preview rules
 - environment.rs: player-local climate / weather / biome snapshot for HUD-facing bridges
@@ -232,7 +234,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - the current minimal slice now supports both created-world loading and procedural fallback
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
-- the local-player voxel visual scaffold is separate from `PlayerBody`; it currently exposes state/rig data for the bridge but does not replace the dummy cube render path yet
+- the local-player voxel visual state is separate from `PlayerBody`; app bridge expands it into a six-part animated voxel avatar instead of the old single dummy cube
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary

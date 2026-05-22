@@ -43,8 +43,10 @@ pub use inventory::{
 pub use player::{LocalPlayerEntity, Player, PlayerBody, PlayerPhysicsState, Transform, Velocity};
 #[allow(unused_imports)]
 pub use player_visual::{
-    VOXEL_PLAYER_PART_COUNT, VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart,
-    VoxelPlayerPartPose, VoxelPlayerVisualState, default_voxel_player_part_poses,
+    VOXEL_PLAYER_IDLE_SPEED_EPSILON, VOXEL_PLAYER_PANTS_COLOR, VOXEL_PLAYER_PART_COUNT,
+    VOXEL_PLAYER_SHIRT_COLOR, VOXEL_PLAYER_SKIN_COLOR, VoxelPlayerAnimationClock,
+    VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart, VoxelPlayerPartPose,
+    VoxelPlayerVisualState, default_voxel_player_part_poses,
 };
 pub use runtime::EcsRuntime;
 #[allow(unused_imports)]

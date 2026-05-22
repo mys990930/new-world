@@ -23,7 +23,10 @@ use super::player::{
     stage_local_player_for_chunk_loading, sync_local_player_velocity_system,
     update_move_world_intent_system,
 };
-use super::player_visual::{VoxelPlayerVisualState, local_player_visual_state};
+use super::player_visual::{
+    VoxelPlayerAnimationClock, VoxelPlayerVisualState, advance_voxel_player_animation_system,
+    local_player_visual_state,
+};
 use super::selection::{SelectionState, update_selection_from_world};
 use crate::simulation::SimulationResult;
 use crate::world::WorldCore;
@@ -46,6 +49,7 @@ impl EcsRuntime {
         world.insert_resource(LocalPlayerEntity::default());
         world.insert_resource(FrameDeltaSeconds::default());
         world.insert_resource(PlayerMovementConfig::default());
+        world.insert_resource(VoxelPlayerAnimationClock::default());
         world.insert_resource(ToolCatalog::default());
         world.insert_resource(ChunkStates::default());
         world.insert_resource(SelectionState::default());
@@ -71,6 +75,7 @@ impl EcsRuntime {
                 apply_camera_zoom_input_system,
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
+                advance_voxel_player_animation_system,
             )
                 .chain(),
         );
