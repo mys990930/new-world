@@ -9,9 +9,9 @@ use crate::ecs::VOXEL_PLAYER_PART_COUNT;
 #[cfg(test)]
 use crate::ecs::quarter_view_camera_pose;
 use crate::ecs::{
-    CameraState, InventoryItem, PlayerInventory, VoxelPlayerAnimationState,
-    VoxelPlayerFacingOctant, VoxelPlayerPart, VoxelPlayerPartPose, VoxelPlayerVisualState,
-    default_voxel_player_part_poses, quarter_view_render_camera_pose,
+    CameraState, FloatingBlockDropRender, InventoryItem, PlayerInventory,
+    VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart, VoxelPlayerPartPose,
+    VoxelPlayerVisualState, default_voxel_player_part_poses, quarter_view_render_camera_pose,
 };
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
@@ -27,7 +27,7 @@ const DEFAULT_PREVIEW_BLOCK_ID: BlockId = BlockId::STONE;
 const PLAYER_TEXTURE_LAYER: u32 = 0;
 
 impl GameApp {
-    pub fn bridge_app_to_render_frame(&self) -> AppRenderFrameData {
+    pub fn bridge_app_to_render_frame(&mut self) -> AppRenderFrameData {
         let camera_state = self.ecs.camera_state();
         let camera = build_quarter_view_camera(camera_state);
         let window = self.platform.window_state();
@@ -49,6 +49,11 @@ impl GameApp {
                     &selection,
                     &self.world,
                     inventory,
+                );
+                push_floating_block_drop_instances(
+                    &mut cube_instances,
+                    self.ecs.floating_block_drops(),
+                    &self.world,
                 );
                 let minimap_viewport = player_transform.map(|transform| {
                     self.minimap
@@ -305,6 +310,28 @@ fn push_selection_preview_instances(
             bottom_texture_layer: face_textures[1],
             side_texture_layer: face_textures[2],
             material_kind: RenderMaterialKind::Highlight,
+        });
+    }
+}
+
+fn push_floating_block_drop_instances(
+    cube_instances: &mut Vec<RenderCubeInstance>,
+    drops: Vec<FloatingBlockDropRender>,
+    world: &WorldCore,
+) {
+    for drop in drops {
+        let face_textures = block_face_texture_layers(world.block_registry(), drop.block);
+        let material_kind = render_material_kind_from_world(
+            world.block_registry().block_or_missing(drop.block).material,
+        );
+        cube_instances.push(RenderCubeInstance {
+            center: drop.center,
+            half_extents: [0.18, 0.18, 0.18],
+            color: [1.0, 1.0, 1.0, 1.0],
+            top_texture_layer: face_textures[0],
+            bottom_texture_layer: face_textures[1],
+            side_texture_layer: face_textures[2],
+            material_kind,
         });
     }
 }

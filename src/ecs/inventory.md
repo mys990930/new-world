@@ -64,6 +64,8 @@
 - if no interaction tool is selected, ECS still falls back to a default single-block interaction preview at player reach
 - build preview and placement require the selected build quickslot to contain a block stack
 - successful app-owned block placement consumes one item from the selected build stack
+- picked-up block drops are inserted into block quickslots first, then general slots
+- tool/block efficiency, per-block HP, and the global tool-use cooldown are prototype tuning data owned outside the inventory layout itself
 
 ## Invariants
 
@@ -76,15 +78,18 @@
 - raw input capture
 - renderer layout or sprite emission
 - actual world block edit application
+- floating drop entity ownership
 
 ## Related Modules
 
 - `input.rs`
 - `command.rs`
 - `selection.rs`
+- `tool_interaction.rs`
 - `../app/bridge.md`
 
 ## Notes
 
 - the current initial loadout is prototype-friendly: shovel + pickaxe in the tool quickbar, plus one stack each of ten common terrain blocks in the build quickbar and general slots
-- current tool preview rules are minimal and visual only: pickaxe highlights a single target block, shovel highlights a small face-oriented area, and the no-tool fallback also highlights a single target block
+- current tool preview rules are minimal: pickaxe targets a single block and shovel targets a small face-oriented area; `tool_interaction.rs` now consumes those preview blocks for prototype damage/breaking
+- the UI atlas contains small pixel icons for the current shovel and pickaxe quickslot previews

@@ -25,7 +25,7 @@
 - refresh the ECS-owned local environment snapshot from the latest world state
 - queue a focused region-classification resolve when the local environment cache is missing
 - update world-and-viewport-based selection state
-- apply frame-local player commands that require app/world coordination, including build-mode block placement through `WorldEdit::SetBlock`
+- apply frame-local player commands that require app/world coordination, including build-mode block placement and interaction-mode block breaking through `WorldEdit::SetBlock`
 - log the clicked block key when a click lands on the current raycast target
 - log chunk load/unload transitions when runtime world residency actually changes
 - log throttled chunk lifecycle request summaries, frame-tagged mesh upload/skip outcomes, create-world progress, and periodic pending-spawn wait state for startup diagnosis
@@ -58,7 +58,7 @@
 - updated app-owned minimap cache
 - optional console logging for clicked blocks and chunk residency transitions
 - diagnostic console logging for chunk request/result flow and pending spawned-world placement
-- applied block placement edits, selected-stack consumption, minimap column refresh, and remesh invalidation
+- applied block placement/break edits, selected-stack consumption, block-drop spawning, minimap column refresh, and remesh invalidation
 - diagnostic console logging for update/render hitches when frame work exceeds the hitch threshold
 - optional diagnostic console logging for app update/render stage timing and job/minimap pressure
 - one renderer frame attempt
@@ -76,17 +76,18 @@
 9. try to place any pending created-world spawn anchor on the currently loaded surface
 10. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth, unless spawn placement is still pending
 11. `ecs.run_post_update()`
-12. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
-13. submit the planned jobs, including `UnloadChunk` requests
-14. collect newly completed jobs again if gameplay result budget remains; completed `ChunkUnloaded` results apply `WorldCore`, renderer mesh, minimap cache removal, and pending mesh-commit cancellation here
-15. try pending spawn placement again after same-frame job completions
-16. commit queued chunk mesh renderer uploads/removals within the frame's mesh commit budget
-17. queue a focused region-classification resolve if the player atlas cell is not cached yet
-18. refresh the ECS-local environment snapshot from the latest player transform and cached world environment state
-19. update `SelectionState` from the latest world state and viewport
-20. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-21. drain discrete commands without per-frame debug output
-22. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
+12. tick ECS tool-interaction state so transient block damage can recover and nearby drops can be picked up
+13. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
+14. submit the planned jobs, including `UnloadChunk` requests
+15. collect newly completed jobs again if gameplay result budget remains; completed `ChunkUnloaded` results apply `WorldCore`, renderer mesh, minimap cache removal, and pending mesh-commit cancellation here
+16. try pending spawn placement again after same-frame job completions
+17. commit queued chunk mesh renderer uploads/removals within the frame's mesh commit budget
+18. queue a focused region-classification resolve if the player atlas cell is not cached yet
+19. refresh the ECS-local environment snapshot from the latest player transform and cached world environment state
+20. update `SelectionState` from the latest world state and viewport
+21. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
+22. drain discrete commands; primary tool actions may become app-applied block breaks, block-drop spawns, remesh invalidation, and minimap refreshes
+23. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
 
@@ -104,7 +105,7 @@
 - hitch logging must be sparse by default and only emit when update/render time crosses `NEW_WORLD_HITCH_LOG_MS` or the built-in threshold
 - opt-in update/render frame diagnostics should report enough stage timing to separate ECS, jobs result application, queued renderer mesh commit, minimap/region cache pressure, and draw/present cost
 - renderer receives render-ready DTOs only
-- block placement must pass through ECS command/selection/inventory state and world-owned `WorldEdit`; app only coordinates the cross-module application and follow-up remesh/minimap work
+- block placement and breaking must pass through ECS command/selection/inventory/tool state and world-owned `WorldEdit`; app only coordinates the cross-module application and follow-up remesh/minimap/drop work
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 - job progress events may update app-owned UI state while gameplay is suspended, but must not mutate world/ECS chunk residency
 - world-select create/load actions stay app-owned; gameplay update suspension does not hand world ownership to renderer UI
@@ -123,6 +124,8 @@
 - the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> pending renderer mesh commit -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> pending renderer mesh commit -> RenderUploadRequest` as fallback
 - empty mesh results are accepted as render-ready chunk state but remove/skip renderer mesh upload because `wgpu` buffers cannot be created from empty vertex/index arrays
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
+- the current build interaction slice applies ECS `PlaceBlock` commands in app by reading ECS selection/inventory state, calling `WorldCore::apply_edit(...)`, consuming one selected block stack item, and invalidating affected chunk meshes/minimap columns
+- the current tool interaction slice applies ECS `PrimaryAction` commands in app by asking ECS for tool damage/break outcomes, calling `WorldCore::apply_edit(... AIR)` for broken blocks, spawning ECS block drops, and invalidating affected chunk meshes/minimap columns
 - the current fixed slice is intentionally narrow: world calendar, per-atlas climate drift, local weather windows, and renderer environment sync now advance on fixed ticks, while direct simulation-driven `WorldEdit` application remains a later step
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - create-world progress events update the world-select popup counter/progress bar before the final `WorldCreated` result arrives

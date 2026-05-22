@@ -8,7 +8,7 @@ use super::{
     },
 };
 use crate::ecs::{
-    InventoryItem, LocalEnvironmentSnapshot, PlayerInventory, QUICKSLOT_COUNT, Transform,
+    InventoryItem, LocalEnvironmentSnapshot, PlayerInventory, QUICKSLOT_COUNT, ToolKind, Transform,
 };
 use crate::renderer::RenderUiSprite;
 use crate::world::{
@@ -18,9 +18,9 @@ use crate::world::{
 
 const UI_TILE_SIZE_PX: f32 = 8.0;
 const UI_ATLAS_WIDTH_PX: f32 = 128.0;
-const UI_ATLAS_HEIGHT_PX: f32 = 128.0;
+const UI_ATLAS_HEIGHT_PX: f32 = 160.0;
 const UI_ATLAS_COLUMNS: u32 = 16;
-const UI_ATLAS_ROWS: u32 = 16;
+const UI_ATLAS_ROWS: u32 = 20;
 const UI_FONT_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-_/().,?#";
 const BLOCK_ICON_SIZE_PX: f32 = 24.0;
 const BLOCK_ICON_ORIGIN_X_PX: f32 = 4.0;
@@ -28,6 +28,10 @@ const BLOCK_ICON_ORIGIN_Y_PX: f32 = 68.0;
 const BLOCK_ICON_STRIDE_X_PX: f32 = 24.0;
 const BLOCK_ICON_STRIDE_Y_PX: f32 = 28.0;
 const BLOCK_ICON_COLUMNS: u32 = 5;
+const TOOL_ICON_SIZE_PX: f32 = 24.0;
+const TOOL_ICON_ORIGIN_X_PX: f32 = 4.0;
+const TOOL_ICON_ORIGIN_Y_PX: f32 = 124.0;
+const TOOL_ICON_STRIDE_X_PX: f32 = 28.0;
 
 const TILE_PANEL_CENTER: (u32, u32) = (0, 0);
 const TILE_PANEL_TOP: (u32, u32) = (1, 0);
@@ -723,7 +727,7 @@ fn push_inventory_slot(
     rect: UiRectPx,
     slot: Option<crate::ecs::InventorySlot>,
     selected: bool,
-    registry: &BlockRegistry,
+    _registry: &BlockRegistry,
 ) {
     let frame = if selected {
         [0.92, 0.76, 0.30, 1.0]
@@ -745,20 +749,8 @@ fn push_inventory_slot(
 
     if let Some(slot) = slot {
         match slot.item {
-            InventoryItem::Tool(_) => {
-                let label = inventory_slot_short_label(slot, registry);
-                push_text_centered(
-                    sprites,
-                    UiRectPx {
-                        x: rect.x + 2.0,
-                        y: rect.y + 6.0,
-                        w: rect.w - 4.0,
-                        h: 12.0,
-                    },
-                    1.0,
-                    label,
-                    [0.96, 0.96, 0.98, 1.0],
-                );
+            InventoryItem::Tool(tool) => {
+                push_tool_icon_sprite(sprites, rect, tool);
             }
             InventoryItem::Block(block) => {
                 push_block_icon_sprite(sprites, rect, block);
@@ -775,6 +767,24 @@ fn push_inventory_slot(
             }
         }
     }
+}
+
+fn push_tool_icon_sprite(sprites: &mut Vec<RenderUiSprite>, rect: UiRectPx, tool: ToolKind) {
+    let (uv_min, uv_max) = tool_icon_uv(tool);
+    let size = (rect.w - 12.0).min(rect.h - 12.0).min(24.0).max(8.0);
+    let icon_rect = UiRectPx {
+        x: rect.x + ((rect.w - size) * 0.5).floor(),
+        y: rect.y + 5.0,
+        w: size,
+        h: size,
+    };
+    sprites.push(RenderUiSprite {
+        min_screen_px: [icon_rect.x, icon_rect.y],
+        max_screen_px: [icon_rect.x + icon_rect.w, icon_rect.y + icon_rect.h],
+        uv_min,
+        uv_max,
+        tint: [1.0, 1.0, 1.0, 1.0],
+    });
 }
 
 fn push_block_icon_sprite(sprites: &mut Vec<RenderUiSprite>, rect: UiRectPx, block: BlockId) {
@@ -794,6 +804,19 @@ fn push_block_icon_sprite(sprites: &mut Vec<RenderUiSprite>, rect: UiRectPx, blo
         uv_max,
         tint: [1.0, 1.0, 1.0, 1.0],
     });
+}
+
+fn tool_icon_uv(tool: ToolKind) -> ([f32; 2], [f32; 2]) {
+    let icon_index = match tool {
+        ToolKind::Shovel => 0,
+        ToolKind::Pickaxe => 1,
+    };
+    atlas_pixel_uv(
+        TOOL_ICON_ORIGIN_X_PX + icon_index as f32 * TOOL_ICON_STRIDE_X_PX,
+        TOOL_ICON_ORIGIN_Y_PX,
+        TOOL_ICON_SIZE_PX,
+        TOOL_ICON_SIZE_PX,
+    )
 }
 
 fn block_icon_uv(block: BlockId) -> Option<([f32; 2], [f32; 2])> {
@@ -825,22 +848,6 @@ fn atlas_pixel_uv(x: f32, y: f32, w: f32, h: f32) -> ([f32; 2], [f32; 2]) {
         [x / UI_ATLAS_WIDTH_PX, y / UI_ATLAS_HEIGHT_PX],
         [(x + w) / UI_ATLAS_WIDTH_PX, (y + h) / UI_ATLAS_HEIGHT_PX],
     )
-}
-
-fn inventory_slot_short_label(
-    slot: crate::ecs::InventorySlot,
-    registry: &BlockRegistry,
-) -> &'static str {
-    match slot.item {
-        InventoryItem::Tool(tool) => tool.short_label(),
-        InventoryItem::Block(block) => match registry.block_or_missing(block).key.as_str() {
-            "grass" => "GRAS",
-            "dirt" => "DIRT",
-            "stone" => "STON",
-            "__missing" => "MISS",
-            _ => "BLCK",
-        },
-    }
 }
 
 fn push_world_select_section_layout(

@@ -11,6 +11,7 @@
 - frame/tick phase state transitions
 - input interpretation
 - inventory / quickslot / manipulation-mode state management
+- tool-use cooldown, transient block damage, and floating block-drop pickup state
 - player entity/component management
 - moving-entity facing / pose state management
 - local-player voxel visual state derivation
@@ -44,6 +45,8 @@
 - `PlayerMovementConfig`
 - `VoxelPlayerAnimationClock`
 - `ToolCatalog`
+- `ToolUseCooldown`
+- `BlockDamageTracker`
 - `CameraState`
 - `LocalPlayerEntity`
 - `ChunkStates`
@@ -63,6 +66,7 @@
 - `PlayerBody`
 - `PlayerPhysicsState`
 - `PlayerInventory`
+- `FloatingBlockDrop`
 - `VoxelPlayerVisualState`
 - `VoxelPlayerAnimationState`
 - `VoxelPlayerFacingOctant`
@@ -101,6 +105,12 @@
   - `build` mode uses the block quickslots
   - the current shared player reach for interaction/build preview is `6` blocks
   - opening inventory blocks movement, world interaction, and raycast preview updates until it is closed
+- tool interaction
+  - left click in interaction mode uses the selected tool; holding left click repeats at the current global cooldown
+  - the prototype global cooldown is `0.5` seconds for every tool and is intentionally documented as tuning data
+  - tool damage is transient per block, recovers after a short untouched timeout, and is pruned when the owning chunk unloads
+  - zero-HP break outcomes are handed to app/world coordination rather than mutating `WorldCore` inside ECS
+  - destroyed blocks become floating ECS drop entities and are inserted into block quickslots first when picked up
 - movement intent generation
   - screen-relative input remains frame input state
   - `CameraState.quarter_turns` is applied before generating `MoveWorldIntent`
@@ -178,6 +188,10 @@ EcsRuntime::local_player_transform() -> Option<Transform>
 EcsRuntime::local_player_body() -> Option<PlayerBody>
 EcsRuntime::local_player_inventory() -> Option<PlayerInventory>
 EcsRuntime::consume_selected_build_block() -> Option<InventorySlot>
+EcsRuntime::apply_primary_tool_action(world: &WorldCore) -> ToolActionOutcome
+EcsRuntime::tick_tool_interaction_state(world: &WorldCore)
+EcsRuntime::spawn_block_drop(pos: WorldBlockCoord, block: BlockId)
+EcsRuntime::floating_block_drops() -> Vec<FloatingBlockDropRender>
 EcsRuntime::local_player_visual_state() -> Option<VoxelPlayerVisualState>
 EcsRuntime::simulate_local_player_motion(world: &WorldCore)
 EcsRuntime::place_local_player_on_surface(world: &WorldCore, anchor_xz: [f32; 2]) -> bool
@@ -217,6 +231,7 @@ EcsRuntime::mark_chunks_for_remesh(coords)
 9. ECS may decide which regions need eager environmental simulation, but world remains the source of truth for calendar and seasonal state
 10. app HUD code may read ECS-local environment snapshots, but those snapshots are derived views over world/simulation truth rather than a new owning layer
 11. textmode observer output must consume ECS/world/simulation state through structured boundaries rather than adding text-only gameplay state
+12. tool interaction may query world block data, but the actual block edit remains world-owned and app-coordinated
 
 ### Submodules
 - mod.rs: public facade, re-export
@@ -224,6 +239,7 @@ EcsRuntime::mark_chunks_for_remesh(coords)
 - input.rs: `EcsInputSnapshot`, frame input resource, discrete command creation
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS-side command/request buffers
 - inventory.rs: player inventory/component state, manipulation mode, quickslot selection, and tool definitions
+- tool_interaction.rs: local-player tool cooldown, transient block damage, floating block drops, and pickup insertion
 - player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
 - player_visual.rs: local player render-facing voxel state, animation clock, rig resource data, and pose/facing contract
 - camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
@@ -244,7 +260,7 @@ EcsRuntime::mark_chunks_for_remesh(coords)
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
 - stale chunk load/mesh results must be filtered against the current retain/world state before app reinserts chunks or reuploads meshes
-- interaction/build preview now exists, and build-mode right click can place the selected block stack through app-owned world-edit coordination; block breaking and inventory drag/drop are still future work
+- interaction/build preview now exists; build-mode right click places the selected block stack through app-owned world-edit coordination, and interaction-mode left click damages/breaks selected blocks through ECS-owned transient damage followed by app-owned world-edit application
 - the first fixed-tick slice is now wired: ECS advances `SimClock`, tracks a player-centered `ActiveSimRegion`, and queues simulation results for app/world follow-up handling
 - fixed update now also derives a replaceable player-centered `3x3` `ActiveChunkObserverScope`; app uses it to build world-biome ecology inputs without making simulation own the accumulator or scope policy
 - time/season/weather ownership still follows the intended split: world owns truth, simulation owns deterministic advancement rules, and ECS owns active-region selection plus gameplay-side consumption boundaries

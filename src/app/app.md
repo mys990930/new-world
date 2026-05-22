@@ -51,7 +51,7 @@ fn render(&mut self)
 fn handle_ui_shortcuts(&mut self)
 fn gameplay_active(&self) -> bool
 fn bridge_platform_to_ecs(&mut self)
-fn bridge_app_to_render_frame(&self) -> AppRenderFrameData
+fn bridge_app_to_render_frame(&mut self) -> AppRenderFrameData
 fn begin_timed_frame(&mut self, now: Instant)
 fn run_fixed_updates(&mut self)
 fn should_run_frame(&self, now: Instant) -> bool
@@ -106,5 +106,6 @@ fn frame_deadline(&self) -> Option<Instant>
 - the current minimap path is app-owned cached state: chunk load/generate results trigger background minimap-column rebuild jobs, and render bridging only composes the current player-centered viewport from cached column data
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
 - the current build interaction slice applies ECS `PlaceBlock` commands in app by reading ECS selection/inventory state, calling `WorldCore::apply_edit(...)`, consuming one selected block stack item, and invalidating affected chunk meshes/minimap columns
+- the current tool interaction slice applies ECS `PrimaryAction` commands in app by asking ECS for transient damage/break outcomes, calling `WorldCore::apply_edit(... AIR)`, spawning ECS block drops, and invalidating affected chunk meshes/minimap columns
 - the current app-owned screen slice can create and reload created worlds, render a mouse-driven sprite-based world-select layout with typed numeric fields, a scrollable created-world list, and create-job loading feedback without stepping gameplay, and add HUD frames without giving renderer any ECS/world dependency
 - the main binary no longer hardcodes or auto-opens a created-world root by default; existing created worlds are discovered by the app-owned world-select screen instead of being synchronously loaded before the window event loop starts

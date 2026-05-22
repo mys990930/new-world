@@ -52,6 +52,6 @@
 ## Notes
 
 - the current UI path samples a single nearest-filtered pixel atlas
-- the current app bridge composes menu panels, tiny bitmap-font text, and pre-rendered build quickslot block icons by emitting `RenderUiSprite` quads
+- the current app bridge composes menu panels, tiny bitmap-font text, pre-rendered build quickslot block icons, and tool quickslot icons by emitting `RenderUiSprite` quads
 - the fallback texture remains a single white texel so missing atlas files degrade safely
 - in-game HUD bars, inventory windows, and world-select menus all use the same atlas-backed sprite path rather than mixing vector/text-system UI approaches

@@ -53,6 +53,7 @@
 - renderers do not read `SelectionState` directly; `app::bridge` converts it into render-ready instances
 - selection and rendering must stay aligned on follow target and zoom in the same frame, even if render-only turn easing is active
 - preview generation is gameplay-owned and tool/mode-aware; the renderer only receives draw-ready cubes/slabs
+- interaction preview blocks are also the target set consumed by prototype tool damage when a primary action is accepted
 
 ## Non-Responsibilities
 
@@ -67,9 +68,10 @@
 - `runtime.rs`
 - `world`
 - `app/bridge.rs`
+- `tool_interaction.rs`
 
 ## Notes
 
 - Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.
-- interaction preview remains visual only; build preview is now also the placement target consumed by app-owned command application
+- interaction preview is now both visual feedback and the prototype tool-damage target set; build preview is the placement target consumed by app-owned command application
 - preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps them to actual selected-block textures

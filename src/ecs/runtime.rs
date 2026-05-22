@@ -29,8 +29,13 @@ use super::player_visual::{
     local_player_visual_state,
 };
 use super::selection::{SelectionState, update_selection_from_world};
+use super::tool_interaction::{
+    BlockDamageTracker, FloatingBlockDropRender, ToolActionOutcome, ToolUseCooldown,
+    apply_primary_tool_action, floating_block_drop_renders, spawn_block_drop,
+    tick_tool_interaction_state,
+};
 use crate::simulation::SimulationResult;
-use crate::world::WorldCore;
+use crate::world::{BlockId, WorldBlockCoord, WorldCore};
 
 pub struct EcsRuntime {
     world: World,
@@ -52,6 +57,8 @@ impl EcsRuntime {
         world.insert_resource(PlayerMovementConfig::default());
         world.insert_resource(VoxelPlayerAnimationClock::default());
         world.insert_resource(ToolCatalog::default());
+        world.insert_resource(ToolUseCooldown::default());
+        world.insert_resource(BlockDamageTracker::default());
         world.insert_resource(ChunkStates::default());
         world.insert_resource(SelectionState::default());
         world.insert_resource(LocalEnvironmentStatus::default());
@@ -197,6 +204,22 @@ impl EcsRuntime {
 
     pub fn consume_selected_build_block(&mut self) -> Option<InventorySlot> {
         consume_selected_block(&mut self.world)
+    }
+
+    pub fn apply_primary_tool_action(&mut self, world: &WorldCore) -> ToolActionOutcome {
+        apply_primary_tool_action(&mut self.world, world)
+    }
+
+    pub fn tick_tool_interaction_state(&mut self, world: &WorldCore) {
+        tick_tool_interaction_state(&mut self.world, world);
+    }
+
+    pub fn spawn_block_drop(&mut self, pos: WorldBlockCoord, block: BlockId) {
+        spawn_block_drop(&mut self.world, pos, block);
+    }
+
+    pub fn floating_block_drops(&mut self) -> Vec<FloatingBlockDropRender> {
+        floating_block_drop_renders(&mut self.world)
     }
 
     pub fn simulate_local_player_motion(&mut self, world: &WorldCore) {

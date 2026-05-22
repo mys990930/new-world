@@ -10,6 +10,7 @@ mod player;
 mod player_visual;
 mod runtime;
 mod selection;
+mod tool_interaction;
 
 #[allow(unused_imports)]
 pub use camera::{
@@ -51,3 +52,9 @@ pub use player_visual::{
 pub use runtime::EcsRuntime;
 #[allow(unused_imports)]
 pub use selection::SelectionState;
+#[allow(unused_imports)]
+pub use tool_interaction::{
+    BLOCK_DAMAGE_RECOVERY_SECONDS, BLOCK_DROP_PICKUP_RADIUS, BlockDamage, BlockDamageTracker,
+    DEFAULT_BLOCK_HP, DEFAULT_TOOL_DAMAGE, FloatingBlockDrop, FloatingBlockDropRender,
+    TOOL_USE_COOLDOWN_SECONDS, ToolActionOutcome, ToolBlockBreak, ToolBlockDamage, ToolUseCooldown,
+};

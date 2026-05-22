@@ -4,7 +4,7 @@ use super::{GameApp, state::PendingChunkMeshCommit};
 use crate::ecs::{InventoryItem, ManipulationMode, PlayerCommand};
 use crate::jobs::{JobRequest, JobRequestCounts, JobResult};
 use crate::renderer::RenderFrameInput;
-use crate::world::{ChunkCoord, WorldBlockCoord, WorldEdit};
+use crate::world::{BlockId, ChunkCoord, WorldBlockCoord, WorldEdit};
 
 const MAX_GAMEPLAY_JOB_RESULTS_PER_FRAME: usize = 4;
 const MAX_CHUNK_MESH_UPLOADS_PER_FRAME: usize = 1;
@@ -66,6 +66,7 @@ impl GameApp {
         let stage_start = Instant::now();
         self.ecs.run_post_update();
         timings.ecs_post_ms = duration_ms(stage_start.elapsed());
+        self.ecs.tick_tool_interaction_state(&self.world);
 
         let stage_start = Instant::now();
         let lifecycle = self
@@ -509,10 +510,70 @@ impl GameApp {
 
     fn apply_player_commands(&mut self) {
         for command in self.ecs.drain_player_commands() {
-            if matches!(command, PlayerCommand::PlaceBlock) {
-                self.try_place_selected_block();
+            match command {
+                PlayerCommand::PrimaryAction => self.try_apply_primary_tool_action(),
+                PlayerCommand::PlaceBlock => self.try_place_selected_block(),
+                PlayerCommand::RotateCamera { .. }
+                | PlayerCommand::RecenterCamera
+                | PlayerCommand::ToggleManipulationMode
+                | PlayerCommand::ToggleInventory
+                | PlayerCommand::CycleQuickslot { .. }
+                | PlayerCommand::SelectQuickslot { .. } => {}
             }
         }
+    }
+
+    fn try_apply_primary_tool_action(&mut self) {
+        let outcome = self.ecs.apply_primary_tool_action(&self.world);
+        if outcome.broken_blocks.is_empty() {
+            return;
+        }
+
+        let mut changed_chunks = std::collections::BTreeSet::new();
+        let mut remesh_chunks = std::collections::BTreeSet::new();
+        let mut destroyed_blocks = 0_usize;
+        for broken in outcome.broken_blocks {
+            let result = self.world.apply_edit(WorldEdit::SetBlock {
+                pos: broken.pos,
+                block: BlockId::AIR,
+            });
+            if !result.applied {
+                if let Some(error) = result.error {
+                    eprintln!(
+                        "[app] block break failed: pos=({}, {}, {}) block={} error={:?}",
+                        broken.pos.0,
+                        broken.pos.1,
+                        broken.pos.2,
+                        broken.block.raw(),
+                        error
+                    );
+                }
+                continue;
+            }
+
+            let drop_block = result.previous_block.unwrap_or(broken.block);
+            if !drop_block.is_air() {
+                self.ecs.spawn_block_drop(broken.pos, drop_block);
+            }
+            changed_chunks.extend(result.changed_chunks);
+            remesh_chunks.extend(result.remesh_chunks);
+            destroyed_blocks += 1;
+        }
+
+        if destroyed_blocks == 0 {
+            return;
+        }
+
+        self.ecs
+            .mark_chunks_for_remesh(remesh_chunks.iter().copied());
+        self.refresh_minimap_after_changed_chunks(
+            &changed_chunks.iter().copied().collect::<Vec<_>>(),
+        );
+        println!(
+            "[app] blocks broken: count={} remesh_chunks={}",
+            destroyed_blocks,
+            remesh_chunks.len()
+        );
     }
 
     fn try_place_selected_block(&mut self) {

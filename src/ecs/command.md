@@ -48,6 +48,8 @@
 - same-frame `RotateCamera` must be applied before `MoveWorldIntent` is generated
 - `RecenterCamera` requests camera follow recentering without changing logical quarter-turn state
 - inventory and quickslot commands mutate player-owned inventory state without mutating world blocks directly
+- `PrimaryAction` is a tool-use request; ECS/tool interaction computes transient damage and app coordinates any resulting world edit
+- `PlaceBlock` remains the build-mode placement request consumed by app/world coordination
 - `MoveWorldIntent` is continuous state and is not drained like the discrete command buffer
 
 ## Order Rules
@@ -82,4 +84,4 @@
 
 ## Notes
 
-- actual block break/place/use-item gameplay is still future work; current commands mainly drive camera, inventory state, and preview logic
+- block placement and prototype block breaking now consume `PlaceBlock` / `PrimaryAction` through app-owned world-edit coordination; richer use-item gameplay remains future work
