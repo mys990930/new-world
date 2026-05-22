@@ -48,6 +48,7 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) river_gravel_hint: f32,
     pub(super) river_cutbank_hint: f32,
     pub(super) estuary_strength: f32,
+    pub(super) estuary_water_strength: f32,
     pub(super) estuary_flow_hint: f32,
     pub(super) estuary_bed_depth_hint: f32,
     pub(super) estuary_along_blocks: f32,
@@ -70,6 +71,7 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
     pub(super) estuary_strength: Vec<f32>,
+    pub(super) estuary_water_strength: Vec<f32>,
     pub(super) estuary_flow_hint: Vec<f32>,
     pub(super) estuary_bed_depth_hint: Vec<f32>,
     pub(super) estuary_along_blocks: Vec<f32>,
@@ -124,6 +126,7 @@ impl MacroFieldInfluenceFields {
             river_gravel_hint: self.river_gravel_hint[index].clamp(0.0, 1.0),
             river_cutbank_hint: self.river_cutbank_hint[index].clamp(0.0, 1.0),
             estuary_strength: self.estuary_strength[index].clamp(0.0, 1.0),
+            estuary_water_strength: self.estuary_water_strength[index].clamp(0.0, 1.0),
             estuary_flow_hint: self.estuary_flow_hint[index].clamp(0.0, 1.0),
             estuary_bed_depth_hint: self.estuary_bed_depth_hint[index].clamp(0.0, 1.0),
             estuary_along_blocks: self.estuary_along_blocks[index].max(0.0),
@@ -194,6 +197,7 @@ pub(super) fn rasterize_influence_fields(
         river_gravel_hint: river.river_gravel_hint,
         river_cutbank_hint: river.river_cutbank_hint,
         estuary_strength: estuary.strength,
+        estuary_water_strength: estuary.water_strength,
         estuary_flow_hint: estuary.flow_hint,
         estuary_bed_depth_hint: estuary.bed_depth_hint,
         estuary_along_blocks: estuary.along_blocks,
@@ -204,6 +208,7 @@ pub(super) fn rasterize_influence_fields(
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct EstuaryFanField {
     pub(super) strength: Vec<f32>,
+    pub(super) water_strength: Vec<f32>,
     pub(super) flow_hint: Vec<f32>,
     pub(super) bed_depth_hint: Vec<f32>,
     pub(super) along_blocks: Vec<f32>,
@@ -217,6 +222,7 @@ pub(super) fn rasterize_estuary_fan_field(
     if fans.is_empty() {
         return EstuaryFanField {
             strength: vec![0.0; sample_count],
+            water_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             bed_depth_hint: vec![0.0; sample_count],
             along_blocks: vec![0.0; sample_count],
@@ -235,6 +241,7 @@ pub(super) fn rasterize_estuary_fan_field(
 
     EstuaryFanField {
         strength: samples.iter().map(|sample| sample.strength).collect(),
+        water_strength: samples.iter().map(|sample| sample.water_strength).collect(),
         flow_hint: samples.iter().map(|sample| sample.flow_hint).collect(),
         bed_depth_hint: samples.iter().map(|sample| sample.bed_depth_hint).collect(),
         along_blocks: samples.iter().map(|sample| sample.along_blocks).collect(),
@@ -244,6 +251,7 @@ pub(super) fn rasterize_estuary_fan_field(
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct EstuaryFanSample {
     pub(super) strength: f32,
+    pub(super) water_strength: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
     pub(super) along_blocks: f32,
@@ -282,8 +290,18 @@ pub(super) fn estuary_fan_sample(
     let tail_floor = 0.48 - flow_t * 0.12;
     let strength =
         (cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
+    let water_edge_t = (rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let water_strength = if water_edge_t <= 0.92 {
+        let inner_t = smoothstep01((water_edge_t / 0.92).clamp(0.0, 1.0));
+        lerp(1.0, RIVER_CORE_STRENGTH_THRESHOLD + 0.02, inner_t)
+    } else {
+        let edge_t = smoothstep01(((water_edge_t - 0.92) / 0.08).clamp(0.0, 1.0));
+        lerp(RIVER_CORE_STRENGTH_THRESHOLD + 0.02, 0.0, edge_t)
+    }
+    .clamp(0.0, 1.0);
     EstuaryFanSample {
         strength,
+        water_strength,
         flow_hint: fan.flow_hint,
         bed_depth_hint: fan.bed_depth_hint,
         along_blocks: along,
@@ -2540,6 +2558,7 @@ mod tests {
         };
 
         let start_edge = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 18.0));
+        let start_mouth = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 8.0));
         let downstream_same_offset = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 18.0));
         let downstream_wide_edge = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 48.0));
 
@@ -2560,6 +2579,16 @@ mod tests {
         assert!(
             downstream_wide_edge.strength > 0.0,
             "downstream fan should retain a broad shallow shelf influence"
+        );
+        assert!(
+            start_mouth.water_strength >= RIVER_CORE_STRENGTH_THRESHOLD,
+            "estuary fan mouth should expose water eligibility across the planned mouth width: {}",
+            start_mouth.water_strength
+        );
+        assert!(
+            downstream_wide_edge.water_strength >= RIVER_CORE_STRENGTH_THRESHOLD,
+            "wide downstream fan should still carry water eligibility instead of only height carve: {}",
+            downstream_wide_edge.water_strength
         );
     }
 

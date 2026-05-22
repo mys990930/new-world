@@ -307,7 +307,10 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   water depth와 diagnostic을 위한 hint로만 쓰이며 terrain height에서 다시 subtract하지 않는다. 상류/하류
   bed 깊이, V/U 단면, bed randomness는 macro_field가 이미 source height에 반영해야 한다.
   ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
-  넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다.
+  넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다. 예외적으로 macro_field가 terminal 하구
+  fan에서 `estuary_water_strength`를 함께 넘긴 above-sea ocean-owned mouth column은 local river-water
+  continuation으로 해석할 수 있다. 이 경우에도 terrain bed는 `combined_macro_height`를 보존하고,
+  heightfield-local carve를 새로 적용하지 않는다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
@@ -368,8 +371,8 @@ heightfield는 그 column output을 소비해야 한다. chunk fill은 graph/mac
 - 기본 preview는 offscreen 3D camera가 아니라 2D isometric projection을 직접 사용한다.
 
 ```text
-screen_x = (x - z) * tile_w / 2
-screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+screen_x = (x + z) * tile_w / 2
+screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
 - `vertical_px_per_block`은 preview 렌더링 전용 투영 값이지만, XZ density에 맞춰 따로 눌러지는 보정
@@ -411,7 +414,8 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
   `--world-center`/`--world-coordinates` 호환 옵션을 사용한다.
 - preview legend는 고정 픽셀 크기가 아니라 출력 이미지 크기에 비례해야 한다. 기본 metadata panel은
   화면 높이의 약 1/5을 목표로 하며, 글꼴, swatch, scale bar도 같은 비율로 커져야 한다.
-- preview는 방향 compass overlay를 포함한다. topdown preview는 이미지 위=N, 오른쪽=E 기준을
+- preview는 방향 compass overlay를 포함한다. topdown preview는 이미지 위=N(`world +Z`),
+  오른쪽=E(`world +X`) 기준을
   유지하지만, `heightfield_preview`의 compass는 isometric `--quarter-turns` projection 이후의
   screen-space 방향을 따른다. 따라서 N/E/S/W label은 현재 quarter view에서 실제 world cardinal
   방향이 화면에 놓이는 방향을 가리킨다.
@@ -505,4 +509,6 @@ screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
     terrain-height offset으로 다시 쓰면 회귀다.
 20. ocean/lake-owned river-mouth bed hints must not threshold-cut above-sea source beds. Above-sea
     ocean-owned source columns keep ordinary ocean bed resolve and do not create river bed depth solely
-    because `river_core_strength` crosses the river threshold.
+    because `river_core_strength` crosses the river threshold. A macro_field estuary fan may opt into
+    above-sea mouth water continuity only through `estuary_water_strength`; that opt-in changes water/terrain
+    kind eligibility, not the already-resolved terrain bed height.

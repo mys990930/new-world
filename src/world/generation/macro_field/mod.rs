@@ -139,7 +139,6 @@ pub fn sample_macro_field_point(
         Some(position),
         config,
     );
-
     MacroFieldSample {
         position,
         nearest_site: nearest_site.map(|site| site.id),
@@ -162,6 +161,7 @@ pub fn sample_macro_field_point(
         river_bank_roughness_hint: river_influence.bank_roughness_hint,
         river_gravel_hint: river_influence.gravel_hint,
         river_cutbank_hint: river_influence.cutbank_hint,
+        estuary_water_strength: 0.0,
         combined_macro_height,
     }
 }
@@ -228,6 +228,27 @@ fn sample_macro_field_point_with_influence(
         influence.estuary_along_blocks,
         config,
     );
+    let estuary_water_strength = influence.estuary_water_strength;
+    let estuary_supplies_water = estuary_water_strength > river_core_strength
+        && influence.estuary_flow_hint > 0.0
+        && lake_mask <= 0.5
+        && dry_basin_mask <= 0.5;
+    let sample_river_core_strength = river_core_strength.max(estuary_water_strength);
+    let sample_river_shoulder_strength =
+        river_shoulder_strength.max(influence.estuary_strength * 0.82);
+    let sample_river_valley_strength = river_valley_strength.max(influence.estuary_strength);
+    let sample_river_flow_hint = if estuary_supplies_water {
+        river_flow_hint.max(influence.estuary_flow_hint)
+    } else {
+        river_flow_hint
+    };
+    let sample_river_bed_depth_hint = if estuary_supplies_water {
+        influence
+            .river_bed_depth_hint
+            .max(influence.estuary_bed_depth_hint)
+    } else {
+        influence.river_bed_depth_hint
+    };
 
     MacroFieldSample {
         position,
@@ -241,16 +262,17 @@ fn sample_macro_field_point_with_influence(
         lake_mask,
         dry_basin_mask,
         ridge_influence,
-        river_core_strength,
-        river_shoulder_strength,
-        river_valley_strength,
+        river_core_strength: sample_river_core_strength,
+        river_shoulder_strength: sample_river_shoulder_strength,
+        river_valley_strength: sample_river_valley_strength,
         river_distance_blocks,
-        river_flow_hint,
+        river_flow_hint: sample_river_flow_hint,
         river_longitudinal_blocks,
-        river_bed_depth_hint: influence.river_bed_depth_hint,
+        river_bed_depth_hint: sample_river_bed_depth_hint,
         river_bank_roughness_hint: influence.river_bank_roughness_hint,
         river_gravel_hint: influence.river_gravel_hint,
         river_cutbank_hint: influence.river_cutbank_hint,
+        estuary_water_strength,
         combined_macro_height,
     }
 }

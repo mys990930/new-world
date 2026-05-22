@@ -1407,6 +1407,40 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
 }
 
 #[test]
+fn above_sea_ocean_estuary_hint_connects_river_water() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
+    mouth.ocean_mask = 1.0;
+    mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_bed_depth_hint = 0.32;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::River,
+        "above-sea ocean-owned estuary fan columns need a local river-water continuation hint"
+    );
+    assert!(
+        column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+        "estuary water continuation should not force the terrain bed below sea level: {}",
+        column.surface_height_blocks
+    );
+    assert!(
+        column.water_y.is_some_and(|water| water > column.surface_y),
+        "estuary continuation should carry water over the macro-resolved bed: surface={} water={:?}",
+        column.surface_y,
+        column.water_y
+    );
+    assert!(
+        column.river_bed_depth_blocks > 0.0,
+        "estuary continuation should preserve the river water-depth hint"
+    );
+}
+
+#[test]
 fn low_strength_river_hint_does_not_override_above_sea_ocean_column() {
     let mut mouth = sample_with_river(0.0, 0.0, 0.004, 0.96);
     mouth.ocean_mask = 1.0;
@@ -1582,6 +1616,7 @@ fn sample(
         river_bank_roughness_hint: 0.0,
         river_gravel_hint: 0.0,
         river_cutbank_hint: 0.0,
+        estuary_water_strength: 0.0,
         combined_macro_height: height,
     }
 }

@@ -36,17 +36,22 @@ pub fn heightfield_column_from_sample(
     );
     let has_core_river_hint =
         sample.river_core_strength >= config.river_water_threshold && sample.river_flow_hint > 0.0;
-    let is_river_hint = has_core_river_hint && !is_ocean && !is_lake;
-    let river_bed_depth_blocks = if is_river_hint {
-        river_bed_depth_blocks(sample)
-    } else {
-        0.0
-    };
     let surface_height_blocks = match config.perlin.placement {
         HeightfieldPerlinPlacement::BeforeContour => contour_guided_surface_height_blocks,
         HeightfieldPerlinPlacement::AfterContourBeforeSnap => {
             contour_guided_surface_height_blocks + meso_delta_blocks + micro_relief_blocks
         }
+    };
+    let has_estuary_water_hint = sample.estuary_water_strength >= config.river_water_threshold
+        && sample.river_flow_hint > 0.0;
+    let is_above_sea_estuary_ocean =
+        is_ocean && has_estuary_water_hint && surface_height_blocks >= config.sea_level_blocks;
+    let is_river_hint = (has_core_river_hint && !is_ocean && !is_lake)
+        || (has_estuary_water_hint && !is_lake && (!is_ocean || is_above_sea_estuary_ocean));
+    let river_bed_depth_blocks = if is_river_hint {
+        river_bed_depth_blocks(sample)
+    } else {
+        0.0
     };
     let lake_water_level_blocks = is_lake.then(|| lake_water_level_blocks(sample, config));
     let is_dry_basin = sample.dry_basin_mask > 0.5;
@@ -88,14 +93,14 @@ pub fn heightfield_column_from_sample(
     let coast_water_level_blocks = (is_land_side_coast
         && surface_height_blocks < config.sea_level_blocks)
         .then_some(snap_height_to_block(config.sea_level_blocks) as f32);
-    let water_level_blocks = if is_ocean {
-        ocean_water_level_blocks
-    } else if is_lake {
+    let water_level_blocks = if is_lake {
         Some(
             snap_height_to_block(lake_water_level_blocks.unwrap_or(config.sea_level_blocks)) as f32,
         )
     } else if is_river_hint {
         river_water_level_blocks
+    } else if is_ocean {
+        ocean_water_level_blocks
     } else if is_land_side_coast {
         coast_water_level_blocks
     } else {
@@ -103,12 +108,12 @@ pub fn heightfield_column_from_sample(
     };
     let water_y = water_level_blocks.map(snap_height_to_block);
     let river_water_height_blocks = is_river_hint.then_some(water_y.unwrap_or(surface_y) as f32);
-    let terrain_kind = if is_ocean {
-        HeightfieldTerrainKind::Ocean
-    } else if is_lake {
+    let terrain_kind = if is_lake {
         HeightfieldTerrainKind::Lake
     } else if is_river_hint {
         HeightfieldTerrainKind::River
+    } else if is_ocean {
+        HeightfieldTerrainKind::Ocean
     } else if is_dry_basin {
         HeightfieldTerrainKind::DryBasin
     } else if is_land_side_coast {
