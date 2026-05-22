@@ -18,7 +18,7 @@
 ## Outputs
 
 - a PNG image rendered through the offscreen renderer
-- a compass overlay using the shared preview orientation: image top=N, right=E, bottom=S, left=W
+- a compass overlay using the shared preview orientation: image top=N (`world +Z`), right=E (`world +X`), bottom=S, left=W
 - a stdout summary for the center chunk, including the sampled surface `y` average/min/max, resolved region classification, atlas sample values, and meso guide weights
 
 ## Current Flow

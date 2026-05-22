@@ -215,7 +215,7 @@ Each PNG contains:
   one chunk. To inspect one sample per world block, set `--width` and `--height` to
   `(2r + 1) * CHUNK_EDGE`.
 - The compass overlay is drawn on every channel. Its orientation is fixed to the common macro-field
-  frame: image top=N, right=E, bottom=S, left=W.
+  frame: image top=N (`world +Z`), right=E (`world +X`), bottom=S, left=W.
 - The `contour` channel is a diagnostic layer, not a terrain source of truth. It should be used to
   check whether the pre-heightfield combined macro height is continuous and readable before the
   heightfield/water solve consumes it. The contour channel keeps noisy Voronoi edge overlay off so

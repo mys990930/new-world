@@ -729,8 +729,8 @@ impl IsoRenderPlan {
         let center_z = tile.height as f32 * 0.5;
         let (rx, rz) = rotate_grid_delta(self.quarter_turns, x - center_x, z - center_z);
         Point2 {
-            x: (rx - rz) * self.tile_w_px * 0.5 + self.offset_x_px,
-            y: (rx + rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
+            x: (rx + rz) * self.tile_w_px * 0.5 + self.offset_x_px,
+            y: (rx - rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
                 + self.offset_y_px,
         }
     }
@@ -1033,8 +1033,8 @@ fn visible_side_directions(quarter_turns: u8) -> [VisibleSide; 2] {
 fn iso_cardinal_screen_delta(quarter_turns: u8, dx: f32, dz: f32) -> Point2 {
     let (rx, rz) = rotate_grid_delta(quarter_turns, dx, dz);
     Point2 {
-        x: (rx - rz) * 0.5,
-        y: (rx + rz) * 0.5,
+        x: (rx + rz) * 0.5,
+        y: (rx - rz) * 0.5,
     }
 }
 
@@ -1654,14 +1654,14 @@ mod tests {
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(1, 0), (0, 1)]
+            vec![(1, 0), (0, -1)]
         );
         assert_eq!(
             visible_side_directions(1)
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(-1, 0), (0, 1)]
+            vec![(1, 0), (0, 1)]
         );
     }
 }

@@ -62,7 +62,7 @@ target/pixelize-preview/s<seed>_cx<cx>_cz<cz>_r<r>.png
   column/border lattice, expanded into a 4-connected orthogonal stair-step path, and then projected
   into the square map viewport. The overlay follows pixelize units exactly instead of drawing
   diagonal strokes across resolved columns.
-- A compact legend and north-up/east-right compass are included.
+- A compact legend and north-up/east-right compass are included, with north = `world +Z` and east = `world +X`.
 - PNG metadata is written to the `new-world-preview-header` iTXt chunk.
 
 ## Pipeline

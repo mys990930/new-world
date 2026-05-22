@@ -116,7 +116,7 @@ or PNG metadata key names.
 - 각 PNG는 작은 legend overlay를 가진다. field map은 gradient color bar와 양끝 의미 label을 표시하고,
   identity map은 간단한 header만 표시한다.
 - 각 PNG는 방향 compass overlay를 가진다. macro field/world topdown 기준으로 이미지 위쪽은 북(N,
-  `world -Z`), 오른쪽은 동(E, `world +X`), 아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
+  `world +Z`), 오른쪽은 동(E, `world +X`), 아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
 - 픽셀 생성은 Rayon 병렬 chunk 처리로 수행한다.
 
 ### 현재 구현 상태
@@ -212,7 +212,7 @@ or PNG metadata key names.
   같은 selected chain이 두 번째 lake contact에 닿지 않도록 제거한 segment 수를 나타낸다.
 - 작은 legend overlay는 ocean/lake/land/dry fill, ridge/fault/coast edge, selected river, sink,
   inlet/outlet marker key를 포함한다. 숨겨진 debug-only lake node는 legend에 넣지 않는다.
-- 방향 compass overlay는 legend와 겹치지 않는 위치에 표시하며, 이미지 위=N(`world -Z`),
+- 방향 compass overlay는 legend와 겹치지 않는 위치에 표시하며, 이미지 위=N(`world +Z`),
   오른쪽=E(`world +X`), 아래=S, 왼쪽=W의 macro field 기준을 따른다.
 - width, height, generator version, stage, effective world span, site spacing은 파일명에 넣지 않고 PNG
   metadata에만 기록한다.
@@ -355,7 +355,7 @@ renderer/GPU 계약을 만들지 않는다.
   yellow/orange `WATER` = standing-water boundary
   overlay가 표시되는 channel의 water/terrain boundary, `GRID` = macro-field cache tile grid를 뜻한다.
 - 각 PNG는 별도 방향 compass overlay를 포함한다. 방향 기준은 모든 topdown macro field preview와
-  같아서 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
+  같아서 위=N(`world +Z`), 오른쪽=E(`world +X`), 아래=S, 왼쪽=W다.
 - `macro_field_preview`의 non-contour channel은 stage 9 `BoundaryCache`의 canonical noisy Voronoi
   graph edge overlay를 표시할 수 있다. 이 overlay가 사용자가 요청한 terrain tile/boundary 확인의
   기본 표면이지만, field 값을 압도하면 안 된다. 기본 스타일은 위치 참고용 faint overlay이며,
@@ -471,7 +471,8 @@ graph-derived field이며, preview renderer가 graph topology, hydrology, river 
   boundary overlay는 pixelize unit을 정확히 따라가며 diagonal stroke가 column interior를 가로지르지
   않는다. Rectangular output은 square map viewport를 중앙에 유지하고 남는 band를 neutral letterbox
   color로 채운다. 이 overlay는 height color ramp를 압도하지 않는 진단용 reference layer다.
-  방향 기준은 macro field topdown과 같아서 이미지 위=N, 오른쪽=E, 아래=S, 왼쪽=W다.
+  방향 기준은 macro field topdown과 같아서 이미지 위=N(`world +Z`), 오른쪽=E(`world +X`),
+  아래=S, 왼쪽=W다.
 
 ### 현재 구현 상태
 
@@ -560,8 +561,8 @@ heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 v
   1/5을 차지하도록 한다. scale bar, swatch, text spacing도 같은 scale을 따라야 한다.
 - 방향 compass는 `heightfield_preview`에 한해 isometric projection과 `--quarter-turns`가 적용된 뒤의
   screen-space 방향을 표시한다. 즉 N/E/S/W는 현재 quarter view에서 world cardinal 방향이 실제 화면으로
-  투영된 위치에 놓인다. `macro_field_preview` 같은 topdown preview는 기존처럼 이미지 위=N,
-  오른쪽=E 기준을 유지한다.
+  투영된 위치에 놓인다. `macro_field_preview` 같은 topdown preview는 이미지 위=N(`world +Z`),
+  오른쪽=E(`world +X`) 기준을 유지한다.
 
 ### 현재 구현 상태
 
@@ -609,8 +610,8 @@ heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 v
   uses:
 
 ```text
-screen_x = (x - z) * tile_w / 2
-screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+screen_x = (x + z) * tile_w / 2
+screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
   `vertical_px_per_block`은 preview 렌더링 전용 값이지만, column density 때문에 별도 세로

@@ -214,7 +214,7 @@ impl PreviewWindow {
     fn world_to_screen(self, point: WorldPlanePoint) -> (f32, f32) {
         (
             (point.x - self.min_x()) / self.world_span_x * self.width as f32,
-            (point.z - self.min_z()) / self.world_span_z * self.height as f32,
+            (self.max_z() - point.z) / self.world_span_z * self.height as f32,
         )
     }
 

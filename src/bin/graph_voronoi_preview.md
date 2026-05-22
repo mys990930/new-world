@@ -57,8 +57,8 @@
   - field modes show a small gradient bar with low/high meaning labels
   - biome mode shows a two-column detailed biome legend using the same distinct palette as
     `biome_map_preview`
-- each PNG includes a compass overlay using the common preview orientation: image top=N, right=E,
-  bottom=S, left=W
+- each PNG includes a compass overlay using the common preview orientation: image top=N
+  (`world +Z`), right=E (`world +X`), bottom=S, left=W
 - stdout summary for seed, generator version, selected modes, world footprint, graph region area, site count, metadata, and generated file paths
 - stdout and metadata include nearest-site spacing min/avg/max/stddev/CV so cell size variability is visible without reading pixels by eye
 - a PNG iTXt chunk named `new-world-preview-header` containing the deterministic header fields plus `mode`, `map_name`, and site spacing stats

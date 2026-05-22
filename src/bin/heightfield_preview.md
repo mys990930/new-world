@@ -69,8 +69,8 @@
   is explicit:
 
 ```text
-screen_x = (x - z) * tile_w / 2
-screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+screen_x = (x + z) * tile_w / 2
+screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
 - `vertical_px_per_block`은 preview 렌더링 전용 값이지만, XZ density에 맞춰 같은 Y 값을 다시 낮추는

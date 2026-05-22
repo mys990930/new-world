@@ -667,10 +667,13 @@ fn render_preview(
         let chunk_offset_z = u32::try_from(patch.coord.2 - min_chunk_z)
             .map_err(|_| cli_error("preview chunk z offset overflowed"))?;
         let pixel_origin_x = chunk_offset_x * pixels_per_chunk;
-        let pixel_origin_z = chunk_offset_z * pixels_per_chunk;
+        let pixel_origin_z = layout
+            .map_height
+            .saturating_sub((chunk_offset_z + 1) * pixels_per_chunk);
 
         for local_z in 0..pixels_per_chunk {
-            let row_offset = (pixel_origin_z + local_z) * layout.map_width;
+            let screen_z = pixels_per_chunk.saturating_sub(1).saturating_sub(local_z);
+            let row_offset = (pixel_origin_z + screen_z) * layout.map_width;
             for local_x in 0..pixels_per_chunk {
                 let source_index = (local_z * pixels_per_chunk + local_x) as usize;
                 let target_index = (row_offset + pixel_origin_x + local_x) as usize;
@@ -772,7 +775,10 @@ fn draw_peak_overlay(
 
     for candidate in peak_candidates {
         let pixel_x = ((candidate.center_x - min_world_x) / blocks_per_pixel).round() as i32;
-        let pixel_z = ((candidate.center_z - min_world_z) / blocks_per_pixel).round() as i32;
+        let pixel_z = (layout.map_height as f32
+            - 1.0
+            - (candidate.center_z - min_world_z) / blocks_per_pixel)
+            .round() as i32;
         draw_peak_marker(
             image,
             layout.map_offset_x as i32 + pixel_x,
@@ -941,7 +947,7 @@ fn draw_coordinate_frame(
     draw_hline(image, map_min_x, map_max_x, top_axis_y, axis_color);
     draw_vline(image, left_axis_x, map_min_z, map_max_z, axis_color);
     draw_arrow_right(image, map_max_x.saturating_sub(14), top_axis_y, axis_color);
-    draw_arrow_down(image, left_axis_x, map_max_z.saturating_sub(14), axis_color);
+    draw_arrow_up(image, left_axis_x, map_min_z.saturating_add(14), axis_color);
     draw_text(image, 6, 6, "X", label_color);
     draw_text(image, 6, top_axis_y.saturating_add(6), "Z", label_color);
 
@@ -975,7 +981,7 @@ fn draw_coordinate_frame(
     }
 
     for chunk_z in window.min_chunk_z()..=window.max_chunk_z() {
-        let chunk_index = u32::try_from(chunk_z - window.min_chunk_z()).unwrap_or(0);
+        let chunk_index = u32::try_from(window.max_chunk_z() - chunk_z).unwrap_or(0);
         let chunk_start_z = layout.map_offset_z + chunk_index * pixels_per_chunk;
         let chunk_center_z = chunk_start_z + pixels_per_chunk / 2;
         let is_center = chunk_z == window.center_z;
@@ -1006,7 +1012,7 @@ fn draw_coordinate_frame(
     let center_chunk_offset_x =
         u32::try_from(window.center_x - window.min_chunk_x()).unwrap_or(0) * pixels_per_chunk;
     let center_chunk_offset_z =
-        u32::try_from(window.center_z - window.min_chunk_z()).unwrap_or(0) * pixels_per_chunk;
+        u32::try_from(window.max_chunk_z() - window.center_z).unwrap_or(0) * pixels_per_chunk;
     let center_rect_x = layout.map_offset_x + center_chunk_offset_x;
     let center_rect_z = layout.map_offset_z + center_chunk_offset_z;
     draw_rect_outline(
@@ -1142,15 +1148,15 @@ fn draw_arrow_right(image: &mut RgbImage, tip_x: u32, y: u32, color: [u8; 3]) {
     }
 }
 
-fn draw_arrow_down(image: &mut RgbImage, x: u32, tip_y: u32, color: [u8; 3]) {
-    draw_vline(image, x, tip_y.saturating_sub(10), tip_y, color);
-    if x > 0 {
-        image.put_pixel(x.saturating_sub(2), tip_y.saturating_sub(2), Rgb(color));
-        image.put_pixel(x.saturating_sub(1), tip_y.saturating_sub(1), Rgb(color));
+fn draw_arrow_up(image: &mut RgbImage, x: u32, tip_y: u32, color: [u8; 3]) {
+    draw_vline(image, x, tip_y, tip_y.saturating_add(10), color);
+    if x > 0 && tip_y + 2 < image.height() {
+        image.put_pixel(x.saturating_sub(2), tip_y + 2, Rgb(color));
+        image.put_pixel(x.saturating_sub(1), tip_y + 1, Rgb(color));
     }
-    if x + 2 < image.width() {
-        image.put_pixel(x + 2, tip_y.saturating_sub(2), Rgb(color));
-        image.put_pixel(x + 1, tip_y.saturating_sub(1), Rgb(color));
+    if x + 2 < image.width() && tip_y + 2 < image.height() {
+        image.put_pixel(x + 2, tip_y + 2, Rgb(color));
+        image.put_pixel(x + 1, tip_y + 1, Rgb(color));
     }
 }
 

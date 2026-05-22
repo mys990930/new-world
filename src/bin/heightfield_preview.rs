@@ -424,7 +424,7 @@ impl PreviewHeader {
             "boundary_overlay=cyan_boundary_cache_noisy_curves_draped_visible_surface".to_string(),
             "view=cpu_isometric_columns".to_string(),
             format!(
-                "projection=screen_x_(x-z)*tile_w/2_screen_y_(x+z)*tile_h/2-y*vertical_px_quarter_turns_{}",
+                "projection=screen_x_(x+z)*tile_w/2_screen_y_(x-z)*tile_h/2-y*vertical_px_quarter_turns_{}",
                 self.quarter_turns
             ),
             format!("vertical_px_per_block={:.4}", self.vertical_px_per_block),
@@ -1103,8 +1103,8 @@ impl IsoRenderPlan {
         let dz = z - center_z;
         let (rx, rz) = rotate_grid_delta(self.quarter_turns, dx, dz);
         Point2 {
-            x: (rx - rz) * self.tile_w_px * 0.5 + self.offset_x_px,
-            y: (rx + rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
+            x: (rx + rz) * self.tile_w_px * 0.5 + self.offset_x_px,
+            y: (rx - rz) * self.tile_h_px * 0.5 - y_blocks * self.vertical_px_per_block
                 + self.offset_y_px,
         }
     }
@@ -1166,8 +1166,8 @@ fn rotate_grid_delta(quarter_turns: u8, dx: f32, dz: f32) -> (f32, f32) {
 fn iso_cardinal_screen_delta(quarter_turns: u8, dx: f32, dz: f32) -> Point2 {
     let (rx, rz) = rotate_grid_delta(quarter_turns, dx, dz);
     Point2 {
-        x: (rx - rz) * 0.5,
-        y: (rx + rz) * 0.5,
+        x: (rx + rz) * 0.5,
+        y: (rx - rz) * 0.5,
     }
 }
 
@@ -3498,42 +3498,42 @@ mod tests {
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(1, 0), (0, 1)]
+            vec![(1, 0), (0, -1)]
         );
         assert_eq!(
             visible_side_directions(1)
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(-1, 0), (0, 1)]
+            vec![(1, 0), (0, 1)]
         );
         assert_eq!(
             visible_side_directions(2)
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(-1, 0), (0, -1)]
+            vec![(-1, 0), (0, 1)]
         );
         assert_eq!(
             visible_side_directions(3)
                 .iter()
                 .map(|side| (side.dx, side.dz))
                 .collect::<Vec<_>>(),
-            vec![(1, 0), (0, -1)]
+            vec![(-1, 0), (0, -1)]
         );
     }
 
     #[test]
     fn projected_compass_follows_quarter_turns() {
-        let n0 = iso_cardinal_screen_delta(0, 0.0, -1.0);
+        let n0 = iso_cardinal_screen_delta(0, 0.0, 1.0);
         let e0 = iso_cardinal_screen_delta(0, 1.0, 0.0);
         assert!(n0.x > 0.0 && n0.y < 0.0);
         assert!(e0.x > 0.0 && e0.y > 0.0);
 
-        let n1 = iso_cardinal_screen_delta(1, 0.0, -1.0);
+        let n1 = iso_cardinal_screen_delta(1, 0.0, 1.0);
         let e1 = iso_cardinal_screen_delta(1, 1.0, 0.0);
-        assert!(n1.x < 0.0 && n1.y < 0.0);
-        assert!(e1.x > 0.0 && e1.y < 0.0);
+        assert!(n1.x > 0.0 && n1.y > 0.0);
+        assert!(e1.x < 0.0 && e1.y > 0.0);
     }
 
     #[test]

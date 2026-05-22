@@ -1419,7 +1419,8 @@ fn render_channel(
         .for_each(|(index, pixel)| {
             let x = index % width;
             let y = index / width;
-            let color = color_for_channel(tile, channel, x, y, width, height);
+            let source_y = height.saturating_sub(1).saturating_sub(y);
+            let color = color_for_channel(tile, channel, x, source_y, width, height);
             pixel.copy_from_slice(&color);
         });
 
@@ -1660,7 +1661,7 @@ fn draw_tile_boundary_overlay(image: &mut RgbImage, window: PreviewWindow, grid:
     let last_z = (window.max_z() / grid.spacing_blocks).floor() as i32;
     for gz in first_z..=last_z {
         let world_z = gz as f32 * grid.spacing_blocks;
-        let py = ((world_z - window.min_z()) / window.world_span_z * image.height() as f32).round();
+        let py = ((window.max_z() - world_z) / window.world_span_z * image.height() as f32).round();
         if !(0.0..image.height() as f32).contains(&py) {
             continue;
         }
@@ -1912,10 +1913,18 @@ fn draw_water_boundary_overlay(
         for x in 0..width {
             let water = tile.samples[y * width + x].is_standing_water();
             if x + 1 < width && water != tile.samples[y * width + x + 1].is_standing_water() {
-                draw_water_boundary_vertical(image, x as i32, y as i32);
+                draw_water_boundary_vertical(
+                    image,
+                    x as i32,
+                    height.saturating_sub(1).saturating_sub(y) as i32,
+                );
             }
             if y + 1 < height && water != tile.samples[(y + 1) * width + x].is_standing_water() {
-                draw_water_boundary_horizontal(image, x as i32, y as i32);
+                draw_water_boundary_horizontal(
+                    image,
+                    x as i32,
+                    height.saturating_sub(2).saturating_sub(y) as i32,
+                );
             }
         }
     }
@@ -2049,7 +2058,7 @@ fn world_to_pixel(
     height: u32,
 ) -> (i32, i32) {
     let x = ((point.x - window.min_x()) / window.world_span_x * width as f32).round() as i32;
-    let y = ((point.z - window.min_z()) / window.world_span_z * height as f32).round() as i32;
+    let y = ((window.max_z() - point.z) / window.world_span_z * height as f32).round() as i32;
     (x, y)
 }
 

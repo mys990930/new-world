@@ -255,7 +255,9 @@ impl PreviewWindow {
             + (point.x.max(0) as u64 * viewport.size as u64 / self.columns_x.max(1) as u64)
                 .min(viewport.size.saturating_sub(1) as u64) as i32;
         let y = viewport.y as i32
-            + (point.z.max(0) as u64 * viewport.size as u64 / self.columns_z.max(1) as u64)
+            + ((self.columns_z.saturating_sub(1) as i32 - point.z.max(0)).max(0) as u64
+                * viewport.size as u64
+                / self.columns_z.max(1) as u64)
                 .min(viewport.size.saturating_sub(1) as u64) as i32;
         (x, y)
     }
@@ -711,6 +713,7 @@ fn render_pixelized_area(
                     .min(area.width.saturating_sub(1) as u64) as u32;
                 let sz = (local_y as u64 * area.height as u64 / viewport.size as u64)
                     .min(area.height.saturating_sub(1) as u64) as u32;
+                let sz = area.height.saturating_sub(1).saturating_sub(sz);
                 let source_index = sz as usize * area.width as usize + sx as usize;
                 area.columns
                     .get(source_index)
@@ -1438,8 +1441,8 @@ mod tests {
             window.snap_world_point_to_pixelize_lattice(end),
         );
 
-        assert_eq!(start, (16, 16));
-        assert_eq!(end, (47, 16));
+        assert_eq!(start, (16, 15));
+        assert_eq!(end, (47, 15));
         assert!(
             window
                 .clip_noisy_world_segment_to_chunk(
@@ -1461,8 +1464,8 @@ mod tests {
 
         let segments = clipped_noisy_polyline_orthogonal_pixel_segments(window, viewport, &points);
 
-        assert_eq!(segments.first().copied(), Some(((16, 0), (17, 0))));
-        assert_eq!(segments.last().copied(), Some(((24, 7), (24, 8))));
+        assert_eq!(segments.first().copied(), Some(((16, 31), (17, 31))));
+        assert_eq!(segments.last().copied(), Some(((24, 24), (24, 23))));
         assert!(segments.len() > 2);
         assert_no_diagonal_pixel_segments(&segments);
         assert!(segments.iter().any(|(start, end)| start.0 != end.0));
@@ -1483,7 +1486,10 @@ mod tests {
 
         assert_eq!(start, LatticePoint { x: 1, z: 2 });
         assert_eq!(end, LatticePoint { x: 5, z: 2 });
-        assert_eq!(pixels, vec![(2, 4), (4, 4), (6, 4), (8, 4), (10, 4)]);
+        assert_eq!(
+            pixels,
+            vec![(2, 186), (4, 186), (6, 186), (8, 186), (10, 186)]
+        );
     }
 
     #[test]
@@ -1499,8 +1505,8 @@ mod tests {
 
         let segments = clipped_noisy_polyline_orthogonal_pixel_segments(window, viewport, &points);
 
-        assert_eq!(segments.first().copied(), Some(((16, 8), (17, 8))));
-        assert_eq!(segments.last().copied(), Some(((46, 16), (47, 16))));
+        assert_eq!(segments.first().copied(), Some(((16, 23), (17, 23))));
+        assert_eq!(segments.last().copied(), Some(((46, 15), (47, 15))));
         assert_no_diagonal_pixel_segments(&segments);
         assert!(segments.iter().all(|(start, end)| start != end));
     }

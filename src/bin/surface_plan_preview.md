@@ -62,8 +62,8 @@
 - The projection mirrors `heightfield_preview`:
 
 ```text
-screen_x = (x - z) * tile_w / 2
-screen_y = (x + z) * tile_h / 2 - y * vertical_px_per_block
+screen_x = (x + z) * tile_w / 2
+screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 ```
 
 - Column draw order is derived from the projected quarter-view depth, so changing

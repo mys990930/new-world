@@ -25,7 +25,7 @@
 
 - a top-down PNG under `target/meso-preview/` by default
   - the image includes chunk grid lines plus a top/left coordinate frame with chunk `x/z` labels and center-chunk highlight
-  - the image includes the shared compass overlay: top=N, right=E, bottom=S, left=W
+  - the image includes the shared compass overlay: top=N (`world +Z`), right=E (`world +X`), bottom=S, left=W
 - stdout diagnostics for:
   - center chunk region identity
   - original vs filtered meso guide sample

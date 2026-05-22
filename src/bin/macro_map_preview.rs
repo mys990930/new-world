@@ -159,7 +159,7 @@ impl PreviewWindow {
     }
 
     fn sample_world_z(self, pixel_z: u32) -> f32 {
-        self.min_z() + (pixel_z as f32 + 0.5) * self.world_span_z / self.height as f32
+        self.max_z() - (pixel_z as f32 + 0.5) * self.world_span_z / self.height as f32
     }
 
     fn world_segment_to_pixels(
@@ -202,7 +202,7 @@ impl PreviewWindow {
         let x = ((point.x - self.min_x()) / self.world_span_x * self.width as f32 - 0.5)
             .round()
             .clamp(0.0, self.width.saturating_sub(1) as f32) as i32;
-        let y = ((point.z - self.min_z()) / self.world_span_z * self.height as f32 - 0.5)
+        let y = ((self.max_z() - point.z) / self.world_span_z * self.height as f32 - 0.5)
             .round()
             .clamp(0.0, self.height.saturating_sub(1) as f32) as i32;
         (x, y)

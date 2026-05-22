@@ -6,7 +6,8 @@
 - Summarize what each binary does, which parameters it accepts, and which command shape is recommended right now.
 - Keep this index focused on active tools only. Removed legacy atlas / realization / terrain-search preview binaries are intentionally not listed here.
 - Active preview images include a small compass overlay. Topdown previews use macro-field/world
-  orientation: image top is north (N), right is east (E), bottom is south (S), and left is west (W).
+  orientation: image top is north (N, world +Z), right is east (E, world +X), bottom is south (S),
+  and left is west (W).
   Quarter-view previews may project the compass through their current camera/quarter transform; see
   the binary-specific docs.
 - Preview binaries may share bin-local helpers under `src/bin/common` for drawing primitives,
@@ -456,5 +457,6 @@ cargo run --bin world_create -- 42 --center-x 0 --center-z 0 --radius 16 --outpu
 - Use `heightfield_preview` to inspect contour-guided heightfield columns before final voxel fill.
 - Use `chunk_preview --stage prototype` or `--stage hydrology` when you need the older chunk-oriented diagnostic paths.
 - Use `chunk_topdown_preview --world-dir ...` when you already have a valid created-world dump and need exact realized block-column inspection.
-- Read topdown preview compasses as common world orientation markers: up=N and right=E. For
+- Read topdown preview compasses as common world orientation markers: up=N (world +Z) and
+  right=E (world +X). For
   quarter-view tools, read the binary docs because the compass may be projected through the view.

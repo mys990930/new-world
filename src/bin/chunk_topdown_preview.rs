@@ -562,8 +562,9 @@ fn render_topdown_preview(
             let base = color_for_cell(cell, registry, surface_range);
             let pixel_origin_x =
                 u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
+            let screen_z = grid_height.saturating_sub(1).saturating_sub(z);
             let pixel_origin_y =
-                u32::try_from(z).expect("grid z index should fit in u32") * pixels_per_block;
+                u32::try_from(screen_z).expect("grid z index should fit in u32") * pixels_per_block;
 
             for local_y in 0..pixels_per_block {
                 for local_x in 0..pixels_per_block {
@@ -765,8 +766,9 @@ fn render_stage_topdown_preview(
             let base = color_for_stage_cell(cell, surface_range);
             let pixel_origin_x =
                 u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
+            let screen_z = grid_height.saturating_sub(1).saturating_sub(z);
             let pixel_origin_y =
-                u32::try_from(z).expect("grid z index should fit in u32") * pixels_per_block;
+                u32::try_from(screen_z).expect("grid z index should fit in u32") * pixels_per_block;
 
             for local_y in 0..pixels_per_block {
                 for local_x in 0..pixels_per_block {
@@ -966,8 +968,9 @@ fn render_material_topdown_preview(
             let base = color_for_material_policy(cell.policy);
             let pixel_origin_x =
                 u32::try_from(x).expect("grid x index should fit in u32") * pixels_per_block;
+            let screen_z = grid_height.saturating_sub(1).saturating_sub(z);
             let pixel_origin_y =
-                u32::try_from(z).expect("grid z index should fit in u32") * pixels_per_block;
+                u32::try_from(screen_z).expect("grid z index should fit in u32") * pixels_per_block;
 
             for local_y in 0..pixels_per_block {
                 for local_x in 0..pixels_per_block {

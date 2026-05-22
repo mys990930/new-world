@@ -18,7 +18,7 @@
 ## Outputs
 
 - a PNG image where each world block column becomes one colored top-down cell
-- a compass overlay using the shared preview orientation: image top=N, right=E, bottom=S, left=W
+- a compass overlay using the shared preview orientation: image top=N (`world +Z`), right=E (`world +X`), bottom=S, left=W
 - a stdout diagnostic summary for the same realized data and its chunk meshes
   - visible top-block counts
   - columns containing any `water`

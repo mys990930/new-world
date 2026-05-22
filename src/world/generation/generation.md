@@ -70,7 +70,8 @@ macro terrain identity는 graph와 field가 소유한다.
 아래 순서가 현재 graph-first generator의 표준 순서다. 각 단계는 같은 seed, generator version,
 area, stage input에 대해 deterministic해야 하며, 단계 직후 topdown preview binary로 검사할 수
 있어야 한다. preview output은 공통적으로 방향 compass overlay를 포함하며, macro field 기준으로
-topdown preview의 이미지 위쪽은 북(N), 오른쪽은 동(E), 아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
+topdown preview의 이미지 위쪽은 북(N, `world +Z`), 오른쪽은 동(E, `world +X`),
+아래쪽은 남(S), 왼쪽은 서(W)를 뜻한다.
 단, `heightfield_preview`처럼 quarter/isometric projection을 쓰는 preview는 현재 `--quarter-turns`
 투영 후 screen-space에서 N/E/S/W가 놓이는 방향을 표시해야 한다.
 
