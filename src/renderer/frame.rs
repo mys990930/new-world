@@ -1,4 +1,5 @@
 use bytemuck::cast_slice;
+use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use super::{
@@ -17,11 +18,53 @@ pub struct RenderCubeInstance {
     pub material_kind: RenderMaterialKind,
 }
 
+pub const MAX_TERRAIN_OCCLUSION_BLOCKS: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOcclusionBlock {
+    pub block: [i32; 3],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub(crate) struct TerrainOcclusionUniform {
+    pub params: [f32; 4],
+    pub blocks: [[i32; 4]; MAX_TERRAIN_OCCLUSION_BLOCKS],
+}
+
+impl TerrainOcclusionUniform {
+    pub(crate) const fn disabled() -> Self {
+        Self {
+            params: [0.0, 0.0, 0.0, 0.0],
+            blocks: [[0; 4]; MAX_TERRAIN_OCCLUSION_BLOCKS],
+        }
+    }
+
+    pub(crate) fn cutout(blocks: &[RenderOcclusionBlock]) -> Self {
+        Self::from_blocks(blocks, 1.0)
+    }
+
+    pub(crate) fn fade(blocks: &[RenderOcclusionBlock]) -> Self {
+        Self::from_blocks(blocks, 2.0)
+    }
+
+    fn from_blocks(blocks: &[RenderOcclusionBlock], mode: f32) -> Self {
+        let mut uniform = Self::disabled();
+        let count = blocks.len().min(MAX_TERRAIN_OCCLUSION_BLOCKS);
+        uniform.params = [count as f32, 0.34, mode, 0.0];
+        for (index, block) in blocks.iter().take(count).enumerate() {
+            uniform.blocks[index] = [block.block[0], block.block[1], block.block[2], 0];
+        }
+        uniform
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderFrameInput<'a> {
     pub camera: &'a RenderCameraState,
     pub draw_scene: bool,
     pub visible_chunks: &'a [ChunkCoord],
+    pub occlusion_blocks: &'a [RenderOcclusionBlock],
     pub cube_instances: &'a [RenderCubeInstance],
     pub ui_sprites: &'a [RenderUiSprite],
     pub clear_color_override: Option<[f32; 4]>,
@@ -164,6 +207,8 @@ impl Renderer {
             self.environment.current(),
             &self.config.quality,
         );
+        let occlusion_cutout_uniform = TerrainOcclusionUniform::cutout(frame.occlusion_blocks);
+        let occlusion_fade_uniform = TerrainOcclusionUniform::fade(frame.occlusion_blocks);
         backend
             .queue
             .write_buffer(&backend.camera_buffer, 0, cast_slice(&[camera_uniform]));
@@ -171,6 +216,16 @@ impl Renderer {
             &backend.environment_buffer,
             0,
             cast_slice(&[environment_uniform]),
+        );
+        backend.queue.write_buffer(
+            &backend.occlusion_cutout_buffer,
+            0,
+            cast_slice(&[occlusion_cutout_uniform]),
+        );
+        backend.queue.write_buffer(
+            &backend.occlusion_fade_buffer,
+            0,
+            cast_slice(&[occlusion_fade_uniform]),
         );
         backend.queue.write_buffer(
             &backend.shadow_uniform_buffer,
@@ -377,7 +432,11 @@ impl Renderer {
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
 
                 render_pass.set_bind_group(0, &backend.camera_bind_group, &[]);
-                render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
+                if frame.occlusion_blocks.is_empty() {
+                    render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
+                } else {
+                    render_pass.set_bind_group(1, &backend.environment_cutout_bind_group, &[]);
+                }
                 render_pass.set_bind_group(2, &backend.block_textures.bind_group, &[]);
                 render_pass.set_bind_group(3, &backend.shadow_sampling_bind_group, &[]);
                 render_pass.set_pipeline(&backend.terrain_pipeline);
@@ -409,6 +468,31 @@ impl Renderer {
                     stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
 
+                if !frame.occlusion_blocks.is_empty() {
+                    render_pass.set_bind_group(1, &backend.environment_fade_bind_group, &[]);
+                    render_pass.set_pipeline(&backend.terrain_fade_pipeline);
+                    for coord in frame.visible_chunks {
+                        if !occlusion_blocks_include_chunk(frame.occlusion_blocks, *coord) {
+                            continue;
+                        }
+                        let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
+                            continue;
+                        };
+                        let Some(buffers) = chunk_mesh.opaque_buffers.as_ref() else {
+                            continue;
+                        };
+
+                        render_pass.set_vertex_buffer(0, buffers.vertex_buffer.slice(..));
+                        render_pass.set_index_buffer(
+                            buffers.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        render_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
+                        stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                    }
+                }
+
+                render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
                 render_pass.set_pipeline(&backend.water_pipeline);
                 for coord in frame.visible_chunks {
                     let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
@@ -735,6 +819,16 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
     } else {
         scale3(vector, length_sq.sqrt().recip())
     }
+}
+
+fn occlusion_blocks_include_chunk(blocks: &[RenderOcclusionBlock], coord: ChunkCoord) -> bool {
+    const CHUNK_EDGE: i32 = 32;
+
+    blocks.iter().any(|block| {
+        block.block[0].div_euclid(CHUNK_EDGE) == coord.0
+            && block.block[1].div_euclid(CHUNK_EDGE) == coord.1
+            && block.block[2].div_euclid(CHUNK_EDGE) == coord.2
+    })
 }
 
 fn build_sun_shadow_uniform(
@@ -1305,13 +1399,25 @@ mod tests {
             cast_slice(&[default_environment_uniform()]),
         );
         let environment_bind_group_layout = create_environment_bind_group_layout(&device);
+        let terrain_occlusion_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen_terrain_occlusion_buffer"),
+                contents: cast_slice(&[TerrainOcclusionUniform::disabled()]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let environment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("offscreen_environment_bind_group"),
             layout: &environment_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: environment_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: environment_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: terrain_occlusion_buffer.as_entire_binding(),
+                },
+            ],
         });
         let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("offscreen_shadow_uniform_buffer"),

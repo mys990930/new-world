@@ -2,6 +2,7 @@ use super::{
     AppMode, GameApp,
     bridge::AppRenderFrameData,
     bridge_ui::{build_ingame_ui_sprites, build_world_select_ui_sprites},
+    occlusion::collect_player_occlusion_blocks,
     ui::build_world_select_layout,
 };
 #[cfg(test)]
@@ -15,8 +16,8 @@ use crate::ecs::{
 };
 use crate::renderer::{
     ChunkCoord as RenderChunkCoord, CpuMesh as RenderCpuMesh, MeshVertex as RenderMeshVertex,
-    RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderProjectionMode,
-    RenderUploadRequest, RenderViewBasis,
+    RenderCameraState, RenderCubeInstance, RenderMaterialKind, RenderOcclusionBlock,
+    RenderProjectionMode, RenderUploadRequest, RenderViewBasis,
 };
 use crate::world::{
     BlockId, BlockMaterialKind, ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh,
@@ -37,6 +38,7 @@ impl GameApp {
             AppMode::InGame => {
                 let inventory = self.ecs.local_player_inventory();
                 let player_transform = self.ecs.local_player_transform();
+                let player_body = self.ecs.local_player_body();
                 let player_visual = self.ecs.local_player_visual_state();
                 let local_environment = self.ecs.local_environment_status();
                 let mut cube_instances = player_visual
@@ -74,6 +76,17 @@ impl GameApp {
                         .into_iter()
                         .map(world_chunk_to_render)
                         .collect(),
+                    occlusion_blocks: collect_player_occlusion_blocks(
+                        &self.world,
+                        player_transform,
+                        player_body,
+                        &camera,
+                    )
+                    .blocks()
+                    .iter()
+                    .copied()
+                    .map(world_block_to_render_occlusion)
+                    .collect(),
                     cube_instances,
                     ui_sprites: build_ingame_ui_sprites(
                         self.ui.show_minimap_overlay,
@@ -109,6 +122,7 @@ impl GameApp {
                     camera,
                     draw_scene: false,
                     visible_chunks: Vec::new(),
+                    occlusion_blocks: Vec::new(),
                     cube_instances: Vec::new(),
                     ui_sprites: build_world_select_ui_sprites(
                         &layout,
@@ -428,6 +442,12 @@ fn block_face_texture_layers(
 
 fn world_chunk_to_render(coord: WorldChunkCoord) -> RenderChunkCoord {
     RenderChunkCoord(coord.0, coord.1, coord.2)
+}
+
+fn world_block_to_render_occlusion(coord: crate::world::WorldBlockCoord) -> RenderOcclusionBlock {
+    RenderOcclusionBlock {
+        block: [coord.0, coord.1, coord.2],
+    }
 }
 
 fn world_mesh_to_render(mesh: WorldCpuMesh) -> RenderCpuMesh {

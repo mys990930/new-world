@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use pollster::block_on;
+use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use super::{
@@ -274,16 +275,51 @@ pub(crate) fn default_environment_uniform() -> EnvironmentUniform {
 pub(crate) fn create_environment_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("renderer_environment_bind_group_layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    })
+}
+
+fn create_environment_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    environment_buffer: &wgpu::Buffer,
+    occlusion_buffer: &wgpu::Buffer,
+    label: &'static str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: environment_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: occlusion_buffer.as_entire_binding(),
+            },
+        ],
     })
 }
 
@@ -539,14 +575,54 @@ async fn create_backend(
         )]),
     );
     let environment_bind_group_layout = create_environment_bind_group_layout(&device);
-    let environment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("renderer_environment_bind_group"),
-        layout: &environment_bind_group_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: environment_buffer.as_entire_binding(),
-        }],
+    let occlusion_disabled_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("renderer_occlusion_disabled_buffer"),
+        contents: bytemuck::cast_slice(&[super::frame::TerrainOcclusionUniform::disabled()]),
+        usage: wgpu::BufferUsages::UNIFORM,
     });
+    let occlusion_cutout_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("renderer_occlusion_cutout_buffer"),
+        size: std::mem::size_of::<super::frame::TerrainOcclusionUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let occlusion_fade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("renderer_occlusion_fade_buffer"),
+        size: std::mem::size_of::<super::frame::TerrainOcclusionUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &occlusion_cutout_buffer,
+        0,
+        bytemuck::cast_slice(&[super::frame::TerrainOcclusionUniform::disabled()]),
+    );
+    queue.write_buffer(
+        &occlusion_fade_buffer,
+        0,
+        bytemuck::cast_slice(&[super::frame::TerrainOcclusionUniform::disabled()]),
+    );
+    let environment_bind_group = create_environment_bind_group(
+        &device,
+        &environment_bind_group_layout,
+        &environment_buffer,
+        &occlusion_disabled_buffer,
+        "renderer_environment_bind_group",
+    );
+    let environment_cutout_bind_group = create_environment_bind_group(
+        &device,
+        &environment_bind_group_layout,
+        &environment_buffer,
+        &occlusion_cutout_buffer,
+        "renderer_environment_cutout_bind_group",
+    );
+    let environment_fade_bind_group = create_environment_bind_group(
+        &device,
+        &environment_bind_group_layout,
+        &environment_buffer,
+        &occlusion_fade_buffer,
+        "renderer_environment_fade_bind_group",
+    );
     let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("renderer_sun_shadow_uniform_buffer"),
         size: std::mem::size_of::<SunShadowUniform>() as u64,
@@ -678,6 +754,17 @@ async fn create_backend(
         Some(wgpu::BlendState::ALPHA_BLENDING),
         false,
     );
+    let terrain_fade_pipeline = create_render_pipeline(
+        &device,
+        "renderer_terrain_fade_pipeline",
+        &main_pipeline_layout,
+        &terrain_shader,
+        surface_config.format,
+        Some(depth_format),
+        wgpu::PrimitiveTopology::TriangleList,
+        Some(wgpu::BlendState::ALPHA_BLENDING),
+        false,
+    );
     let dynamic_cube_pipeline = create_render_pipeline(
         &device,
         "renderer_dynamic_cube_pipeline",
@@ -785,6 +872,10 @@ async fn create_backend(
         camera_bind_group,
         environment_buffer,
         environment_bind_group,
+        environment_cutout_bind_group,
+        environment_fade_bind_group,
+        occlusion_cutout_buffer,
+        occlusion_fade_buffer,
         shadow_uniform_buffer,
         shadow_pass_bind_group,
         shadow_sampling_bind_group,
@@ -798,6 +889,7 @@ async fn create_backend(
         ui_texture,
         sun_overlay_pipeline,
         terrain_pipeline,
+        terrain_fade_pipeline,
         water_pipeline,
         dynamic_cube_pipeline,
         shadow_depth_pipeline,

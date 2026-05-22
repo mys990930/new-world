@@ -7,6 +7,7 @@ mod config;
 mod fixed;
 mod frame;
 mod minimap;
+mod occlusion;
 mod runner;
 mod state;
 mod ui;

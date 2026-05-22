@@ -16,6 +16,7 @@
 - top-level create-world / created-world selection screen ownership
 - top-level minimap cache ownership and jobs-based refresh policy
 - top-level chunk unload application ownership
+- player-visibility terrain occlusion target collection for render bridging
 - top-level shutdown handling
 
 ### Non-Responsibilities
@@ -90,6 +91,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - bridge_scene.rs: scene-frame and mesh-upload render translation
 - bridge_ui.rs: HUD/menu/minimap sprite translation
 - minimap.rs: app-owned minimap cache, chunk-column rebuild scheduling state, viewport composition
+- occlusion.rs: bounded player-to-camera solid block collection for renderer fade targets
 - ui.rs: app-mode and lightweight overlay state
 - shutdown.rs: future teardown / flush
 
@@ -104,6 +106,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - app now also owns the first fixed-tick slice: it accumulates frame time, advances ECS fixed state, calls the simulation time subsystem, applies world-owned calendar/climate/weather updates, and refreshes the renderer environment
 - app now also owns steady-state chunk unload application after `ChunkUnloaded` job results are drained because it is the layer that can coordinate `world.remove_chunk(...)`, renderer mesh removal, minimap cache invalidation, and stale-result acceptance in one place
 - the current minimap path is app-owned cached state: chunk load/generate results trigger background minimap-column rebuild jobs, and render bridging only composes the current player-centered viewport from cached column data
+- app now collects a small render-only list of loaded solid blocks between the local player and camera so the renderer can fade terrain that covers the avatar without mutating world data or remeshing chunks
 - the current world-aware player slice keeps collision against `WorldCore` outside the pure ECS schedules so world source-of-truth ownership stays in `world`
 - the current build interaction slice applies ECS `PlaceBlock` commands in app by reading ECS selection/inventory state, calling `WorldCore::apply_edit(...)`, consuming one selected block stack item, and invalidating affected chunk meshes/minimap columns
 - the current tool interaction slice applies ECS `PrimaryAction` commands in app by asking ECS for transient damage/break outcomes, calling `WorldCore::apply_edit(... AIR)`, spawning scattered ECS block drops, and invalidating affected chunk meshes/minimap columns

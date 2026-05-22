@@ -11,12 +11,12 @@
 - Create `wgpu::Instance`, `Surface`, `Adapter`, `Device`, and `Queue`
 - Create and recreate the main depth texture on resize
 - Create the shadow-map texture and comparison sampler
-- Create the camera, environment, and sun-shadow uniform buffers and bind groups
+- Create the camera, environment, terrain occlusion, and sun-shadow uniform buffers and bind groups
 - Create the block-texture bind group layout and GPU texture-array resources
 - Create the screen-space UI sprite pipeline and atlas bind group
 - Configure and reconfigure the surface
 - Bridge renderer bootstrap time and post-`resumed()` live attach time
-- Build the sun overlay, shadow depth, opaque terrain, translucent water, dynamic cube, UI sprite, and debug edge pipelines
+- Build the sun overlay, shadow depth, opaque terrain, terrain fade, translucent water, dynamic cube, UI sprite, and debug edge pipelines
 
 ## Non-Responsibilities
 
@@ -44,6 +44,7 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 - A zero-sized surface is not configured
 - Real surface configure/present only happens when a live backend exists
 - Terrain and dynamic passes share the same binding contract so the frame encoder can switch pipelines without rebinding camera/environment/texture/shadow ownership data
+- Terrain occlusion buffers are renderer-owned uniforms selected by bind group; app only provides render-ready block coordinates
 
 ## Related Modules
 
@@ -53,7 +54,7 @@ Renderer::resize(width: u32, height: u32) -> Result<(), RenderSurfaceError>
 
 ## Notes
 
-- The backend now creates the sun overlay pipeline, shadow depth pipeline, opaque terrain pipeline, translucent water pipeline, dynamic cube pipeline, UI sprite pipeline, and debug edge pipeline during initialization.
+- The backend now creates the sun overlay pipeline, shadow depth pipeline, opaque terrain pipeline, terrain fade pipeline, translucent water pipeline, dynamic cube pipeline, UI sprite pipeline, and debug edge pipeline during initialization.
 - Shadow maps currently use a single `Depth32Float` texture plus comparison sampler.
 - Medium quality uses a smaller hard-sun map than high quality.
 - The environment uniform test helper now follows the current default environment preset instead of pinning a separate hardcoded baseline.

@@ -17,6 +17,11 @@ struct EnvironmentUniform {
     quality_flags: vec4<u32>,
 };
 
+struct TerrainOcclusionUniform {
+    params: vec4<f32>,
+    blocks: array<vec4<i32>, 64>,
+};
+
 struct SunShadowUniform {
     light_view_projection: mat4x4<f32>,
     sun_direction_shadow_strength: vec4<f32>,
@@ -38,6 +43,8 @@ const MATERIAL_EMISSIVE: u32 = 7u;
 var<uniform> camera: CameraUniform;
 @group(1) @binding(0)
 var<uniform> environment: EnvironmentUniform;
+@group(1) @binding(1)
+var<uniform> terrain_occlusion: TerrainOcclusionUniform;
 @group(2) @binding(0)
 var block_textures: texture_2d_array<f32>;
 @group(2) @binding(1)
@@ -315,8 +322,28 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
     return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.28));
 }
 
+fn terrain_occlusion_block_coord(world_position: vec3<f32>, normal: vec3<f32>) -> vec3<i32> {
+    let inward_position = world_position - normalize(normal) * 0.002;
+    return vec3<i32>(floor(inward_position));
+}
+
+fn is_terrain_occlusion_block(coord: vec3<i32>) -> bool {
+    let count = min(u32(terrain_occlusion.params.x), 64u);
+    for (var index = 0u; index < 64u; index = index + 1u) {
+        if index >= count {
+            break;
+        }
+        let block = terrain_occlusion.blocks[index].xyz;
+        if all(block == coord) {
+            return true;
+        }
+    }
+    return false;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let normal = normalize(input.normal);
     let sampled = textureSample(
         block_textures,
         block_sampler,
@@ -333,8 +360,20 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if alpha <= 0.001 {
         discard;
     }
+    let occlusion_mode = u32(terrain_occlusion.params.z);
+    let occluding = is_terrain_occlusion_block(
+        terrain_occlusion_block_coord(input.world_position, normal)
+    );
+    if occlusion_mode == 1u && occluding {
+        discard;
+    }
+    if occlusion_mode == 2u {
+        if !occluding {
+            discard;
+        }
+        alpha = min(alpha, terrain_occlusion.params.y);
+    }
 
-    let normal = normalize(input.normal);
     let to_light = sun_direction();
     let to_eye = normalize(camera.eye_position.xyz - input.world_position);
     let lambert = max(dot(normal, to_light), 0.0);

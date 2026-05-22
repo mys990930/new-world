@@ -20,7 +20,10 @@ pub use config::{
     RenderEnvironment, RenderQualityConfig, RenderQualityTier, ShadowQuality, SurfaceFormatPolicy,
 };
 #[allow(unused_imports)]
-pub use frame::{RenderCubeInstance, RenderError, RenderFrameInput, RenderStats};
+pub use frame::{
+    MAX_TERRAIN_OCCLUSION_BLOCKS, RenderCubeInstance, RenderError, RenderFrameInput,
+    RenderOcclusionBlock, RenderStats,
+};
 #[allow(unused_imports)]
 pub use offscreen::{
     OffscreenRenderError, OffscreenRenderOutput, OffscreenRenderRequest, render_offscreen,

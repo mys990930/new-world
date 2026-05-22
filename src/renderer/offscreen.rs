@@ -187,13 +187,24 @@ pub fn render_offscreen(
         mapped_at_creation: false,
     });
     let environment_bind_group_layout = create_environment_bind_group_layout(&device);
+    let terrain_occlusion_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("offscreen_terrain_occlusion_buffer"),
+        contents: cast_slice(&[super::frame::TerrainOcclusionUniform::disabled()]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
     let environment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("offscreen_environment_bind_group"),
         layout: &environment_bind_group_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: environment_buffer.as_entire_binding(),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: environment_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: terrain_occlusion_buffer.as_entire_binding(),
+            },
+        ],
     });
 
     let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {

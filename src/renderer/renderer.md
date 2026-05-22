@@ -19,6 +19,7 @@
 - CPU render DTO -> GPU draw command conversion
 - screen-space UI sprite draw submission
 - alpha-blended gameplay preview cube submission
+- player-occluding terrain block fade submission and pass ordering
 - per-face dynamic-cube texture layer submission
 - Submit / present / recoverable render error propagation
 - Offscreen terrain preview rendering for debug binaries
@@ -48,6 +49,7 @@
 - `CameraGpuState`
 - `RenderTextureArraySource`
 - `RenderCubeInstance`
+- `RenderOcclusionBlock`
 - future oriented dynamic voxel-part DTOs, if axis-aligned cube instances are not expressive enough
 - `RenderUiSprite`
 - `RenderUiTextureSource`
@@ -67,7 +69,7 @@
   - read world-owned chunk weather `temperature`, `moisture`, `cloud`, `rain`, and derived weather kind from app-provided render DTOs
   - combine weather modifiers with day/night lighting rather than deriving weather independently in shaders
 - frame render
-  - accept `RenderFrameInput`, update scene uniforms when needed, draw the scene passes, draw the UI overlay pass, and present
+  - accept `RenderFrameInput`, update scene and occlusion uniforms when needed, draw the scene passes, draw the UI overlay pass, and present
 - offscreen preview render
   - accept renderer-ready meshes and render them into a PNG-friendly RGBA image without a live surface
 
@@ -131,6 +133,7 @@ NOT:
 - Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
 - Highlight dynamic cubes sample a solid shader color rather than block texture alpha so selection/damage overlays remain stable when drawn close to terrain faces.
 - The dynamic cube color pipeline alpha-blends with depth testing but does not write scene depth; this keeps translucent helper overlays from masking their own faces or later translucent passes.
+- Terrain blocks flagged by the app as covering the local player are cut out of the opaque terrain pass and redrawn in a bounded alpha-blended terrain fade pass after dynamic cubes, preserving existing chunk meshes while revealing the avatar.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping only a very light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The app bridge now resolves the player-focus chunk weather scalar state, combines it with world calendar time-of-day, and writes the result into `RenderEnvironment`; the renderer still only sees presentation-ready values.
 - Live weather maps chunk scalar values as follows: `cloud` lowers direct light, softens ambient, and raises fog; `rain` lowers saturation/contrast and raises wetness/precipitation strength; `temperature` shifts color temperature; `moisture` feeds haze/fog and vegetation tint; `Storm` darkens light and cools the tint.

@@ -142,6 +142,7 @@ impl GameApp {
         let render_frame = self.bridge_app_to_render_frame();
         let bridge_ms = duration_ms(bridge_start.elapsed());
         let visible_chunks = render_frame.visible_chunks.len();
+        let occlusion_blocks = render_frame.occlusion_blocks.len();
         let cube_instances = render_frame.cube_instances.len();
         let ui_sprites = render_frame.ui_sprites.len();
         let draw_scene = render_frame.draw_scene;
@@ -151,6 +152,7 @@ impl GameApp {
             camera: &render_frame.camera,
             draw_scene: render_frame.draw_scene,
             visible_chunks: &render_frame.visible_chunks,
+            occlusion_blocks: &render_frame.occlusion_blocks,
             cube_instances: &render_frame.cube_instances,
             ui_sprites: &render_frame.ui_sprites,
             clear_color_override: render_frame.clear_color_override,
@@ -161,13 +163,14 @@ impl GameApp {
         let total = render_start.elapsed();
         if trace_frame_perf_logs_enabled() {
             println!(
-                "[perf] render frame: frame={} total_ms={:.2} bridge_ms={:.2} draw_ms={:.2} draw_scene={} visible_chunks={} cube_instances={} ui_sprites={} surface={}x{}",
+                "[perf] render frame: frame={} total_ms={:.2} bridge_ms={:.2} draw_ms={:.2} draw_scene={} visible_chunks={} occlusion_blocks={} cube_instances={} ui_sprites={} surface={}x{}",
                 self.timing.frame_index,
                 duration_ms(total),
                 bridge_ms,
                 draw_ms,
                 draw_scene,
                 visible_chunks,
+                occlusion_blocks,
                 cube_instances,
                 ui_sprites,
                 width,
