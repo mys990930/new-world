@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::height::{
-    boundary_roughness_offset, is_lake_surface, lake_boundary_lowering_factor, smoothstep01,
+    boundary_roughness_offset, is_lake_surface, lake_boundary_lowering_factor, lerp, smoothstep01,
 };
 use super::influence::RIDGE_FIELD_SOURCE_MIN_RIDGENESS;
 use super::river::{
@@ -152,13 +152,12 @@ impl<'a> MacroFieldRasterContext<'a> {
                     return None;
                 }
                 let flow_hint = flow_hint_from_plan(plan);
-                let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
-                let start_half_width_blocks = (plan.bed_width_blocks * 0.55)
-                    .max(6.0)
-                    .min(plan.broad_valley_width_blocks.max(8.0));
-                let end_half_width_blocks = (start_half_width_blocks
-                    + plan.broad_valley_width_blocks * (0.55 + flow_t * 0.95))
-                    .max(start_half_width_blocks * 2.0);
+                let (start_half_width_blocks, end_half_width_blocks) =
+                    estuary_fan_half_widths_blocks(
+                        plan.bed_width_blocks,
+                        plan.broad_valley_width_blocks,
+                        flow_hint,
+                    );
                 let length_blocks = estuary_fan_length_blocks(
                     plan.bed_width_blocks,
                     plan.broad_valley_width_blocks,
@@ -496,6 +495,27 @@ pub(super) struct EstuaryFanRef {
     pub(super) length_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+}
+
+pub(super) fn estuary_fan_half_widths_blocks(
+    bed_width_blocks: f32,
+    broad_valley_width_blocks: f32,
+    flow_hint: f32,
+) -> (f32, f32) {
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    let water_width = bed_width_blocks.max(1.0);
+    let valley_width = broad_valley_width_blocks.max(water_width).max(8.0);
+    let start_half_width_blocks = (water_width * lerp(0.62, 0.80, flow_t))
+        .max(8.0)
+        .min(valley_width * 0.90);
+    let water_spread = water_width * lerp(1.35, 3.60, flow_t);
+    let valley_spread = valley_width * lerp(0.35, 0.68, flow_t);
+    let min_spread = start_half_width_blocks * lerp(2.20, 3.35, flow_t);
+    let end_half_width_blocks = (start_half_width_blocks + water_spread + valley_spread)
+        .max(min_spread)
+        .max(start_half_width_blocks * 2.0);
+
+    (start_half_width_blocks, end_half_width_blocks)
 }
 
 pub(super) fn estuary_fan_length_blocks(
@@ -912,6 +932,29 @@ mod tests {
         assert!(
             downstream > headwater,
             "large downstream mouths should still spread farther than the low-Q minimum: headwater={headwater} downstream={downstream}"
+        );
+    }
+
+    #[test]
+    fn estuary_fan_width_tracks_terminal_water_width() {
+        let (small_start, small_end) = estuary_fan_half_widths_blocks(12.0, 36.0, 0.20);
+        let (large_start, large_end) = estuary_fan_half_widths_blocks(120.0, 280.0, 0.85);
+
+        assert!(
+            small_start * 2.0 >= 12.0,
+            "small mouth fan should begin at least as wide as the planned water width: {small_start}"
+        );
+        assert!(
+            large_start * 2.0 >= 120.0 * 1.20,
+            "large mouth fan lip should not pinch narrower than the existing downstream water: {large_start}"
+        );
+        assert!(
+            large_end > small_end * 6.0,
+            "fan spread should scale with terminal water width instead of using a nearly fixed mouth: small={small_end} large={large_end}"
+        );
+        assert!(
+            large_end > large_start * 3.0,
+            "large estuary fans should visibly spread downstream: start={large_start} end={large_end}"
         );
     }
 
