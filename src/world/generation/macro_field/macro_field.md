@@ -694,11 +694,13 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 hydrology downstream으로
   정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로 굽는다. terminal river
   stroke는 endpoint 직전에서 core/shoulder strength를 fade-out해 마지막 noisy segment의 rounded cap이
-  estuary bed나 valley에 남지 않게 하고, fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로
-  이어진다. 이 guide는 시작부에서 기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral
-  half-width가 넓어져 coast/ocean source 안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산
-  반폭은 terminal segment의 planned water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면
-  폭보다 좁게 pinching되지 않아야 한다. broad valley width는 보조 확산 context로만 더해진다. low-Q
+  estuary bed나 valley에 남지 않게 하고, fan은 terminal taper 구간보다 긴 upstream overlap을 둔 뒤
+  smooth inlet fade로 이어진다. 이 overlap 안에서도 planned mouth width를 보존해야 하며, terminal river
+  water가 먼저 좁아진 뒤 fan center만 다시 생기는 pinching은 회귀다. 이 guide는 시작부에서 기존
+  terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
+  안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산 반폭은 terminal segment의 planned
+  water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면 폭보다 좁게 pinching되지 않아야
+  한다. broad valley width는 보조 확산 context로만 더해진다. low-Q
   mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도 coast/ocean source 쪽으로 끊기지 않게
   한다. fan influence는 terminal endpoint 이후의 downstream 누적 거리(`estuary_along_blocks`)도 함께
   저장한다. height 합성은 fan 시작부를 terminal river core floor 그대로 복제하지 않고 terminal budget의
@@ -706,8 +708,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   따라서 river가 있는 마지막 edge 끝과 estuary 시작점 사이에 별도 급경사 단차가 생기면 회귀다. 최종 도달
   shelf target은 river carve/depth hint에서 계산한 raw fan depth를 강하게 얕은 스케일로 낮추고,
   terminal river floor guard는 최종 sea-floor가 과하게 깊어지는 것을 막도록 별도 낮은 비율만 반영한다.
-  height carve는 fan body strength와 `estuary_water_strength`가 모두 충분한 중심부에서만 깊게 작동하며,
-  weak fan edge/water edge는 shallow/no-carve로 남아야 한다. deterministic world-space
+  height carve는 fan body strength와 `estuary_water_strength`가 모두 충분한 중심부에서만 깊게 작동하되,
+  water-eligible fan body가 downstream으로 넓어질수록 실제 lowered core 폭도 함께 유지/확산되어야 한다.
+  weak fan edge/water edge는 shallow/no-carve로 남아야 한다. coast/ocean-owned source라도 source
+  macro elevation이 y=0 주변을 벗어나 높게 올라가 있으면 일반 above-sea terrain처럼 취급해 estuary
+  water가 높은 곳에서 시작하지 않게 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. 다만 fan 내부에는
   `estuary_water_strength`와 `estuary_water_depth_hint`를 별도로 굽고, heightfield는 이 별도 channel을

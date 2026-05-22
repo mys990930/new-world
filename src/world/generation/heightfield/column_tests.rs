@@ -1384,7 +1384,7 @@ fn estuary_fan_edge_stays_exposed_bed() {
 
 #[test]
 fn estuary_fan_center_restores_water_core() {
-    let mut mouth = sample_with_river(0.0, 0.0, 0.006, 0.72);
+    let mut mouth = sample_with_river(0.0, 0.0, -0.006, 0.72);
     mouth.river_core_strength = 0.0;
     mouth.river_shoulder_strength = 1.0;
     mouth.river_valley_strength = 1.0;
@@ -1615,8 +1615,8 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
 }
 
 #[test]
-fn above_sea_ocean_estuary_center_restores_water_core() {
-    let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
+fn near_sea_ocean_estuary_center_restores_water_core() {
+    let mut mouth = sample_with_river(0.0, 0.0, -0.002, 0.96);
     mouth.ocean_mask = 1.0;
     mouth.river_core_strength = 0.0;
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
@@ -1630,7 +1630,7 @@ fn above_sea_ocean_estuary_center_restores_water_core() {
     assert_eq!(
         column.terrain_kind,
         HeightfieldTerrainKind::RiverCore,
-        "strong above-sea ocean-owned estuary fan centers should restore the water-filled core"
+        "strong near-sea ocean-owned estuary fan centers should restore the water-filled core"
     );
     assert!(
         column.water_y.is_some_and(|water| water > column.surface_y),
@@ -1641,6 +1641,45 @@ fn above_sea_ocean_estuary_center_restores_water_core() {
     assert!(
         column.river_core_depth_blocks > 0.0,
         "active estuary continuation should preserve core diagnostics"
+    );
+}
+
+#[test]
+fn estuary_water_uses_fan_depth_hint_instead_of_full_river_fill() {
+    let mut mouth = sample_with_river(0.0, 0.0, -0.005, 0.96);
+    mouth.ocean_mask = 1.0;
+    mouth.river_core_strength = 0.0;
+    mouth.estuary_water_strength = 1.0;
+    mouth.river_core_depth_hint = 0.90;
+    mouth.estuary_water_depth_hint = 0.10;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::RiverCore);
+    assert!(
+        column.water_y.is_some_and(|water| water <= 2),
+        "estuary water should follow the fan sea-level convergence instead of refilling from the full river-bed depth: surface={} water={:?}",
+        column.surface_y,
+        column.water_y
+    );
+}
+
+#[test]
+fn above_sea_estuary_water_does_not_start_high() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
+    mouth.ocean_mask = 1.0;
+    mouth.river_core_strength = 0.0;
+    mouth.estuary_water_strength = 1.0;
+    mouth.river_core_depth_hint = 0.90;
+    mouth.estuary_water_depth_hint = 0.45;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert!(
+        column.water_y.is_none(),
+        "above-sea estuary columns should wait for macro_field to lower the bed instead of starting a high water surface: surface={} water={:?}",
+        column.surface_y,
+        column.water_y
     );
 }
 
