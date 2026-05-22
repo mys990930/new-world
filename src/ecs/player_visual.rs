@@ -116,38 +116,38 @@ pub fn default_voxel_player_part_poses() -> [VoxelPlayerPartPose; VOXEL_PLAYER_P
     [
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::Head,
-            local_center: [0.0, 1.50, 0.0],
-            half_extents: [0.50, 0.50, 0.50],
+            local_center: [0.0, 1.25, 0.0],
+            half_extents: [0.42, 0.42, 0.42],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::Torso,
-            local_center: [0.0, 0.45, 0.0],
-            half_extents: [0.58, 0.80, 1.00],
+            local_center: [0.0, 0.35, 0.0],
+            half_extents: [0.46, 0.55, 0.28],
             color: VOXEL_PLAYER_SHIRT_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::LeftArm,
-            local_center: [-0.78, 0.35, 0.0],
-            half_extents: [0.22, 0.85, 0.28],
+            local_center: [-0.62, 0.30, 0.0],
+            half_extents: [0.16, 0.52, 0.18],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::RightArm,
-            local_center: [0.78, 0.35, 0.0],
-            half_extents: [0.22, 0.85, 0.28],
+            local_center: [0.62, 0.30, 0.0],
+            half_extents: [0.16, 0.52, 0.18],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::LeftLeg,
-            local_center: [-0.28, -1.20, 0.0],
-            half_extents: [0.24, 0.80, 0.30],
+            local_center: [-0.22, -0.70, 0.0],
+            half_extents: [0.18, 0.55, 0.20],
             color: VOXEL_PLAYER_PANTS_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::RightLeg,
-            local_center: [0.28, -1.20, 0.0],
-            half_extents: [0.24, 0.80, 0.30],
+            local_center: [0.22, -0.70, 0.0],
+            half_extents: [0.18, 0.55, 0.20],
             color: VOXEL_PLAYER_PANTS_COLOR,
         },
     ]
@@ -202,30 +202,6 @@ mod tests {
             default_voxel_player_part_poses().len(),
             VOXEL_PLAYER_PART_COUNT
         );
-    }
-
-    #[test]
-    fn default_rig_matches_two_by_two_by_four_body_bounds() {
-        let poses = default_voxel_player_part_poses();
-        let min = poses.iter().fold([f32::INFINITY; 3], |mut min, part| {
-            for (axis, value) in min.iter_mut().enumerate() {
-                *value = value.min(part.local_center[axis] - part.half_extents[axis]);
-            }
-            min
-        });
-        let max = poses.iter().fold([f32::NEG_INFINITY; 3], |mut max, part| {
-            for (axis, value) in max.iter_mut().enumerate() {
-                *value = value.max(part.local_center[axis] + part.half_extents[axis]);
-            }
-            max
-        });
-
-        assert!((min[0] + 1.0).abs() < 1e-5);
-        assert!((max[0] - 1.0).abs() < 1e-5);
-        assert!((min[1] + 2.0).abs() < 1e-5);
-        assert!((max[1] - 2.0).abs() < 1e-5);
-        assert!((min[2] + 1.0).abs() < 1e-5);
-        assert!((max[2] - 1.0).abs() < 1e-5);
     }
 
     #[test]

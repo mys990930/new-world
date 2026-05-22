@@ -155,6 +155,7 @@ fn build_voxel_player_part_instance(
 ) -> RenderCubeInstance {
     let animated_center = animated_voxel_player_local_center(visual, part);
     let facing_center = rotate_player_local_offset(animated_center, visual.facing);
+    let facing_half_extents = rotate_player_local_half_extents(part.half_extents, visual.facing);
 
     RenderCubeInstance {
         center: [
@@ -162,7 +163,7 @@ fn build_voxel_player_part_instance(
             visual.root_translation[1] + facing_center[1],
             visual.root_translation[2] + facing_center[2],
         ],
-        half_extents: part.half_extents,
+        half_extents: facing_half_extents,
         color: part.color,
         top_texture_layer: PLAYER_TEXTURE_LAYER,
         bottom_texture_layer: PLAYER_TEXTURE_LAYER,
@@ -254,6 +255,21 @@ fn rotate_player_local_offset(local: [f32; 3], facing: VoxelPlayerFacingOctant) 
         local[0] * cos_yaw + local[2] * sin_yaw,
         local[1],
         -local[0] * sin_yaw + local[2] * cos_yaw,
+    ]
+}
+
+fn rotate_player_local_half_extents(
+    half_extents: [f32; 3],
+    facing: VoxelPlayerFacingOctant,
+) -> [f32; 3] {
+    let yaw = facing.0 as f32 * std::f32::consts::FRAC_PI_4;
+    let (sin_yaw, cos_yaw) = yaw.sin_cos();
+    let abs_sin = sin_yaw.abs();
+    let abs_cos = cos_yaw.abs();
+    [
+        half_extents[0] * abs_cos + half_extents[2] * abs_sin,
+        half_extents[1],
+        half_extents[0] * abs_sin + half_extents[2] * abs_cos,
     ]
 }
 
@@ -537,6 +553,18 @@ mod tests {
         assert!(north[0].abs() < 1e-5);
         assert!((east[0] - 1.0).abs() < 1e-5);
         assert!(east[2].abs() < 1e-5);
+    }
+
+    #[test]
+    fn voxel_player_bridge_rotates_part_extents_to_facing_aabb() {
+        let local = [0.46, 0.55, 0.28];
+        let north = rotate_player_local_half_extents(local, VoxelPlayerFacingOctant::NORTH);
+        let east = rotate_player_local_half_extents(local, VoxelPlayerFacingOctant::EAST);
+
+        assert_eq!(north, local);
+        assert!((east[0] - local[2]).abs() < 1e-5);
+        assert!((east[1] - local[1]).abs() < 1e-5);
+        assert!((east[2] - local[0]).abs() < 1e-5);
     }
 
     fn test_visual_state(animation_seconds: f32) -> VoxelPlayerVisualState {

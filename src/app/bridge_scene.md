@@ -30,6 +30,7 @@
 - camera policy still stays ECS-owned; this layer only exports the current render-facing pose
 - world mesh semantics stay world-owned until they are copied into renderer DTOs
 - selection preview rules stay ECS-owned even though preview cubes are emitted here
+- voxel-player part centers and axis-aligned extents are composed from ECS-facing octants so the visible avatar turns with movement direction
 - HUD/environment text remains ECS-derived data even though the actual sprite layout stays app-owned
 
 ## Invariants

@@ -237,7 +237,7 @@ EcsRuntime::plan_chunk_lifecycle(
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - the local-player voxel visual state is separate from `PlayerBody`; app bridge expands it into a six-part animated voxel avatar instead of the old single dummy cube
-- the default voxel avatar rig fills the same `2x2x4` local bounds as `PlayerBody`, so visual scale and collision scale match
+- the default voxel avatar rig keeps slimmer prototype visual proportions while `PlayerBody` remains the `2x2x4` collision source of truth
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary
