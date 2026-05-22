@@ -28,7 +28,8 @@
 1. Convert the center chunk and radius into an inclusive chunk square footprint.
 2. Build the graph-first preview world in the documented order: graph, macro map, hydrology,
    headwater biome hydration, noisy boundary, and river plan.
-3. Rasterize a `MacroFieldTile` at one column per world block for the selected chunk footprint.
+3. Rasterize a `MacroFieldTile` at one column per integer world block for the selected chunk
+   footprint, matching the graph-first created-world voxel plan.
 4. Convert the macro tile into a `HeightfieldTile` with the same preview heightfield config as
    `heightfield_preview`; bounded heightfield-owned micro relief is enabled before surface material
    policy is applied. `--perlin` remains accepted for older scripts but does not change the
@@ -52,6 +53,9 @@
 - Geometry is inherited from `HeightfieldTile`: `SurfaceColumnPlan.surface_y` and `water_y` come
   from the generated heightfield columns. Surface plan changes block/material interpretation on top
   of that geometry and must not recompute height from macro samples.
+- The macro-field footprint is aligned to the same integer world block coordinates used by
+  `build_graph_first_voxel_plan(...)`; older half-block-centered previews will not match saved
+  created-world chunks exactly.
 - Perlin matches `heightfield_preview` by building `HeightfieldConfig` with
   `HeightfieldPerlinConfig::preview_enabled(seed, generator_version)` by default. `--perlin` remains
   accepted as a backward-compatible no-op alias.

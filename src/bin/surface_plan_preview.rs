@@ -152,8 +152,8 @@ impl PreviewWindow {
         let min =
             graph_region_for_world_block(self.min_world_x, self.min_world_z, region_size_blocks);
         let max = graph_region_for_world_block(
-            self.max_world_x_exclusive(),
-            self.max_world_z_exclusive(),
+            self.max_world_x_exclusive() - 1,
+            self.max_world_z_exclusive() - 1,
             region_size_blocks,
         );
         GraphRegionArea::new(min, max).ok_or_else(|| cli_error("invalid surface plan preview area"))
@@ -471,8 +471,8 @@ fn build_macro_field_tile(
     world: &common::generation_preview_context::CommonPreviewWorld,
 ) -> MacroFieldTile {
     let config = MacroFieldTileConfig::new(
-        window.min_world_x as f32 + 0.5,
-        window.min_world_z as f32 + 0.5,
+        window.min_world_x as f32,
+        window.min_world_z as f32,
         window.columns_x,
         window.columns_z,
         window.sample_spacing_blocks,
