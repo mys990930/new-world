@@ -176,6 +176,7 @@ impl<'a> MacroFieldRasterContext<'a> {
                         plan.bed_depth_blocks,
                         plan.segment_length_blocks,
                     ),
+                    water_depth_hint: estuary_water_depth_hint(plan.bed_depth_blocks, flow_hint),
                 })
             })
             .collect::<Vec<_>>();
@@ -495,6 +496,7 @@ pub(super) struct EstuaryFanRef {
     pub(super) length_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+    pub(super) water_depth_hint: f32,
 }
 
 pub(super) fn estuary_fan_half_widths_blocks(
@@ -542,6 +544,15 @@ pub(super) fn estuary_bed_depth_hint(
         ((terminal_segment_length_blocks.max(0.0) - 48.0) / (192.0 - 48.0)).clamp(0.0, 1.0),
     );
     depth_hint * (0.42 + length_t * 0.58)
+}
+
+pub(super) fn estuary_water_depth_hint(bed_depth_blocks: f32, flow_hint: f32) -> f32 {
+    let flow = flow_hint.clamp(0.0, 1.0);
+    let flow_t = smoothstep01(flow);
+    let planned_depth_blocks = bed_depth_blocks.max(0.0);
+    let minimum_depth_blocks = 1.5 + flow_t * 4.5;
+    let fill_ratio = (0.70 + flow * 0.10).clamp(0.58, 0.82);
+    (planned_depth_blocks.max(minimum_depth_blocks) * fill_ratio / 40.0).clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -970,6 +981,21 @@ mod tests {
         assert!(
             long > 0.75,
             "long final segments keep the planned river-mouth bed depth hint: {long}"
+        );
+    }
+
+    #[test]
+    fn estuary_water_depth_hint_keeps_terminal_water_depth_separate_from_bed_carve() {
+        let short_bed = estuary_bed_depth_hint(32.0, 24.0);
+        let water = estuary_water_depth_hint(32.0, 0.82);
+
+        assert!(
+            water > short_bed,
+            "water continuation should use terminal river water depth even when the fan bed carve is slope-limited: bed={short_bed} water={water}"
+        );
+        assert!(
+            water < 1.0,
+            "normalized estuary water depth hint must stay bounded: {water}"
         );
     }
 

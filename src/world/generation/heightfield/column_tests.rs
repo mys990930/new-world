@@ -1415,6 +1415,7 @@ fn above_sea_ocean_estuary_hint_connects_river_water() {
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     mouth.river_bed_depth_hint = 0.32;
+    mouth.estuary_water_depth_hint = 0.28;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
 
@@ -1437,6 +1438,76 @@ fn above_sea_ocean_estuary_hint_connects_river_water() {
     assert!(
         column.river_bed_depth_blocks > 0.0,
         "estuary continuation should preserve the river water-depth hint"
+    );
+}
+
+#[test]
+fn estuary_water_depth_hint_can_outlive_shallow_fan_bed_hint() {
+    let mut shallow_fan = sample_with_river(0.0, 0.0, 0.005, 0.96);
+    shallow_fan.ocean_mask = 1.0;
+    shallow_fan.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    shallow_fan.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    shallow_fan.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    shallow_fan.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    shallow_fan.river_bed_depth_hint = 0.02;
+
+    let without_hint = heightfield_column_from_sample(&shallow_fan, HeightfieldConfig::default());
+    shallow_fan.estuary_water_depth_hint = 0.36;
+    let with_hint = heightfield_column_from_sample(&shallow_fan, HeightfieldConfig::default());
+
+    assert!(
+        with_hint.water_y > without_hint.water_y,
+        "estuary water depth hint should raise continuation water above a slope-limited fan bed: without={:?} with={:?}",
+        without_hint.water_y,
+        with_hint.water_y
+    );
+    assert!(
+        with_hint
+            .water_y
+            .is_some_and(|water| water > with_hint.surface_y),
+        "estuary water still needs to be active above its resolved bed: surface={} water={:?}",
+        with_hint.surface_y,
+        with_hint.water_y
+    );
+}
+
+#[test]
+fn estuary_water_depth_hint_is_clamped_by_local_banks() {
+    let config = MacroFieldTileConfig::new(0.0, 0.0, 3, 1, 1.0);
+    let left_bank = sample(0.0, 0.0, 0.008, 0.0, 0.0, 0.0, 0.0);
+    let mut mouth = sample_with_river(1.0, 0.0, 0.005, 0.96);
+    mouth.ocean_mask = 1.0;
+    mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_bed_depth_hint = 0.02;
+    mouth.estuary_water_depth_hint = 0.90;
+    let right_bank = sample(2.0, 0.0, 0.008, 0.0, 0.0, 0.0, 0.0);
+    let macro_tile = MacroFieldTile {
+        config,
+        samples: vec![left_bank, mouth, right_bank],
+        stats: MacroFieldTileStats::default(),
+    };
+
+    let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+    let center = tile.column(1, 0).expect("mouth column");
+    let bank_ceiling = tile
+        .column(0, 0)
+        .expect("left bank")
+        .surface_y
+        .min(tile.column(2, 0).expect("right bank").surface_y);
+
+    assert!(
+        center.water_y.is_some_and(|water| water <= bank_ceiling),
+        "estuary water continuation must be held by neighboring banks: water={:?} bank={bank_ceiling}",
+        center.water_y
+    );
+    assert!(
+        center.water_y.is_some_and(|water| water > center.surface_y),
+        "bank clamp should not suppress a valid estuary water column: surface={} water={:?}",
+        center.surface_y,
+        center.water_y
     );
 }
 
@@ -1617,6 +1688,7 @@ fn sample(
         river_gravel_hint: 0.0,
         river_cutbank_hint: 0.0,
         estuary_water_strength: 0.0,
+        estuary_water_depth_hint: 0.0,
         combined_macro_height: height,
     }
 }

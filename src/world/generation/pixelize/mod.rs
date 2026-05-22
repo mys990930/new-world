@@ -271,6 +271,7 @@ fn validate_macro_sample(sample: &MacroFieldSample) {
     assert!(sample.river_distance_blocks.is_finite() || sample.river_distance_blocks.is_infinite());
     assert!(sample.river_flow_hint.is_finite());
     assert!(sample.estuary_water_strength.is_finite());
+    assert!(sample.estuary_water_depth_hint.is_finite());
     assert!(sample.combined_macro_height.is_finite());
 }
 
@@ -1206,6 +1207,7 @@ mod tests {
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,
             estuary_water_strength: 0.0,
+            estuary_water_depth_hint: 0.0,
             combined_macro_height,
         }
     }

@@ -309,8 +309,9 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
   넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다. 예외적으로 macro_field가 terminal 하구
   fan에서 `estuary_water_strength`를 함께 넘긴 above-sea ocean-owned mouth column은 local river-water
-  continuation으로 해석할 수 있다. 이 경우에도 terrain bed는 `combined_macro_height`를 보존하고,
-  heightfield-local carve를 새로 적용하지 않는다.
+  continuation으로 해석할 수 있다. 이 경우 `estuary_water_depth_hint`가 있으면 fan bed carve depth가
+  얕아도 water depth만 terminal river 맥락으로 보강한다. terrain bed는 계속 `combined_macro_height`를
+  보존하고, heightfield-local carve를 새로 적용하지 않는다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
@@ -510,5 +511,7 @@ screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 20. ocean/lake-owned river-mouth bed hints must not threshold-cut above-sea source beds. Above-sea
     ocean-owned source columns keep ordinary ocean bed resolve and do not create river bed depth solely
     because `river_core_strength` crosses the river threshold. A macro_field estuary fan may opt into
-    above-sea mouth water continuity only through `estuary_water_strength`; that opt-in changes water/terrain
-    kind eligibility, not the already-resolved terrain bed height.
+    above-sea mouth water continuity through `estuary_water_strength`, and may provide
+    `estuary_water_depth_hint` to keep the visible water surface connected when the fan bed carve is
+    intentionally shallow. These opt-ins change water/terrain kind and water-depth eligibility, not the
+    already-resolved terrain bed height.

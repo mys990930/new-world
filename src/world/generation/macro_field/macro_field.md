@@ -120,6 +120,7 @@ MacroFieldSample {
     river_gravel_hint,
     river_cutbank_hint,
     estuary_water_strength,
+    estuary_water_depth_hint,
     meso_raise_strength,
     meso_carve_strength,
     meso_flatten_strength,
@@ -688,8 +689,10 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   않고 절반 스케일로 낮춰, 하구 연결부가 과도하게 깊은 trench로 끝나지 않게 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. 다만 fan 내부에는
-  `estuary_water_strength`를 별도로 굽고, 이 값이 water threshold를 넘는 above-sea mouth column은
-  heightfield가 terminal river water surface와 이어진 local river-water continuation으로 해석할 수 있다.
+  `estuary_water_strength`와 `estuary_water_depth_hint`를 별도로 굽고, strength가 water threshold를
+  넘는 above-sea mouth column은 heightfield가 terminal river water surface와 이어진 local river-water
+  continuation으로 해석할 수 있다. 이때 water depth hint는 fan bed carve depth와 분리되어, 짧은 terminal
+  segment 때문에 bed carve가 slope-limited 되더라도 수면 연결은 기존 river water depth 맥락을 보존한다.
   이 continuation은 selected river segment를 downstream cell로 추가하는 것이 아니라, 하구 y>0 구간의
   수면 단절을 막는 raster hint다. height 합성은 estuary influence를 읽어 coast/ocean near-sea source를
   `combined_macro_height <= 0` 쪽으로 열어 준다. fan edge의 약한 strength는 target depth도 함께 약화해

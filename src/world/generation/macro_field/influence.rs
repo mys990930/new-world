@@ -51,6 +51,7 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) estuary_water_strength: f32,
     pub(super) estuary_flow_hint: f32,
     pub(super) estuary_bed_depth_hint: f32,
+    pub(super) estuary_water_depth_hint: f32,
     pub(super) estuary_along_blocks: f32,
 }
 
@@ -74,6 +75,7 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) estuary_water_strength: Vec<f32>,
     pub(super) estuary_flow_hint: Vec<f32>,
     pub(super) estuary_bed_depth_hint: Vec<f32>,
+    pub(super) estuary_water_depth_hint: Vec<f32>,
     pub(super) estuary_along_blocks: Vec<f32>,
     pub(super) stats: MacroFieldInfluenceStats,
 }
@@ -129,6 +131,7 @@ impl MacroFieldInfluenceFields {
             estuary_water_strength: self.estuary_water_strength[index].clamp(0.0, 1.0),
             estuary_flow_hint: self.estuary_flow_hint[index].clamp(0.0, 1.0),
             estuary_bed_depth_hint: self.estuary_bed_depth_hint[index].clamp(0.0, 1.0),
+            estuary_water_depth_hint: self.estuary_water_depth_hint[index].clamp(0.0, 1.0),
             estuary_along_blocks: self.estuary_along_blocks[index].max(0.0),
         }
     }
@@ -200,6 +203,7 @@ pub(super) fn rasterize_influence_fields(
         estuary_water_strength: estuary.water_strength,
         estuary_flow_hint: estuary.flow_hint,
         estuary_bed_depth_hint: estuary.bed_depth_hint,
+        estuary_water_depth_hint: estuary.water_depth_hint,
         estuary_along_blocks: estuary.along_blocks,
         stats,
     }
@@ -211,6 +215,7 @@ pub(super) struct EstuaryFanField {
     pub(super) water_strength: Vec<f32>,
     pub(super) flow_hint: Vec<f32>,
     pub(super) bed_depth_hint: Vec<f32>,
+    pub(super) water_depth_hint: Vec<f32>,
     pub(super) along_blocks: Vec<f32>,
 }
 
@@ -225,6 +230,7 @@ pub(super) fn rasterize_estuary_fan_field(
             water_strength: vec![0.0; sample_count],
             flow_hint: vec![0.0; sample_count],
             bed_depth_hint: vec![0.0; sample_count],
+            water_depth_hint: vec![0.0; sample_count],
             along_blocks: vec![0.0; sample_count],
         };
     }
@@ -244,6 +250,10 @@ pub(super) fn rasterize_estuary_fan_field(
         water_strength: samples.iter().map(|sample| sample.water_strength).collect(),
         flow_hint: samples.iter().map(|sample| sample.flow_hint).collect(),
         bed_depth_hint: samples.iter().map(|sample| sample.bed_depth_hint).collect(),
+        water_depth_hint: samples
+            .iter()
+            .map(|sample| sample.water_depth_hint)
+            .collect(),
         along_blocks: samples.iter().map(|sample| sample.along_blocks).collect(),
     }
 }
@@ -254,6 +264,7 @@ pub(super) struct EstuaryFanSample {
     pub(super) water_strength: f32,
     pub(super) flow_hint: f32,
     pub(super) bed_depth_hint: f32,
+    pub(super) water_depth_hint: f32,
     pub(super) along_blocks: f32,
 }
 
@@ -304,6 +315,7 @@ pub(super) fn estuary_fan_sample(
         water_strength,
         flow_hint: fan.flow_hint,
         bed_depth_hint: fan.bed_depth_hint,
+        water_depth_hint: fan.water_depth_hint,
         along_blocks: along,
     }
 }
@@ -2555,6 +2567,7 @@ mod tests {
             length_blocks: 180.0,
             flow_hint: 0.82,
             bed_depth_hint: 0.55,
+            water_depth_hint: 0.42,
         };
 
         let start_edge = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 18.0));
@@ -2604,6 +2617,7 @@ mod tests {
             length_blocks: 144.0,
             flow_hint: 0.03,
             bed_depth_hint: 0.12,
+            water_depth_hint: 0.08,
         };
 
         let center_tail = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 0.0));

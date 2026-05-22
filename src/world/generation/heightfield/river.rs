@@ -18,7 +18,15 @@ pub(super) fn river_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
     let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
     let bed_depth = river_bed_depth_blocks(sample);
     let fill_ratio = (0.70 + flow * 0.10 - rough * 0.05).clamp(0.58, 0.82);
-    (bed_depth * fill_ratio).clamp(1.0, bed_depth.max(1.0))
+    let river_depth = (bed_depth * fill_ratio).clamp(1.0, bed_depth.max(1.0));
+    river_depth.max(estuary_water_depth_blocks(sample))
+}
+
+fn estuary_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
+    if sample.estuary_water_strength <= 0.0 {
+        return 0.0;
+    }
+    (sample.estuary_water_depth_hint.clamp(0.0, 1.0) * 40.0).max(0.0)
 }
 
 pub(super) fn apply_river_water_descent(

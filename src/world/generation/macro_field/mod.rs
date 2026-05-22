@@ -162,6 +162,7 @@ pub fn sample_macro_field_point(
         river_gravel_hint: river_influence.gravel_hint,
         river_cutbank_hint: river_influence.cutbank_hint,
         estuary_water_strength: 0.0,
+        estuary_water_depth_hint: 0.0,
         combined_macro_height,
     }
 }
@@ -273,6 +274,11 @@ fn sample_macro_field_point_with_influence(
         river_gravel_hint: influence.river_gravel_hint,
         river_cutbank_hint: influence.river_cutbank_hint,
         estuary_water_strength,
+        estuary_water_depth_hint: if estuary_supplies_water {
+            influence.estuary_water_depth_hint
+        } else {
+            0.0
+        },
         combined_macro_height,
     }
 }
