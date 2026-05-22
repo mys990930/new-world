@@ -112,9 +112,14 @@ impl Renderer {
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = 0;
 
+        let dynamic_shadow_casters = dynamic_shadow_caster_instances(frame.cube_instances);
         let dynamic_cube_mesh = frame
             .draw_scene
             .then(|| build_cube_mesh(frame.cube_instances))
+            .flatten();
+        let dynamic_shadow_cube_mesh = frame
+            .draw_scene
+            .then(|| build_cube_mesh(&dynamic_shadow_casters))
             .flatten();
         let debug_edge_mesh = self
             .config
@@ -137,7 +142,7 @@ impl Renderer {
                 frame.camera,
                 frame.visible_chunks,
                 &self.world,
-                frame.cube_instances,
+                &dynamic_shadow_casters,
                 self.environment.current(),
                 &self.config.quality,
             )
@@ -192,6 +197,28 @@ impl Renderer {
                     });
             (vertex_buffer, index_buffer, indices.len() as u32)
         });
+        let dynamic_shadow_cube_buffers =
+            dynamic_shadow_cube_mesh
+                .as_ref()
+                .map(|(vertices, indices)| {
+                    let vertex_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_dynamic_shadow_cube_vertex_buffer"),
+                                contents: cast_slice(vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                    let index_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_dynamic_shadow_cube_index_buffer"),
+                                contents: cast_slice(indices),
+                                usage: wgpu::BufferUsages::INDEX,
+                            });
+                    (vertex_buffer, index_buffer, indices.len() as u32)
+                });
         let debug_edge_buffers = debug_edge_mesh.as_ref().map(|(vertices, indices)| {
             let vertex_buffer =
                 backend
@@ -303,7 +330,8 @@ impl Renderer {
                 stats.draw_call_count = stats.draw_call_count.saturating_add(1);
             }
 
-            if let Some((vertex_buffer, index_buffer, index_count)) = dynamic_cube_buffers.as_ref()
+            if let Some((vertex_buffer, index_buffer, index_count)) =
+                dynamic_shadow_cube_buffers.as_ref()
             {
                 shadow_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 shadow_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -531,6 +559,20 @@ fn build_cube_mesh(cube_instances: &[RenderCubeInstance]) -> Option<(Vec<MeshVer
     }
 
     Some((vertices, indices))
+}
+
+fn dynamic_shadow_caster_instances(
+    cube_instances: &[RenderCubeInstance],
+) -> Vec<RenderCubeInstance> {
+    cube_instances
+        .iter()
+        .copied()
+        .filter(is_dynamic_shadow_caster)
+        .collect()
+}
+
+fn is_dynamic_shadow_caster(cube: &RenderCubeInstance) -> bool {
+    cube.material_kind == RenderMaterialKind::Actor
 }
 
 fn build_cube_edge_mesh(
@@ -1114,6 +1156,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dynamic_shadow_casters_only_include_actor_cubes() {
+        let cubes = [
+            test_cube(RenderMaterialKind::Actor),
+            test_cube(RenderMaterialKind::Highlight),
+            test_cube(RenderMaterialKind::GenericOpaque),
+        ];
+
+        let casters = dynamic_shadow_caster_instances(&cubes);
+
+        assert_eq!(casters.len(), 1);
+        assert_eq!(casters[0].material_kind, RenderMaterialKind::Actor);
+    }
+
     #[derive(Debug, Default)]
     struct LitPixelStats {
         highlight_pixels: u32,
@@ -1126,6 +1182,18 @@ mod tests {
             render_cube_offscreen_with_depth_compare(wgpu::CompareFunction::LessEqual, 1.0).await
         } else {
             render_cube_offscreen_with_depth_compare(wgpu::CompareFunction::Always, 1.0).await
+        }
+    }
+
+    fn test_cube(material_kind: RenderMaterialKind) -> RenderCubeInstance {
+        RenderCubeInstance {
+            center: [0.0, 0.5, 0.0],
+            half_extents: [0.5, 0.5, 0.5],
+            color: [1.0, 1.0, 1.0, 1.0],
+            top_texture_layer: 0,
+            bottom_texture_layer: 0,
+            side_texture_layer: 0,
+            material_kind,
         }
     }
 

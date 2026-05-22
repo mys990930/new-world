@@ -12,14 +12,14 @@
 - upload the environment uniform
 - upload the sun-shadow uniform
 - acquire the surface texture
-- render the shadow depth pass
+- render the shadow depth pass from terrain and dynamic shadow-caster instances
 - clear and use the depth buffer
 - draw the visible sun overlay
 - bind the block texture array
 - draw uploaded chunk meshes for the current `visible_chunks`
 - draw opaque terrain before translucent terrain partitions
-- expand `cube_instances` into a cube mesh with per-face normals
-- expand `cube_instances` into a cube mesh with per-face normals and top/bottom/side texture layers
+- expand `cube_instances` into a main-pass cube mesh with per-face normals and top/bottom/side texture layers
+- expand dynamic shadow-caster cube instances into a separate shadow-depth mesh
 - draw the terrain pass
 - draw the dynamic cube pass
 - draw the translucent water pass
@@ -50,7 +50,7 @@
 3. Resolve the clear color from the active renderer environment unless the app overrides it.
 4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds when scene rendering is enabled.
 5. Upload camera, environment, and sun-shadow uniforms.
-6. Render the shadow map when the active quality preset enables it.
+6. Render the shadow map when the active quality preset enables it, using terrain plus filtered dynamic actor cubes.
 7. Begin the main color pass and, when `draw_scene` is enabled, draw the visible sun overlay, opaque terrain, dynamic cubes, and then translucent water.
 8. Draw the screen-space UI overlay pass.
 9. Optionally draw the debug edge overlay pass for the 3D scene.
@@ -66,6 +66,7 @@
 - orthographic fog should be based on focal-area distance rather than raw eye distance, because the quarter-view eye sits far away only to define the view basis
 - UI overlay and gameplay preview cubes remain separate DTO channels even when they visually describe the same gameplay state
 - moving voxel-player parts arrive as app-bridge-authored render DTOs; renderer frame code draws them without choosing animation state or facing
+- only dynamic actor cubes cast dynamic shadows; highlight/preview cubes and any app-authored helper quads must not enter the shadow-depth mesh
 
 ## Related Modules
 
@@ -77,7 +78,7 @@
 
 - The current shadow solution is a single directional hard-sun map fit to visible terrain/cube bounds.
 - The visible sun is a full-screen overlay pass positioned from the current sun direction projected into the active camera.
-- Terrain and dynamic shaders both sample the same shadow map, but react differently based on material kind.
+- Terrain and dynamic shaders both sample the same shadow map, but the shadow-depth pass filters dynamic cubes to actor casters so helper overlays do not cast fake shadows.
 - Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing only a subtle amount of distance haze.

@@ -124,7 +124,7 @@ NOT:
 - A visible sun overlay is now drawn from the current `sun_direction`.
 - Terrain and dynamic cubes now sample a directional shadow map derived from visible geometry bounds.
 - The current shadow solution is a single hard-sun shadow map sized by quality tier.
-- Dynamic cube instances distinguish actor, shadow, and highlight behavior through `RenderMaterialKind`.
+- Dynamic cube instances distinguish actor and highlight behavior through `RenderMaterialKind`; actor cubes are the dynamic shadow casters, while helper overlays do not cast shadows.
 - Dynamic cube instances may also choose top/bottom/side texture layers per instance, so bridge-owned gameplay previews can render real block textures without giving renderer any direct block-registry dependency.
 - Screen-space app UI currently enters as `RenderUiSprite` and is rendered in a dedicated overlay pass with no camera/world dependency.
 - steady-state chunk unload is app-owned, but renderer already exposes `remove_chunk_mesh(...)` / `RemoveChunkMesh` as the render-side destruction path for chunks that leave the retain envelope.

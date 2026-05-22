@@ -60,7 +60,7 @@
 - quarter-view basis rules are still defined in ECS camera code
 - render camera turn easing is authored in ECS camera state; `bridge` only exports the current render-facing pose
 - the current player render body uses ECS-owned `VoxelPlayerVisualState` plus code-authored rig part poses, with app composing them into renderer DTOs
-- `PlayerBody.half_extents` is still used for the retained ground shadow footprint, not for visible avatar proportions
+- player ground shadows are not app-authored quads; actor cube instances participate in the renderer shadow-map path
 - UI text and panels are built from atlas-backed sprite pieces, not renderer-owned text shaping
 - dynamic gameplay preview cubes may choose block face texture layers here, but the preview coordinate/range rules still stay ECS-owned
 
@@ -75,7 +75,7 @@
 ## Notes
 
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
-- `RenderCubeInstance` also carries a renderer material kind plus block-face texture layers so the player body, ground shadow slab, and gameplay previews can be shaded differently without leaking world ownership into renderer
+- `RenderCubeInstance` also carries a renderer material kind plus block-face texture layers so actor body parts and gameplay previews can be shaded differently without leaking world ownership into renderer
 - the initial voxel-player integration expands the ECS rig into multiple dynamic cube instances in `bridge_scene.rs`, applies simple idle/walk/sprint/airborne offsets, and rotates local part offsets using ECS-facing octants; if rotated limbs are required later, bridge should target a renderer DTO extension rather than moving pose logic into renderer
 - the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, editable field rows, a scrollable created-world list, explicit action buttons, and a centered loading popup
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned

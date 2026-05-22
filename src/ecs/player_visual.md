@@ -87,7 +87,7 @@
 
 1. `PlayerBody` remains the physical source of truth; `VoxelPlayerVisualState` is a derived snapshot for app bridge reads.
 2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs.
-3. The app bridge expands the rig into multiple dynamic cube instances, replacing the old single white player cube while retaining the existing ground shadow.
+3. The app bridge expands the rig into multiple dynamic actor cube instances, replacing the old single white player cube; renderer-owned shadow maps handle the ground shadow.
 4. Procedural animation offsets are applied in the app bridge:
    - idle bob
    - mirrored arm/leg swing for walk and sprint

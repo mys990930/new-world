@@ -8,7 +8,7 @@
 
 - build `AppRenderFrameData`
 - export the ECS-owned quarter-view camera into renderer camera DTOs
-- convert selection previews and local player body state into render cube instances
+- convert selection previews and local player visual state into render cube instances
 - convert world CPU meshes into renderer upload payloads
 - choose which app-owned UI sprite builders to call for the current top-level app mode
 
@@ -34,7 +34,8 @@
 
 ## Invariants
 
-- in-game scene export must keep player body, ground shadow, selection previews, and visible chunk list aligned to the same frame snapshot
+- in-game scene export must keep player visual parts, selection previews, and visible chunk list aligned to the same frame snapshot
+- bridge_scene must not emit app-authored ground-shadow quads; dynamic actor cubes rely on renderer-owned shadow-map rendering
 - world-select mode must emit UI-only frames without scene cubes or visible chunks
 - renderer-facing material mapping must not re-own world semantics beyond the DTO conversion step
 

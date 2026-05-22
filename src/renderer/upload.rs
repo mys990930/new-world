@@ -18,7 +18,6 @@ pub enum RenderMaterialKind {
     Water = 6,
     Emissive = 7,
     Actor = 8,
-    Shadow = 9,
     Highlight = 10,
 }
 

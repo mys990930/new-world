@@ -37,19 +37,11 @@ impl GameApp {
             AppMode::InGame => {
                 let inventory = self.ecs.local_player_inventory();
                 let player_transform = self.ecs.local_player_transform();
-                let player_body = self.ecs.local_player_body();
                 let player_visual = self.ecs.local_player_visual_state();
                 let local_environment = self.ecs.local_environment_status();
                 let mut cube_instances = player_visual
                     .map(build_voxel_player_instances)
                     .unwrap_or_default();
-
-                if let Some((player, body)) = player_transform.zip(player_body) {
-                    cube_instances.insert(
-                        0,
-                        build_ground_shadow_instance(player.translation, body.half_extents),
-                    );
-                }
 
                 let selection = self.ecs.selection_state();
                 push_selection_preview_instances(
@@ -147,23 +139,6 @@ fn build_quarter_view_camera(camera_state: CameraState) -> RenderCameraState {
             up: pose.basis.up,
             forward: pose.basis.forward,
         }),
-    }
-}
-
-fn build_ground_shadow_instance(center: [f32; 3], half_extents: [f32; 3]) -> RenderCubeInstance {
-    let shadow_offset = [-0.18, 0.0, 0.12];
-    RenderCubeInstance {
-        center: [
-            center[0] + shadow_offset[0],
-            center[1] - half_extents[1] + 0.01,
-            center[2] + shadow_offset[2],
-        ],
-        half_extents: [half_extents[0] * 0.96, 0.01, half_extents[2] * 0.96],
-        color: [0.08, 0.08, 0.10, 1.0],
-        top_texture_layer: 0,
-        bottom_texture_layer: 0,
-        side_texture_layer: 0,
-        material_kind: RenderMaterialKind::Shadow,
     }
 }
 

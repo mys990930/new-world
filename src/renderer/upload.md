@@ -42,6 +42,6 @@
 ## Notes
 
 - `texture_layer` indexes the renderer-owned block texture array
-- `material_kind` lets shaders branch on grass / soil / stone / actor / shadow / highlight behavior without querying gameplay state
+- `material_kind` lets shaders branch on grass / soil / stone / actor / highlight behavior without querying gameplay state
 - `contour_edges` lets the terrain shader apply readability lines only on world-provided top-face height breaks
 - dynamic cubes still use texture layer `0` today, but their material kind now carries more of the visual meaning

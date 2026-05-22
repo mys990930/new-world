@@ -27,7 +27,6 @@ struct SunShadowUniform {
 
 const MATERIAL_GENERIC_OPAQUE: u32 = 0u;
 const MATERIAL_ACTOR: u32 = 8u;
-const MATERIAL_SHADOW: u32 = 9u;
 const MATERIAL_HIGHLIGHT: u32 = 10u;
 
 @group(0) @binding(0)
@@ -108,7 +107,7 @@ fn sample_shadow(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f3
 }
 
 fn apply_color_grade(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) -> vec3<f32> {
-    if environment.quality_flags.y == 0u || material_kind == MATERIAL_SHADOW {
+    if environment.quality_flags.y == 0u {
         return color;
     }
 
@@ -179,10 +178,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if input.material_kind == MATERIAL_ACTOR {
         let top_boost = 1.0 + max(normal.y, 0.0) * environment.readability.x * 0.32;
         shaded = shaded * top_boost;
-    } else if input.material_kind == MATERIAL_SHADOW {
-        shaded =
-            base_color *
-            (environment.ambient_color_intensity.rgb * 0.24 + vec3<f32>(0.015, 0.015, 0.02));
     } else if input.material_kind == MATERIAL_HIGHLIGHT {
         let highlight_glow =
             environment.horizon_color_height_falloff.xyz * 0.42 +
