@@ -36,6 +36,7 @@
 - `Renderer`
 - `AppUiState`
 - `AppMinimapCache`
+- pending chunk mesh renderer commit queue
 - pending player spawn anchor
 - `AppConfig`
 - `AppTimingState`
@@ -99,6 +100,7 @@ fn frame_deadline(&self) -> Option<Instant>
 - the current frame path supports both created-world chunk loading and procedural generation, then meshing and renderer upload
 - created-world opening stages the player at the selected spawn x/z and streams the spawn neighborhood through jobs instead of synchronously preloading the full interest area on the main thread
 - gameplay frames apply completed job results through a small per-frame budget so chunk load/mesh/minimap bursts do not monopolize input and renderer cadence
+- completed chunk mesh results are queued separately from job-result draining and committed to the renderer through an app-owned per-frame upload budget, because GPU resource creation remains renderer-owned and cannot be moved wholesale to worker jobs
 - app now also owns the first fixed-tick slice: it accumulates frame time, advances ECS fixed state, calls the simulation time subsystem, applies world-owned calendar/climate/weather updates, and refreshes the renderer environment
 - app now also owns steady-state chunk unload application after `ChunkUnloaded` job results are drained because it is the layer that can coordinate `world.remove_chunk(...)`, renderer mesh removal, minimap cache invalidation, and stale-result acceptance in one place
 - the current minimap path is app-owned cached state: chunk load/generate results trigger background minimap-column rebuild jobs, and render bridging only composes the current player-centered viewport from cached column data

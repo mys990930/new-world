@@ -89,6 +89,7 @@ impl GameApp {
             renderer,
             ui: AppUiState::default(),
             minimap: AppMinimapCache::default(),
+            pending_chunk_mesh_commits: std::collections::VecDeque::new(),
             pending_player_spawn_anchor,
             timing,
         };
@@ -198,6 +199,7 @@ impl GameApp {
         self.created_world = Some(source);
         self.jobs = JobSystem::new(JobConfig::default());
         self.minimap = AppMinimapCache::default();
+        self.pending_chunk_mesh_commits.clear();
         self.pending_player_spawn_anchor = Some(anchor);
         self.sync_renderer_environment_from_world();
         self.queue_environment_region_resolve_for_focus();

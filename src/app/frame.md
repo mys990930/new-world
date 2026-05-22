@@ -11,7 +11,7 @@
 - handle app-owned screen shortcuts before gameplay logic
 - bridge platform snapshot into ECS input
 - run ECS `pre/update/post` phases
-- collect completed jobs and apply them to ECS/world/renderer
+- collect completed jobs and apply them to ECS/world/minimap, then queue completed chunk mesh renderer commits
 - collect intermediate create-world progress jobs and apply them to app-owned world-select UI state
 - collect completed minimap rebuild jobs and patch app-owned minimap cache
 - collect completed region-classification jobs and patch the world-owned runtime region cache
@@ -20,8 +20,8 @@
 - plan chunk acquisition / meshing / unload lifecycle from ECS chunk state
 - submit chunk unload requests through jobs and apply completed unload results to world/renderer/minimap within the gameplay result budget
 - request minimap chunk-column rebuilds when chunk load/generate results change loaded world data
-- remove renderer chunk meshes for empty CPU mesh results instead of attempting an invalid empty GPU upload
-- process gameplay job completions through a small per-frame budget so chunk mesh uploads cannot monopolize input frames
+- queue renderer chunk mesh removals for empty CPU mesh results instead of attempting an invalid empty GPU upload
+- process gameplay job completions through a small per-frame budget, then process queued renderer mesh commits through a separate per-frame upload/removal budget so completed chunk mesh bursts cannot monopolize input frames
 - refresh the ECS-owned local environment snapshot from the latest world state
 - queue a focused region-classification resolve when the local environment cache is missing
 - update world-and-viewport-based selection state
@@ -50,7 +50,7 @@
 
 - updated ECS state
 - updated world chunk state within the current frame's job-result processing budget
-- updated renderer chunk cache within the current frame's job-result processing budget
+- updated renderer chunk cache within the current frame's mesh commit budget
 - updated `SelectionState`
 - updated local environment HUD snapshot
 - updated app-owned minimap cache
@@ -68,20 +68,21 @@
 5. `bridge_platform_to_ecs()`
 6. `ecs.run_pre_update()`
 7. `ecs.run_update()`
-8. collect already-completed jobs into ECS/world/renderer/minimap cache up to the gameplay result budget
+8. collect already-completed jobs into ECS/world/minimap cache and queue chunk mesh renderer commits up to the gameplay result budget
 9. try to place any pending created-world spawn anchor on the currently loaded surface
 10. run `ecs.simulate_local_player_motion(&world)` so player collision uses the current world source of truth, unless spawn placement is still pending
 11. `ecs.run_post_update()`
 12. plan chunk lifecycle with `ecs.plan_chunk_lifecycle(&world, created_world.as_ref())`
 13. submit the planned jobs, including `UnloadChunk` requests
-14. collect newly completed jobs again if gameplay result budget remains; completed `ChunkUnloaded` results apply `WorldCore`, renderer mesh, and minimap cache removal here
+14. collect newly completed jobs again if gameplay result budget remains; completed `ChunkUnloaded` results apply `WorldCore`, renderer mesh, minimap cache removal, and pending mesh-commit cancellation here
 15. try pending spawn placement again after same-frame job completions
-16. queue a focused region-classification resolve if the player atlas cell is not cached yet
-17. refresh the ECS-local environment snapshot from the latest player transform and cached world environment state
-18. update `SelectionState` from the latest world state and viewport
-19. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
-20. drain discrete commands without per-frame debug output
-21. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
+16. commit queued chunk mesh renderer uploads/removals within the frame's mesh commit budget
+17. queue a focused region-classification resolve if the player atlas cell is not cached yet
+18. refresh the ECS-local environment snapshot from the latest player transform and cached world environment state
+19. update `SelectionState` from the latest world state and viewport
+20. if left/right click happened and the current selection is valid, log the clicked block key/id/coord to the console
+21. drain discrete commands without per-frame debug output
+22. build render DTOs, including app-owned sprite UI data, and call `renderer.render(...)`
 
 ## Invariants
 
@@ -89,13 +90,14 @@
 - player motion is skipped while created-world spawn placement is still pending so missing chunks remain a loading boundary rather than a collision artifact
 - local-environment refresh and selection update both happen after world/job result application
 - local-environment refresh must not force uncached region classification on the main thread; uncached atlas cells are resolved by jobs and use fallback display data until cached
-- gameplay frames must not apply unlimited completed chunk jobs in one update; deferred results remain queued for later frames
+- gameplay frames must not apply unlimited completed chunk jobs in one update; deferred job results remain queued for later frames
+- renderer chunk mesh commits must also be budgeted separately from job result draining; deferred mesh uploads/removals remain in the app-owned pending commit queue and are revalidated against chunk retain/world residency before touching the renderer
 - minimap viewport composition must read app-owned cached data only; completed jobs and future local world edits are the only sources that mutate the cache
 - unload candidates enter the same job queue and result budget as other chunk work so stale load/mesh work has a clear acceptance gate without doing synchronous unload bursts in the lifecycle plan
 - block logging is click-triggered so the console does not flood every frame
 - chunk load/unload logging is tied to actual residency changes, not to every lifecycle plan recomputation
 - chunk lifecycle plan logging is throttled while requests are active and still emitted for unload activity so normal idle frames do not flood the console
-- opt-in update/render frame diagnostics should report enough stage timing to separate ECS, jobs result application, renderer upload, minimap/region cache pressure, and draw/present cost
+- opt-in update/render frame diagnostics should report enough stage timing to separate ECS, jobs result application, queued renderer mesh commit, minimap/region cache pressure, and draw/present cost
 - renderer receives render-ready DTOs only
 - app-owned screen modes may suspend gameplay updates without changing renderer ownership boundaries
 - job progress events may update app-owned UI state while gameplay is suspended, but must not mutate world/ECS chunk residency
@@ -112,7 +114,7 @@
 
 ## Notes
 
-- the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> RenderUploadRequest` as fallback
+- the current minimal chunk path now supports `LoadChunk -> BuildChunkMesh -> pending renderer mesh commit -> RenderUploadRequest` when a created world is available, and `GenerateChunk -> BuildChunkMesh -> pending renderer mesh commit -> RenderUploadRequest` as fallback
 - empty mesh results are accepted as render-ready chunk state but remove/skip renderer mesh upload because `wgpu` buffers cannot be created from empty vertex/index arrays
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
 - the current fixed slice is intentionally narrow: world calendar, per-atlas climate drift, local weather windows, and renderer environment sync now advance on fixed ticks, while direct simulation-driven `WorldEdit` application remains a later step
@@ -123,6 +125,6 @@
 - the current minimap no longer scans `WorldCore` every frame; it composes a one-chunk viewport from cached chunk-column top-down data rebuilt through jobs
 - steady-state chunk lifetime now supports interest-vs-retain hysteresis, job-queued unload requests, and app-owned unload application after the result is drained
 - startup diagnosis logs now separate window/surface startup, lifecycle request planning, disk/generated chunk arrival, mesh upload, stale-result ignores, and delayed player placement
-- gameplay job result application is budgeted per frame, which spreads bursty chunk load/mesh/minimap completions across frames instead of uploading all finished meshes at once
+- gameplay job result application is budgeted per frame, and renderer mesh commits use an additional upload/removal budget, which spreads bursty chunk load/mesh/minimap completions across frames instead of uploading all finished meshes at once
 - update/render frame perf logs are ignored by default; `NEW_WORLD_TRACE_FRAME_LOGS=1` opts into the per-frame `[perf] update/render frame` diagnostics
 - focused region classification now runs as `ResolveRegionClassArea`; worker time may appear in job diagnostics, but ECS/app environment refreshes read cached samples only and stay non-blocking on the main frame

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::app::config::AppConfig;
@@ -6,7 +7,9 @@ use crate::jobs::JobSystem;
 use crate::platform::Platform;
 use crate::renderer::Renderer;
 use crate::simulation::SimulationCore;
-use crate::world::{CreatedWorldSource, WorldCore};
+use crate::world::{
+    ChunkCoord as WorldChunkCoord, CpuMesh as WorldCpuMesh, CreatedWorldSource, WorldCore,
+};
 
 use super::{AppMinimapCache, AppUiState};
 
@@ -21,8 +24,29 @@ pub struct GameApp {
     pub renderer: Renderer,
     pub ui: AppUiState,
     pub minimap: AppMinimapCache,
+    pub pending_chunk_mesh_commits: VecDeque<PendingChunkMeshCommit>,
     pub pending_player_spawn_anchor: Option<[f32; 2]>,
     pub timing: AppTimingState,
+}
+
+pub enum PendingChunkMeshCommit {
+    Upsert {
+        coord: WorldChunkCoord,
+        mesh: WorldCpuMesh,
+        triangles: usize,
+        bytes: usize,
+    },
+    Remove {
+        coord: WorldChunkCoord,
+    },
+}
+
+impl PendingChunkMeshCommit {
+    pub fn coord(&self) -> WorldChunkCoord {
+        match self {
+            Self::Upsert { coord, .. } | Self::Remove { coord } => *coord,
+        }
+    }
 }
 
 pub struct AppTimingState {

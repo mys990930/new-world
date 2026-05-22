@@ -21,6 +21,7 @@
 - meshing algorithms
 - frame draw encoding
 - gameplay state ownership
+- app-level upload scheduling or chunk lifetime decisions
 
 ## Invariants
 
@@ -31,6 +32,7 @@
 - `RenderUploadRequest::UpsertChunkMesh` validates the CPU mesh and stores enough data to rebuild GPU buffers after live surface attach
 - if there is no live backend yet, the renderer may cache the CPU mesh first and build GPU buffers later
 - uploaded chunk meshes may be partitioned into opaque and translucent subsets inside the renderer so water can render after opaque terrain without changing app-facing DTOs
+- GPU buffer creation and renderer chunk-map mutation stay renderer-owned; worker jobs may build CPU mesh data, but app must schedule when completed mesh commits are applied to the renderer
 
 ## Related Modules
 
