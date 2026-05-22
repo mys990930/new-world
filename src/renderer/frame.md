@@ -10,7 +10,7 @@
 - update GPU camera state
 - upload the camera uniform
 - upload the environment uniform
-- upload bounded terrain occlusion uniforms for opaque-cutout and fade-only terrain passes
+- upload bounded terrain occlusion uniforms for opaque-cutout and vignette fade terrain passes
 - upload the sun-shadow uniform
 - acquire the surface texture
 - render the shadow depth pass from terrain and dynamic shadow-caster instances
@@ -19,12 +19,12 @@
 - bind the block texture array
 - draw uploaded chunk meshes for the current `visible_chunks`
 - draw opaque terrain before translucent terrain partitions
-- cut player-occluding terrain fragments out of the opaque terrain pass when provided by the app
+- cut player-near occluding terrain fragments out of the opaque terrain pass when provided by the app
 - expand `cube_instances` into a main-pass cube mesh with per-face normals and top/bottom/side texture layers
 - expand dynamic shadow-caster cube instances into a separate shadow-depth mesh
 - draw the terrain pass
-- draw the dynamic cube pass
 - draw the player-occluding terrain fade pass
+- draw the dynamic cube pass
 - draw the translucent water pass
 - draw the screen-space UI sprite overlay pass
 - optionally draw the debug edge overlay pass
@@ -54,7 +54,7 @@
 4. Build a renderer-owned sun-shadow uniform from the current camera, sun direction, and visible geometry bounds when scene rendering is enabled.
 5. Upload camera, environment, terrain occlusion, and sun-shadow uniforms.
 6. Render the shadow map when the active quality preset enables it, using terrain plus filtered dynamic actor cubes.
-7. Begin the main color pass and, when `draw_scene` is enabled, draw the visible sun overlay, opaque terrain with occluder cutouts, dynamic cubes, occluder terrain fade, and then translucent water.
+7. Begin the main color pass and, when `draw_scene` is enabled, draw the visible sun overlay, opaque terrain with occluder cutouts, occluder terrain fade, dynamic cubes, and then translucent water.
 8. Draw the screen-space UI overlay pass.
 9. Optionally draw the debug edge overlay pass for the 3D scene.
 10. Submit and present.
@@ -71,6 +71,7 @@
 - moving voxel-player parts arrive as app-bridge-authored render DTOs; renderer frame code draws them without choosing animation state or facing
 - only dynamic actor cubes cast dynamic shadows; highlight/preview cubes and any app-authored helper quads must not enter the shadow-depth mesh
 - terrain occlusion fade is render-only and must not mutate uploaded chunk meshes or renderer chunk ownership
+- player voxel cubes draw after the terrain fade pass so terrain fade cannot tint or cover the avatar itself
 
 ## Related Modules
 
@@ -85,7 +86,7 @@
 - Terrain and dynamic shaders both sample the same shadow map, but the shadow-depth pass filters dynamic cubes to actor casters so helper overlays do not cast fake shadows.
 - Terrain shading now consumes a world-provided top-face contour mask, so readability lines appear on real height breaks instead of every block edge.
 - Water now renders in a separate translucent terrain pass after opaque terrain and dynamic cubes.
-- Player-occluding terrain uses a bounded block-coordinate uniform: opaque terrain discards those fragments first, then the same chunk mesh is redrawn through an alpha-blended fade pass after dynamic cubes.
+- Player-occluding terrain uses a bounded block-coordinate uniform to enable the effect and a player-centered vignette to shape it: opaque terrain discards the vignette region first, then nearby chunk terrain is redrawn through an alpha-blended fade pass before dynamic player cubes.
 - Terrain and dynamic fog now key off the camera focus position, which avoids washing the whole scene just because the orthographic eye offset is large while still allowing only a subtle amount of distance haze.
 - the current UI path samples a nearest-filtered pixel atlas and draws app-provided sprite quads for menus and HUD frames
 - dynamic cube previews may use alpha-blended shading so ECS build previews can appear translucent without changing UI sprite ownership

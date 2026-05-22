@@ -9,6 +9,7 @@
 - Sample a small set of local-player body points.
 - Walk from those samples toward the current render camera eye.
 - Collect loaded solid world blocks between the camera and player.
+- Provide a player-centered fade focus and radius pair once any covering block is found.
 - Keep the collected block list small and deterministic for renderer uniform upload.
 
 ## Non-Responsibilities
@@ -27,7 +28,7 @@
 
 ## Outputs
 
-- `OccludingBlockSet` containing `WorldBlockCoord` values.
+- `OccludingBlockSet` containing `WorldBlockCoord` values plus player-centered vignette parameters.
 
 ## Boundary Rules
 
@@ -40,3 +41,4 @@
 - Occlusion collection must be bounded per frame.
 - Missing/unloaded chunks are treated as empty for presentation; they must not trigger synchronous loading.
 - Player occlusion fade must not request remeshes or renderer mesh uploads.
+- Exact occluding blocks only enable and bound the effect; the visual mask is a soft player-centered vignette so the fade reads as a visibility aid rather than individual block toggles.

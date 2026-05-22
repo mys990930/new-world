@@ -29,6 +29,7 @@ pub struct RenderOcclusionBlock {
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(crate) struct TerrainOcclusionUniform {
     pub params: [f32; 4],
+    pub focus: [f32; 4],
     pub blocks: [[i32; 4]; MAX_TERRAIN_OCCLUSION_BLOCKS],
 }
 
@@ -36,22 +37,48 @@ impl TerrainOcclusionUniform {
     pub(crate) const fn disabled() -> Self {
         Self {
             params: [0.0, 0.0, 0.0, 0.0],
+            focus: [0.0, 0.0, 0.0, 0.0],
             blocks: [[0; 4]; MAX_TERRAIN_OCCLUSION_BLOCKS],
         }
     }
 
-    pub(crate) fn cutout(blocks: &[RenderOcclusionBlock]) -> Self {
-        Self::from_blocks(blocks, 1.0)
+    pub(crate) fn cutout(
+        blocks: &[RenderOcclusionBlock],
+        focus: Option<[f32; 3]>,
+        inner_radius: f32,
+        outer_radius: f32,
+    ) -> Self {
+        Self::from_blocks(blocks, focus, inner_radius, outer_radius, 1.0)
     }
 
-    pub(crate) fn fade(blocks: &[RenderOcclusionBlock]) -> Self {
-        Self::from_blocks(blocks, 2.0)
+    pub(crate) fn fade(
+        blocks: &[RenderOcclusionBlock],
+        focus: Option<[f32; 3]>,
+        inner_radius: f32,
+        outer_radius: f32,
+    ) -> Self {
+        Self::from_blocks(blocks, focus, inner_radius, outer_radius, 2.0)
     }
 
-    fn from_blocks(blocks: &[RenderOcclusionBlock], mode: f32) -> Self {
+    fn from_blocks(
+        blocks: &[RenderOcclusionBlock],
+        focus: Option<[f32; 3]>,
+        inner_radius: f32,
+        outer_radius: f32,
+        mode: f32,
+    ) -> Self {
+        let Some(focus) = focus else {
+            return Self::disabled();
+        };
         let mut uniform = Self::disabled();
         let count = blocks.len().min(MAX_TERRAIN_OCCLUSION_BLOCKS);
-        uniform.params = [count as f32, 0.34, mode, 0.0];
+        if count == 0 {
+            return uniform;
+        }
+        let outer_radius = outer_radius.max(0.01);
+        let inner_radius = inner_radius.clamp(0.0, outer_radius - 0.01);
+        uniform.params = [count as f32, 0.30, mode, outer_radius];
+        uniform.focus = [focus[0], focus[1], focus[2], inner_radius];
         for (index, block) in blocks.iter().take(count).enumerate() {
             uniform.blocks[index] = [block.block[0], block.block[1], block.block[2], 0];
         }
@@ -65,6 +92,9 @@ pub struct RenderFrameInput<'a> {
     pub draw_scene: bool,
     pub visible_chunks: &'a [ChunkCoord],
     pub occlusion_blocks: &'a [RenderOcclusionBlock],
+    pub occlusion_focus: Option<[f32; 3]>,
+    pub occlusion_inner_radius: f32,
+    pub occlusion_outer_radius: f32,
     pub cube_instances: &'a [RenderCubeInstance],
     pub ui_sprites: &'a [RenderUiSprite],
     pub clear_color_override: Option<[f32; 4]>,
@@ -207,8 +237,18 @@ impl Renderer {
             self.environment.current(),
             &self.config.quality,
         );
-        let occlusion_cutout_uniform = TerrainOcclusionUniform::cutout(frame.occlusion_blocks);
-        let occlusion_fade_uniform = TerrainOcclusionUniform::fade(frame.occlusion_blocks);
+        let occlusion_cutout_uniform = TerrainOcclusionUniform::cutout(
+            frame.occlusion_blocks,
+            frame.occlusion_focus,
+            frame.occlusion_inner_radius,
+            frame.occlusion_outer_radius,
+        );
+        let occlusion_fade_uniform = TerrainOcclusionUniform::fade(
+            frame.occlusion_blocks,
+            frame.occlusion_focus,
+            frame.occlusion_inner_radius,
+            frame.occlusion_outer_radius,
+        );
         backend
             .queue
             .write_buffer(&backend.camera_buffer, 0, cast_slice(&[camera_uniform]));
@@ -458,21 +498,16 @@ impl Renderer {
                     stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
 
-                if let Some((vertex_buffer, index_buffer, index_count)) =
-                    dynamic_cube_buffers.as_ref()
-                {
-                    render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
-                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
-                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
-                }
-
                 if !frame.occlusion_blocks.is_empty() {
                     render_pass.set_bind_group(1, &backend.environment_fade_bind_group, &[]);
                     render_pass.set_pipeline(&backend.terrain_fade_pipeline);
                     for coord in frame.visible_chunks {
-                        if !occlusion_blocks_include_chunk(frame.occlusion_blocks, *coord) {
+                        if !occlusion_vignette_includes_chunk(
+                            frame.occlusion_blocks,
+                            frame.occlusion_focus,
+                            frame.occlusion_outer_radius,
+                            *coord,
+                        ) {
                             continue;
                         }
                         let Some(chunk_mesh) = self.world.chunk_meshes.get(coord) else {
@@ -490,6 +525,16 @@ impl Renderer {
                         render_pass.draw_indexed(0..chunk_mesh.opaque_index_count, 0, 0..1);
                         stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                     }
+                }
+
+                if let Some((vertex_buffer, index_buffer, index_count)) =
+                    dynamic_cube_buffers.as_ref()
+                {
+                    render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
                 }
 
                 render_pass.set_bind_group(1, &backend.environment_bind_group, &[]);
@@ -821,14 +866,45 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
     }
 }
 
-fn occlusion_blocks_include_chunk(blocks: &[RenderOcclusionBlock], coord: ChunkCoord) -> bool {
+fn occlusion_vignette_includes_chunk(
+    blocks: &[RenderOcclusionBlock],
+    focus: Option<[f32; 3]>,
+    outer_radius: f32,
+    coord: ChunkCoord,
+) -> bool {
     const CHUNK_EDGE: i32 = 32;
 
-    blocks.iter().any(|block| {
+    if blocks.iter().any(|block| {
         block.block[0].div_euclid(CHUNK_EDGE) == coord.0
             && block.block[1].div_euclid(CHUNK_EDGE) == coord.1
             && block.block[2].div_euclid(CHUNK_EDGE) == coord.2
-    })
+    }) {
+        return true;
+    }
+
+    let Some(focus) = focus else {
+        return false;
+    };
+    let radius = outer_radius.max(0.0);
+    let min = [
+        coord.0 as f32 * CHUNK_EDGE as f32,
+        coord.1 as f32 * CHUNK_EDGE as f32,
+        coord.2 as f32 * CHUNK_EDGE as f32,
+    ];
+    let max = [
+        min[0] + CHUNK_EDGE as f32,
+        min[1] + CHUNK_EDGE as f32,
+        min[2] + CHUNK_EDGE as f32,
+    ];
+    let closest = [
+        focus[0].clamp(min[0], max[0]),
+        focus[1].clamp(min[1], max[1]),
+        focus[2].clamp(min[2], max[2]),
+    ];
+    let dx = focus[0] - closest[0];
+    let dy = (focus[1] - closest[1]) * 0.45;
+    let dz = focus[2] - closest[2];
+    dx * dx + dy * dy + dz * dz <= radius * radius
 }
 
 fn build_sun_shadow_uniform(

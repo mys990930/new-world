@@ -67,6 +67,13 @@ impl GameApp {
                         .compose_viewport(transform.translation[0], transform.translation[2])
                 });
 
+                let occlusion = collect_player_occlusion_blocks(
+                    &self.world,
+                    player_transform,
+                    player_body,
+                    &camera,
+                );
+
                 AppRenderFrameData {
                     camera,
                     draw_scene: true,
@@ -76,17 +83,15 @@ impl GameApp {
                         .into_iter()
                         .map(world_chunk_to_render)
                         .collect(),
-                    occlusion_blocks: collect_player_occlusion_blocks(
-                        &self.world,
-                        player_transform,
-                        player_body,
-                        &camera,
-                    )
-                    .blocks()
-                    .iter()
-                    .copied()
-                    .map(world_block_to_render_occlusion)
-                    .collect(),
+                    occlusion_blocks: occlusion
+                        .blocks()
+                        .iter()
+                        .copied()
+                        .map(world_block_to_render_occlusion)
+                        .collect(),
+                    occlusion_focus: occlusion.focus(),
+                    occlusion_inner_radius: occlusion.inner_radius(),
+                    occlusion_outer_radius: occlusion.outer_radius(),
                     cube_instances,
                     ui_sprites: build_ingame_ui_sprites(
                         self.ui.show_minimap_overlay,
@@ -123,6 +128,9 @@ impl GameApp {
                     draw_scene: false,
                     visible_chunks: Vec::new(),
                     occlusion_blocks: Vec::new(),
+                    occlusion_focus: None,
+                    occlusion_inner_radius: 0.0,
+                    occlusion_outer_radius: 0.0,
                     cube_instances: Vec::new(),
                     ui_sprites: build_world_select_ui_sprites(
                         &layout,

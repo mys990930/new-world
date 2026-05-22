@@ -19,6 +19,7 @@ struct EnvironmentUniform {
 
 struct TerrainOcclusionUniform {
     params: vec4<f32>,
+    focus: vec4<f32>,
     blocks: array<vec4<i32>, 64>,
 };
 
@@ -322,23 +323,26 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
     return mix(color, environment.fog_color_density.xyz, clamp(resisted, 0.0, 0.28));
 }
 
-fn terrain_occlusion_block_coord(world_position: vec3<f32>, normal: vec3<f32>) -> vec3<i32> {
-    let inward_position = world_position - normalize(normal) * 0.002;
-    return vec3<i32>(floor(inward_position));
-}
-
-fn is_terrain_occlusion_block(coord: vec3<i32>) -> bool {
-    let count = min(u32(terrain_occlusion.params.x), 64u);
-    for (var index = 0u; index < 64u; index = index + 1u) {
-        if index >= count {
-            break;
-        }
-        let block = terrain_occlusion.blocks[index].xyz;
-        if all(block == coord) {
-            return true;
-        }
+fn terrain_occlusion_strength(world_position: vec3<f32>) -> f32 {
+    if terrain_occlusion.params.x <= 0.5 {
+        return 0.0;
     }
-    return false;
+
+    let focus = terrain_occlusion.focus.xyz;
+    let delta = world_position - focus;
+    let outer_radius = max(terrain_occlusion.params.w, 0.01);
+    let inner_radius = clamp(terrain_occlusion.focus.w, 0.0, outer_radius - 0.01);
+    let vignette_distance = length(vec3<f32>(delta.x, delta.y * 0.45, delta.z));
+    let radial = 1.0 - smoothstep(inner_radius, outer_radius, vignette_distance);
+    if radial <= 0.0 {
+        return 0.0;
+    }
+
+    let to_eye = normalize(camera.eye_position.xyz - focus);
+    let delta_length = length(delta);
+    let fragment_dir = select(to_eye, delta / delta_length, delta_length > 0.0001);
+    let camera_side = smoothstep(-0.05, 0.22, dot(fragment_dir, to_eye));
+    return clamp(radial * camera_side, 0.0, 1.0);
 }
 
 @fragment
@@ -361,17 +365,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let occlusion_mode = u32(terrain_occlusion.params.z);
-    let occluding = is_terrain_occlusion_block(
-        terrain_occlusion_block_coord(input.world_position, normal)
-    );
-    if occlusion_mode == 1u && occluding {
+    let occlusion_strength = terrain_occlusion_strength(input.world_position);
+    if occlusion_mode == 1u && occlusion_strength > 0.015 {
         discard;
     }
     if occlusion_mode == 2u {
-        if !occluding {
+        if occlusion_strength <= 0.015 {
             discard;
         }
-        alpha = min(alpha, terrain_occlusion.params.y);
+        alpha = mix(alpha, min(alpha, terrain_occlusion.params.y), occlusion_strength);
     }
 
     let to_light = sun_direction();

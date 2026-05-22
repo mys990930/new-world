@@ -9,7 +9,7 @@
 
 - convert platform raw state into `EcsInputSnapshot`
 - convert app / ECS gameplay state into render-ready DTOs
-- convert app-owned player occlusion targets into renderer-ready block fade DTOs
+- convert app-owned player occlusion targets into renderer-ready block fade and vignette DTOs
 - convert ECS-owned voxel-player visual state into render-ready dynamic cube DTOs
 - convert app-owned menu / HUD layout into renderer-owned pixel-sprite DTOs
 - convert cached minimap viewport data into minimap sprite cells
@@ -58,7 +58,7 @@
 - held Shift is passed through as sprint state; ECS player logic decides how that affects speed
 - Space just-pressed state is passed through as jump state; ECS player logic decides whether the local player is grounded and allowed to launch
 - `app/ecs -> renderer` only maps camera pose, visibility, draw-ready instances, and app-owned UI sprites
-- player occlusion fade targets are presentation-only block coordinates; they must not imply world edits, remeshes, or chunk lifecycle requests
+- player occlusion fade targets are presentation-only block coordinates and vignette parameters; they must not imply world edits, remeshes, or chunk lifecycle requests
 - `world/jobs -> renderer` copies render-facing mesh payloads without re-owning world semantics
 - quarter-view basis rules are still defined in ECS camera code
 - render camera turn easing is authored in ECS camera state; `bridge` only exports the current render-facing pose
@@ -84,6 +84,6 @@
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
 - in-game inventory HUD now follows the same atlas-backed sprite path: bridge reads ECS inventory snapshots and emits only screen-space sprite DTOs plus render-ready preview cubes
-- in-game scene export includes a bounded terrain occlusion block list derived before rendering, allowing the renderer to fade player-covering terrain while keeping chunk meshes unchanged
+- in-game scene export includes a bounded terrain occlusion block list and player-centered vignette derived before rendering, allowing the renderer to fade player-covering terrain while keeping chunk meshes unchanged
 - the minimap overlay now uses the same pixel-sprite path, but bridge only reads app-owned cached viewport data; minimap chunk-column derivation happens earlier through jobs and cache composition
 - bridge is now physically split so raw input mapping, scene DTO export, and UI sprite export can evolve independently without re-growing one monolithic file

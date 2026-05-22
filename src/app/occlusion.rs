@@ -4,16 +4,44 @@ use crate::world::{WorldBlockCoord, WorldCore};
 
 pub(crate) const MAX_PLAYER_OCCLUSION_BLOCKS: usize = 64;
 const MAX_OCCLUSION_DISTANCE_BLOCKS: f32 = 96.0;
+const PLAYER_OCCLUSION_INNER_RADIUS_BLOCKS: f32 = 0.75;
+const PLAYER_OCCLUSION_OUTER_RADIUS_BLOCKS: f32 = 4.25;
 const PLAYER_OCCLUSION_SAMPLE_COUNT: usize = 5;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OccludingBlockSet {
     blocks: Vec<WorldBlockCoord>,
+    focus: [f32; 3],
+    inner_radius: f32,
+    outer_radius: f32,
+}
+
+impl Default for OccludingBlockSet {
+    fn default() -> Self {
+        Self {
+            blocks: Vec::new(),
+            focus: [0.0, 0.0, 0.0],
+            inner_radius: PLAYER_OCCLUSION_INNER_RADIUS_BLOCKS,
+            outer_radius: PLAYER_OCCLUSION_OUTER_RADIUS_BLOCKS,
+        }
+    }
 }
 
 impl OccludingBlockSet {
     pub(crate) fn blocks(&self) -> &[WorldBlockCoord] {
         &self.blocks
+    }
+
+    pub(crate) fn focus(&self) -> Option<[f32; 3]> {
+        (!self.blocks.is_empty()).then_some(self.focus)
+    }
+
+    pub(crate) fn inner_radius(&self) -> f32 {
+        self.inner_radius
+    }
+
+    pub(crate) fn outer_radius(&self) -> f32 {
+        self.outer_radius
     }
 
     fn push_unique(&mut self, block: WorldBlockCoord) {
@@ -37,7 +65,10 @@ pub(crate) fn collect_player_occlusion_blocks(
     };
     let body = player_body.unwrap_or_default();
     let samples = player_occlusion_samples(transform, body);
-    let mut occluding = OccludingBlockSet::default();
+    let mut occluding = OccludingBlockSet {
+        focus: player_occlusion_focus(transform, body),
+        ..OccludingBlockSet::default()
+    };
 
     for sample in samples {
         collect_solid_blocks_on_segment(world, sample, camera.eye, &mut occluding);
@@ -47,6 +78,14 @@ pub(crate) fn collect_player_occlusion_blocks(
     }
 
     occluding
+}
+
+fn player_occlusion_focus(transform: Transform, body: PlayerBody) -> [f32; 3] {
+    [
+        transform.translation[0],
+        transform.translation[1] + body.half_extents[1] * 0.34,
+        transform.translation[2],
+    ]
 }
 
 fn player_occlusion_samples(
@@ -193,6 +232,7 @@ mod tests {
         );
 
         assert!(blocks.blocks().contains(&WorldBlockCoord(4, 3, 4)));
+        assert_eq!(blocks.focus(), Some([2.5, 2.68, 2.5]));
     }
 
     #[test]
@@ -212,6 +252,7 @@ mod tests {
         );
 
         assert!(blocks.blocks().is_empty());
+        assert_eq!(blocks.focus(), None);
     }
 
     fn test_world() -> WorldCore {

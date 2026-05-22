@@ -11,7 +11,7 @@
 - convert selection previews and local player visual state into render cube instances
 - convert damaged-block feedback snapshots into subtle shake/tint overlay cube instances
 - convert ECS-owned floating block drops into small render cube instances
-- convert app-owned player terrain occlusion samples into renderer block fade DTOs
+- convert app-owned player terrain occlusion samples into renderer block fade and vignette DTOs
 - convert world CPU meshes into renderer upload payloads
 - choose which app-owned UI sprite builders to call for the current top-level app mode
 
@@ -45,7 +45,7 @@
 - bridge_scene must not emit app-authored ground-shadow quads; dynamic actor cubes rely on renderer-owned shadow-map rendering
 - floating block drops use world block face texture layers and material mapping, but they do not mutate or own world block data
 - selection and damaged-block feedback use solid highlight tint rather than block textures, avoiding translucent texture/depth artifacts on faces that overlap terrain
-- player-covering terrain fade targets are emitted separately from dynamic cubes so the renderer can handle terrain depth and alpha pass ordering
+- player-covering terrain fade targets are emitted separately from dynamic cubes so the renderer can handle terrain depth and alpha pass ordering without applying terrain fade over player voxels
 - world-select mode must emit UI-only frames without scene cubes or visible chunks
 - renderer-facing material mapping must not re-own world semantics beyond the DTO conversion step
 
