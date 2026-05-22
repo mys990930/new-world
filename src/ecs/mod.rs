@@ -55,8 +55,9 @@ pub use runtime::EcsRuntime;
 pub use selection::SelectionState;
 #[allow(unused_imports)]
 pub use tool_interaction::{
-    BLOCK_DAMAGE_RECOVERY_SECONDS, BLOCK_DROP_PICKUP_RADIUS, BlockDamage, BlockDamageTracker,
-    DEFAULT_BLOCK_HP, DamagedBlockRender, FloatingBlockDrop, FloatingBlockDropRender,
-    PICKAXE_TOOL_DAMAGE, SHOVEL_TOOL_DAMAGE, TOOL_USE_COOLDOWN_SECONDS, ToolActionOutcome,
-    ToolBlockBreak, ToolBlockDamage, ToolUseCooldown,
+    BLOCK_DAMAGE_RECOVERY_SECONDS, BLOCK_DROP_ATTRACT_RADIUS, BLOCK_DROP_ATTRACT_SPEED,
+    BLOCK_DROP_PICKUP_RADIUS, BlockDamage, BlockDamageTracker, DEFAULT_BLOCK_HP,
+    DamagedBlockRender, FloatingBlockDrop, FloatingBlockDropRender, PICKAXE_TOOL_DAMAGE,
+    SHOVEL_TOOL_DAMAGE, TOOL_USE_COOLDOWN_SECONDS, ToolActionOutcome, ToolBlockBreak,
+    ToolBlockDamage, ToolUseCooldown,
 };

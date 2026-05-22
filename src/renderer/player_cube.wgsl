@@ -140,12 +140,15 @@ fn apply_fog(color: vec3<f32>, world_position: vec3<f32>, material_kind: u32) ->
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let sampled = textureSample(
+    var sampled = textureSample(
         block_textures,
         block_sampler,
         input.uv,
         i32(input.texture_layer)
     );
+    if input.material_kind == MATERIAL_HIGHLIGHT {
+        sampled = vec4<f32>(1.0);
+    }
     let base_color = sampled.rgb * input.color.rgb;
     let alpha = sampled.a * input.color.a;
     if alpha <= 0.001 {

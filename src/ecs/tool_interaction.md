@@ -61,13 +61,14 @@
 - active damaged blocks are exposed to the app bridge with HP fraction and recent-hit age so the bridge can render shake/tint feedback without owning damage rules
 - when HP reaches zero, ECS reports a break outcome; `app` applies the actual `WorldEdit::SetBlock { block: AIR }`
 - successful app-side block destruction spawns one floating block drop with a deterministic pseudo-random horizontal offset inside the destroyed block
+- floating block drops inside the prototype `3` block attraction radius move toward the local player's collision body
 - floating block drops are picked up when they are within `0.5` blocks of the local player's collision body
 - picked-up blocks are inserted into block quickslots first, then general inventory slots
 - accepted tool uses trigger the ECS-owned local-player tool-swing visual state; the current duration matches the tool cooldown
 
 ## Tuning Notes
 
-- tool/block efficiency, block HP, damage values, pickup radius, drop scatter, and the `0.5` second tool cooldown are prototype constants and should become data-driven later
+- tool/block efficiency, block HP, damage values, pickup radius, attraction radius/speed, drop scatter, and the `0.5` second tool cooldown are prototype constants and should become data-driven later
 - shovel currently damages the selected face-plane preview set, while pickaxe damages the single selected block because selection shape still comes from `ToolCatalog`
 
 ## Invariants

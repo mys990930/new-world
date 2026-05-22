@@ -114,7 +114,7 @@
   - pickaxe prototype damage is stronger than shovel damage and can break default-HP blocks in one accepted use
   - zero-HP break outcomes are handed to app/world coordination rather than mutating `WorldCore` inside ECS
   - damaged blocks expose render feedback data so app bridge can show shake/tint without owning damage rules
-  - destroyed blocks become scattered floating ECS drop entities and are inserted into block quickslots first when they come within pickup distance of the player's body
+  - destroyed blocks become scattered floating ECS drop entities, move toward the player inside the attraction radius, and are inserted into block quickslots first when they come within pickup distance of the player's body
   - accepted tool uses trigger a short ECS-owned player arm swing state
 - movement intent generation
   - screen-relative input remains frame input state

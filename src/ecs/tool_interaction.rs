@@ -13,6 +13,8 @@ pub const DEFAULT_BLOCK_HP: f32 = 3.0;
 pub const SHOVEL_TOOL_DAMAGE: f32 = 1.0;
 pub const PICKAXE_TOOL_DAMAGE: f32 = 3.0;
 pub const BLOCK_DROP_PICKUP_RADIUS: f32 = 0.5;
+pub const BLOCK_DROP_ATTRACT_RADIUS: f32 = 3.0;
+pub const BLOCK_DROP_ATTRACT_SPEED: f32 = 8.0;
 const BLOCK_DROP_RANDOM_OFFSET_RADIUS: f32 = 0.32;
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
@@ -269,10 +271,16 @@ fn update_floating_block_drops(ecs_world: &mut World, dt_seconds: f32) {
         let mut query = ecs_world.query::<(Entity, &mut FloatingBlockDrop)>();
         for (entity, mut drop) in query.iter_mut(ecs_world) {
             drop.age_seconds += dt_seconds;
-            if distance_to_aabb(drop.base_center, player_min, player_max)
-                <= BLOCK_DROP_PICKUP_RADIUS
-            {
+            let distance_to_player = distance_to_aabb(drop.base_center, player_min, player_max);
+            if distance_to_player <= BLOCK_DROP_PICKUP_RADIUS {
                 pickups.push((entity, drop.block, drop.count));
+            } else if distance_to_player <= BLOCK_DROP_ATTRACT_RADIUS {
+                let target = closest_point_on_aabb(drop.base_center, player_min, player_max);
+                drop.base_center = move_towards(
+                    drop.base_center,
+                    target,
+                    BLOCK_DROP_ATTRACT_SPEED * dt_seconds,
+                );
             }
         }
     }
@@ -382,6 +390,32 @@ fn distance_to_interval(value: f32, min: f32, max: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+fn closest_point_on_aabb(point: [f32; 3], min: [f32; 3], max: [f32; 3]) -> [f32; 3] {
+    [
+        point[0].clamp(min[0], max[0]),
+        point[1].clamp(min[1], max[1]),
+        point[2].clamp(min[2], max[2]),
+    ]
+}
+
+fn move_towards(current: [f32; 3], target: [f32; 3], max_delta: f32) -> [f32; 3] {
+    let delta = [
+        target[0] - current[0],
+        target[1] - current[1],
+        target[2] - current[2],
+    ];
+    let distance = (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
+    if distance <= f32::EPSILON || distance <= max_delta {
+        return target;
+    }
+    let scale = max_delta / distance;
+    [
+        current[0] + delta[0] * scale,
+        current[1] + delta[1] * scale,
+        current[2] + delta[2] * scale,
+    ]
 }
 
 #[cfg(test)]
@@ -528,6 +562,36 @@ mod tests {
                 .unwrap()
                 .block_quickslots[0],
             Some(InventorySlot::block(BlockId::DIRT, 1))
+        );
+    }
+
+    #[test]
+    fn nearby_drop_moves_towards_player_before_pickup() {
+        let world = test_world_with_block(BlockId::STONE);
+        let mut ecs_world = test_ecs_world();
+        ecs_world.resource_mut::<FrameDeltaSeconds>().0 = 0.1;
+        let drop_entity = ecs_world
+            .spawn((
+                FloatingBlockDrop {
+                    block: BlockId::DIRT,
+                    count: 1,
+                    base_center: [4.2, 3.0, 1.5],
+                    age_seconds: 0.0,
+                },
+                Transform {
+                    translation: [4.2, 3.0, 1.5],
+                },
+            ))
+            .id();
+
+        tick_tool_interaction_state(&mut ecs_world, &world);
+
+        assert!(
+            ecs_world
+                .get::<FloatingBlockDrop>(drop_entity)
+                .unwrap()
+                .base_center[0]
+                < 4.2
         );
     }
 }

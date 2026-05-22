@@ -23,8 +23,8 @@ use crate::world::{
     MeshVertex as WorldMeshVertex, WorldCore,
 };
 
-const DEFAULT_PREVIEW_BLOCK_ID: BlockId = BlockId::STONE;
 const PLAYER_TEXTURE_LAYER: u32 = 0;
+const HIGHLIGHT_TEXTURE_LAYER: u32 = 0;
 
 impl GameApp {
     pub fn bridge_app_to_render_frame(&mut self) -> AppRenderFrameData {
@@ -53,7 +53,6 @@ impl GameApp {
                 push_damaged_block_feedback_instances(
                     &mut cube_instances,
                     self.ecs.damaged_blocks(&self.world),
-                    &self.world,
                     self.timing.frame_index,
                 );
                 push_floating_block_drop_instances(
@@ -295,46 +294,40 @@ fn push_selection_preview_instances(
     inventory: Option<PlayerInventory>,
 ) {
     for preview in &selection.interaction_preview_blocks {
-        let face_textures = world
-            .get_block(preview.block)
-            .map(|block| block_face_texture_layers(world.block_registry(), block))
-            .unwrap_or_else(|| default_preview_texture_layers(world.block_registry()));
         cube_instances.push(RenderCubeInstance {
             center: [
                 preview.block.0 as f32 + 0.5,
                 preview.block.1 as f32 + 0.5,
                 preview.block.2 as f32 + 0.5,
             ],
-            half_extents: [0.505, 0.505, 0.505],
-            color: [1.0, 0.22, 0.22, 0.18],
-            top_texture_layer: face_textures[0],
-            bottom_texture_layer: face_textures[1],
-            side_texture_layer: face_textures[2],
+            half_extents: [0.535, 0.535, 0.535],
+            color: [1.0, 0.18, 0.14, 0.12],
+            top_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            bottom_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            side_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
             material_kind: RenderMaterialKind::Highlight,
         });
     }
 
     if let Some(block) = selection.build_preview_block {
-        let face_textures = inventory
+        let selected_block_color = inventory
             .and_then(|player_inventory| player_inventory.selected_block())
             .and_then(|slot| match slot.item {
-                InventoryItem::Block(block_id) => {
-                    Some(block_face_texture_layers(world.block_registry(), block_id))
-                }
+                InventoryItem::Block(block_id) => Some(block_preview_tint(world, block_id)),
                 InventoryItem::Tool(_) => None,
             })
-            .unwrap_or_else(|| default_preview_texture_layers(world.block_registry()));
+            .unwrap_or([1.0, 0.95, 0.35, 0.20]);
         cube_instances.push(RenderCubeInstance {
             center: [
                 block.0 as f32 + 0.5,
                 block.1 as f32 + 0.5,
                 block.2 as f32 + 0.5,
             ],
-            half_extents: [0.49, 0.49, 0.49],
-            color: [1.0, 0.95, 0.35, 0.35],
-            top_texture_layer: face_textures[0],
-            bottom_texture_layer: face_textures[1],
-            side_texture_layer: face_textures[2],
+            half_extents: [0.485, 0.485, 0.485],
+            color: selected_block_color,
+            top_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            bottom_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            side_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
             material_kind: RenderMaterialKind::Highlight,
         });
     }
@@ -343,15 +336,13 @@ fn push_selection_preview_instances(
 fn push_damaged_block_feedback_instances(
     cube_instances: &mut Vec<RenderCubeInstance>,
     damaged_blocks: Vec<DamagedBlockRender>,
-    world: &WorldCore,
     frame_index: u64,
 ) {
     for damaged in damaged_blocks {
-        let face_textures = block_face_texture_layers(world.block_registry(), damaged.block);
         let damage_fraction = (1.0 - damaged.hp_fraction).clamp(0.0, 1.0);
         let recent = (1.0 - damaged.untouched_seconds / 0.35).clamp(0.0, 1.0);
         let seed = damaged_block_feedback_seed(damaged.pos, frame_index);
-        let jitter = 0.035 * recent;
+        let jitter = 0.018 * recent;
         let center = [
             damaged.pos.0 as f32 + 0.5 + seed[0] * jitter,
             damaged.pos.1 as f32 + 0.5 + seed[1] * jitter * 0.45,
@@ -360,19 +351,19 @@ fn push_damaged_block_feedback_instances(
         cube_instances.push(RenderCubeInstance {
             center,
             half_extents: [
-                0.508 + 0.012 * damage_fraction,
-                0.508 + 0.012 * damage_fraction,
-                0.508 + 0.012 * damage_fraction,
+                0.545 + 0.015 * damage_fraction,
+                0.545 + 0.015 * damage_fraction,
+                0.545 + 0.015 * damage_fraction,
             ],
             color: [
-                0.22 + 0.22 * recent,
-                0.08 + 0.06 * damaged.hp_fraction,
-                0.04 + 0.05 * damaged.hp_fraction,
-                0.16 + 0.32 * damage_fraction,
+                0.10 + 0.18 * damage_fraction + 0.10 * recent,
+                0.02 + 0.05 * damaged.hp_fraction,
+                0.01 + 0.04 * damaged.hp_fraction,
+                0.14 + 0.24 * damage_fraction,
             ],
-            top_texture_layer: face_textures[0],
-            bottom_texture_layer: face_textures[1],
-            side_texture_layer: face_textures[2],
+            top_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            bottom_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
+            side_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
             material_kind: RenderMaterialKind::Highlight,
         });
     }
@@ -408,8 +399,19 @@ fn push_floating_block_drop_instances(
     }
 }
 
-fn default_preview_texture_layers(registry: &crate::world::BlockRegistry) -> [u32; 3] {
-    block_face_texture_layers(registry, DEFAULT_PREVIEW_BLOCK_ID)
+fn block_preview_tint(world: &WorldCore, block_id: BlockId) -> [f32; 4] {
+    let def = world.block_registry().block_or_missing(block_id);
+    let color = match def.material {
+        BlockMaterialKind::Grass => [0.35, 0.78, 0.28],
+        BlockMaterialKind::Soil => [0.58, 0.36, 0.20],
+        BlockMaterialKind::Stone => [0.62, 0.64, 0.68],
+        BlockMaterialKind::Sand => [0.86, 0.74, 0.42],
+        BlockMaterialKind::Foliage => [0.25, 0.72, 0.30],
+        BlockMaterialKind::Water => [0.30, 0.58, 0.94],
+        BlockMaterialKind::Emissive => [0.95, 0.80, 0.30],
+        BlockMaterialKind::GenericOpaque => [0.96, 0.84, 0.36],
+    };
+    [color[0], color[1], color[2], 0.20]
 }
 
 fn block_face_texture_layers(

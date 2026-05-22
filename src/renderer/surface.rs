@@ -687,7 +687,7 @@ async fn create_backend(
         Some(depth_format),
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::ALPHA_BLENDING),
-        true,
+        false,
     );
     let ui_sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("renderer_ui_sprite_pipeline"),
