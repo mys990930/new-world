@@ -77,7 +77,7 @@
 
 - world-side mesh vertices carry `uv`, `texture_layer`, and `material_kind`; the bridge copies or maps all three into renderer upload vertices
 - `RenderCubeInstance` also carries a renderer material kind plus block-face texture layers so actor body parts and gameplay previews can be shaded differently without leaking world ownership into renderer
-- the initial voxel-player integration expands the ECS rig into multiple dynamic cube instances in `bridge_scene.rs`, applies simple idle/walk/sprint/airborne offsets, and rotates local part offsets plus axis-aligned extent approximations using ECS-facing octants; if rotated limbs are required later, bridge should target a renderer DTO extension rather than moving pose logic into renderer
+- the initial voxel-player integration expands the ECS rig into multiple dynamic cube instances in `bridge_scene.rs`, applies simple idle/walk/sprint/airborne offsets, and rotates local part offsets using ECS-facing octants while keeping per-part extents stable; if rotated limbs are required later, bridge should target a renderer DTO extension rather than resizing axis-aligned cubes
 - the current world-select UI uses renderer-owned sprite DTOs composed from a pixel atlas, larger atlas-backed bitmap text, editable field rows, a scrollable created-world list, explicit action buttons, and a centered loading popup
 - the renderer consumes the same app-owned world-select layout geometry that `ui.rs` uses for mouse hit testing, field focus, list-row selection, and popup blocking, so visible controls and clickable bounds stay aligned
 - app-owned HUD and menu layouts no longer emit flat rectangles; they emit sprite quads with atlas UVs and tint only
