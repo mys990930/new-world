@@ -117,12 +117,26 @@ impl<'a> MacroFieldRasterContext<'a> {
                 let longitudinal_start_blocks = (plan.chain_downstream_progress * chain_length
                     - plan.segment_length_blocks.max(0.0) * 0.5)
                     .max(0.0);
+                let endpoints = river_plan.endpoints(plan.segment_id);
                 boundary_curves
                     .get(&plan.edge)
                     .copied()
                     .map(|curve| RiverCurveRef {
+                        is_terminal_outlet: terminal_chain_ids
+                            .get(&plan.chain_id)
+                            .copied()
+                            .flatten()
+                            .is_some_and(|segment_id| segment_id == plan.segment_id),
                         edge: plan.edge,
-                        points: curve.points.clone(),
+                        points: endpoints
+                            .map(|endpoints| {
+                                orient_river_curve_points_downstream(
+                                    curve.points.clone(),
+                                    endpoints.from_position,
+                                    endpoints.to_position,
+                                )
+                            })
+                            .unwrap_or_else(|| curve.points.clone()),
                         longitudinal_start_blocks,
                         flow_hint: flow_hint_from_plan(plan),
                         water_width_blocks: plan.bed_width_blocks,
@@ -476,6 +490,7 @@ impl<'a> MacroFieldRasterContext<'a> {
 
 #[derive(Debug, Clone)]
 pub(super) struct RiverCurveRef {
+    pub(super) is_terminal_outlet: bool,
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: Vec<WorldPlanePoint>,
     pub(super) longitudinal_start_blocks: f32,
@@ -904,6 +919,24 @@ pub(super) fn nearest_site_order(
         .then_with(|| candidate.id.0.cmp(&current.id.0))
 }
 
+fn orient_river_curve_points_downstream(
+    mut points: Vec<WorldPlanePoint>,
+    from_position: WorldPlanePoint,
+    to_position: WorldPlanePoint,
+) -> Vec<WorldPlanePoint> {
+    let (Some(first), Some(last)) = (points.first().copied(), points.last().copied()) else {
+        return points;
+    };
+    let forward_error =
+        squared_distance(first, from_position) + squared_distance(last, to_position);
+    let reverse_error =
+        squared_distance(first, to_position) + squared_distance(last, from_position);
+    if reverse_error < forward_error {
+        points.reverse();
+    }
+    points
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -926,6 +959,23 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
+
+    #[test]
+    fn river_curve_points_are_oriented_to_hydrology_downstream() {
+        let from = WorldPlanePoint::new(0.0, 0.0);
+        let to = WorldPlanePoint::new(96.0, 0.0);
+        let points = vec![
+            to,
+            WorldPlanePoint::new(64.0, 8.0),
+            WorldPlanePoint::new(32.0, -8.0),
+            from,
+        ];
+
+        let oriented = orient_river_curve_points_downstream(points, from, to);
+
+        assert_eq!(oriented.first().copied(), Some(from));
+        assert_eq!(oriented.last().copied(), Some(to));
+    }
 
     #[test]
     fn low_flow_estuary_fan_keeps_practical_downstream_reach() {
