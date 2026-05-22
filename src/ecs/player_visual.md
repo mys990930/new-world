@@ -13,6 +13,7 @@
 - `VoxelPlayerAnimationState`
 - `VoxelPlayerFacingOctant`
 - `VoxelPlayerAnimationClock`
+- `VoxelPlayerToolSwingState`
 
 ### Rig / Pose Description
 - `VoxelPlayerPart`
@@ -21,6 +22,7 @@
 - `VOXEL_PLAYER_SKIN_COLOR`
 - `VOXEL_PLAYER_SHIRT_COLOR`
 - `VOXEL_PLAYER_PANTS_COLOR`
+- `VOXEL_PLAYER_TOOL_SWING_SECONDS`
 
 ## Inputs
 
@@ -38,6 +40,7 @@
 - render-facing 8-octant direction
 - coarse animation state such as idle, walk, sprint, or airborne
 - current visual animation clock seconds
+- current tool-swing fraction for app bridge arm motion
 - display horizontal speed in gameplay units per second
 - default voxel body-part layout that app bridge can expand into dynamic cubes
 
@@ -57,6 +60,7 @@
   - `Sprint` when grounded, moving, and `sprint_down` is held
   - `Airborne` when not grounded
 - the animation clock advances from ECS frame delta and is exported with the visual state
+- accepted tool uses restart a short `0.5` second swing state so the bridge can move the arms during the same cadence as tool use
 - the default rig is code-authored data, not an external atlas or sprite dependency
 - the default rig is intentionally slimmer than `PlayerBody`; collision remains `2x2x4`, while the visible avatar keeps readable prototype proportions
 - part poses are local to the player root; app bridge is responsible for composing root, facing, animation offset, and renderer DTOs
@@ -67,6 +71,7 @@
 - renderer must not infer player intent, movement state, or facing from raw transform deltas
 - app bridge may approximate the rig with axis-aligned cube instances until renderer supports rotated dynamic parts
 - animation remains deterministic from explicit ECS state plus `VoxelPlayerAnimationClock`, so multiplayer/server replay can reproduce visual state selection
+- tool-swing animation state is ECS-owned and is triggered by gameplay tool use, not by renderer timing
 - visual scaffolding must not change `PlayerBody`, collision, spawn placement, selection, or camera follow semantics
 
 ## Non-Responsibilities
@@ -93,6 +98,7 @@
    - idle bob
    - mirrored arm/leg swing for walk and sprint
    - airborne tuck / raised-arm pose
+   - right-arm dominant tool swing during accepted tool use
 5. If axis-aligned limb approximation is not expressive enough, extend renderer DTOs with an oriented dynamic cube instance while keeping gameplay-facing pose selection in ECS.
 6. Deterministic tests cover visual-state classification, facing octant selection, bridge-emitted part count, limb animation movement, and facing rotation.
 

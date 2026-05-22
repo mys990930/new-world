@@ -9,7 +9,7 @@ use crate::ecs::VOXEL_PLAYER_PART_COUNT;
 #[cfg(test)]
 use crate::ecs::quarter_view_camera_pose;
 use crate::ecs::{
-    CameraState, FloatingBlockDropRender, InventoryItem, PlayerInventory,
+    CameraState, DamagedBlockRender, FloatingBlockDropRender, InventoryItem, PlayerInventory,
     VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart, VoxelPlayerPartPose,
     VoxelPlayerVisualState, default_voxel_player_part_poses, quarter_view_render_camera_pose,
 };
@@ -49,6 +49,12 @@ impl GameApp {
                     &selection,
                     &self.world,
                     inventory,
+                );
+                push_damaged_block_feedback_instances(
+                    &mut cube_instances,
+                    self.ecs.damaged_blocks(&self.world),
+                    &self.world,
+                    self.timing.frame_index,
                 );
                 push_floating_block_drop_instances(
                     &mut cube_instances,
@@ -249,6 +255,26 @@ fn animated_voxel_player_local_center(
         },
     }
 
+    let swing = (visual.tool_swing_fraction * std::f32::consts::PI)
+        .sin()
+        .max(0.0);
+    if swing > 0.0 {
+        match part.part {
+            VoxelPlayerPart::RightArm => {
+                center[2] += 0.44 * swing;
+                center[1] -= 0.20 * swing;
+            }
+            VoxelPlayerPart::LeftArm => {
+                center[2] += 0.10 * swing;
+                center[1] -= 0.04 * swing;
+            }
+            VoxelPlayerPart::Head
+            | VoxelPlayerPart::Torso
+            | VoxelPlayerPart::LeftLeg
+            | VoxelPlayerPart::RightLeg => {}
+        }
+    }
+
     center
 }
 
@@ -312,6 +338,52 @@ fn push_selection_preview_instances(
             material_kind: RenderMaterialKind::Highlight,
         });
     }
+}
+
+fn push_damaged_block_feedback_instances(
+    cube_instances: &mut Vec<RenderCubeInstance>,
+    damaged_blocks: Vec<DamagedBlockRender>,
+    world: &WorldCore,
+    frame_index: u64,
+) {
+    for damaged in damaged_blocks {
+        let face_textures = block_face_texture_layers(world.block_registry(), damaged.block);
+        let damage_fraction = (1.0 - damaged.hp_fraction).clamp(0.0, 1.0);
+        let recent = (1.0 - damaged.untouched_seconds / 0.35).clamp(0.0, 1.0);
+        let seed = damaged_block_feedback_seed(damaged.pos, frame_index);
+        let jitter = 0.035 * recent;
+        let center = [
+            damaged.pos.0 as f32 + 0.5 + seed[0] * jitter,
+            damaged.pos.1 as f32 + 0.5 + seed[1] * jitter * 0.45,
+            damaged.pos.2 as f32 + 0.5 + seed[2] * jitter,
+        ];
+        cube_instances.push(RenderCubeInstance {
+            center,
+            half_extents: [
+                0.508 + 0.012 * damage_fraction,
+                0.508 + 0.012 * damage_fraction,
+                0.508 + 0.012 * damage_fraction,
+            ],
+            color: [
+                0.22 + 0.22 * recent,
+                0.08 + 0.06 * damaged.hp_fraction,
+                0.04 + 0.05 * damaged.hp_fraction,
+                0.16 + 0.32 * damage_fraction,
+            ],
+            top_texture_layer: face_textures[0],
+            bottom_texture_layer: face_textures[1],
+            side_texture_layer: face_textures[2],
+            material_kind: RenderMaterialKind::Highlight,
+        });
+    }
+}
+
+fn damaged_block_feedback_seed(pos: crate::world::WorldBlockCoord, frame_index: u64) -> [f32; 3] {
+    let phase = frame_index as f32 * 1.73
+        + pos.0 as f32 * 12.9898
+        + pos.1 as f32 * 78.233
+        + pos.2 as f32 * 37.719;
+    [phase.sin(), (phase + 2.17).sin(), (phase + 4.31).sin()]
 }
 
 fn push_floating_block_drop_instances(
@@ -574,6 +646,7 @@ mod tests {
             horizontal_speed: 7.0,
             grounded: true,
             animation_seconds,
+            tool_swing_fraction: 0.0,
         }
     }
 }

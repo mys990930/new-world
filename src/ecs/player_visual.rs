@@ -13,6 +13,7 @@ pub const VOXEL_PLAYER_IDLE_SPEED_EPSILON: f32 = 0.01;
 pub const VOXEL_PLAYER_SKIN_COLOR: [f32; 4] = [0.94, 0.74, 0.52, 1.0];
 pub const VOXEL_PLAYER_SHIRT_COLOR: [f32; 4] = [0.18, 0.42, 0.82, 1.0];
 pub const VOXEL_PLAYER_PANTS_COLOR: [f32; 4] = [0.12, 0.15, 0.22, 1.0];
+pub const VOXEL_PLAYER_TOOL_SWING_SECONDS: f32 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoxelPlayerAnimationState {
@@ -51,6 +52,24 @@ pub struct VoxelPlayerVisualState {
     pub horizontal_speed: f32,
     pub grounded: bool,
     pub animation_seconds: f32,
+    pub tool_swing_fraction: f32,
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct VoxelPlayerToolSwingState {
+    pub elapsed_seconds: f32,
+    pub duration_seconds: f32,
+    pub active: bool,
+}
+
+impl Default for VoxelPlayerToolSwingState {
+    fn default() -> Self {
+        Self {
+            elapsed_seconds: 0.0,
+            duration_seconds: VOXEL_PLAYER_TOOL_SWING_SECONDS,
+            active: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +107,10 @@ pub fn local_player_visual_state(world: &World) -> Option<VoxelPlayerVisualState
         .get_resource::<VoxelPlayerAnimationClock>()
         .copied()
         .unwrap_or_default();
+    let tool_swing = world
+        .get_resource::<VoxelPlayerToolSwingState>()
+        .copied()
+        .unwrap_or_default();
     let intent_strength =
         (velocity.linear[0] * velocity.linear[0] + velocity.linear[2] * velocity.linear[2]).sqrt();
     let horizontal_speed = if intent_strength <= VOXEL_PLAYER_IDLE_SPEED_EPSILON {
@@ -109,6 +132,7 @@ pub fn local_player_visual_state(world: &World) -> Option<VoxelPlayerVisualState
         horizontal_speed,
         grounded: physics.grounded,
         animation_seconds: animation_clock.seconds,
+        tool_swing_fraction: tool_swing.fraction(),
     })
 }
 
@@ -158,6 +182,39 @@ pub(crate) fn advance_voxel_player_animation_system(
     mut clock: ResMut<VoxelPlayerAnimationClock>,
 ) {
     clock.seconds = (clock.seconds + frame_delta.0.max(0.0)).rem_euclid(3600.0);
+}
+
+pub(crate) fn advance_voxel_player_tool_swing_system(
+    frame_delta: Res<FrameDeltaSeconds>,
+    mut swing: ResMut<VoxelPlayerToolSwingState>,
+) {
+    if !swing.active {
+        return;
+    }
+    swing.elapsed_seconds += frame_delta.0.max(0.0);
+    if swing.elapsed_seconds >= swing.duration_seconds {
+        swing.active = false;
+        swing.elapsed_seconds = swing.duration_seconds;
+    }
+}
+
+pub(crate) fn trigger_voxel_player_tool_swing(world: &mut World) {
+    if world.get_resource::<VoxelPlayerToolSwingState>().is_none() {
+        world.insert_resource(VoxelPlayerToolSwingState::default());
+    }
+    let mut swing = world.resource_mut::<VoxelPlayerToolSwingState>();
+    swing.active = true;
+    swing.elapsed_seconds = 0.05;
+    swing.duration_seconds = VOXEL_PLAYER_TOOL_SWING_SECONDS;
+}
+
+impl VoxelPlayerToolSwingState {
+    pub fn fraction(self) -> f32 {
+        if !self.active || self.duration_seconds <= f32::EPSILON {
+            return 0.0;
+        }
+        (self.elapsed_seconds / self.duration_seconds).clamp(0.0, 1.0)
+    }
 }
 
 fn animation_state_from_motion(

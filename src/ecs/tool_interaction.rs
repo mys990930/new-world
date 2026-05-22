@@ -2,15 +2,18 @@ use std::collections::HashMap;
 
 use bevy_ecs::prelude::{Component, Entity, Resource, World};
 
-use super::inventory::{InventoryItem, InventorySlot, ManipulationMode, PlayerInventory};
+use super::inventory::{InventoryItem, InventorySlot, ManipulationMode, PlayerInventory, ToolKind};
 use super::player::{FrameDeltaSeconds, LocalPlayerEntity, PlayerBody, Transform};
+use super::player_visual::trigger_voxel_player_tool_swing;
 use crate::world::{BlockId, WorldBlockCoord, WorldCore, world_to_chunk_local};
 
 pub const TOOL_USE_COOLDOWN_SECONDS: f32 = 0.5;
 pub const BLOCK_DAMAGE_RECOVERY_SECONDS: f32 = 5.0;
 pub const DEFAULT_BLOCK_HP: f32 = 3.0;
-pub const DEFAULT_TOOL_DAMAGE: f32 = 1.0;
+pub const SHOVEL_TOOL_DAMAGE: f32 = 1.0;
+pub const PICKAXE_TOOL_DAMAGE: f32 = 3.0;
 pub const BLOCK_DROP_PICKUP_RADIUS: f32 = 0.5;
+const BLOCK_DROP_RANDOM_OFFSET_RADIUS: f32 = 0.32;
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub struct ToolUseCooldown {
@@ -71,6 +74,14 @@ pub struct FloatingBlockDropRender {
     pub age_seconds: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DamagedBlockRender {
+    pub pos: WorldBlockCoord,
+    pub block: BlockId,
+    pub hp_fraction: f32,
+    pub untouched_seconds: f32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolActionOutcome {
     pub touched_blocks: Vec<ToolBlockDamage>,
@@ -104,11 +115,12 @@ pub(crate) fn apply_primary_tool_action(
     let Some(inventory) = ecs_world.get::<PlayerInventory>(entity).copied() else {
         return outcome;
     };
-    if !matches!(inventory.manipulation_mode, ManipulationMode::Interaction)
-        || inventory.selected_tool().is_none()
-    {
+    if !matches!(inventory.manipulation_mode, ManipulationMode::Interaction) {
         return outcome;
     }
+    let Some(tool) = inventory.selected_tool() else {
+        return outcome;
+    };
 
     let targets: Vec<_> = ecs_world
         .resource::<super::selection::SelectionState>()
@@ -120,6 +132,8 @@ pub(crate) fn apply_primary_tool_action(
         return outcome;
     }
 
+    trigger_voxel_player_tool_swing(ecs_world);
+    let tool_damage = tool_damage(tool);
     let mut tracker = ecs_world.resource_mut::<BlockDamageTracker>();
     for pos in targets {
         let Some(block) = world.get_block(pos).filter(|block| !block.is_air()) else {
@@ -131,7 +145,7 @@ pub(crate) fn apply_primary_tool_action(
             hp_remaining: DEFAULT_BLOCK_HP,
             untouched_seconds: 0.0,
         });
-        damage.hp_remaining = (damage.hp_remaining - DEFAULT_TOOL_DAMAGE).max(0.0);
+        damage.hp_remaining = (damage.hp_remaining - tool_damage).max(0.0);
         damage.untouched_seconds = 0.0;
         outcome.touched_blocks.push(ToolBlockDamage {
             pos,
@@ -159,7 +173,12 @@ pub(crate) fn spawn_block_drop(ecs_world: &mut World, pos: WorldBlockCoord, bloc
         return;
     }
 
-    let base_center = [pos.0 as f32 + 0.5, pos.1 as f32 + 0.65, pos.2 as f32 + 0.5];
+    let [offset_x, offset_z] = random_drop_offset(pos, block);
+    let base_center = [
+        pos.0 as f32 + 0.5 + offset_x,
+        pos.1 as f32 + 0.65,
+        pos.2 as f32 + 0.5 + offset_z,
+    ];
     ecs_world.spawn((
         FloatingBlockDrop {
             block,
@@ -171,6 +190,28 @@ pub(crate) fn spawn_block_drop(ecs_world: &mut World, pos: WorldBlockCoord, bloc
             translation: base_center,
         },
     ));
+}
+
+pub(crate) fn damaged_block_renders(
+    ecs_world: &mut World,
+    world: &WorldCore,
+) -> Vec<DamagedBlockRender> {
+    let tracker = ecs_world.resource::<BlockDamageTracker>();
+    tracker
+        .damaged_blocks
+        .iter()
+        .filter_map(|(pos, damage)| {
+            world
+                .get_block(*pos)
+                .filter(|block| !block.is_air())
+                .map(|block| DamagedBlockRender {
+                    pos: *pos,
+                    block,
+                    hp_fraction: (damage.hp_remaining / DEFAULT_BLOCK_HP).clamp(0.0, 1.0),
+                    untouched_seconds: damage.untouched_seconds,
+                })
+        })
+        .collect()
 }
 
 pub(crate) fn floating_block_drop_renders(ecs_world: &mut World) -> Vec<FloatingBlockDropRender> {
@@ -212,10 +253,15 @@ fn update_floating_block_drops(ecs_world: &mut World, dt_seconds: f32) {
         .get::<PlayerBody>(player_entity)
         .copied()
         .unwrap_or_default();
-    let pickup_anchor = [
-        player_transform.translation[0],
-        player_transform.translation[1] - player_body.half_extents[1] + 0.5,
-        player_transform.translation[2],
+    let player_min = [
+        player_transform.translation[0] - player_body.half_extents[0],
+        player_transform.translation[1] - player_body.half_extents[1],
+        player_transform.translation[2] - player_body.half_extents[2],
+    ];
+    let player_max = [
+        player_transform.translation[0] + player_body.half_extents[0],
+        player_transform.translation[1] + player_body.half_extents[1],
+        player_transform.translation[2] + player_body.half_extents[2],
     ];
 
     let mut pickups = Vec::new();
@@ -223,7 +269,9 @@ fn update_floating_block_drops(ecs_world: &mut World, dt_seconds: f32) {
         let mut query = ecs_world.query::<(Entity, &mut FloatingBlockDrop)>();
         for (entity, mut drop) in query.iter_mut(ecs_world) {
             drop.age_seconds += dt_seconds;
-            if distance3(drop.base_center, pickup_anchor) <= BLOCK_DROP_PICKUP_RADIUS {
+            if distance_to_aabb(drop.base_center, player_min, player_max)
+                <= BLOCK_DROP_PICKUP_RADIUS
+            {
                 pickups.push((entity, drop.block, drop.count));
             }
         }
@@ -289,11 +337,51 @@ fn add_to_slot_group<const N: usize>(
     remaining
 }
 
-fn distance3(left: [f32; 3], right: [f32; 3]) -> f32 {
-    let dx = left[0] - right[0];
-    let dy = left[1] - right[1];
-    let dz = left[2] - right[2];
+fn tool_damage(tool: ToolKind) -> f32 {
+    match tool {
+        ToolKind::Shovel => SHOVEL_TOOL_DAMAGE,
+        ToolKind::Pickaxe => PICKAXE_TOOL_DAMAGE,
+    }
+}
+
+fn random_drop_offset(pos: WorldBlockCoord, block: BlockId) -> [f32; 2] {
+    let hash = hash_block_drop(pos, block);
+    let unit_x = ((hash & 0xffff) as f32 / 65535.0) * 2.0 - 1.0;
+    let unit_z = (((hash >> 16) & 0xffff) as f32 / 65535.0) * 2.0 - 1.0;
+    let length = (unit_x * unit_x + unit_z * unit_z).sqrt();
+    if length <= f32::EPSILON {
+        return [0.0, 0.0];
+    }
+    let radius = BLOCK_DROP_RANDOM_OFFSET_RADIUS * (((hash >> 32) & 0xffff) as f32 / 65535.0);
+    [unit_x / length * radius, unit_z / length * radius]
+}
+
+fn hash_block_drop(pos: WorldBlockCoord, block: BlockId) -> u64 {
+    let mut value = 0x9e37_79b9_7f4a_7c15_u64;
+    value ^= (pos.0 as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = value.rotate_left(21);
+    value ^= (pos.1 as i64 as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value = value.rotate_left(17);
+    value ^= (pos.2 as i64 as u64).wrapping_mul(0x2545_f491_4f6c_dd1d);
+    value ^= u64::from(block.raw()).wrapping_mul(0x9ddf_ea08_eb38_2d69);
+    value ^ (value >> 33)
+}
+
+fn distance_to_aabb(point: [f32; 3], min: [f32; 3], max: [f32; 3]) -> f32 {
+    let dx = distance_to_interval(point[0], min[0], max[0]);
+    let dy = distance_to_interval(point[1], min[1], max[1]);
+    let dz = distance_to_interval(point[2], min[2], max[2]);
     (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn distance_to_interval(value: f32, min: f32, max: f32) -> f32 {
+    if value < min {
+        min - value
+    } else if value > max {
+        value - max
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]
@@ -301,7 +389,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::ecs::{Player, SelectionState};
+    use crate::ecs::{Player, SelectionState, VoxelPlayerToolSwingState};
     use crate::world::{BlockRegistry, ChunkCoord, ChunkData, LocalBlockCoord, WorldMeta};
 
     fn test_world_with_block(block: BlockId) -> WorldCore {
@@ -321,6 +409,7 @@ mod tests {
         ecs_world.insert_resource(LocalPlayerEntity::default());
         ecs_world.insert_resource(BlockDamageTracker::default());
         ecs_world.insert_resource(FrameDeltaSeconds(0.016));
+        ecs_world.insert_resource(VoxelPlayerToolSwingState::default());
         ecs_world.insert_resource(SelectionState {
             hovered_block: Some(WorldBlockCoord(1, 1, 1)),
             hovered_face: None,
@@ -360,6 +449,22 @@ mod tests {
     }
 
     #[test]
+    fn pickaxe_breaks_default_block_in_one_use() {
+        let world = test_world_with_block(BlockId::STONE);
+        let mut ecs_world = test_ecs_world();
+        let player_entity = ecs_world.resource::<LocalPlayerEntity>().0.unwrap();
+        ecs_world
+            .get_mut::<PlayerInventory>(player_entity)
+            .unwrap()
+            .selected_tool_slot = 1;
+
+        let outcome = apply_primary_tool_action(&mut ecs_world, &world);
+
+        assert_eq!(outcome.broken_blocks.len(), 1);
+        assert_eq!(outcome.broken_blocks[0].pos, WorldBlockCoord(1, 1, 1));
+    }
+
+    #[test]
     fn block_damage_recovers_after_timeout() {
         let world = test_world_with_block(BlockId::STONE);
         let mut ecs_world = test_ecs_world();
@@ -384,6 +489,39 @@ mod tests {
         let remaining = add_block_to_local_inventory(&mut ecs_world, BlockId::DIRT, 1);
 
         assert_eq!(remaining, 0);
+        assert_eq!(
+            ecs_world
+                .get::<PlayerInventory>(player_entity)
+                .unwrap()
+                .block_quickslots[0],
+            Some(InventorySlot::block(BlockId::DIRT, 1))
+        );
+    }
+
+    #[test]
+    fn drop_pickup_uses_player_body_distance() {
+        let world = test_world_with_block(BlockId::STONE);
+        let mut ecs_world = test_ecs_world();
+        let player_entity = ecs_world.resource::<LocalPlayerEntity>().0.unwrap();
+        {
+            let mut inventory = ecs_world.get_mut::<PlayerInventory>(player_entity).unwrap();
+            inventory.block_quickslots = [None; super::super::inventory::QUICKSLOT_COUNT];
+            inventory.general_slots = [None; super::super::inventory::GENERAL_SLOT_COUNT];
+        }
+        ecs_world.spawn((
+            FloatingBlockDrop {
+                block: BlockId::DIRT,
+                count: 1,
+                base_center: [2.85, 3.0, 1.5],
+                age_seconds: 0.0,
+            },
+            Transform {
+                translation: [2.85, 3.0, 1.5],
+            },
+        ));
+
+        tick_tool_interaction_state(&mut ecs_world, &world);
+
         assert_eq!(
             ecs_world
                 .get::<PlayerInventory>(player_entity)

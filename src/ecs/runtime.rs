@@ -25,14 +25,15 @@ use super::player::{
     update_move_world_intent_system,
 };
 use super::player_visual::{
-    VoxelPlayerAnimationClock, VoxelPlayerVisualState, advance_voxel_player_animation_system,
+    VoxelPlayerAnimationClock, VoxelPlayerToolSwingState, VoxelPlayerVisualState,
+    advance_voxel_player_animation_system, advance_voxel_player_tool_swing_system,
     local_player_visual_state,
 };
 use super::selection::{SelectionState, update_selection_from_world};
 use super::tool_interaction::{
-    BlockDamageTracker, FloatingBlockDropRender, ToolActionOutcome, ToolUseCooldown,
-    apply_primary_tool_action, floating_block_drop_renders, spawn_block_drop,
-    tick_tool_interaction_state,
+    BlockDamageTracker, DamagedBlockRender, FloatingBlockDropRender, ToolActionOutcome,
+    ToolUseCooldown, apply_primary_tool_action, damaged_block_renders, floating_block_drop_renders,
+    spawn_block_drop, tick_tool_interaction_state,
 };
 use crate::simulation::SimulationResult;
 use crate::world::{BlockId, WorldBlockCoord, WorldCore};
@@ -56,6 +57,7 @@ impl EcsRuntime {
         world.insert_resource(FrameDeltaSeconds::default());
         world.insert_resource(PlayerMovementConfig::default());
         world.insert_resource(VoxelPlayerAnimationClock::default());
+        world.insert_resource(VoxelPlayerToolSwingState::default());
         world.insert_resource(ToolCatalog::default());
         world.insert_resource(ToolUseCooldown::default());
         world.insert_resource(BlockDamageTracker::default());
@@ -84,6 +86,7 @@ impl EcsRuntime {
                 update_move_world_intent_system,
                 sync_local_player_velocity_system,
                 advance_voxel_player_animation_system,
+                advance_voxel_player_tool_swing_system,
             )
                 .chain(),
         );
@@ -220,6 +223,10 @@ impl EcsRuntime {
 
     pub fn floating_block_drops(&mut self) -> Vec<FloatingBlockDropRender> {
         floating_block_drop_renders(&mut self.world)
+    }
+
+    pub fn damaged_blocks(&mut self, world: &WorldCore) -> Vec<DamagedBlockRender> {
+        damaged_block_renders(&mut self.world, world)
     }
 
     pub fn simulate_local_player_motion(&mut self, world: &WorldCore) {

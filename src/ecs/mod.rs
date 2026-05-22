@@ -45,9 +45,10 @@ pub use player::{LocalPlayerEntity, Player, PlayerBody, PlayerPhysicsState, Tran
 #[allow(unused_imports)]
 pub use player_visual::{
     VOXEL_PLAYER_IDLE_SPEED_EPSILON, VOXEL_PLAYER_PANTS_COLOR, VOXEL_PLAYER_PART_COUNT,
-    VOXEL_PLAYER_SHIRT_COLOR, VOXEL_PLAYER_SKIN_COLOR, VoxelPlayerAnimationClock,
-    VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart, VoxelPlayerPartPose,
-    VoxelPlayerVisualState, default_voxel_player_part_poses,
+    VOXEL_PLAYER_SHIRT_COLOR, VOXEL_PLAYER_SKIN_COLOR, VOXEL_PLAYER_TOOL_SWING_SECONDS,
+    VoxelPlayerAnimationClock, VoxelPlayerAnimationState, VoxelPlayerFacingOctant, VoxelPlayerPart,
+    VoxelPlayerPartPose, VoxelPlayerToolSwingState, VoxelPlayerVisualState,
+    default_voxel_player_part_poses,
 };
 pub use runtime::EcsRuntime;
 #[allow(unused_imports)]
@@ -55,6 +56,7 @@ pub use selection::SelectionState;
 #[allow(unused_imports)]
 pub use tool_interaction::{
     BLOCK_DAMAGE_RECOVERY_SECONDS, BLOCK_DROP_PICKUP_RADIUS, BlockDamage, BlockDamageTracker,
-    DEFAULT_BLOCK_HP, DEFAULT_TOOL_DAMAGE, FloatingBlockDrop, FloatingBlockDropRender,
-    TOOL_USE_COOLDOWN_SECONDS, ToolActionOutcome, ToolBlockBreak, ToolBlockDamage, ToolUseCooldown,
+    DEFAULT_BLOCK_HP, DamagedBlockRender, FloatingBlockDrop, FloatingBlockDropRender,
+    PICKAXE_TOOL_DAMAGE, SHOVEL_TOOL_DAMAGE, TOOL_USE_COOLDOWN_SECONDS, ToolActionOutcome,
+    ToolBlockBreak, ToolBlockDamage, ToolUseCooldown,
 };

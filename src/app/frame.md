@@ -58,7 +58,7 @@
 - updated app-owned minimap cache
 - optional console logging for clicked blocks and chunk residency transitions
 - diagnostic console logging for chunk request/result flow and pending spawned-world placement
-- applied block placement/break edits, selected-stack consumption, block-drop spawning, minimap column refresh, and remesh invalidation
+- applied block placement/break edits, selected-stack consumption, scattered block-drop spawning, minimap column refresh, and remesh invalidation
 - diagnostic console logging for update/render hitches when frame work exceeds the hitch threshold
 - optional diagnostic console logging for app update/render stage timing and job/minimap pressure
 - one renderer frame attempt
@@ -125,7 +125,7 @@
 - empty mesh results are accepted as render-ready chunk state but remove/skip renderer mesh upload because `wgpu` buffers cannot be created from empty vertex/index arrays
 - the current player motion slice supports `2x2x4` body collision, one-block step-up, and gravity/falling against loaded world blocks
 - the current build interaction slice applies ECS `PlaceBlock` commands in app by reading ECS selection/inventory state, calling `WorldCore::apply_edit(...)`, consuming one selected block stack item, and invalidating affected chunk meshes/minimap columns
-- the current tool interaction slice applies ECS `PrimaryAction` commands in app by asking ECS for tool damage/break outcomes, calling `WorldCore::apply_edit(... AIR)` for broken blocks, spawning ECS block drops, and invalidating affected chunk meshes/minimap columns
+- the current tool interaction slice applies ECS `PrimaryAction` commands in app by asking ECS for tool damage/break outcomes, calling `WorldCore::apply_edit(... AIR)` for broken blocks, spawning scattered ECS block drops, and invalidating affected chunk meshes/minimap columns
 - the current fixed slice is intentionally narrow: world calendar, per-atlas climate drift, local weather windows, and renderer environment sync now advance on fixed ticks, while direct simulation-driven `WorldEdit` application remains a later step
 - the current world-select screen is a mouse-driven app-mode that skips gameplay updates, still collects completed jobs, and renders only app-owned pixel-sprite UI including a blocking loading popup while app-owned create-world work is pending
 - create-world progress events update the world-select popup counter/progress bar before the final `WorldCreated` result arrives
