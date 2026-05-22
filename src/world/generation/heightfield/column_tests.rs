@@ -154,7 +154,7 @@ fn enabled_perlin_perturbs_macro_resolved_river_bed_before_contour() {
     sample.river_core_strength = 1.0;
     sample.river_shoulder_strength = 1.0;
     sample.river_valley_strength = 1.0;
-    sample.river_bed_depth_hint = 0.55;
+    sample.river_core_depth_hint = 0.55;
     sample.river_bank_roughness_hint = 0.75;
     let disabled = heightfield_column_from_sample(&sample, HeightfieldConfig::default());
     let enabled_config = HeightfieldConfig {
@@ -170,7 +170,7 @@ fn enabled_perlin_perturbs_macro_resolved_river_bed_before_contour() {
             enabled.raw_surface_height_blocks + enabled.micro_relief_blocks,
             enabled_config.contour,
         ),
-        "river bed Perlin should perturb the same pre-contour source as land"
+        "river core Perlin should perturb the same pre-contour source as land"
     );
     assert!(
         (enabled.surface_y - disabled.surface_y).abs()
@@ -374,7 +374,7 @@ fn default_river_corridor_consumes_macro_resolved_bed_without_extra_cut() {
     let plain =
         heightfield_column_from_sample(&sample(0.0, 0.0, 0.00400, 0.0, 0.0, 0.0, 0.0), config);
     let mut river_sample = sample_with_river(0.0, 0.0, 0.00400, 0.75);
-    river_sample.river_bed_depth_hint = 1.0;
+    river_sample.river_core_depth_hint = 1.0;
     let river = heightfield_column_from_sample(&river_sample, config);
 
     assert_eq!(
@@ -383,7 +383,7 @@ fn default_river_corridor_consumes_macro_resolved_bed_without_extra_cut() {
     );
     assert_eq!(
         river.surface_height_blocks, plain.surface_height_blocks,
-        "heightfield must consume the macro-resolved river bed instead of applying an extra local cut"
+        "heightfield must consume the macro-resolved river core instead of applying an extra local cut"
     );
     assert!(
         river.water_level_blocks.is_some(),
@@ -1013,7 +1013,7 @@ fn final_visible_heights_are_integer_blocks() {
                 .water_level_blocks
                 .is_none_or(|water| water.fract() == 0.0)
             && column
-                .river_water_height_blocks
+                .river_core_water_height_blocks
                 .is_none_or(|water| water.fract() == 0.0)
     }));
 }
@@ -1022,13 +1022,13 @@ fn final_visible_heights_are_integer_blocks() {
 fn river_water_steps_down_to_standing_water_without_large_jumps() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 32.0);
     let mut first = sample_with_river(0.0, 0.0, -0.0010, 0.22);
-    first.river_bed_depth_hint = 0.25;
+    first.river_core_depth_hint = 0.25;
     let mut second = sample_with_river(32.0, 0.0, -0.0012, 0.42);
-    second.river_bed_depth_hint = 0.35;
+    second.river_core_depth_hint = 0.35;
     let mut third = sample_with_river(64.0, 0.0, -0.0014, 0.62);
-    third.river_bed_depth_hint = 0.45;
+    third.river_core_depth_hint = 0.45;
     let mut fourth = sample_with_river(96.0, 0.0, -0.0016, 0.82);
-    fourth.river_bed_depth_hint = 0.55;
+    fourth.river_core_depth_hint = 0.55;
     let samples = vec![
         first,
         second,
@@ -1046,7 +1046,7 @@ fn river_water_steps_down_to_standing_water_without_large_jumps() {
         .map(|x| {
             tile.column(x, 0)
                 .expect("river column")
-                .river_water_height_blocks
+                .river_core_water_height_blocks
                 .expect("river water")
         })
         .collect::<Vec<_>>();
@@ -1077,14 +1077,14 @@ fn river_water_steps_down_to_standing_water_without_large_jumps() {
 fn high_flow_river_water_pools_inside_core_without_overtopping_banks() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 5, 1, 32.0);
     let mut left_edge = sample_with_river(32.0, 0.0, -0.001, 0.92);
-    left_edge.river_core_strength = 0.90;
-    left_edge.river_bed_depth_hint = 0.80;
+    left_edge.river_core_strength = 0.996;
+    left_edge.river_core_depth_hint = 0.80;
     let mut center = sample_with_river(64.0, 0.0, -0.004, 0.92);
     center.river_core_strength = 1.0;
-    center.river_bed_depth_hint = 0.90;
+    center.river_core_depth_hint = 0.90;
     let mut right_edge = sample_with_river(96.0, 0.0, -0.001, 0.92);
-    right_edge.river_core_strength = 0.90;
-    right_edge.river_bed_depth_hint = 0.80;
+    right_edge.river_core_strength = 0.996;
+    right_edge.river_core_depth_hint = 0.80;
     let left_bank = sample(0.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0);
     let right_bank = sample(128.0, 0.0, 0.004, 0.0, 0.0, 0.0, 0.0);
     let macro_tile = MacroFieldTile {
@@ -1114,45 +1114,117 @@ fn high_flow_river_water_pools_inside_core_without_overtopping_banks() {
 }
 
 #[test]
-fn river_water_descent_suppresses_water_without_recutting_resolved_bed() {
-    let config = MacroFieldTileConfig::new(0.0, 0.0, 2, 1, 32.0);
-    let mut river = sample_with_river(0.0, 0.0, 0.010, 0.22);
-    river.river_bed_depth_hint = 0.03;
+fn lowered_river_corridor_keeps_exposed_bed_outside_active_core() {
+    let mut bed_edge = sample_with_river(0.0, 0.0, 0.010, 0.42);
+    bed_edge.river_core_strength = 0.90;
+    bed_edge.river_shoulder_strength = 0.90;
+    bed_edge.river_valley_strength = 0.90;
+    bed_edge.river_core_depth_hint = 0.25;
+    let mut active_core = bed_edge;
+    active_core.river_core_strength = 0.99;
+
+    let bed_column = heightfield_column_from_sample(&bed_edge, HeightfieldConfig::default());
+    let core_column = heightfield_column_from_sample(&active_core, HeightfieldConfig::default());
+
+    assert_eq!(
+        bed_column.terrain_kind,
+        HeightfieldTerrainKind::RiverBed,
+        "macro-lowered corridor edge should remain the exposed river bed tier, not active core"
+    );
+    assert_eq!(bed_column.water_y, None);
+    assert_eq!(bed_column.river_core_depth_blocks, 0.0);
+    assert_eq!(
+        core_column.terrain_kind,
+        HeightfieldTerrainKind::RiverCore,
+        "only the stronger central active channel should become water-filled RiverCore"
+    );
+    assert!(
+        core_column
+            .water_y
+            .is_some_and(|water| water > core_column.surface_y),
+        "active RiverCore should be filled by water: surface={} water={:?}",
+        core_column.surface_y,
+        core_column.water_y
+    );
+}
+
+#[test]
+fn river_core_descent_keeps_water_without_recutting_resolved_bed() {
+    let config = MacroFieldTileConfig::new(0.0, 0.0, 3, 1, 32.0);
+    let left_bank = sample(0.0, 0.0, 0.025, 0.0, 0.0, 0.0, 0.0);
+    let mut river = sample_with_river(32.0, 0.0, 0.010, 0.22);
+    river.river_core_depth_hint = 0.03;
     let resolved_river = heightfield_column_from_sample(&river, HeightfieldConfig::default());
-    let samples = vec![river, sample(32.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0)];
+    let right_bank = sample(64.0, 0.0, 0.025, 0.0, 0.0, 0.0, 0.0);
     let macro_tile = MacroFieldTile {
         config,
-        samples,
+        samples: vec![left_bank, river, right_bank],
         stats: MacroFieldTileStats::default(),
     };
 
     let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
-    let river = tile.column(0, 0).expect("river column");
+    let river = tile.column(1, 0).expect("river column");
 
-    assert_eq!(river.terrain_kind, HeightfieldTerrainKind::River);
+    assert_eq!(river.terrain_kind, HeightfieldTerrainKind::RiverCore);
     assert_eq!(
         river.surface_y, resolved_river.surface_y,
         "river water descent must not recut terrain bed after column resolve"
     );
-    assert_eq!(
-        river.water_y, None,
-        "water that descends to the resolved bed or below should be suppressed instead"
+    assert!(
+        river.water_y.is_some_and(|water| water > river.surface_y),
+        "river core water should keep at least one block above the resolved bed: surface={} water={:?}",
+        river.surface_y,
+        river.water_y
     );
-    assert_eq!(river.water_level_blocks, None);
-    assert_eq!(river.river_water_height_blocks, None);
 }
 
 #[test]
-fn headwater_river_bed_stays_shallow_and_nearly_filled() {
+fn river_core_descent_fills_threshold_core_above_resolved_bed() {
+    let config = MacroFieldTileConfig::new(0.0, 0.0, 4, 1, 32.0);
+    let left_bank = sample(0.0, 0.0, 0.026, 0.0, 0.0, 0.0, 0.0);
+    let mut core = sample_with_river(32.0, 0.0, 0.010, 0.72);
+    core.river_shoulder_strength = 0.54;
+    core.river_valley_strength = 1.0;
+    core.river_core_depth_hint = 0.25;
+    let mut companion = sample_with_river(64.0, 0.0, 0.010, 0.72);
+    companion.river_shoulder_strength = 0.54;
+    companion.river_valley_strength = 1.0;
+    companion.river_core_depth_hint = 0.25;
+    let right_bank = sample(96.0, 0.0, 0.026, 0.0, 0.0, 0.0, 0.0);
+    let resolved_core = heightfield_column_from_sample(&core, HeightfieldConfig::default());
+    let macro_tile = MacroFieldTile {
+        config,
+        samples: vec![left_bank, core, companion, right_bank],
+        stats: MacroFieldTileStats::default(),
+    };
+
+    let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
+    let core = tile.column(1, 0).expect("core river column");
+
+    assert_eq!(core.terrain_kind, HeightfieldTerrainKind::RiverCore);
+    assert_eq!(
+        core.surface_y, resolved_core.surface_y,
+        "river water descent must preserve the macro-field-resolved core bed"
+    );
+    assert!(
+        core.water_y.is_some_and(|water| water > core.surface_y),
+        "supported river core should keep at least one water block above the resolved bed: surface={} water={:?}",
+        core.surface_y,
+        core.water_y
+    );
+}
+
+#[test]
+fn headwater_river_core_stays_shallow_and_nearly_filled() {
     let mut headwater = sample_with_river(0.0, 0.0, 0.004, 0.05);
-    headwater.river_bed_depth_hint = 3.0 / 40.0;
+    headwater.river_core_depth_hint = 3.0 / 40.0;
     let column = heightfield_column_from_sample(&headwater, HeightfieldConfig::default());
 
-    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::River);
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::RiverCore);
     assert!(
-        column.river_bed_depth_blocks <= 3.0,
+        column.river_core_depth_blocks <= 3.0,
         "headwater stream carve should stay within the small V-cut range: {}",
-        column.river_bed_depth_blocks
+        column.river_core_depth_blocks
     );
     assert!(
         column.water_y.expect("river water") - column.surface_y <= 2,
@@ -1163,20 +1235,20 @@ fn headwater_river_bed_stays_shallow_and_nearly_filled() {
 }
 
 #[test]
-fn river_bed_depth_scales_with_flow_hint() {
+fn river_core_depth_scales_with_flow_hint() {
     let mut headwater = sample_with_river(0.0, 0.0, 0.02, 0.05);
-    headwater.river_bed_depth_hint = 3.0 / 40.0;
+    headwater.river_core_depth_hint = 3.0 / 40.0;
     let mut lower = sample_with_river(1.0, 0.0, 0.02, 0.85);
-    lower.river_bed_depth_hint = 18.0 / 40.0;
+    lower.river_core_depth_hint = 18.0 / 40.0;
 
     let headwater = heightfield_column_from_sample(&headwater, HeightfieldConfig::default());
     let lower = heightfield_column_from_sample(&lower, HeightfieldConfig::default());
 
     assert!(
-        lower.river_bed_depth_blocks > headwater.river_bed_depth_blocks * 3.0,
-        "downstream river bed depth should follow river-plan Q scale: headwater={} lower={}",
-        headwater.river_bed_depth_blocks,
-        lower.river_bed_depth_blocks
+        lower.river_core_depth_blocks > headwater.river_core_depth_blocks * 3.0,
+        "downstream river core depth should follow river-plan Q scale: headwater={} lower={}",
+        headwater.river_core_depth_blocks,
+        lower.river_core_depth_blocks
     );
     assert!(
         lower.water_y.expect("lower water") - lower.surface_y
@@ -1193,14 +1265,150 @@ fn river_shoulder_strength_does_not_create_water_or_bed_core() {
     shoulder.river_valley_strength = 0.76;
     shoulder.river_distance_blocks = 72.0;
     shoulder.river_flow_hint = 0.72;
-    shoulder.river_bed_depth_hint = 0.9;
+    shoulder.river_core_depth_hint = 0.9;
     shoulder.river_bank_roughness_hint = 0.7;
 
     let column = heightfield_column_from_sample(&shoulder, HeightfieldConfig::default());
 
     assert_eq!(column.terrain_kind, HeightfieldTerrainKind::Land);
     assert_eq!(column.water_y, None);
-    assert_eq!(column.river_bed_depth_blocks, 0.0);
+    assert_eq!(column.river_core_depth_blocks, 0.0);
+}
+
+#[test]
+fn unlowered_river_water_hint_does_not_create_bed_or_core() {
+    let mut edge = sample_with_river(0.0, 0.0, 0.020, 0.48);
+    edge.macro_elevation = edge.combined_macro_height;
+    edge.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    edge.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    edge.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
+    edge.river_core_depth_hint = 0.85;
+    let mut plain = edge;
+    plain.river_core_strength = 0.0;
+    plain.river_shoulder_strength = 0.0;
+    plain.river_valley_strength = 0.0;
+    plain.river_flow_hint = 0.0;
+    plain.river_core_depth_hint = 0.0;
+
+    let edge_column = heightfield_column_from_sample(&edge, HeightfieldConfig::default());
+    let plain_column = heightfield_column_from_sample(&plain, HeightfieldConfig::default());
+
+    assert_eq!(edge_column.terrain_kind, HeightfieldTerrainKind::Land);
+    assert_eq!(edge_column.water_y, None);
+    assert_eq!(
+        edge_column.river_core_depth_blocks, 0.0,
+        "unlowered river hints must not preserve active-channel core-depth diagnostics"
+    );
+    assert_eq!(
+        edge_column.surface_y, plain_column.surface_y,
+        "heightfield must not recut threshold-only river bed columns into the lower core layer"
+    );
+}
+
+#[test]
+fn lowered_river_channel_center_is_water_filled_core() {
+    let mut edge = sample_with_river(0.0, 0.0, 0.020, 0.66);
+    edge.river_core_strength = 0.99;
+    edge.river_shoulder_strength = 0.99;
+    edge.river_valley_strength = 0.99;
+    edge.river_core_depth_hint = 0.70;
+
+    let column = heightfield_column_from_sample(&edge, HeightfieldConfig::default());
+
+    assert_eq!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::RiverCore,
+        "a macro-lowered central channel is the water-filled core, not a dry exposed bed"
+    );
+    assert!(
+        column.river_core_depth_blocks > 0.0,
+        "water-filled core should preserve the active-channel depth diagnostic"
+    );
+    assert!(
+        column.water_y.is_some_and(|water| water > column.surface_y),
+        "the carved core must be filled by water: surface={} water={:?}",
+        column.surface_y,
+        column.water_y
+    );
+}
+
+#[test]
+fn river_bed_descent_clears_accidental_water_hint() {
+    let mut bed_sample = sample_with_river(0.0, 0.0, 0.006, 0.72);
+    bed_sample.river_core_strength = 0.90;
+    bed_sample.river_shoulder_strength = 0.90;
+    bed_sample.river_valley_strength = 0.90;
+    let mut bed = heightfield_column_from_sample(&bed_sample, HeightfieldConfig::default());
+    assert_eq!(bed.terrain_kind, HeightfieldTerrainKind::RiverBed);
+
+    bed.water_y = Some(bed.surface_y + 4);
+    bed.water_level_blocks = Some((bed.surface_y + 4) as f32);
+    bed.river_core_water_height_blocks = Some((bed.surface_y + 4) as f32);
+    let mut columns = vec![bed];
+
+    super::super::river::apply_river_water_descent(
+        &mut columns,
+        1,
+        1,
+        DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
+    );
+
+    assert_eq!(
+        columns[0].water_y, None,
+        "RiverBed may keep exposed bed context, but river water must only survive on RiverCore"
+    );
+    assert_eq!(columns[0].water_level_blocks, None);
+    assert_eq!(columns[0].river_core_water_height_blocks, None);
+}
+
+#[test]
+fn estuary_fan_edge_stays_exposed_bed() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.006, 0.72);
+    mouth.river_core_strength = 0.90;
+    mouth.river_shoulder_strength = 1.0;
+    mouth.river_valley_strength = 1.0;
+    mouth.river_core_depth_hint = 0.80;
+    mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.estuary_water_depth_hint = 0.32;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::RiverBed,
+        "estuary fan edge context may mark exposed bed, but must not widen active RiverCore into the fan"
+    );
+    assert_eq!(column.river_core_depth_blocks, 0.0);
+    assert_eq!(column.water_y, None);
+}
+
+#[test]
+fn estuary_fan_center_restores_water_core() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.006, 0.72);
+    mouth.river_core_strength = 0.0;
+    mouth.river_shoulder_strength = 1.0;
+    mouth.river_valley_strength = 1.0;
+    mouth.river_core_depth_hint = 0.80;
+    mouth.estuary_water_strength = 1.0;
+    mouth.estuary_water_depth_hint = 0.32;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(
+        column.terrain_kind,
+        HeightfieldTerrainKind::RiverCore,
+        "estuary fan center should restore the active water-filled core"
+    );
+    assert!(
+        column.river_core_depth_blocks > 0.0,
+        "water-filled estuary core should preserve core depth diagnostics"
+    );
+    assert!(
+        column.water_y.is_some_and(|water| water > column.surface_y),
+        "estuary core must carry water: surface={} water={:?}",
+        column.surface_y,
+        column.water_y
+    );
 }
 
 #[test]
@@ -1210,7 +1418,7 @@ fn high_shoulder_does_not_recut_river_bank_in_heightfield() {
     bank.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
     bank.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
     bank.river_distance_blocks = 38.0;
-    bank.river_bed_depth_hint = 0.19;
+    bank.river_core_depth_hint = 0.19;
     bank.river_bank_roughness_hint = 0.5;
 
     let mut plain = bank;
@@ -1219,7 +1427,7 @@ fn high_shoulder_does_not_recut_river_bank_in_heightfield() {
     plain.river_valley_strength = 0.0;
     plain.river_flow_hint = 0.0;
     plain.river_distance_blocks = f32::INFINITY;
-    plain.river_bed_depth_hint = 0.0;
+    plain.river_core_depth_hint = 0.0;
     plain.river_bank_roughness_hint = 0.0;
 
     let bank_column = heightfield_column_from_sample(&bank, HeightfieldConfig::default());
@@ -1227,7 +1435,7 @@ fn high_shoulder_does_not_recut_river_bank_in_heightfield() {
 
     assert_eq!(bank_column.terrain_kind, HeightfieldTerrainKind::Land);
     assert_eq!(bank_column.water_level_blocks, None);
-    assert_eq!(bank_column.river_bed_depth_blocks, 0.0);
+    assert_eq!(bank_column.river_core_depth_blocks, 0.0);
     assert_eq!(
         bank_column.surface_y, plain_column.surface_y,
         "river bank slope must already be present in macro_field; heightfield should not recut it"
@@ -1290,10 +1498,10 @@ fn preview_perlin_does_not_reintroduce_broad_river_bank_noise() {
 }
 
 #[test]
-fn macro_resolved_river_bed_can_stay_below_sea_level_at_ocean_mouth() {
+fn macro_resolved_river_core_can_stay_below_sea_level_at_ocean_mouth() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 2, 1, 1.0);
     let mut river = sample_with_river(0.0, 0.0, -0.006, 0.95);
-    river.river_bed_depth_hint = 0.85;
+    river.river_core_depth_hint = 0.85;
     river.river_bank_roughness_hint = 0.2;
     let samples = vec![river, sample(1.0, 0.0, -0.8, 1.0, 0.0, 0.0, 0.0)];
     let macro_tile = MacroFieldTile {
@@ -1307,10 +1515,10 @@ fn macro_resolved_river_bed_can_stay_below_sea_level_at_ocean_mouth() {
     let ocean = tile.column(1, 0).expect("ocean");
 
     assert_eq!(ocean.visible_surface_height_blocks(), 0.0);
-    assert_eq!(river.terrain_kind, HeightfieldTerrainKind::River);
+    assert_eq!(river.terrain_kind, HeightfieldTerrainKind::RiverCore);
     assert!(
         river.surface_height_blocks < DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-        "macro-resolved river bed should stay below sea level near the mouth: {}",
+        "macro-resolved river core should stay below sea level near the mouth: {}",
         river.surface_height_blocks
     );
     assert!(
@@ -1318,8 +1526,8 @@ fn macro_resolved_river_bed_can_stay_below_sea_level_at_ocean_mouth() {
         "river water surface should remain distinct from the carved bed"
     );
     assert!(
-        river.river_bed_depth_blocks > 0.0,
-        "heightfield should preserve the river bed depth diagnostic"
+        river.river_core_depth_blocks > 0.0,
+        "heightfield should preserve the river core depth diagnostic"
     );
 }
 
@@ -1327,7 +1535,7 @@ fn macro_resolved_river_bed_can_stay_below_sea_level_at_ocean_mouth() {
 fn below_sea_ocean_mouth_preserves_macro_resolved_bed() {
     let mut mouth = sample_with_river(0.0, 0.0, -0.25, 0.98);
     mouth.ocean_mask = 1.0;
-    mouth.river_bed_depth_hint = 0.9;
+    mouth.river_core_depth_hint = 0.9;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
 
@@ -1356,7 +1564,7 @@ fn ocean_owned_above_sea_river_hint_keeps_ocean_ownership_without_mouth_carve() 
     mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.65;
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.65;
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.65;
-    mouth.river_bed_depth_hint = 0.82;
+    mouth.river_core_depth_hint = 0.82;
     mouth.river_bank_roughness_hint = 0.2;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
@@ -1372,7 +1580,7 @@ fn ocean_owned_above_sea_river_hint_keeps_ocean_ownership_without_mouth_carve() 
         column.surface_height_blocks
     );
     assert_eq!(
-        column.river_bed_depth_blocks, 0.0,
+        column.river_core_depth_blocks, 0.0,
         "ocean-owned columns are filled as ocean before river policy runs"
     );
 }
@@ -1385,7 +1593,7 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.01;
     mouth.river_distance_blocks = 38.0;
-    mouth.river_bed_depth_hint = 0.82;
+    mouth.river_core_depth_hint = 0.82;
     mouth.river_bank_roughness_hint = 0.62;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
@@ -1401,87 +1609,76 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
         column.surface_height_blocks
     );
     assert_eq!(
-        column.river_bed_depth_blocks, 0.0,
-        "river bed depth is reserved for non-ocean river columns or below-sea standing-water mouth beds"
+        column.river_core_depth_blocks, 0.0,
+        "river core depth is reserved for actual RiverCore columns"
     );
 }
 
 #[test]
-fn above_sea_ocean_estuary_hint_connects_river_water() {
+fn above_sea_ocean_estuary_center_restores_water_core() {
     let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
     mouth.ocean_mask = 1.0;
-    mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_core_strength = 0.0;
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
-    mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
-    mouth.river_bed_depth_hint = 0.32;
+    mouth.estuary_water_strength = 1.0;
+    mouth.river_core_depth_hint = 0.32;
     mouth.estuary_water_depth_hint = 0.28;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
 
     assert_eq!(
         column.terrain_kind,
-        HeightfieldTerrainKind::River,
-        "above-sea ocean-owned estuary fan columns need a local river-water continuation hint"
-    );
-    assert!(
-        column.surface_height_blocks >= DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS,
-        "estuary water continuation should not force the terrain bed below sea level: {}",
-        column.surface_height_blocks
+        HeightfieldTerrainKind::RiverCore,
+        "strong above-sea ocean-owned estuary fan centers should restore the water-filled core"
     );
     assert!(
         column.water_y.is_some_and(|water| water > column.surface_y),
-        "estuary continuation should carry water over the macro-resolved bed: surface={} water={:?}",
+        "estuary water should survive on the active core: surface={} water={:?}",
         column.surface_y,
         column.water_y
     );
     assert!(
-        column.river_bed_depth_blocks > 0.0,
-        "estuary continuation should preserve the river water-depth hint"
+        column.river_core_depth_blocks > 0.0,
+        "active estuary continuation should preserve core diagnostics"
     );
 }
 
 #[test]
-fn estuary_water_depth_hint_can_outlive_shallow_fan_bed_hint() {
+fn estuary_water_depth_hint_does_not_create_water_outside_core() {
     let mut shallow_fan = sample_with_river(0.0, 0.0, 0.005, 0.96);
     shallow_fan.ocean_mask = 1.0;
-    shallow_fan.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    shallow_fan.river_core_strength = 0.0;
     shallow_fan.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     shallow_fan.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     shallow_fan.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
-    shallow_fan.river_bed_depth_hint = 0.02;
+    shallow_fan.river_core_depth_hint = 0.02;
 
     let without_hint = heightfield_column_from_sample(&shallow_fan, HeightfieldConfig::default());
     shallow_fan.estuary_water_depth_hint = 0.36;
     let with_hint = heightfield_column_from_sample(&shallow_fan, HeightfieldConfig::default());
 
-    assert!(
-        with_hint.water_y > without_hint.water_y,
-        "estuary water depth hint should raise continuation water above a slope-limited fan bed: without={:?} with={:?}",
-        without_hint.water_y,
-        with_hint.water_y
+    assert_eq!(
+        without_hint.water_y, None,
+        "estuary depth hints should not create water outside the active core"
     );
-    assert!(
-        with_hint
-            .water_y
-            .is_some_and(|water| water > with_hint.surface_y),
-        "estuary water still needs to be active above its resolved bed: surface={} water={:?}",
-        with_hint.surface_y,
-        with_hint.water_y
+    assert_eq!(
+        with_hint.water_y, None,
+        "estuary depth hints should not create water outside the active core"
     );
 }
 
 #[test]
-fn estuary_water_depth_hint_is_clamped_by_local_banks() {
+fn estuary_bed_has_no_river_water_to_clamp() {
     let config = MacroFieldTileConfig::new(0.0, 0.0, 3, 1, 1.0);
     let left_bank = sample(0.0, 0.0, 0.008, 0.0, 0.0, 0.0, 0.0);
     let mut mouth = sample_with_river(1.0, 0.0, 0.005, 0.96);
     mouth.ocean_mask = 1.0;
-    mouth.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
+    mouth.river_core_strength = 0.0;
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
     mouth.estuary_water_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD + 0.02;
-    mouth.river_bed_depth_hint = 0.02;
+    mouth.river_core_depth_hint = 0.02;
     mouth.estuary_water_depth_hint = 0.90;
     let right_bank = sample(2.0, 0.0, 0.008, 0.0, 0.0, 0.0, 0.0);
     let macro_tile = MacroFieldTile {
@@ -1492,22 +1689,14 @@ fn estuary_water_depth_hint_is_clamped_by_local_banks() {
 
     let tile = generate_heightfield_tile(&macro_tile, HeightfieldConfig::default());
     let center = tile.column(1, 0).expect("mouth column");
-    let bank_ceiling = tile
-        .column(0, 0)
-        .expect("left bank")
-        .surface_y
-        .min(tile.column(2, 0).expect("right bank").surface_y);
-
-    assert!(
-        center.water_y.is_some_and(|water| water <= bank_ceiling),
-        "estuary water continuation must be held by neighboring banks: water={:?} bank={bank_ceiling}",
-        center.water_y
+    assert_eq!(
+        center.terrain_kind,
+        HeightfieldTerrainKind::RiverBed,
+        "estuary fan context can remain an exposed bed"
     );
-    assert!(
-        center.water_y.is_some_and(|water| water > center.surface_y),
-        "bank clamp should not suppress a valid estuary water column: surface={} water={:?}",
-        center.surface_y,
-        center.water_y
+    assert_eq!(
+        center.water_y, None,
+        "river water clamp should not invent water on non-core estuary bed"
     );
 }
 
@@ -1519,7 +1708,7 @@ fn low_strength_river_hint_does_not_override_above_sea_ocean_column() {
     mouth.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.35;
     mouth.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD * 0.35;
     mouth.river_distance_blocks = 96.0;
-    mouth.river_bed_depth_hint = 0.82;
+    mouth.river_core_depth_hint = 0.82;
 
     let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
 
@@ -1533,7 +1722,7 @@ fn low_strength_river_hint_does_not_override_above_sea_ocean_column() {
         "low-strength mouth hint must not cut above-sea ocean source below sea level: {}",
         column.surface_height_blocks
     );
-    assert_eq!(column.river_bed_depth_blocks, 0.0);
+    assert_eq!(column.river_core_depth_blocks, 0.0);
 }
 
 #[test]
@@ -1562,19 +1751,19 @@ fn water_adjacent_visible_step_stays_under_two_blocks() {
 fn same_context_downstream_river_bed_step_is_limited() {
     let config = MacroFieldTileConfig::new(-1875.5, -779.5, 2, 1, 1.0);
     let mut left = sample_with_river(-1875.5, -779.5, 0.021431, 0.663);
-    left.river_core_strength = 0.890;
-    left.river_shoulder_strength = 0.890;
-    left.river_valley_strength = 0.890;
+    left.river_core_strength = 0.996;
+    left.river_shoulder_strength = 0.996;
+    left.river_valley_strength = 0.996;
     left.river_distance_blocks = 35.751;
-    left.river_bed_depth_hint = 0.171;
+    left.river_core_depth_hint = 0.171;
     left.river_bank_roughness_hint = 0.625;
     left.river_gravel_hint = 0.431;
     let mut right = sample_with_river(-1874.5, -779.5, 0.022834, 0.663);
-    right.river_core_strength = 0.890;
-    right.river_shoulder_strength = 0.890;
-    right.river_valley_strength = 0.890;
+    right.river_core_strength = 0.996;
+    right.river_shoulder_strength = 0.996;
+    right.river_valley_strength = 0.996;
     right.river_distance_blocks = 35.536;
-    right.river_bed_depth_hint = 0.171;
+    right.river_core_depth_hint = 0.171;
     right.river_bank_roughness_hint = 0.625;
     right.river_gravel_hint = 0.431;
     let macro_tile = MacroFieldTile {
@@ -1588,17 +1777,23 @@ fn same_context_downstream_river_bed_step_is_limited() {
     let right = tile.column(1, 0).expect("right river column");
     let bed_delta = (left.surface_y - right.surface_y).abs();
 
-    assert_eq!(left.terrain_kind, HeightfieldTerrainKind::River);
-    assert_eq!(right.terrain_kind, HeightfieldTerrainKind::River);
+    assert_eq!(left.terrain_kind, HeightfieldTerrainKind::RiverCore);
+    assert_eq!(right.terrain_kind, HeightfieldTerrainKind::RiverCore);
     assert!(
         bed_delta <= 1,
-        "same-context downstream river beds should not keep a 3-block contour-source cross-section step: left={} right={}",
+        "same-context downstream river cores should not keep a 3-block contour-source cross-section step: left={} right={}",
         left.surface_y,
         right.surface_y
     );
     assert!(
         (left.visible_surface_height_blocks() - right.visible_surface_height_blocks()).abs() <= 1.0,
-        "water top should remain locally continuous while the bed step is limited"
+        "water top should remain locally continuous while the bed step is limited: left surface={} water={:?} visible={} right surface={} water={:?} visible={}",
+        left.surface_y,
+        left.water_y,
+        left.visible_surface_height_blocks(),
+        right.surface_y,
+        right.water_y,
+        right.visible_surface_height_blocks()
     );
 }
 
@@ -1683,7 +1878,7 @@ fn sample(
         river_distance_blocks: f32::INFINITY,
         river_flow_hint: 0.0,
         river_longitudinal_blocks: 0.0,
-        river_bed_depth_hint: 0.0,
+        river_core_depth_hint: 0.0,
         river_bank_roughness_hint: 0.0,
         river_gravel_hint: 0.0,
         river_cutbank_hint: 0.0,
@@ -1695,9 +1890,10 @@ fn sample(
 
 fn sample_with_river(x: f32, z: f32, height: f32, flow_hint: f32) -> MacroFieldSample {
     let mut sample = sample(x, z, height, 0.0, 0.0, 0.0, 0.0);
-    sample.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
-    sample.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
-    sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
+    sample.macro_elevation = height + 0.01;
+    sample.river_core_strength = 1.0;
+    sample.river_shoulder_strength = 1.0;
+    sample.river_valley_strength = 1.0;
     sample.river_flow_hint = flow_hint;
     sample
 }

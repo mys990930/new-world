@@ -159,16 +159,19 @@ Voronoi cell width 약 `200` blocks에서 유도한 `downstream_water_width_bloc
 
 ```text
 macro_field:
-  broad_valley_width/depth를 읽어 큰 지형 계곡만 완만하게 낮춘다.
+  broad_valley_width/depth로 넓은 저지대를 만들고, bed_width/depth로 exposed bed tier와 그 안쪽
+  active core trough를 source height에 bake한다.
 
 heightfield/water:
-  bed_width/depth와 water hint를 읽어 좁은 실제 강바닥/수면을 snap한다.
+  macro_field가 낮춘 river corridor 중 flow-scaled active-core cutoff를 통과한 lower channel만
+  RiverCore로 snap하고 물을 채운다. 그 주변의 낮아진 평평한 tier는 RiverBed로 남겨 수면 주변의
+  노출 가능한 bed/gravel/deposition context를 보존한다.
 ```
 
-macro field의 `combined_macro_height`는 강바닥을 깊게 파서 river shape를 완성하려고 하면 안 된다.
-이 단계에서 좁고 강한 carve가 보이면 bend에서 capsule/blob artifact가 커진다. macro field는 넓고
-약한 valley morphology를 보여주고, 실제 river bed와 visible water는 heightfield/water/surface 단계에서
-별도 hint로 확정한다.
+macro field의 `combined_macro_height`는 river valley와 active core trough의 지형 맥락을 책임진다.
+heightfield/water/surface 단계는 이 source height를 다시 carve하지 않고, 이미 패인 morphology 안에서
+exposed bed와 active water core의 ownership만 판정한다. cutoff는 centerline 하나로 줄이는 용도가 아니라
+bed tier가 core에 먹히지 않도록 macro_field의 단면 profile을 읽는 용도다.
 
 Low-flow reach의 broad valley는 물/bed depth를 줄이는 방식보다 폭을 좁히는 방식으로 조정한다.
 Headwater/upper land carve는 `bed_width_blocks` 주변의 좁은 shoulder로 유지하고, water depth hint와

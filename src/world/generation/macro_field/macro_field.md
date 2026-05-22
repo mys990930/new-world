@@ -115,7 +115,7 @@ MacroFieldSample {
     river_distance_blocks,
     river_flow_hint,
     river_longitudinal_blocks,
-    river_bed_depth_hint,
+    river_core_depth_hint,
     river_bank_roughness_hint,
     river_gravel_hint,
     river_cutbank_hint,
@@ -198,7 +198,7 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      curve를 topology/guide로 사용한다. raster distance를 계산할 때는 endpoint를 보존한 river-only
      rounded realization path를 만들고, 내부 kink는 flow/width에 비례해 완만하게 당긴다. 따라서 강은
      Voronoi edge를 기준선으로 삼되 매 sample column이 noisy edge의 각진 segment를 그대로 따르지는 않는다.
-   - 각 sample cell은 실제 물/강바닥 corridor인 `river_core_strength`와 broad valley context guide인
+   - 각 sample cell은 selected river bed/core corridor guide인 `river_core_strength`와 broad valley context guide인
      `river_shoulder_strength`를 분리해 보존한다. `river_valley_strength`는 기존 preview/tool 호환을 위한
      legacy aggregate diagnostic이며 water/bed eligibility의 source가 아니다. combined height에는
      `river_shoulder_strength` 기반 contextual valley modulation과 `river_core_strength` 중심부의 bed
@@ -299,7 +299,7 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      edge-local arc length를 combined height의 직접 floor-noise source로 쓰지 않으므로 broad shoulder
      등고선이 river를 가로지르는 반복 slab/band로 고정되면 회귀다. 좁은 river bed 중심부, U/V 단면의
      깊이감, roughness/gravel 기반의 작은 비균일성은 이 단계에서 source height로 baked되어야 한다.
-     core downcut은 Q와 `river_bed_depth_hint`에서 먼저 하나의 target depth budget을 만들고,
+     core downcut은 Q와 `river_core_depth_hint`에서 먼저 하나의 target depth budget을 만들고,
      low-Q에서는 center로 급히 모이는 좁은 V profile, high-Q에서는 중간 단면도 거의 같은 깊이를 갖는
      넓은 U profile로 섞는다. 같은 depth budget의 절반은 normalized shoulder cap을 읽는 inner
      bank/riverbed profile에 baseline으로 적용해, 물 가장자리와 강둑이 core와 같은 계열로 낮아지되
@@ -311,7 +311,11 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
      주고, 바깥쪽은 `river_cutbank_hint`를 키워 조금 더 깊게 깎이는 cutbank 성향을 준다. 이 값들은
      topology나 river width를 바꾸는 source가 아니라 combined height lowering scale만 조절하는
      morphology hint다.
-   - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 water/bed corridor profile이다.
+   - `river_core_strength`는 downstream heightfield/water policy가 읽는 0..1 selected-river bed/core corridor profile이다.
+     downstream `RiverCore`는 이 corridor 안에서도 channel cutoff를 통과한 가장 낮은 물길이고,
+     그 주변의 lowered corridor는 `RiverBed`로 해석된다. 하구 fan continuation은 별도
+     `estuary_water_strength`로 전달되며 downstream에서는 edge가 exposed `RiverBed`, center가
+     water-filled `RiverCore`로 해석될 수 있다.
      high-core 폭은 river_plan의 absolute `bed_width_blocks`를 full water-width target으로 읽는다.
      `river_shoulder_strength`는 broad valley context profile이며 `broad_valley_width_blocks`를
      source guide로 읽되, macro_field 단계에서는 high-Q/downstream reach의 non-core shoulder 반경을
@@ -689,12 +693,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   않고 절반 스케일로 낮춰, 하구 연결부가 과도하게 깊은 trench로 끝나지 않게 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. 다만 fan 내부에는
-  `estuary_water_strength`와 `estuary_water_depth_hint`를 별도로 굽고, strength가 water threshold를
-  넘는 above-sea mouth column은 heightfield가 terminal river water surface와 이어진 local river-water
-  continuation으로 해석할 수 있다. 이때 water depth hint는 fan bed carve depth와 분리되어, 짧은 terminal
-  segment 때문에 bed carve가 slope-limited 되더라도 수면 연결은 기존 river water depth 맥락을 보존한다.
+  `estuary_water_strength`와 `estuary_water_depth_hint`를 별도로 굽고, heightfield는 이 별도 channel을
+  읽어 fan edge는 exposed `RiverBed`, fan center는 water-filled `RiverCore`로 해석한다. Estuary fan
+  context는 `river_core_strength`로 합쳐 active river core를 승격시키지 않고 별도 channel로 downstream에 전달된다.
   이 continuation은 selected river segment를 downstream cell로 추가하는 것이 아니라, 하구 y>0 구간의
-  수면 단절을 막는 raster hint다. height 합성은 estuary influence를 읽어 coast/ocean near-sea source를
+  fan bed/source transition을 표시하는 raster hint다. height 합성은 estuary influence를 읽어 coast/ocean near-sea source를
   `combined_macro_height <= 0` 쪽으로 열어 준다. fan edge의 약한 strength는 target depth도 함께 약화해
   경계에서 고립된 water block speckle이나 갑작스러운 한 블록 수면 불일치를 만들지 않아야 한다. lake,
   wetland, dry basin, ordinary inland/no-flow sample은 이 guide의 carve 대상이 아니다.

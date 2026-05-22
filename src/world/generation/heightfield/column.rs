@@ -4,12 +4,16 @@ use super::mapping::{
     contour_config_for_sample, normalized_to_blocks, resolve_contour_band_height,
     snap_height_to_block, snap_to_contour_step,
 };
-use super::river::{river_bed_depth_blocks, river_water_depth_blocks};
+use super::river::{river_core_depth_blocks, river_core_water_depth_blocks};
 use super::water::{lake_bed_height_blocks, lake_water_level_blocks, ocean_bed_height_blocks};
 use super::{
     HeightfieldColumn, HeightfieldConfig, HeightfieldPerlinPlacement, HeightfieldTerrainKind,
     perlin, validate_heightfield_config,
 };
+
+const RIVER_CORE_MIN_LOWERING_BLOCKS: f32 = 1.0;
+const RIVER_CORE_LOW_FLOW_STRENGTH_THRESHOLD: f32 = 0.965;
+const RIVER_CORE_HIGH_FLOW_STRENGTH_THRESHOLD: f32 = 0.925;
 
 pub fn heightfield_column_from_sample(
     sample: &MacroFieldSample,
@@ -34,7 +38,7 @@ pub fn heightfield_column_from_sample(
         sample.surface_kind,
         Some(MacroSurfaceKind::CoastLand | MacroSurfaceKind::CoastIsland)
     );
-    let has_core_river_hint =
+    let has_river_corridor_hint =
         sample.river_core_strength >= config.river_water_threshold && sample.river_flow_hint > 0.0;
     let surface_height_blocks = match config.perlin.placement {
         HeightfieldPerlinPlacement::BeforeContour => contour_guided_surface_height_blocks,
@@ -42,14 +46,28 @@ pub fn heightfield_column_from_sample(
             contour_guided_surface_height_blocks + meso_delta_blocks + micro_relief_blocks
         }
     };
-    let has_estuary_water_hint = sample.estuary_water_strength >= config.river_water_threshold
-        && sample.river_flow_hint > 0.0;
-    let is_above_sea_estuary_ocean =
-        is_ocean && has_estuary_water_hint && surface_height_blocks >= config.sea_level_blocks;
-    let is_river_hint = (has_core_river_hint && !is_ocean && !is_lake)
-        || (has_estuary_water_hint && !is_lake && (!is_ocean || is_above_sea_estuary_ocean));
-    let river_bed_depth_blocks = if is_river_hint {
-        river_bed_depth_blocks(sample)
+    let has_estuary_context = sample.estuary_water_strength > 0.0 && sample.river_flow_hint > 0.0;
+    let has_estuary_water_hint =
+        sample.estuary_water_strength >= config.river_water_threshold && has_estuary_context;
+    let macro_surface_height_blocks = normalized_to_blocks(sample.macro_elevation, config);
+    let river_trough_lowering_blocks =
+        (macro_surface_height_blocks - raw_surface_height_blocks).max(0.0);
+    let is_macro_lowered_river_corridor =
+        has_river_corridor_hint && river_trough_lowering_blocks >= RIVER_CORE_MIN_LOWERING_BLOCKS;
+    let core_strength_threshold = river_core_channel_strength_threshold(sample.river_flow_hint);
+    let has_core_river_hint =
+        is_macro_lowered_river_corridor && sample.river_core_strength >= core_strength_threshold;
+    let has_estuary_core_hint = has_estuary_water_hint
+        && river_trough_lowering_blocks >= RIVER_CORE_MIN_LOWERING_BLOCKS
+        && sample.estuary_water_strength >= core_strength_threshold;
+    let is_river_core_hint =
+        (has_core_river_hint && !is_ocean && !is_lake) || (has_estuary_core_hint && !is_lake);
+    let is_river_core_water_hint = is_river_core_hint;
+    let is_river_bed_hint =
+        (is_macro_lowered_river_corridor && !is_river_core_hint && !is_ocean && !is_lake)
+            || (has_estuary_water_hint && !is_river_core_hint && !is_lake);
+    let river_core_depth_blocks = if is_river_core_hint {
+        river_core_depth_blocks(sample)
     } else {
         0.0
     };
@@ -62,13 +80,13 @@ pub fn heightfield_column_from_sample(
     } else {
         0.0
     };
-    let river_water_level_blocks = if is_river_hint {
+    let river_water_level_blocks = if is_river_core_water_hint {
         let base_constrained =
             surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
         let base_snapped = snap_to_contour_step(base_constrained, contour);
         let base_y = snap_height_to_block(base_snapped) as f32;
         Some(snap_height_to_block(
-            (base_y + river_water_depth_blocks(sample)).max(config.sea_level_blocks),
+            (base_y + river_core_water_depth_blocks(sample)).max(config.sea_level_blocks),
         ) as f32)
     } else {
         None
@@ -97,7 +115,7 @@ pub fn heightfield_column_from_sample(
         Some(
             snap_height_to_block(lake_water_level_blocks.unwrap_or(config.sea_level_blocks)) as f32,
         )
-    } else if is_river_hint {
+    } else if is_river_core_water_hint {
         river_water_level_blocks
     } else if is_ocean {
         ocean_water_level_blocks
@@ -107,11 +125,14 @@ pub fn heightfield_column_from_sample(
         None
     };
     let water_y = water_level_blocks.map(snap_height_to_block);
-    let river_water_height_blocks = is_river_hint.then_some(water_y.unwrap_or(surface_y) as f32);
+    let river_core_water_height_blocks =
+        is_river_core_water_hint.then_some(water_y.unwrap_or(surface_y) as f32);
     let terrain_kind = if is_lake {
         HeightfieldTerrainKind::Lake
-    } else if is_river_hint {
-        HeightfieldTerrainKind::River
+    } else if is_river_core_hint {
+        HeightfieldTerrainKind::RiverCore
+    } else if is_river_bed_hint {
+        HeightfieldTerrainKind::RiverBed
     } else if is_ocean {
         HeightfieldTerrainKind::Ocean
     } else if is_dry_basin {
@@ -133,7 +154,7 @@ pub fn heightfield_column_from_sample(
         surface_y,
         water_level_blocks,
         water_y,
-        river_water_height_blocks,
+        river_core_water_height_blocks,
         terrain_kind,
         macro_elevation: sample.macro_elevation,
         combined_macro_height: sample.combined_macro_height,
@@ -151,7 +172,7 @@ pub fn heightfield_column_from_sample(
         river_valley_strength: sample.river_valley_strength,
         river_distance_blocks: sample.river_distance_blocks,
         river_flow_hint: sample.river_flow_hint,
-        river_bed_depth_blocks,
+        river_core_depth_blocks,
         river_bank_roughness_hint: sample.river_bank_roughness_hint,
         river_gravel_hint: sample.river_gravel_hint,
         river_cutbank_hint: sample.river_cutbank_hint,
@@ -163,3 +184,15 @@ pub fn heightfield_column_from_sample(
 #[cfg(test)]
 #[path = "column_tests.rs"]
 mod tests;
+
+fn river_core_channel_strength_threshold(flow_hint: f32) -> f32 {
+    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
+    RIVER_CORE_LOW_FLOW_STRENGTH_THRESHOLD
+        + (RIVER_CORE_HIGH_FLOW_STRENGTH_THRESHOLD - RIVER_CORE_LOW_FLOW_STRENGTH_THRESHOLD)
+            * flow_t
+}
+
+fn smoothstep01(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
