@@ -582,7 +582,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    뿐이며, hydrology/river_plan selected segment topology를 연장하거나 downstream/coast/ocean cell을
    `River`로 승격하면 안 된다. terminal selected segment의 noisy curve는 hydrology flow 방향으로
    정렬해 rasterize하고, 마지막 outlet segment는 endpoint 뒤쪽 sample을 잘라 capsule distance field의
-   rounded terminal cap이 fan/bed를 왜곡하지 않게 한다. 마지막 river segment와 fan 시작부의 height field가
+   rounded terminal cap이 fan/bed를 왜곡하지 않게 한다. 또한 terminal endpoint 주변의 boosted
+   water/shoulder profile은 flow 방향으로 열린 throat distance를 사용해, 넓은 river carve 자체가
+   endpoint를 중심으로 한 원형 footprint로 닫히지 않아야 한다. 마지막 river segment와 fan 시작부의 height field가
    맞닿는 곳에서는 strong estuary water와 river-mouth context가 인접한 sample pair에 한해
    deterministic downcut-only continuity guard를 적용할 수 있다. 이 guard는 높은 쪽 combined height만
    bounded grade 안으로 낮추며, 낮은 쪽을 올리거나 weak fan edge, inland river, ordinary coast,
@@ -694,8 +696,9 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   downstream cell로 연장하지 않는다. 대신 macro_field river raster pass는 CoastOutlet chain의 마지막
   두 selected segment를 terminal mouth reach로 태그하고, downstream으로 갈수록 river core/shoulder
   influence 자체의 유효 water width, valley width, flow/depth hint를 점진적으로 키운다. 마지막 segment는
-  mouth progress로 하구 직전까지 먼저 넓게 열리되, endpoint 뒤쪽 subpixel은 raster에서 제외해
-  segment-distance의 둥근 terminal cap이 fan 앞에 끊겨 남지 않아야 한다. 그 뒤 macro_field raster pass 안에서
+  mouth progress로 하구 직전까지 먼저 넓게 열리되, endpoint 뒤쪽 subpixel은 raster에서 제외하고
+  endpoint 근처의 outer boosted profile에는 lateral penalty를 적용해 segment-distance의 둥근 terminal
+  cap이나 원형 wide-carve footprint가 fan 앞에 끊겨 남지 않아야 한다. 그 뒤 macro_field raster pass 안에서
   hydrology downstream으로 정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로
   굽는다. fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로 이어진다. 이 guide는 시작부에서
   기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
