@@ -1384,7 +1384,7 @@ fn estuary_fan_edge_stays_exposed_bed() {
 
 #[test]
 fn estuary_fan_center_restores_water_core() {
-    let mut mouth = sample_with_river(0.0, 0.0, 0.006, 0.72);
+    let mut mouth = sample_with_river(0.0, 0.0, -0.006, 0.72);
     mouth.river_core_strength = 0.0;
     mouth.river_shoulder_strength = 1.0;
     mouth.river_valley_strength = 1.0;
@@ -1408,6 +1408,11 @@ fn estuary_fan_center_restores_water_core() {
         "estuary core must carry water: surface={} water={:?}",
         column.surface_y,
         column.water_y
+    );
+    assert_eq!(
+        column.water_y,
+        Some(DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS as i32),
+        "estuary-only fan water should sit at sea level away from the local river handoff"
     );
 }
 
@@ -1615,7 +1620,7 @@ fn high_core_above_sea_ocean_column_does_not_threshold_cut_mouth_bed() {
 }
 
 #[test]
-fn above_sea_ocean_estuary_center_restores_water_core() {
+fn above_sea_ocean_estuary_center_does_not_start_high_water() {
     let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
     mouth.ocean_mask = 1.0;
     mouth.river_core_strength = 0.0;
@@ -1629,18 +1634,40 @@ fn above_sea_ocean_estuary_center_restores_water_core() {
 
     assert_eq!(
         column.terrain_kind,
-        HeightfieldTerrainKind::RiverCore,
-        "strong above-sea ocean-owned estuary fan centers should restore the water-filled core"
+        HeightfieldTerrainKind::RiverBed,
+        "above-sea estuary fan centers should remain exposed bed until macro_field lowers them to sea level"
     );
+    assert_eq!(
+        column.water_y, None,
+        "estuary water must not start as a high local water surface: surface={} water={:?}",
+        column.surface_y, column.water_y
+    );
+    assert_eq!(
+        column.river_core_depth_blocks, 0.0,
+        "estuary bed outside active sea-level water should not preserve core depth diagnostics"
+    );
+}
+
+#[test]
+fn local_river_estuary_handoff_can_keep_river_surface_above_sea() {
+    let mut mouth = sample_with_river(0.0, 0.0, 0.005, 0.96);
+    mouth.river_core_strength = 1.0;
+    mouth.river_shoulder_strength = 1.0;
+    mouth.river_valley_strength = 1.0;
+    mouth.estuary_water_strength = 1.0;
+    mouth.river_core_depth_hint = 0.32;
+    mouth.estuary_water_depth_hint = 0.28;
+
+    let column = heightfield_column_from_sample(&mouth, HeightfieldConfig::default());
+
+    assert_eq!(column.terrain_kind, HeightfieldTerrainKind::RiverCore);
     assert!(
-        column.water_y.is_some_and(|water| water > column.surface_y),
-        "estuary water should survive on the active core: surface={} water={:?}",
+        column
+            .water_y
+            .is_some_and(|water| water > DEFAULT_HEIGHTFIELD_SEA_LEVEL_BLOCKS as i32),
+        "the local river/estuary handoff may keep the upstream river surface before it resolves to sea level: surface={} water={:?}",
         column.surface_y,
         column.water_y
-    );
-    assert!(
-        column.river_core_depth_blocks > 0.0,
-        "active estuary continuation should preserve core diagnostics"
     );
 }
 

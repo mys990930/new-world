@@ -21,6 +21,8 @@ flow-scaled active-core cutoff를 통과한 한 단계 낮은 물길이다. 하�
 `RiverBed`로 남을 수 있지만, fan center가 `estuary_water_strength` active-core cutoff를 통과하면
 water-filled `RiverCore`로 보존한다. fan은 `macro_field`가 source bed에 굽는 local carve guide이며,
 `heightfield`가 downstream cell을 river로 판정 확장하거나 별도 shallow-to-sea carve를 다시 적용하지 않는다.
+estuary-dominant fan water는 실제 selected river core가 남아 있는 국소 handoff 구간을 제외하고
+sea level `y = 0`에 머물러야 하며, macro-resolved bed가 그 수면 아래일 때만 물 column을 만든다.
 
 현재 구현 파일 경계:
 
@@ -315,8 +317,11 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
   넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다. macro_field가 terminal 하구 fan에서
   `estuary_water_strength`를 함께 넘긴 column은 active-core cutoff 아래에서는 exposed fan `RiverBed`로
-  남고, cutoff를 통과한 fan center에서는 `RiverCore`와 water surface를 보존한다. terrain bed는 계속
-  `combined_macro_height`를 보존하고 heightfield-local carve를 새로 적용하지 않는다.
+  남고, cutoff를 통과한 fan center에서는 `RiverCore`와 water surface를 보존한다. 다만 estuary-dominant
+  water surface는 실제 selected river core가 함께 있는 국소 handoff 구간을 제외하고 sea level `y = 0`에
+  고정된다. 이 fan water는 macro-resolved bed가 sea level 아래인 경우에만 생성되며, above-sea fan bed 위에
+  높은 독립 수면을 만들면 회귀다. terrain bed는 계속 `combined_macro_height`를 보존하고
+  heightfield-local carve를 새로 적용하지 않는다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.

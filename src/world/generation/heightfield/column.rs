@@ -57,9 +57,14 @@ pub fn heightfield_column_from_sample(
     let core_strength_threshold = river_core_channel_strength_threshold(sample.river_flow_hint);
     let has_core_river_hint =
         is_macro_lowered_river_corridor && sample.river_core_strength >= core_strength_threshold;
+    let estuary_dominates_river =
+        has_estuary_water_hint && sample.estuary_water_strength > sample.river_core_strength;
+    let estuary_uses_sea_level = estuary_dominates_river && !has_core_river_hint;
+    let estuary_bed_reaches_sea = surface_height_blocks < config.sea_level_blocks;
     let has_estuary_core_hint = has_estuary_water_hint
         && river_trough_lowering_blocks >= RIVER_CORE_MIN_LOWERING_BLOCKS
-        && sample.estuary_water_strength >= core_strength_threshold;
+        && sample.estuary_water_strength >= core_strength_threshold
+        && (!estuary_uses_sea_level || estuary_bed_reaches_sea);
     let is_river_core_hint =
         (has_core_river_hint && !is_ocean && !is_lake) || (has_estuary_core_hint && !is_lake);
     let is_river_core_water_hint = is_river_core_hint;
@@ -85,9 +90,13 @@ pub fn heightfield_column_from_sample(
             surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
         let base_snapped = snap_to_contour_step(base_constrained, contour);
         let base_y = snap_height_to_block(base_snapped) as f32;
-        Some(snap_height_to_block(
-            (base_y + river_core_water_depth_blocks(sample)).max(config.sea_level_blocks),
-        ) as f32)
+        if estuary_uses_sea_level {
+            Some(snap_height_to_block(config.sea_level_blocks) as f32)
+        } else {
+            Some(snap_height_to_block(
+                (base_y + river_core_water_depth_blocks(sample)).max(config.sea_level_blocks),
+            ) as f32)
+        }
     } else {
         None
     };
