@@ -695,7 +695,10 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   두 selected segment를 terminal mouth reach로 태그하고, downstream으로 갈수록 river core/shoulder
   influence 자체의 유효 water width, valley width, flow/depth hint를 점진적으로 키운다. 마지막 segment의
   endpoint taper도 이 mouth progress를 읽어 완화하므로, 하구 직전 river influence가 먼저 넓게 열리고
-  별도의 둥근 terminal cap이 fan 앞에 끊겨 남지 않아야 한다. 그 뒤 macro_field raster pass 안에서
+  별도의 둥근 terminal cap이 fan 앞에 끊겨 남지 않아야 한다. 특히 마지막 endpoint 뒤쪽의 river
+  influence distance field는 endpoint까지의 원형/capsule distance를 그대로 쓰지 않고, downstream 방향으로
+  길게 늘어나며 lateral half-width가 넓어지는 fan-like mouth distance를 사용한다. 그래서 마지막 river
+  carve가 원형 blob으로 끝나는 대신 하구 방향으로 퍼져 나가야 한다. 그 뒤 macro_field raster pass 안에서
   hydrology downstream으로 정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로
   굽는다. fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로 이어진다. 이 guide는 시작부에서
   기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source

@@ -29,6 +29,9 @@ const TERMINAL_MOUTH_VALLEY_WIDTH_BOOST: f32 = 0.36;
 const TERMINAL_MOUTH_DEPTH_BOOST: f32 = 0.18;
 const TERMINAL_MOUTH_FLOW_BOOST: f32 = 0.30;
 const TERMINAL_MOUTH_TAPER_BLEND: f32 = 1.0;
+const TERMINAL_MOUTH_SPREAD_REACH_SCALE: f32 = 1.15;
+const TERMINAL_MOUTH_SPREAD_MAX_FLARE: f32 = 1.35;
+const TERMINAL_MOUTH_SPREAD_LONGITUDINAL_WEIGHT: f32 = 0.18;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -733,6 +736,50 @@ fn terminal_mouth_max_flow_hint(source: &RiverRasterWorkSource) -> f32 {
         .clamp(0.0, 1.0)
 }
 
+fn terminal_mouth_spread_distance(
+    source: &RiverRasterWorkSource,
+    segment_index: usize,
+    point: WorldPlanePoint,
+    start: WorldPlanePoint,
+    end: WorldPlanePoint,
+    round_cap_distance: f32,
+) -> f32 {
+    if !source.is_terminal_outlet
+        || source.terminal_mouth_factor <= f32::EPSILON
+        || segment_index + 2 != source.points.len()
+    {
+        return round_cap_distance;
+    }
+
+    let dx = end.x - start.x;
+    let dz = end.z - start.z;
+    let len2 = dx * dx + dz * dz;
+    if len2 <= f32::EPSILON {
+        return round_cap_distance;
+    }
+
+    let t = ((point.x - start.x) * dx + (point.z - start.z) * dz) / len2;
+    if t <= 1.0 {
+        return round_cap_distance;
+    }
+
+    let length = len2.sqrt();
+    let downstream_blocks = (t - 1.0) * length;
+    let lateral_blocks =
+        ((point.x - start.x) * -dz / length + (point.z - start.z) * dx / length).abs();
+    let reach_blocks = (terminal_mouth_max_water_width_blocks(source)
+        * TERMINAL_MOUTH_SPREAD_REACH_SCALE)
+        .max(16.0)
+        .min(terminal_mouth_max_valley_width_blocks(source).max(16.0));
+    let progress = (downstream_blocks / reach_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0);
+    let flare = 1.0 + TERMINAL_MOUTH_SPREAD_MAX_FLARE * mouth * smoothstep01(progress);
+    let lateral_distance = lateral_blocks / flare.max(f32::EPSILON);
+    let downstream_distance = downstream_blocks * TERMINAL_MOUTH_SPREAD_LONGITUDINAL_WEIGHT;
+
+    (lateral_distance * lateral_distance + downstream_distance * downstream_distance).sqrt()
+}
+
 fn river_segment_bend_strength(source: &RiverRasterWorkSource, segment_index: usize) -> f32 {
     if source.points.len() < 3 || segment_index + 1 >= source.points.len() {
         return 0.0;
@@ -1275,7 +1322,14 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
     for x in min_x..=max_x {
         let global_index = z * width + x;
         let position = config.sample_position(global_index);
-        let distance = point_segment_distance(position, start, end);
+        let distance = terminal_mouth_spread_distance(
+            source,
+            segment_index,
+            position,
+            start,
+            end,
+            point_segment_distance(position, start, end),
+        );
         if distance > active_radius_blocks + aa_margin {
             continue;
         }
@@ -1297,7 +1351,14 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 position.x + offset_x * spacing,
                 position.z + offset_z * spacing,
             );
-            let subpixel_distance = point_segment_distance(subpixel, start, end);
+            let subpixel_distance = terminal_mouth_spread_distance(
+                source,
+                segment_index,
+                subpixel,
+                start,
+                end,
+                point_segment_distance(subpixel, start, end),
+            );
             let subpixel_t = projected_t_on_segment(subpixel, start, end);
             let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
             let effective = effective_river_morphology(source, mouth_progress);
@@ -2741,6 +2802,51 @@ mod tests {
                 && end_morphology.valley_width_blocks > start_morphology.valley_width_blocks
                 && end_morphology.bed_depth_blocks > start_morphology.bed_depth_blocks,
             "terminal morphology should widen/deepen downstream: start={start_morphology:?} end={end_morphology:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_mouth_downstream_distance_spreads_instead_of_round_cap() {
+        let source = RiverRasterWorkSource {
+            is_terminal_outlet: true,
+            edge: VoronoiEdgeId(100),
+            points: vec![
+                WorldPlanePoint::new(0.0, 0.0),
+                WorldPlanePoint::new(128.0, 0.0),
+            ],
+            cumulative_lengths: vec![0.0, 128.0],
+            longitudinal_start_blocks: 0.0,
+            flow_hint: 0.76,
+            water_width_blocks: 72.0,
+            valley_width_blocks: 200.0,
+            bed_depth_blocks: 16.0,
+            terminal_mouth_factor: 1.0,
+            component_id: 0,
+        };
+        let start = source.points[0];
+        let end = source.points[1];
+        let downstream_bank = WorldPlanePoint::new(176.0, 72.0);
+        let upstream_bank = WorldPlanePoint::new(80.0, 72.0);
+        let downstream_round = point_segment_distance(downstream_bank, start, end);
+        let downstream_spread = terminal_mouth_spread_distance(
+            &source,
+            0,
+            downstream_bank,
+            start,
+            end,
+            downstream_round,
+        );
+        let upstream_round = point_segment_distance(upstream_bank, start, end);
+        let upstream_spread =
+            terminal_mouth_spread_distance(&source, 0, upstream_bank, start, end, upstream_round);
+
+        assert!(
+            downstream_spread < downstream_round * 0.72,
+            "downstream mouth distance should be fan-shaped instead of a round endpoint cap: round={downstream_round} spread={downstream_spread}"
+        );
+        assert_eq!(
+            upstream_spread, upstream_round,
+            "mouth spread should only affect downstream samples beyond the terminal endpoint"
         );
     }
 
