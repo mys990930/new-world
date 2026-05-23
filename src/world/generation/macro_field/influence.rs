@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use super::context::{EstuaryFanRef, MacroFieldRasterContext};
 use super::height::{
-    boundary_roughness_offset, envelope, lerp, ridge_envelope, roughened_distance,
-    smoothstep_range, smoothstep01,
+    boundary_roughness_offset, envelope, lerp, ridge_envelope, roughened_distance, smoothstep01,
 };
 use super::river::{
     nearest_point_on_segment, point_segment_distance, projected_t_on_segment,
@@ -23,7 +22,7 @@ pub(super) const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
 pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
-const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 3.0;
+const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 1.25;
 const TERMINAL_RIVER_TAPER_WIDTH_SCALE: f32 = 2.50;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
@@ -302,11 +301,7 @@ pub(super) fn estuary_fan_sample(
 
     let flow_t = smoothstep01(fan.flow_hint.clamp(0.0, 1.0));
     let inlet_extension_t = if along < 0.0 {
-        smoothstep_range(
-            0.08,
-            0.55,
-            ((along + inlet_overlap_blocks) / inlet_overlap_blocks).clamp(0.0, 1.0),
-        )
+        smoothstep01(((along + inlet_overlap_blocks) / inlet_overlap_blocks).clamp(0.0, 1.0))
     } else {
         1.0
     };
@@ -337,7 +332,7 @@ pub(super) fn estuary_fan_sample(
 }
 
 pub(super) fn estuary_fan_half_width_blocks(fan: EstuaryFanRef, progress: f32) -> f32 {
-    let t = progress.clamp(0.0, 1.0).powf(0.72);
+    let t = smoothstep01(progress.clamp(0.0, 1.0));
     lerp(fan.start_half_width_blocks, fan.end_half_width_blocks, t)
 }
 

@@ -85,17 +85,9 @@ pub fn heightfield_column_from_sample(
             surface_height_blocks.clamp(config.min_height_blocks, config.max_height_blocks);
         let base_snapped = snap_to_contour_step(base_constrained, contour);
         let base_y = snap_height_to_block(base_snapped) as f32;
-        let raw_water_level = snap_height_to_block(
+        Some(snap_height_to_block(
             (base_y + river_core_water_depth_blocks(sample)).max(config.sea_level_blocks),
-        ) as f32;
-        let is_estuary_dominant_water = sample.estuary_water_strength > 0.0
-            && sample.estuary_water_strength > sample.river_core_strength;
-        let water_level = if is_estuary_dominant_water {
-            raw_water_level.min(config.sea_level_blocks + 2.0)
-        } else {
-            raw_water_level
-        };
-        (water_level > base_y).then_some(water_level)
+        ) as f32)
     } else {
         None
     };

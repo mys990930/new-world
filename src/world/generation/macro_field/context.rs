@@ -522,11 +522,11 @@ pub(super) fn estuary_fan_half_widths_blocks(
     let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
     let water_width = bed_width_blocks.max(1.0);
     let valley_width = broad_valley_width_blocks.max(water_width).max(8.0);
-    let start_half_width_blocks = (water_width * lerp(0.70, 0.95, flow_t))
+    let start_half_width_blocks = (water_width * lerp(0.62, 0.80, flow_t))
         .max(8.0)
         .min(valley_width * 0.90);
-    let water_spread = water_width * lerp(1.60, 4.10, flow_t);
-    let valley_spread = valley_width * lerp(0.38, 0.74, flow_t);
+    let water_spread = water_width * lerp(1.35, 3.60, flow_t);
+    let valley_spread = valley_width * lerp(0.35, 0.68, flow_t);
     let min_spread = start_half_width_blocks * lerp(2.20, 3.35, flow_t);
     let end_half_width_blocks = (start_half_width_blocks + water_spread + valley_spread)
         .max(min_spread)
@@ -561,8 +561,8 @@ pub(super) fn estuary_water_depth_hint(bed_depth_blocks: f32, flow_hint: f32) ->
     let flow = flow_hint.clamp(0.0, 1.0);
     let flow_t = smoothstep01(flow);
     let planned_depth_blocks = bed_depth_blocks.max(0.0);
-    let minimum_depth_blocks = 1.0 + flow_t * 3.0;
-    let fill_ratio = (0.20 + flow * 0.14).clamp(0.18, 0.38);
+    let minimum_depth_blocks = 1.5 + flow_t * 4.5;
+    let fill_ratio = (0.70 + flow * 0.10).clamp(0.58, 0.82);
     (planned_depth_blocks.max(minimum_depth_blocks) * fill_ratio / 40.0).clamp(0.0, 1.0)
 }
 

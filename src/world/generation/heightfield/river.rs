@@ -19,13 +19,9 @@ pub(super) fn river_core_water_depth_blocks(sample: &MacroFieldSample) -> f32 {
     let flow = sample.river_flow_hint.clamp(0.0, 1.0);
     let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
     let core_depth = river_core_depth_blocks(sample);
-    let estuary_depth = estuary_water_depth_blocks(sample);
-    if estuary_depth > 0.0 && sample.estuary_water_strength > sample.river_core_strength {
-        return estuary_depth.clamp(1.0, core_depth.max(1.0));
-    }
     let fill_ratio = (0.70 + flow * 0.10 - rough * 0.05).clamp(0.58, 0.82);
     let river_depth = (core_depth * fill_ratio).clamp(1.0, core_depth.max(1.0));
-    river_depth.max(estuary_depth)
+    river_depth.max(estuary_water_depth_blocks(sample))
 }
 
 fn is_river_core_terrain(kind: HeightfieldTerrainKind) -> bool {

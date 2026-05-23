@@ -21,9 +21,6 @@ flow-scaled active-core cutoff를 통과한 한 단계 낮은 물길이다. 하�
 `RiverBed`로 남을 수 있지만, fan center가 `estuary_water_strength` active-core cutoff를 통과하면
 water-filled `RiverCore`로 보존한다. fan은 `macro_field`가 source bed에 굽는 local carve guide이며,
 `heightfield`가 downstream cell을 river로 판정 확장하거나 별도 shallow-to-sea carve를 다시 적용하지 않는다.
-estuary-dominant `RiverCore` water는 upstream river core fill-depth가 아니라 별도
-`estuary_water_depth_hint`와 작은 sea-level convergence ceiling을 사용해 하구 수면이 y=0 해수면
-쪽으로 수렴하게 한다.
 
 현재 구현 파일 경계:
 
@@ -318,10 +315,8 @@ smoothing, smoothstep, band-local interpolation은 현재 사용하지 않는다
   ocean/lake-owned mouth column은 river diagnostics를 보존할 수 있지만, `river_core_strength` threshold를
   넘었다는 이유만으로 sea level 아래 trench로 절단되면 안 된다. macro_field가 terminal 하구 fan에서
   `estuary_water_strength`를 함께 넘긴 column은 active-core cutoff 아래에서는 exposed fan `RiverBed`로
-  남고, cutoff를 통과한 fan center에서는 `RiverCore`와 water surface를 보존한다. 이때 estuary-dominant
-  water는 ordinary upstream river fill-depth가 아니라 `estuary_water_depth_hint`와 sea-level convergence
-  ceiling을 사용한다. terrain bed는 계속 `combined_macro_height`를 보존하고 heightfield-local carve를 새로
-  적용하지 않는다.
+  남고, cutoff를 통과한 fan center에서는 `RiverCore`와 water surface를 보존한다. terrain bed는 계속
+  `combined_macro_height`를 보존하고 heightfield-local carve를 새로 적용하지 않는다.
   river와 ocean의 active water surface는 sea level `y = 0` 아래로 내려갈 수 없다. river water descent와
   bank clamp는 이 sea-level floor를 보존해야 하며, sea level 아래의 dry/coast terrain bed를 adjacent
   bank ceiling으로 사용해 강 또는 바닷물 수면을 아래로 끌어내리면 안 된다.
@@ -530,6 +525,4 @@ screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
     because `river_core_strength` crosses the river threshold. A macro_field estuary fan may opt an
     above-sea mouth column into exposed `RiverBed` context at the fan edge or water-filled `RiverCore`
     at the fan center when `estuary_water_strength` crosses the active-core cutoff; both cases must
-    preserve the already-baked source bed instead of carving locally in heightfield, and estuary-dominant
-    water must use the fan water-depth hint plus a small sea-level convergence ceiling instead of the full
-    upstream river fill-depth.
+    preserve the already-baked source bed instead of carving locally in heightfield.
