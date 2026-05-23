@@ -694,13 +694,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 hydrology downstream으로
   정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로 굽는다. terminal river
   stroke는 endpoint 직전에서 core/shoulder strength를 fade-out해 마지막 noisy segment의 rounded cap이
-  estuary bed나 valley에 남지 않게 하고, fan은 시작 반폭보다 긴 upstream overlap을 둔 뒤 mouth band가
-  terminal water/core 폭 안에서 먼저 유지되게 이어진다. 이 guide는 시작부부터 기존 terminal river
-  bed/flow width보다 넓은 lip으로 열리고, downstream 초반부터 lateral half-width가 곡선적으로 빠르게
-  넓어져 coast/ocean source 안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산 반폭은
-  terminal segment의 planned water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면 폭보다
-  좁게 pinching되거나 강 끝에 별도의 둥근 cap처럼 붙어 보이면 회귀다. broad valley width는 보조 확산
-  context로만 더해진다. low-Q
+  estuary bed나 valley에 남지 않게 하고, fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로
+  이어진다. 이 guide는 시작부에서 기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral
+  half-width가 넓어져 coast/ocean source 안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산
+  반폭은 terminal segment의 planned water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면
+  폭보다 좁게 pinching되지 않아야 한다. broad valley width는 보조 확산 context로만 더해진다. low-Q
   mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도 coast/ocean source 쪽으로 끊기지 않게
   한다. fan influence는 terminal endpoint 이후의 downstream 누적 거리(`estuary_along_blocks`)도 함께
   저장한다. height 합성은 fan 시작부를 terminal river core floor 그대로 복제하지 않고 terminal budget의

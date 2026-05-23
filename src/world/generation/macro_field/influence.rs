@@ -22,7 +22,7 @@ pub(super) const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
 pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
-const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 2.25;
+const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 1.25;
 const TERMINAL_RIVER_TAPER_WIDTH_SCALE: f32 = 2.50;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
@@ -301,9 +301,7 @@ pub(super) fn estuary_fan_sample(
 
     let flow_t = smoothstep01(fan.flow_hint.clamp(0.0, 1.0));
     let inlet_extension_t = if along < 0.0 {
-        smoothstep01(
-            ((along + inlet_overlap_blocks) / (inlet_overlap_blocks * 0.45)).clamp(0.0, 1.0),
-        )
+        smoothstep01(((along + inlet_overlap_blocks) / inlet_overlap_blocks).clamp(0.0, 1.0))
     } else {
         1.0
     };
@@ -334,12 +332,8 @@ pub(super) fn estuary_fan_sample(
 }
 
 pub(super) fn estuary_fan_half_width_blocks(fan: EstuaryFanRef, progress: f32) -> f32 {
-    let t = estuary_fan_flare_progress(progress);
+    let t = smoothstep01(progress.clamp(0.0, 1.0));
     lerp(fan.start_half_width_blocks, fan.end_half_width_blocks, t)
-}
-
-pub(super) fn estuary_fan_flare_progress(progress: f32) -> f32 {
-    smoothstep01(progress.clamp(0.0, 1.0).powf(0.58))
 }
 
 fn strongest_estuary_sample(left: EstuaryFanSample, right: EstuaryFanSample) -> EstuaryFanSample {
@@ -2631,7 +2625,6 @@ mod tests {
 
         let start_edge = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 18.0));
         let start_mouth = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 8.0));
-        let upstream_mouth = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 6.0));
         let downstream_same_offset = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 18.0));
         let downstream_wide_edge = estuary_fan_sample(fan, WorldPlanePoint::new(120.0, 48.0));
 
@@ -2640,19 +2633,8 @@ mod tests {
             fan.start_half_width_blocks
         );
         assert!(
-            estuary_fan_half_width_blocks(fan, 0.20) > fan.start_half_width_blocks * 2.0,
-            "estuary fan should begin flaring near the river mouth, not after a round terminal cap"
-        );
-        assert!(
             estuary_fan_half_width_blocks(fan, 0.75) > fan.start_half_width_blocks * 3.0,
             "estuary fan should spread wider downstream instead of remaining a raw line"
-        );
-        assert!(
-            upstream_mouth.strength > 0.25
-                && upstream_mouth.water_strength >= RIVER_CORE_STRENGTH_THRESHOLD,
-            "fan overlap should keep a broad wet mouth band before the terminal river endpoint: strength={} water={}",
-            upstream_mouth.strength,
-            upstream_mouth.water_strength
         );
         assert!(
             downstream_same_offset.strength > start_edge.strength,
