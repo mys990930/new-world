@@ -14,6 +14,7 @@ pub const VOXEL_PLAYER_SKIN_COLOR: [f32; 4] = [0.94, 0.74, 0.52, 1.0];
 pub const VOXEL_PLAYER_SHIRT_COLOR: [f32; 4] = [0.18, 0.42, 0.82, 1.0];
 pub const VOXEL_PLAYER_PANTS_COLOR: [f32; 4] = [0.12, 0.15, 0.22, 1.0];
 pub const VOXEL_PLAYER_TOOL_SWING_SECONDS: f32 = 0.5;
+pub const VOXEL_PLAYER_VISUAL_FOOT_OFFSET_Y: f32 = -1.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoxelPlayerAnimationState {
@@ -140,37 +141,37 @@ pub fn default_voxel_player_part_poses() -> [VoxelPlayerPartPose; VOXEL_PLAYER_P
     [
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::Head,
-            local_center: [0.0, 1.25, 0.0],
+            local_center: [0.0, 1.0, 0.0],
             half_extents: [0.42, 0.42, 0.42],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::Torso,
-            local_center: [0.0, 0.35, 0.0],
+            local_center: [0.0, 0.10, 0.0],
             half_extents: [0.46, 0.55, 0.28],
             color: VOXEL_PLAYER_SHIRT_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::LeftArm,
-            local_center: [-0.62, 0.30, 0.0],
+            local_center: [-0.62, 0.05, 0.0],
             half_extents: [0.16, 0.52, 0.18],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::RightArm,
-            local_center: [0.62, 0.30, 0.0],
+            local_center: [0.62, 0.05, 0.0],
             half_extents: [0.16, 0.52, 0.18],
             color: VOXEL_PLAYER_SKIN_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::LeftLeg,
-            local_center: [-0.22, -0.70, 0.0],
+            local_center: [-0.22, VOXEL_PLAYER_VISUAL_FOOT_OFFSET_Y + 0.55, 0.0],
             half_extents: [0.18, 0.55, 0.20],
             color: VOXEL_PLAYER_PANTS_COLOR,
         },
         VoxelPlayerPartPose {
             part: VoxelPlayerPart::RightLeg,
-            local_center: [0.22, -0.70, 0.0],
+            local_center: [0.22, VOXEL_PLAYER_VISUAL_FOOT_OFFSET_Y + 0.55, 0.0],
             half_extents: [0.18, 0.55, 0.20],
             color: VOXEL_PLAYER_PANTS_COLOR,
         },
@@ -259,6 +260,16 @@ mod tests {
             default_voxel_player_part_poses().len(),
             VOXEL_PLAYER_PART_COUNT
         );
+    }
+
+    #[test]
+    fn default_rig_feet_align_to_collision_foot_offset() {
+        let min_y = default_voxel_player_part_poses()
+            .into_iter()
+            .map(|part| part.local_center[1] - part.half_extents[1])
+            .fold(f32::INFINITY, f32::min);
+
+        assert!((min_y - VOXEL_PLAYER_VISUAL_FOOT_OFFSET_Y).abs() < 1e-5);
     }
 
     #[test]

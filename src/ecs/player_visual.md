@@ -63,6 +63,7 @@
 - accepted tool uses restart a short `0.5` second swing state so the bridge can move the arms during the same cadence as tool use
 - the default rig is code-authored data, not an external atlas or sprite dependency
 - the default rig is intentionally separate from `PlayerBody`; collision remains `1x1x3`, while the visible avatar keeps readable prototype proportions
+- the default rig's lowest visible foot point is `-1.5` from player root, matching the `1x1x3` collision body's foot offset so a surface-placed player does not visually float
 - part poses are local to the player root; app bridge is responsible for composing root, facing, animation offset, and renderer DTOs
 
 ## Invariants
@@ -93,14 +94,15 @@
 
 1. `PlayerBody` remains the physical source of truth; `VoxelPlayerVisualState` is a derived snapshot for app bridge reads.
 2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs with prototype visual proportions separate from the `1x1x3` collision body.
-3. The app bridge expands the rig into multiple dynamic actor cube instances, replacing the old single white player cube; renderer-owned shadow maps handle the ground shadow.
-4. Procedural animation offsets are applied in the app bridge:
+3. The rig is vertically offset so leg bottoms align with `Transform.translation.y - 1.5`, the same foot plane used by `PlayerBody`.
+4. The app bridge expands the rig into multiple dynamic actor cube instances, replacing the old single white player cube; renderer-owned shadow maps handle the ground shadow.
+5. Procedural animation offsets are applied in the app bridge:
    - idle bob
    - mirrored arm/leg swing for walk and sprint
    - airborne tuck / raised-arm pose
    - right-arm dominant tool swing during accepted tool use
-5. If axis-aligned limb approximation is not expressive enough, extend renderer DTOs with an oriented dynamic cube instance while keeping gameplay-facing pose selection in ECS.
-6. Deterministic tests cover visual-state classification, facing octant selection, bridge-emitted part count, limb animation movement, and facing rotation.
+6. If axis-aligned limb approximation is not expressive enough, extend renderer DTOs with an oriented dynamic cube instance while keeping gameplay-facing pose selection in ECS.
+7. Deterministic tests cover visual-state classification, facing octant selection, bridge-emitted part count, limb animation movement, foot alignment, and facing rotation.
 
 ## Notes
 
