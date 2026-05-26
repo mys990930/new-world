@@ -3,9 +3,7 @@ use crate::world::generation::graph::WorldPlanePoint;
 use crate::world::generation::macro_map::{MacroSite, MacroSurfaceKind};
 
 pub(super) const RIDGE_INFLUENCE_VISIBLE_FLOOR: f32 = 0.12;
-const ESTUARY_FAN_FINAL_DEPTH_SCALE: f32 = 0.18;
-const ESTUARY_FAN_ENTRY_DEPTH_SCALE: f32 = 0.28;
-const ESTUARY_FAN_TERMINAL_FLOOR_GUARD_SCALE: f32 = 0.34;
+const ESTUARY_FAN_FINAL_DEPTH_SCALE: f32 = 0.5;
 const ESTUARY_FAN_DEPTH_GRADE_BLOCKS_PER_BLOCK: f32 = 0.36;
 const RIVER_CORE_HEIGHT_PROFILE_THRESHOLD: f32 = 0.88;
 pub(super) fn lake_boundary_lowering_factor(
@@ -103,7 +101,7 @@ pub(super) fn combine_macro_height_with_river_profile(
     river_shoulder_strength: f32,
     river_core_strength: f32,
     river_flow_hint: f32,
-    river_core_depth_hint: f32,
+    river_bed_depth_hint: f32,
     river_bank_roughness_hint: f32,
     river_gravel_hint: f32,
     river_cutbank_hint: f32,
@@ -123,14 +121,13 @@ pub(super) fn combine_macro_height_with_river_profile(
         river_shoulder_strength,
         river_core_strength,
         river_flow_hint,
-        river_core_depth_hint,
+        river_bed_depth_hint,
         river_bank_roughness_hint,
         river_gravel_hint,
         river_cutbank_hint,
         river_centerline_macro_elevation,
         river_longitudinal_blocks,
         river_position,
-        0.0,
         0.0,
         0.0,
         0.0,
@@ -151,7 +148,7 @@ pub(super) fn combine_macro_height_with_estuary_profile(
     river_shoulder_strength: f32,
     river_core_strength: f32,
     river_flow_hint: f32,
-    river_core_depth_hint: f32,
+    river_bed_depth_hint: f32,
     river_bank_roughness_hint: f32,
     river_gravel_hint: f32,
     river_cutbank_hint: f32,
@@ -159,7 +156,6 @@ pub(super) fn combine_macro_height_with_estuary_profile(
     river_longitudinal_blocks: f32,
     river_position: Option<WorldPlanePoint>,
     estuary_strength: f32,
-    estuary_water_strength: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
     estuary_along_blocks: f32,
@@ -177,7 +173,7 @@ pub(super) fn combine_macro_height_with_estuary_profile(
     );
     let core_budget = river_core_downcut_budget(
         river_flow_hint,
-        river_core_depth_hint,
+        river_bed_depth_hint,
         river_position,
         config,
     ) * river_morphology_lowering_scale(
@@ -213,7 +209,6 @@ pub(super) fn combine_macro_height_with_estuary_profile(
         lake_lowering_factor,
         _dry_basin_mask,
         estuary_strength,
-        estuary_water_strength,
         estuary_flow_hint,
         estuary_bed_depth_hint,
         estuary_along_blocks,
@@ -236,7 +231,6 @@ pub(super) fn estuary_fan_macro_height(
     lake_lowering_factor: f32,
     dry_basin_mask: f32,
     estuary_strength: f32,
-    estuary_water_strength: f32,
     estuary_flow_hint: f32,
     estuary_bed_depth_hint: f32,
     estuary_along_blocks: f32,
@@ -257,33 +251,26 @@ pub(super) fn estuary_fan_macro_height(
 
     let flow_t = smoothstep01(estuary_flow_hint.clamp(0.0, 1.0));
     let bed_t = estuary_bed_depth_hint.clamp(0.0, 1.0);
-    let water_active = smoothstep_range(0.72, 1.0, estuary_water_strength.clamp(0.0, 1.0));
-    let body_active = smoothstep_range(0.20, 0.90, strength);
-    let active = water_active * body_active * water_context;
+    let active = smoothstep01(strength) * water_context;
     let raw_shelf_depth_blocks = (config.river_carve_scale * lerp(0.35, 1.15, flow_t)
         + bed_t * lerp(0.006, 0.026, flow_t))
         * 2048.0
         * ESTUARY_FAN_FINAL_DEPTH_SCALE;
     let terminal_entry_depth_blocks =
         river_core_downcut_budget(estuary_flow_hint, bed_t, None, config) * 2048.0;
+    let final_shelf_depth_blocks = raw_shelf_depth_blocks.max(terminal_entry_depth_blocks);
     let shallow_start_floor_blocks = lerp(1.5, 3.5, flow_t);
-    let final_shelf_depth_blocks = raw_shelf_depth_blocks
-        .max(terminal_entry_depth_blocks * ESTUARY_FAN_TERMINAL_FLOOR_GUARD_SCALE)
-        .max(shallow_start_floor_blocks);
-    let entry_depth_blocks = (terminal_entry_depth_blocks * ESTUARY_FAN_ENTRY_DEPTH_SCALE)
-        .max(shallow_start_floor_blocks);
-    let grade_budget = estuary_along_blocks.max(0.0) * ESTUARY_FAN_DEPTH_GRADE_BLOCKS_PER_BLOCK;
-    let slope_limited_depth_blocks = if final_shelf_depth_blocks >= entry_depth_blocks {
-        (entry_depth_blocks + grade_budget).min(final_shelf_depth_blocks)
-    } else {
-        (entry_depth_blocks - grade_budget).max(final_shelf_depth_blocks)
-    }
-    .max(0.0);
+    let entry_depth_blocks = terminal_entry_depth_blocks
+        .max(shallow_start_floor_blocks)
+        .min(final_shelf_depth_blocks.max(shallow_start_floor_blocks));
+    let slope_limited_depth_blocks = (entry_depth_blocks
+        + estuary_along_blocks.max(0.0) * ESTUARY_FAN_DEPTH_GRADE_BLOCKS_PER_BLOCK)
+        .min(final_shelf_depth_blocks.max(entry_depth_blocks))
+        .max(0.0);
     let shallow_shelf_depth = slope_limited_depth_blocks / 2048.0;
     let edge_t = smoothstep_range(0.20, 0.92, active);
     let target = -shallow_shelf_depth * lerp(0.16, 1.0, edge_t);
-    let carve_strength = smoothstep_range(0.08, 0.96, active);
-    let lowering = (height - target).max(0.0) * carve_strength;
+    let lowering = (height - target).max(0.0) * active;
 
     (height - lowering).min(height)
 }
@@ -358,13 +345,13 @@ fn river_shoulder_context_height_with_position(
 pub(super) fn river_core_center_lowering(
     river_core_strength: f32,
     river_flow_hint: f32,
-    river_core_depth_hint: f32,
+    river_bed_depth_hint: f32,
     river_position: Option<WorldPlanePoint>,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let core_budget = river_core_downcut_budget(
         river_flow_hint,
-        river_core_depth_hint,
+        river_bed_depth_hint,
         river_position,
         config,
     );
@@ -439,13 +426,13 @@ fn river_bed_bank_cross_section_strength(
 
 fn river_core_downcut_budget(
     river_flow_hint: f32,
-    river_core_depth_hint: f32,
+    river_bed_depth_hint: f32,
     river_position: Option<WorldPlanePoint>,
     config: MacroFieldTileConfig,
 ) -> f32 {
     let flow_t = smoothstep01(river_flow_hint.clamp(0.0, 1.0));
     let log_flow_t = river_shoulder_log_growth(river_flow_hint);
-    let bed_t = river_core_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.34);
+    let bed_t = river_bed_depth_hint.clamp(0.0, 1.0).max(log_flow_t * 0.34);
     let low_flow_guard = lerp(0.54, 1.0, smoothstep_range(0.06, 0.42, river_flow_hint));
     let base = config.river_carve_scale * lerp(0.04, 1.76, bed_t);
     let flow_floor = config.river_carve_scale * lerp(0.03, 0.48, flow_t);
@@ -1125,13 +1112,13 @@ mod tests {
     fn estuary_fan_lowers_only_coast_or_ocean_near_sea_source() {
         let config = test_tile_config();
         let coast = estuary_fan_macro_height(
-            0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.035, 0.035, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
         );
         let ocean = estuary_fan_macro_height(
-            0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.020, 0.020, 1.0, 0.0, 0.0, 0.0, 0.85, 0.85, 0.70, 96.0, config,
         );
         let ordinary = estuary_fan_macro_height(
-            0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.035, 0.035, 0.0, 0.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
         );
 
         assert!(
@@ -1152,26 +1139,15 @@ mod tests {
     fn estuary_fan_edge_strength_does_not_snap_water_boundary_below_sea() {
         let config = test_tile_config();
         let weak_edge = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.42, 0.04, 0.85, 0.70, 96.0, config,
-        );
-        let soft_edge = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.70, 0.62, 0.85, 0.70, 96.0, config,
+            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 0.22, 0.85, 0.70, 96.0, config,
         );
         let core = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.020, 0.020, 0.0, 1.0, 0.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
         );
 
         assert!(
             weak_edge > 0.0,
             "weak estuary fan edge samples should taper toward the bank instead of creating one-block water speckles: {weak_edge}"
-        );
-        assert!(
-            (0.020 - weak_edge) * 2048.0 <= 3.0,
-            "weak estuary fan edge samples should not carve a visible terminal seam: {weak_edge}"
-        );
-        assert!(
-            (0.020 - soft_edge) * 2048.0 <= 3.0,
-            "mid-strength estuary fan edges should stay shallow instead of creating a ring seam: {soft_edge}"
         );
         assert!(
             core <= 0.0,
@@ -1186,8 +1162,6 @@ mod tests {
         let bed_depth_hint = 0.70;
         let terminal_depth_blocks =
             river_core_downcut_budget(flow_hint, bed_depth_hint, None, config) * 2048.0;
-        let expected_entry_depth_blocks = (terminal_depth_blocks * ESTUARY_FAN_ENTRY_DEPTH_SCALE)
-            .max(lerp(1.5, 3.5, smoothstep01(flow_hint)));
         let mut heights = Vec::new();
         let mut max_delta_blocks = 0.0_f32;
         let mut previous_height = None::<f32>;
@@ -1200,7 +1174,6 @@ mod tests {
                 1.0,
                 0.0,
                 0.0,
-                1.0,
                 1.0,
                 flow_hint,
                 bed_depth_hint,
@@ -1220,13 +1193,13 @@ mod tests {
             "estuary fan start should not fall faster than a 30 degree grade: max_delta={max_delta_blocks}"
         );
         assert!(
-            (heights[0] + expected_entry_depth_blocks).abs() <= 0.001,
-            "estuary fan origin should use a raised entry shelf instead of copying a round terminal bowl: heights={heights:?} entry_depth={expected_entry_depth_blocks}"
+            (heights[0] + terminal_depth_blocks).abs() <= 0.001,
+            "estuary fan origin should match the terminal river floor context instead of forming a transition step: heights={heights:?} terminal_depth={terminal_depth_blocks}"
         );
     }
 
     #[test]
-    fn estuary_fan_final_depth_uses_raised_sea_floor_guard() {
+    fn estuary_fan_final_depth_keeps_terminal_floor_or_half_scaled_shelf_target() {
         let config = test_tile_config();
         let flow_hint = 0.90;
         let bed_depth_hint = 0.70;
@@ -1244,20 +1217,17 @@ mod tests {
             0.0,
             0.0,
             1.0,
-            1.0,
             flow_hint,
             bed_depth_hint,
             4096.0,
             config,
         ) * 2048.0;
-        let expected_depth_blocks = (unscaled_shelf_depth_blocks * ESTUARY_FAN_FINAL_DEPTH_SCALE)
-            .max(terminal_depth_blocks * ESTUARY_FAN_TERMINAL_FLOOR_GUARD_SCALE)
-            .max(lerp(1.5, 3.5, flow_t));
-        let expected_height_blocks = -expected_depth_blocks;
+        let expected_height_blocks = -(unscaled_shelf_depth_blocks * ESTUARY_FAN_FINAL_DEPTH_SCALE)
+            .max(terminal_depth_blocks);
 
         assert!(
             (final_height_blocks - expected_height_blocks).abs() <= 0.001,
-            "estuary fan final reach should use the raised sea-floor target instead of being pinned to the terminal river floor: final={final_height_blocks}, expected={expected_height_blocks}"
+            "estuary fan final reach should not rise above terminal river floor while still using the scaled shelf when deeper: final={final_height_blocks}, expected={expected_height_blocks}"
         );
     }
 
@@ -1265,10 +1235,10 @@ mod tests {
     fn estuary_fan_excludes_lake_and_dry_basin_sources() {
         let config = test_tile_config();
         let lake = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.020, 0.020, 0.0, 1.0, 1.0, 0.0, 1.0, 0.85, 0.70, 96.0, config,
         );
         let dry = estuary_fan_macro_height(
-            0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
+            0.020, 0.020, 0.0, 1.0, 0.0, 1.0, 1.0, 0.85, 0.70, 96.0, config,
         );
 
         assert_eq!(lake, 0.020);

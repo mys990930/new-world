@@ -580,13 +580,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
    계산하거나 재-carve하면 회귀다.
    terminal coast outlet 하구 fan은 이 river morphology를 이어받는 macro_field-local carve guide일
    뿐이며, hydrology/river_plan selected segment topology를 연장하거나 downstream/coast/ocean cell을
-   `River`로 승격하면 안 된다. terminal selected segment의 noisy curve는 hydrology flow 방향으로
-   정렬해 rasterize하고, outlet endpoint 직전에서는 river core/shoulder influence를 taper해 rounded
-   terminal cap이 fan/bed를 왜곡하지 않게 한다. 마지막 river segment와 fan 시작부의 height field가
-   맞닿는 곳에서는 strong estuary water와 river-mouth context가 인접한 sample pair에 한해
-   deterministic downcut-only continuity guard를 적용할 수 있다. 이 guard는 높은 쪽 combined height만
-   bounded grade 안으로 낮추며, 낮은 쪽을 올리거나 weak fan edge, inland river, ordinary coast,
-   broad valley 전체를 smoothing하면 안 된다.
+   `River`로 승격하면 안 된다.
 7. tile sample fill은 deterministic해야 하며, 병렬 scheduling이 sample 순서나 값에 영향을 주면 안 된다.
 8. combined macro height는 finite 값이어야 하고 preview 가능한 범위를 유지해야 한다.
 9. dry basin은 water mask가 아니며, combined macro height에서 lake/ocean flatten을 적용하지 않는다.
@@ -650,13 +644,6 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   이때 raster sample의 `surface_kind`가 land/coast로 되돌아가면 stale ocean context가 downstream
   surface policy에 남지 않도록 ocean-role `biome_context.water_role`과 `biome`도 land/coast 의미로
   재분류한다.
-- ocean fragment 정리 뒤에는 terminal estuary handoff continuity guard를 적용한다. 이 pass는
-  strong `estuary_water_strength`가 있는 sample과 coast/ocean river-mouth context가 맞닿는 이웃
-  sample pair만 검사하고, 1 block 이하의 bounded grade로 이어지도록 높은 쪽
-  `combined_macro_height`만 낮춘다. weak fan edge나 water boundary 전체를 따라 전파되면 하구 끝의
-  straight seam/round bowl이 다시 생기므로, river topology, fan footprint, water mask, final water
-  surface solve는 바꾸지 않고 마지막 river segment와 estuary fan 중심부 사이의 raster 접합 단차만
-  완화한다.
 - `biome_context`와 `biome`은 macro_map이 resolve한 noisy owner site `GraphBiomeCell`을 전달한다. 이
   단계는 biome을 새로 고르지 않고, macro_map stage 끝의 graph-first classification을 cache sample에
   싣는다.
@@ -691,23 +678,19 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   `640` blocks다. 실제 narrow bed depth는 core center profile을 통해 combined height에 반영하고,
   같은 bed-depth 값은 heightfield/water/surface stage가 읽는 diagnostic/water-depth hint로도 남긴다.
   selected river chain이 `CoastOutlet` terminal에서 끝나는 마지막 segment는 river topology를
-  downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 hydrology downstream으로
-  정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로 굽는다. terminal river
-  stroke는 endpoint 직전에서 core/shoulder strength를 fade-out해 마지막 noisy segment의 rounded cap이
-  estuary bed나 valley에 남지 않게 하고, fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로
-  이어진다. 이 guide는 시작부에서 기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral
-  half-width가 넓어져 coast/ocean source 안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산
-  반폭은 terminal segment의 planned water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면
-  폭보다 좁게 pinching되지 않아야 한다. broad valley width는 보조 확산 context로만 더해진다. low-Q
-  mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도 coast/ocean source 쪽으로 끊기지 않게
-  한다. fan influence는 terminal endpoint 이후의 downstream 누적 거리(`estuary_along_blocks`)도 함께
-  저장한다. height 합성은 fan 시작부를 terminal river core floor 그대로 복제하지 않고 terminal budget의
-  일부만 쓰는 raised entry shelf에서 시작하며, 이후 바다 floor 목표까지 bounded grade cap으로만 변한다.
-  따라서 river가 있는 마지막 edge 끝과 estuary 시작점 사이에 별도 급경사 단차가 생기면 회귀다. 최종 도달
-  shelf target은 river carve/depth hint에서 계산한 raw fan depth를 강하게 얕은 스케일로 낮추고,
-  terminal river floor guard는 최종 sea-floor가 과하게 깊어지는 것을 막도록 별도 낮은 비율만 반영한다.
-  height carve는 fan body strength와 `estuary_water_strength`가 모두 충분한 중심부에서만 깊게 작동하며,
-  weak fan edge/water edge는 shallow/no-carve로 남아야 한다. deterministic world-space
+  downstream cell로 연장하지 않는다. 대신 macro_field raster pass 안에서 terminal endpoint 이후
+  downstream 방향의 fan/estuary guide를 내부 influence channel로 굽는다. 이 guide는 시작부에서 기존
+  terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
+  안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산 반폭은 terminal segment의 planned
+  water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면 폭보다 좁게 pinching되지 않아야
+  한다. broad valley width는 보조 확산 context로만 더해진다. low-Q mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도
+  coast/ocean source 쪽으로 끊기지 않게 한다. fan influence는 terminal endpoint 이후의 downstream
+  누적 거리(`estuary_along_blocks`)도 함께 저장한다. height 합성은 fan 시작부를 얕은 독립 shelf로
+  초기화하지 않고 terminal river core downcut budget에서 온 floor depth로 시작하며, 이후 바다 floor
+  목표까지 같은 grade cap으로만 더 깊어진다. 따라서 river가 있는 마지막 edge 끝과 estuary 시작점 사이에
+  별도 급경사 단차가 생기면 회귀다. 최종 도달 shelf target은 river carve/depth hint에서 계산한 raw fan
+  depth를 절반 스케일로 낮추되, terminal river floor보다 얕아지는 경우에는 terminal floor를 하한으로
+  삼아 하구가 바다 쪽으로 올라가는 ramp가 되지 않게 한다. deterministic world-space
   roughness는 fan edge만 흔들며 selected
   river segment, hydrology adjacency, surface owner mask를 바꾸지 않는다. 다만 fan 내부에는
   `estuary_water_strength`와 `estuary_water_depth_hint`를 별도로 굽고, heightfield는 이 별도 channel을

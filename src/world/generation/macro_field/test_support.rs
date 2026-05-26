@@ -358,7 +358,6 @@ pub(in crate::world::generation::macro_field) fn test_river_source<'a>(
     flow_hint: f32,
 ) -> RiverRasterSource<'a> {
     RiverRasterSource {
-        is_terminal_outlet: false,
         edge: curve.edge,
         points: &curve.points,
         longitudinal_start_blocks: 0.0,
@@ -388,7 +387,7 @@ pub(in crate::world::generation::macro_field) fn test_river_raster_field(
         river_centerline_z: vec![f32::NAN; sample_count],
         river_longitudinal_blocks: vec![f32::NAN; sample_count],
         flow_hint: vec![0.0; sample_count],
-        river_core_depth_hint: vec![0.0; sample_count],
+        river_bed_depth_hint: vec![0.0; sample_count],
         river_bank_roughness_hint: vec![0.0; sample_count],
         river_gravel_hint: vec![0.0; sample_count],
         river_cutbank_hint: vec![0.0; sample_count],
@@ -409,7 +408,7 @@ pub(in crate::world::generation::macro_field) fn set_river_raster_strength(
     field.river_valley_strength[index] = strength;
     field.flow_hint[index] = 0.72;
     field.distance_blocks[index] = 1.0;
-    field.river_core_depth_hint[index] = 0.45;
+    field.river_bed_depth_hint[index] = 0.45;
     field.river_bank_roughness_hint[index] = 0.35;
     field.river_gravel_hint[index] = 0.25;
 }
@@ -453,7 +452,7 @@ pub(in crate::world::generation::macro_field) fn test_contour_tile(
                 river_distance_blocks: f32::INFINITY,
                 river_flow_hint: 0.0,
                 river_longitudinal_blocks: 0.0,
-                river_core_depth_hint: 0.0,
+                river_bed_depth_hint: 0.0,
                 river_bank_roughness_hint: 0.0,
                 river_gravel_hint: 0.0,
                 river_cutbank_hint: 0.0,

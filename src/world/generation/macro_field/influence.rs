@@ -22,8 +22,6 @@ pub(super) const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
 pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
-const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 1.25;
-const TERMINAL_RIVER_TAPER_WIDTH_SCALE: f32 = 2.50;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -45,7 +43,7 @@ pub(super) struct MacroFieldInfluenceSample {
     pub(super) river_centerline_position: Option<WorldPlanePoint>,
     pub(super) river_longitudinal_blocks: f32,
     pub(super) river_flow_hint: f32,
-    pub(super) river_core_depth_hint: f32,
+    pub(super) river_bed_depth_hint: f32,
     pub(super) river_bank_roughness_hint: f32,
     pub(super) river_gravel_hint: f32,
     pub(super) river_cutbank_hint: f32,
@@ -69,7 +67,7 @@ pub(super) struct MacroFieldInfluenceFields {
     pub(super) river_centerline_z: Vec<f32>,
     pub(super) river_longitudinal_blocks: Vec<f32>,
     pub(super) river_flow_hint: Vec<f32>,
-    pub(super) river_core_depth_hint: Vec<f32>,
+    pub(super) river_bed_depth_hint: Vec<f32>,
     pub(super) river_bank_roughness_hint: Vec<f32>,
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
@@ -125,7 +123,7 @@ impl MacroFieldInfluenceFields {
                 0.0
             },
             river_flow_hint,
-            river_core_depth_hint: self.river_core_depth_hint[index].clamp(0.0, 1.0),
+            river_bed_depth_hint: self.river_bed_depth_hint[index].clamp(0.0, 1.0),
             river_bank_roughness_hint: self.river_bank_roughness_hint[index].clamp(0.0, 1.0),
             river_gravel_hint: self.river_gravel_hint[index].clamp(0.0, 1.0),
             river_cutbank_hint: self.river_cutbank_hint[index].clamp(0.0, 1.0),
@@ -157,7 +155,6 @@ pub(super) fn rasterize_influence_fields(
         .river_curves
         .iter()
         .map(|river| RiverRasterSource {
-            is_terminal_outlet: river.is_terminal_outlet,
             edge: river.edge,
             points: &river.points,
             longitudinal_start_blocks: river.longitudinal_start_blocks,
@@ -198,7 +195,7 @@ pub(super) fn rasterize_influence_fields(
         river_centerline_z: river.river_centerline_z,
         river_longitudinal_blocks: river.river_longitudinal_blocks,
         river_flow_hint: river.flow_hint,
-        river_core_depth_hint: river.river_core_depth_hint,
+        river_bed_depth_hint: river.river_bed_depth_hint,
         river_bank_roughness_hint: river.river_bank_roughness_hint,
         river_gravel_hint: river.river_gravel_hint,
         river_cutbank_hint: river.river_cutbank_hint,
@@ -278,14 +275,12 @@ pub(super) fn estuary_fan_sample(
     let dx = position.x - fan.origin.x;
     let dz = position.z - fan.origin.z;
     let along = dx * fan.direction_x + dz * fan.direction_z;
-    let inlet_overlap_blocks =
-        (fan.start_half_width_blocks * ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE).max(1.0);
-    if along < -inlet_overlap_blocks || along > fan.length_blocks {
+    if along < 0.0 || along > fan.length_blocks {
         return EstuaryFanSample::default();
     }
 
     let lateral = (dx * -fan.direction_z + dz * fan.direction_x).abs();
-    let progress = (along.max(0.0) / fan.length_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
+    let progress = (along / fan.length_blocks.max(f32::EPSILON)).clamp(0.0, 1.0);
     let half_width = estuary_fan_half_width_blocks(fan, progress);
     let edge_noise = boundary_roughness_offset(
         position,
@@ -300,27 +295,21 @@ pub(super) fn estuary_fan_sample(
     }
 
     let flow_t = smoothstep01(fan.flow_hint.clamp(0.0, 1.0));
-    let inlet_extension_t = if along < 0.0 {
-        smoothstep01(((along + inlet_overlap_blocks) / inlet_overlap_blocks).clamp(0.0, 1.0))
-    } else {
-        1.0
-    };
-    let inlet_blend =
-        (0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28) * inlet_extension_t;
+    let inlet_blend = 0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28;
     let along_strength = 1.0 - smoothstep01(progress);
     let shelf_tail = 1.0 - smoothstep01((progress - 0.78) / 0.22);
     let tail_floor = 0.48 - flow_t * 0.12;
     let strength =
         (cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
     let water_edge_t = (rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0);
-    let water_strength = ((if water_edge_t <= 0.92 {
+    let water_strength = if water_edge_t <= 0.92 {
         let inner_t = smoothstep01((water_edge_t / 0.92).clamp(0.0, 1.0));
         lerp(1.0, RIVER_CORE_STRENGTH_THRESHOLD + 0.02, inner_t)
     } else {
         let edge_t = smoothstep01(((water_edge_t - 0.92) / 0.08).clamp(0.0, 1.0));
         lerp(RIVER_CORE_STRENGTH_THRESHOLD + 0.02, 0.0, edge_t)
-    }) * inlet_extension_t)
-        .clamp(0.0, 1.0);
+    }
+    .clamp(0.0, 1.0);
     EstuaryFanSample {
         strength,
         water_strength,
@@ -354,7 +343,7 @@ pub(super) struct RasterDistanceField {
     pub(super) river_centerline_z: Vec<f32>,
     pub(super) river_longitudinal_blocks: Vec<f32>,
     pub(super) flow_hint: Vec<f32>,
-    pub(super) river_core_depth_hint: Vec<f32>,
+    pub(super) river_bed_depth_hint: Vec<f32>,
     pub(super) river_bank_roughness_hint: Vec<f32>,
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
@@ -376,7 +365,7 @@ pub(super) struct RiverRasterRow {
     pub(super) longitudinal_weight_sum: Vec<f32>,
     pub(super) flow_weighted_sum: Vec<f32>,
     pub(super) flow_weight_sum: Vec<f32>,
-    pub(super) river_core_depth_hint: Vec<f32>,
+    pub(super) river_bed_depth_hint: Vec<f32>,
     pub(super) river_bank_roughness_hint: Vec<f32>,
     pub(super) river_gravel_hint: Vec<f32>,
     pub(super) river_cutbank_hint: Vec<f32>,
@@ -400,7 +389,7 @@ impl RiverRasterRow {
             longitudinal_weight_sum: vec![0.0; width],
             flow_weighted_sum: vec![0.0; width],
             flow_weight_sum: vec![0.0; width],
-            river_core_depth_hint: vec![0.0; width],
+            river_bed_depth_hint: vec![0.0; width],
             river_bank_roughness_hint: vec![0.0; width],
             river_gravel_hint: vec![0.0; width],
             river_cutbank_hint: vec![0.0; width],
@@ -551,8 +540,8 @@ pub(super) fn copy_strongest_neighbor_river_hints(
     }
 
     if let Some(neighbor) = best {
-        river.river_core_depth_hint[index] =
-            river.river_core_depth_hint[index].max(river.river_core_depth_hint[neighbor]);
+        river.river_bed_depth_hint[index] =
+            river.river_bed_depth_hint[index].max(river.river_bed_depth_hint[neighbor]);
         river.river_bank_roughness_hint[index] =
             river.river_bank_roughness_hint[index].max(river.river_bank_roughness_hint[neighbor]);
         river.river_gravel_hint[index] =
@@ -567,7 +556,6 @@ pub(super) fn copy_strongest_neighbor_river_hints(
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct RiverRasterSource<'a> {
-    pub(super) is_terminal_outlet: bool,
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: &'a [WorldPlanePoint],
     pub(super) longitudinal_start_blocks: f32,
@@ -580,7 +568,6 @@ pub(super) struct RiverRasterSource<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct RiverRasterWorkSource {
-    pub(super) is_terminal_outlet: bool,
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: Vec<WorldPlanePoint>,
     pub(super) cumulative_lengths: Vec<f32>,
@@ -607,7 +594,6 @@ pub(super) fn rounded_river_raster_sources(
                 configured_radius_blocks,
             );
             RiverRasterWorkSource {
-                is_terminal_outlet: source.is_terminal_outlet,
                 edge: source.edge,
                 cumulative_lengths: cumulative_polyline_lengths(&points),
                 points,
@@ -913,7 +899,7 @@ pub(super) fn rasterize_curve_distance_field(
             river_centerline_z: vec![f32::NAN; sample_count],
             river_longitudinal_blocks: vec![f32::NAN; sample_count],
             flow_hint: vec![0.0; sample_count],
-            river_core_depth_hint: vec![0.0; sample_count],
+            river_bed_depth_hint: vec![0.0; sample_count],
             river_bank_roughness_hint: vec![0.0; sample_count],
             river_gravel_hint: vec![0.0; sample_count],
             river_cutbank_hint: vec![0.0; sample_count],
@@ -977,7 +963,7 @@ pub(super) fn rasterize_curve_distance_field(
         river_centerline_z: vec![f32::NAN; sample_count],
         river_longitudinal_blocks: vec![f32::NAN; sample_count],
         flow_hint: cropped_flow,
-        river_core_depth_hint: vec![0.0; sample_count],
+        river_bed_depth_hint: vec![0.0; sample_count],
         river_bank_roughness_hint: vec![0.0; sample_count],
         river_gravel_hint: vec![0.0; sample_count],
         river_cutbank_hint: vec![0.0; sample_count],
@@ -1001,7 +987,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
             river_centerline_z: vec![f32::NAN; sample_count],
             river_longitudinal_blocks: vec![f32::NAN; sample_count],
             flow_hint: vec![0.0; sample_count],
-            river_core_depth_hint: vec![0.0; sample_count],
+            river_bed_depth_hint: vec![0.0; sample_count],
             river_bank_roughness_hint: vec![0.0; sample_count],
             river_gravel_hint: vec![0.0; sample_count],
             river_cutbank_hint: vec![0.0; sample_count],
@@ -1030,7 +1016,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
     let mut longitudinal_weight_sum = Vec::with_capacity(sample_count);
     let mut flow_weighted_sum = Vec::with_capacity(sample_count);
     let mut flow_weight_sum = Vec::with_capacity(sample_count);
-    let mut river_core_depth_hint = Vec::with_capacity(sample_count);
+    let mut river_bed_depth_hint = Vec::with_capacity(sample_count);
     let mut river_bank_roughness_hint = Vec::with_capacity(sample_count);
     let mut river_gravel_hint = Vec::with_capacity(sample_count);
     let mut river_cutbank_hint = Vec::with_capacity(sample_count);
@@ -1046,7 +1032,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
         longitudinal_weight_sum.extend(row.longitudinal_weight_sum);
         flow_weighted_sum.extend(row.flow_weighted_sum);
         flow_weight_sum.extend(row.flow_weight_sum);
-        river_core_depth_hint.extend(row.river_core_depth_hint);
+        river_bed_depth_hint.extend(row.river_bed_depth_hint);
         river_bank_roughness_hint.extend(row.river_bank_roughness_hint);
         river_gravel_hint.extend(row.river_gravel_hint);
         river_cutbank_hint.extend(row.river_cutbank_hint);
@@ -1083,7 +1069,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
         river_centerline_z,
         river_longitudinal_blocks,
         flow_hint,
-        river_core_depth_hint,
+        river_bed_depth_hint,
         river_bank_roughness_hint,
         river_gravel_hint,
         river_cutbank_hint,
@@ -1224,16 +1210,13 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 position.z + offset_z * spacing,
             );
             let subpixel_distance = point_segment_distance(subpixel, start, end);
-            let subpixel_t = projected_t_on_segment(subpixel, start, end);
-            let terminal_taper =
-                terminal_outlet_river_taper(source, segment_index, subpixel_t, radius_blocks);
             let core_strength = river_core_strength_for_roughened_distance(
                 subpixel_distance,
                 roughness_offset,
                 source.flow_hint,
                 source.water_width_blocks,
                 radius_blocks,
-            ) * terminal_taper;
+            );
             let shoulder_strength = river_valley_strength_for_roughened_distance(
                 subpixel_distance,
                 roughness_offset,
@@ -1241,7 +1224,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 source.water_width_blocks,
                 source.valley_width_blocks,
                 radius_blocks,
-            ) * terminal_taper;
+            );
             let valley_strength = core_strength.max(shoulder_strength);
             let hints =
                 river_hints_from_strength(core_strength, source.flow_hint, source.bed_depth_blocks);
@@ -1285,7 +1268,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 component_union_strength(row.river_shoulder_strength[x], shoulder_strength);
             row.river_valley_strength[x] =
                 component_union_strength(row.river_valley_strength[x], anti_aliased_strength);
-            row.river_core_depth_hint[x] = row.river_core_depth_hint[x].max(bed_hint);
+            row.river_bed_depth_hint[x] = row.river_bed_depth_hint[x].max(bed_hint);
             row.river_bank_roughness_hint[x] = row.river_bank_roughness_hint[x].max(rough_hint);
             row.river_gravel_hint[x] = row.river_gravel_hint[x].max(gravel_hint);
             row.river_cutbank_hint[x] = row.river_cutbank_hint[x].max(cutbank_hint);
@@ -1314,7 +1297,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 longitudinal_blocks,
                 anti_aliased_strength,
             );
-            row.river_core_depth_hint[x] = bed_hint;
+            row.river_bed_depth_hint[x] = bed_hint;
             row.river_bank_roughness_hint[x] = rough_hint;
             row.river_gravel_hint[x] = gravel_hint;
             row.river_cutbank_hint[x] = cutbank_hint;
@@ -1322,41 +1305,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.flow_weight_sum[x] = anti_aliased_strength;
         }
     }
-}
-
-fn terminal_outlet_river_taper(
-    source: &RiverRasterWorkSource,
-    segment_index: usize,
-    segment_t: f32,
-    configured_radius_blocks: f32,
-) -> f32 {
-    if !source.is_terminal_outlet {
-        return 1.0;
-    }
-
-    let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
-    let start = source
-        .cumulative_lengths
-        .get(segment_index)
-        .copied()
-        .unwrap_or(0.0);
-    let end = source
-        .cumulative_lengths
-        .get(segment_index + 1)
-        .copied()
-        .unwrap_or(start);
-    let along_source = lerp(start, end, segment_t.clamp(0.0, 1.0));
-    let remaining = (total_length - along_source).max(0.0);
-    let fade_blocks = (source.water_width_blocks * TERMINAL_RIVER_TAPER_WIDTH_SCALE)
-        .max(river_water_radius_blocks(
-            source.flow_hint,
-            source.water_width_blocks,
-            configured_radius_blocks,
-        ))
-        .max(1.0);
-
-    let taper = smoothstep01((remaining / fade_blocks).clamp(0.0, 1.0));
-    taper * taper
 }
 
 pub(super) fn accumulate_river_row_hints(
@@ -1696,7 +1644,6 @@ mod tests {
     #[test]
     fn bend_bar_hints_separate_inside_gravel_from_outside_cutbank() {
         let source = RiverRasterWorkSource {
-            is_terminal_outlet: false,
             edge: VoronoiEdgeId(7),
             points: vec![
                 WorldPlanePoint::new(0.0, 0.0),
