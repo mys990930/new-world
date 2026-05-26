@@ -121,6 +121,7 @@ NOT:
 ### Current Implementation Notes
 
 - Uploaded chunk terrain includes material classification from the world registry.
+- World meshing may merge flat same-material top faces before upload; renderer block-texture sampling repeats merged UV spans so tiling stays block-scaled while avoiding per-block top-face geometry seams.
 - The terrain shader preserves more raw texture detail before atmosphere/fog grading, so dirt/grass/stone read more clearly in quarter view.
 - The terrain shader now consumes world-provided top-face contour edges, so layer breaks read on actual height transitions instead of every block border.
 - A visible sun overlay is now drawn from the current `sun_direction`.

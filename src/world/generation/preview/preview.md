@@ -275,7 +275,7 @@ selected hydrology result, river reach morphology plan, canonical noisy boundary
 preview와 runtime cache miss는 ridge/coast/river guide distance를 sample마다 반복 계산하지 않아야
 한다. stage 11 preview는 ridge/coast의 canonical noisy curve를 tile source pixel로 rasterize하고
 distance propagation으로 influence field를 만들 수 있다. river channel은 stage 7 `RiverPlan`의
-broad valley parameter와 narrow bed hint를 같은 noisy edge geometry 위에 굽는다. 이 pass는
+broad valley parameter와 river core hint를 같은 noisy edge geometry 위에 굽는다. 이 pass는
 selected hydrology topology를 바꾸지 않고, subpixel coverage 기반 valley strength, nearest guide
 distance, blended display flow, reach type을 저장한 뒤 그 결과를 렌더한다. river rasterization은
 row-range local buffer를 Rayon worker가 독립적으로 채우고 row-major 순서로 결합해 deterministic
@@ -311,9 +311,9 @@ sample fill은 site bucket 후보를 allocation 없이 직접 순회하고, near
   land 사이의 경계가 노란 coast처럼 보이면 회귀다.
 - `ridge`: ridge/fault guide edge의 canonical noisy curve 주변 influence envelope
 - `river`: selected hydrology segment가 참조하는 canonical noisy curve 주변의 river plan broad
-  valley strength, narrow bed hint, display flow, reach type. 이 channel은 모든 강을 같은 폭으로
+  valley strength, river core hint, display flow, reach type. 이 channel은 모든 강을 같은 폭으로
   칠하지 않고, 상류/하류와 lake inlet/outlet의 morphology 차이를 보여야 한다. macro field combined
-  height는 broad valley를 주로 반영하고, narrow bed는 heightfield/water가 읽을 hint로 보존한다.
+  height는 broad valley를 주로 반영하고, river core는 heightfield/water가 읽을 hint로 보존한다.
 - `meso`: stage 10 `MesoFeaturePlan`에서 온 raise/carve/flatten/roughness/material hint와 protected
   mask attenuation을 보여준다.
 - `combined`: Perlin 합성 전 macro elevation + ridge raise - broad river valley - lake flatten + meso contribution 결과.
@@ -414,7 +414,7 @@ footprint를 갖는 일반 raster surface이며, runtime cache와 pixelize hando
   정의한 reach parameter, lake inlet/outlet endpoint를 따라가야 한다.
 - noisy boundary ownership: macro elevation과 mask 경계는 nearest-site straight boundary가 아니라
   stage 9 noisy boundary curve를 따라야 한다.
-- no lake-edge river invariant: river valley/bed hint는 `MacroLakeEdgeClass::NonLake` selected
+- no lake-edge river invariant: river valley/core hint는 `MacroLakeEdgeClass::NonLake` selected
   segment와 lake endpoint marker 정책만 사용해야 한다.
 - preview nonblank: 각 channel은 blank 단색 이미지가 아니어야 하며 legend와 metadata를 포함해야 한다.
 - contour sanity: contour segment는 finite world-space endpoint를 가져야 하며, flat field는 contour를
@@ -595,13 +595,14 @@ heightfield / voxel-column cache로 변환한 뒤, column을 diagnostic box로 v
   cliff로 솟으면 macro/pixelize source scalar 또는 coast profile을 먼저 진단한다.
 - broad river valley는 이미 `combined_macro_height`에 반영되어 있으므로 heightfield stage에서
   같은 계곡을 다시 carve하지 않는다. macro field 쪽 river guide는 selected hydrology flow/slope/bend
-  context에서 broad valley와 narrow bed, bank roughness, gravel, cutbank hint를 만든다.
-  heightfield는 이 중 bed-depth hint만 terrain bed/water split에 반영하고, gravel/cutbank는
+  context에서 broad valley와 river core, bank roughness, gravel, cutbank hint를 만든다.
+  heightfield는 이 중 bed-depth hint만 terrain core/water split에 반영하고, gravel/cutbank는
   downstream surface/material diagnostic hint로 보존한다. river hint column에는 preliminary integer river
   water height를 만들고, 인접 river/standing-water surface와 한 block 이하의 step으로 천천히 내려오도록
   clamping한다.
-- block color는 final material이 아니라 diagnostic terrain ramp다. water/ocean은 muted blue, low land는
-  green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
+- block color는 final material이 아니라 diagnostic terrain ramp다. active water overlay는 muted blue,
+  active river core bed만 neutral gray이며, ocean/lake bed와 upper river bed는 별도 non-gray 색을 쓴다.
+  low land는 green-gray, high/ridge는 pale gray, dry basin은 muted gray/mauve 계열이다.
 - player diagnostic cube는 terrain diagnostic ramp와 명확히 구분되는 형광색으로 그린다. 큐브 footprint는
   preview footprint 중앙의 world/block 기준 `1 x 1` block이고 높이는 `4` block이다. 바닥은 해당
   footprint와 가장 가까운 heightfield column/columns의 `surface_y` 최댓값에 맞춰 지형 블럭 위에

@@ -11,6 +11,7 @@ pub mod pipeline;
 pub mod pixelize;
 pub mod river_plan;
 pub mod surface_plan;
+pub mod vegetation;
 pub mod voxel;
 
 // Legacy generation remains available through `world::generation::*` until the
@@ -115,6 +116,11 @@ pub use surface_plan::{
     BiomeSurfacePolicy, SurfaceBlockPalette, SurfaceColumnInput, SurfaceColumnPlan,
     SurfaceHydrologyRole, SurfacePlanArea, SurfacePlanAreaStats, SurfacePlanConfig,
     biome_surface_policy, generate_surface_plan_area, resolve_surface_column,
+};
+#[allow(unused_imports)]
+pub use vegetation::{
+    RockFeaturePlacementConfig, SurfaceFeaturePlacement, SurfaceFeaturePlan,
+    SurfaceFeaturePlanStats, SurfaceFeatureRef, generate_rock_feature_placements,
 };
 #[allow(unused_imports)]
 pub use voxel::{

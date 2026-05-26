@@ -31,9 +31,11 @@
   - `--quarter-turns <u8>`: isometric camera rotation in 90 degree steps, default `0`
   - `--perlin`: backward-compatible no-op alias; heightfield Perlin micro relief is on by
     default.
-  - `--river-influence-color`: opt-in diagnostic terrain color mode. River core/bed influence is
-    colored separately from shoulder and broad-valley influence while the default output remains
-    unchanged. `--riverbed-influence-color` is accepted as a compatibility alias.
+  - `--river-influence-color`: opt-in diagnostic terrain color mode. River core influence is
+    colored separately from upper river bed, shoulder, and broad-valley influence while the default
+    output remains unchanged. Strong `river_core_strength` alone is not shown as active core unless
+    heightfield classified the column as `RiverCore`. `--riverbed-influence-color` is accepted as a
+    compatibility alias.
   - `--output <path>`
 
 ## Flow
@@ -101,14 +103,16 @@ screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
   filled top/visible side faces, the player diagnostic cube, and separate world/grid reference
   overlays.
 - Colors are diagnostic and intentionally close to the subtle terrain ramp:
-  - muted blue active water/submerged ocean
+  - muted blue active water overlay
+  - neutral gray river core bed only
   - subdued green-gray low land
   - pale gray high/ridge
   - muted gray/mauve dry basin
 - `--river-influence-color` replaces only the terrain color ramp with a river-influence diagnostic
-  ramp: core/riverbed columns use a hot magenta-orange color, shoulder/bank influence uses cyan,
-  and broad valley-only influence uses muted indigo. Water still renders as the same translucent
-  overlay, and the flag is off by default so normal preview output stays visually stable.
+  ramp: river core columns use a hot magenta-orange color, upper river bed uses teal, shoulder/bank
+  influence uses cyan, and broad valley-only influence uses muted indigo. Water still renders as the
+  same translucent overlay, and the flag is off by default so normal preview output stays visually
+  stable.
 - Ocean-owned dry terrain above sea level uses the same land ramp as ordinary land. If it renders
   blue, the issue is preview coloring, not heightfield water generation.
 - Water boxes come from heightfield water hints, not final fluid simulation. They are rendered as
@@ -116,8 +120,9 @@ screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
   same projected painter pass. Rendering all water after all terrain is a regression because far
   water can alpha-blend over nearer land and look shifted toward the viewer.
 - Sea level is fixed at `y = 0` for ocean water. Lake water uses the heightfield lake water hint.
-  Because the water pass is translucent, ocean/lake/river beds below the waterline remain visible
-  enough to inspect bathymetry and riverbed carving near mouths.
+  Because the water pass is translucent, river core surfaces remain visible enough to inspect
+  carving under the overlay. Ocean/lake beds and upper `RiverBed` columns keep distinct non-gray
+  terrain colors so gray means active river core in the default preview.
 - Coast-adjacent land no longer uses a heightfield shoreline contour ceiling. Ocean/lake contact
   keeps standing water at `y = 0`, while adjacent land preserves the macro/pixelize source contour
   band so coast jumps can be diagnosed upstream.
@@ -131,11 +136,11 @@ screen_y = (x - z) * tile_h / 2 - y * vertical_px_per_block
 - The default Perlin path uses heightfield-owned deterministic world-space fBM micro relief before contour-band
   resolve, then snaps the perturbed source to integer block height. The preview-enabled default is
   noticeable but bounded, around `8` blocks amplitude with a `10` block clamp. Lake and submerged
-  ocean source columns keep `0` land micro relief, river columns currently keep `0` to preserve
-  continuity, and ocean-owned dry terrain above sea level uses the same micro relief map as land.
-- River columns receive an integer preliminary water height. Before preview, neighboring river or
-  standing-water surfaces clamp river water so adjacent river-water steps descend by at most one
-  block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.
+  ocean source columns keep `0` land micro relief, river core columns use a smaller active-channel
+  relief pass, and ocean-owned dry terrain above sea level uses the same micro relief map as land.
+- Active `RiverCore` columns receive an integer preliminary water height. Before preview, neighboring
+  river core or standing-water surfaces clamp river water so adjacent river-water steps descend by at
+  most one block. This is a diagnostic vertical slice, not the final fluid/voxel channel solve.
 - Ocean/lake terrain `surface_height_blocks` is drawn as bed terrain first. The translucent water
   overlay then uses `water_level_blocks`, while diagnostics can still compare adjacent columns by
   visible top height, `max(surface_height_blocks, water_level_blocks)`.

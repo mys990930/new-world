@@ -15,6 +15,7 @@
 - emit a world-owned `CpuMesh`
 - handle chunk-border visibility through neighbor snapshots
 - encode top-face terrace contour edges for renderer-side readability shading
+- greedily merge flat top faces that do not need contour-edge readability lines
 
 ## Non-Responsibilities
 
@@ -42,8 +43,10 @@
 4. Resolve render kind, tint, face texture, opacity, block material, and exposed surface height through the registry.
 5. For `foliage_cross`, emit two double-sided crossed quads with alpha-aware foliage material and skip cube face culling.
 6. Cull cube faces hidden by opaque neighbors or fully shared fluid volume.
-7. Emit face vertices with position, tint, normal, UV, texture layer, material kind, and any top-face contour-edge mask needed for renderer shading.
-8. Return the accumulated `CpuMesh`.
+7. Emit side/bottom face vertices with position, tint, normal, UV, texture layer, and material kind.
+8. Greedily merge visible top faces when block, height, tint, texture, material, and `contour_edges == 0` all match.
+9. Emit contour-bearing top faces as individual quads so height breaks and chunk/neighbor boundaries remain legible.
+10. Return the accumulated `CpuMesh`.
 
 ## Public Interface
 
@@ -80,3 +83,4 @@ meshing::build_chunk_mesh(
 - Missing block ids resolve through the registry fallback and therefore produce a magenta-tinted mesh with a valid material kind.
 - World meshing intentionally keeps `material_kind` as world-owned meaning so the app bridge can translate it into renderer-specific shading enums without leaking world internals.
 - Terrace contour readability is now driven by a world-produced top-edge bitmask, so shaders can highlight real height breaks on top faces without reverting to per-block outlines.
+- Flat merged top faces emit UVs spanning the merged block area; renderer block-texture sampling repeats those UVs so visual tiling remains block-scaled without preserving per-block geometry seams.

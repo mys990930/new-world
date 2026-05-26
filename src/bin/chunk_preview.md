@@ -1,4 +1,4 @@
-﻿# chunk_preview
+# chunk_preview
 
 ## Role
 

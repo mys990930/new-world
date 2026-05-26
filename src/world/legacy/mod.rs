@@ -8,6 +8,7 @@ pub mod edit;
 pub mod generation;
 pub mod meshing;
 pub mod meta;
+pub mod prop;
 pub mod query;
 pub mod registry;
 pub mod storage;
@@ -102,6 +103,11 @@ pub use generation::{
 pub use meshing::{CpuMesh, MeshVertex, RenderBounds, build_chunk_mesh};
 #[allow(unused_imports)]
 pub use meta::WorldMeta;
+#[allow(unused_imports)]
+pub use prop::{
+    MicrovoxelCuboid, MicrovoxelPropCatalog, MicrovoxelPropDef, MicrovoxelPropError,
+    MicrovoxelPropPlacement, build_microvoxel_prop_mesh, default_prop_manifest_path,
+};
 #[allow(unused_imports)]
 pub use query::{NeighborChunks, Ray3, RaycastHit};
 #[allow(unused_imports)]

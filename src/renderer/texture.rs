@@ -255,8 +255,8 @@ pub(crate) fn create_gpu_block_texture_resources(
         mag_filter: wgpu::FilterMode::Nearest,
         min_filter: wgpu::FilterMode::Nearest,
         mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
         address_mode_w: wgpu::AddressMode::ClampToEdge,
         ..Default::default()
     });

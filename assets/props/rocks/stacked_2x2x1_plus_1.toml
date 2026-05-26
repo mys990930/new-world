@@ -1,0 +1,20 @@
+key = "rock_stacked_2x2x1_plus_1"
+texture = "rock"
+material = "stone"
+tint = [136, 134, 124, 255]
+
+[[cuboids]]
+x = 7
+y = 0
+z = 7
+w = 2
+h = 1
+d = 2
+
+[[cuboids]]
+x = 8
+y = 1
+z = 8
+w = 1
+h = 1
+d = 1

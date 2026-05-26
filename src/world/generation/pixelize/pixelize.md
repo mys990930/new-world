@@ -137,7 +137,10 @@ ocean/lake/river mask가 없는 일반 land source는 sea level 아래에서도 
 
 standing water는 source macro masks를 따른다. `ocean_mask` 또는 `lake_mask`가 standing-water threshold를
 넘으면 `water_y = Some(sea_level_blocks)`가 된다. river water는 selected hydrology를 다시 풀지 않고,
-`MacroFieldSample`의 river valley/bed/water hint를 읽어 optional water hint로만 옮긴다. dry basin은
+`MacroFieldSample`의 river valley/bed/water hint를 읽어 optional water hint로만 옮긴다. `RiverCore`와
+`RiverBed` terrain kind는 heightfield의 판정을 그대로 보존한다. `RiverCore`는 실제 물이 차는 낮은
+channel이고, `RiverBed`는 노출될 수 있는 upper bed/gravel/deposition 또는 estuary fan context다.
+pixelize는 이 둘을 다시 합치거나 threshold-edge bed를 core로 승격하지 않는다. dry basin은
 water mask가 아니며 `water_y`를 만들지 않는다.
 Concave river cusp cleanup is not owned here. Stage 10 `macro_field` performs bounded river raster
 cleanup before samples become `MacroFieldTile`, so `pixelize` must preserve the supplied source river

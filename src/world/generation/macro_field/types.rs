@@ -83,7 +83,7 @@ pub struct MacroFieldSample {
     pub river_distance_blocks: f32,
     pub river_flow_hint: f32,
     pub river_longitudinal_blocks: f32,
-    pub river_bed_depth_hint: f32,
+    pub river_core_depth_hint: f32,
     pub river_bank_roughness_hint: f32,
     pub river_gravel_hint: f32,
     pub river_cutbank_hint: f32,

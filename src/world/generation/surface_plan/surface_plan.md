@@ -128,8 +128,10 @@ surface resolve는 아래 priority를 고정한다.
 1. `HeightfieldColumn`의 `terrain_kind`, water hint, macro mask를 읽어 hydrology surface role을 정한다.
    - `Ocean`, `Lake`, `River`, `Wetland`, `Coast`, `DryBasin`, `Ridge`, `Land`를 구분한다.
    - ocean, lake, river, wetland, coast는 같은 water mask로 합치지 않는다.
-   - river는 selected hydrology를 다시 풀지 않고 `river_valley_strength`, `river_flow_hint`,
-     `river_bed_depth_blocks`, `river_gravel_hint`, `river_cutbank_hint`만 읽는다.
+   - river는 selected hydrology를 다시 풀지 않고 `HeightfieldTerrainKind::RiverCore` /
+     `HeightfieldTerrainKind::RiverBed`, `river_flow_hint`, `river_core_depth_blocks`,
+     `river_gravel_hint`, `river_cutbank_hint`만 읽는다. broad `river_valley_strength`만으로 dry shoulder를
+     active river role로 승격하지 않는다.
    - `coast_mask`는 넓은 coast distance diagnostic이므로 그 자체만으로 `Coast` role을 만들지 않는다.
      coast material은 explicit coast terrain, stage 8 coast water role, 또는 coast biome에서 온다.
 2. biome과 final context를 읽어 기본 material policy family를 고른다.
@@ -156,7 +158,7 @@ hydrology role은 biome 기본 palette보다 강하지만, 모든 주변 땅을 
   shallow/low-energy shelf는 `sand`/`silt`, higher-energy bed는 `gravel` 쪽으로 갈 수 있다.
 - lake column은 `silt`, `clay`, `mud`를 기본 sediment로 쓰고, rugged edge나 inlet/outlet 근처에서는
   `gravel`을 허용한다.
-- river core는 `gravel`, `silt`, `mud`, `wet_gravel` 계열을 쓴다. flow와 gravel/cutbank hint가 높을수록
+- river core와 exposed river bed는 `gravel`, `silt`, `mud`, `wet_gravel` 계열을 쓴다. flow와 gravel/cutbank hint가 높을수록
   `gravel`/`wet_gravel`, low-energy floodplain은 `silt`/`mud`/`clay` 쪽으로 간다.
 - river valley/fan scalar가 남아 있는 dry land는 그 자체만으로 연속 sediment patch가 되면 안 된다.
   dry bank나 mouth shoulder material은 selected river의 bed/roughness/gravel/cutbank hint와 충분히 강한

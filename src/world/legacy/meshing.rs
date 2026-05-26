@@ -79,6 +79,10 @@ pub fn build_chunk_mesh(
                 }
 
                 for face in faces() {
+                    if matches!(face, BlockFace::PosY) {
+                        continue;
+                    }
+
                     let Some(face_span) = visible_face_span(
                         center,
                         &neighbors,
@@ -111,6 +115,8 @@ pub fn build_chunk_mesh(
             }
         }
     }
+
+    append_greedy_top_faces(&mut mesh, center, &neighbors, registry);
 
     mesh
 }
@@ -191,6 +197,197 @@ fn boundary_local_for_face(face: BlockFace, a: u8, b: u8) -> LocalBlockCoord {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TopFaceCell {
+    block: BlockId,
+    face_span: FaceSpan,
+    color: [f32; 4],
+    texture_layer: u32,
+    material_kind: BlockMaterialKind,
+    contour_edges: u32,
+}
+
+impl TopFaceCell {
+    fn is_mergeable(self) -> bool {
+        self.contour_edges == 0
+    }
+
+    fn same_merge_key(self, other: Self) -> bool {
+        self.is_mergeable()
+            && other.is_mergeable()
+            && self.block == other.block
+            && self.face_span == other.face_span
+            && self.color == other.color
+            && self.texture_layer == other.texture_layer
+            && self.material_kind == other.material_kind
+    }
+}
+
+fn append_greedy_top_faces(
+    mesh: &mut CpuMesh,
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    registry: &BlockRegistry,
+) {
+    let edge = super::coord::CHUNK_EDGE;
+    let mut cells = vec![None; edge * edge];
+    let mut visited = vec![false; edge * edge];
+
+    for y in 0..edge as u8 {
+        cells.fill(None);
+        visited.fill(false);
+
+        for z in 0..edge as u8 {
+            for x in 0..edge as u8 {
+                let local =
+                    LocalBlockCoord::new(x, y, z).expect("chunk iteration must stay in bounds");
+                cells[top_face_index(x, z)] = top_face_cell(center, neighbors, local, registry);
+            }
+        }
+
+        for z in 0..edge as u8 {
+            for x in 0..edge as u8 {
+                let index = top_face_index(x, z);
+                if visited[index] {
+                    continue;
+                }
+                let Some(cell) = cells[index] else {
+                    continue;
+                };
+
+                let local =
+                    LocalBlockCoord::new(x, y, z).expect("chunk iteration must stay in bounds");
+                if !cell.is_mergeable() {
+                    visited[index] = true;
+                    let block_def = registry.block_or_missing(cell.block);
+                    append_face(
+                        mesh,
+                        center.coord(),
+                        local,
+                        block_def,
+                        BlockFace::PosY,
+                        cell.face_span,
+                        cell.contour_edges,
+                    );
+                    continue;
+                }
+
+                let width = top_face_merge_width(&cells, &visited, x, z, cell);
+                let depth = top_face_merge_depth(&cells, &visited, x, z, width, cell);
+
+                for dz in 0..depth {
+                    for dx in 0..width {
+                        visited[top_face_index(x + dx, z + dz)] = true;
+                    }
+                }
+
+                append_top_face_rect(
+                    mesh,
+                    center.coord(),
+                    local,
+                    u32::from(width),
+                    u32::from(depth),
+                    cell,
+                );
+            }
+        }
+    }
+}
+
+fn top_face_cell(
+    center: &ChunkSnapshot,
+    neighbors: &NeighborChunks,
+    local: LocalBlockCoord,
+    registry: &BlockRegistry,
+) -> Option<TopFaceCell> {
+    let block = center.get_block(local)?;
+    let block_def = registry.block_or_missing(block);
+    if !block_def.is_rendered_cube() {
+        return None;
+    }
+
+    let block_height = resolved_block_surface_height(center, neighbors, local, registry);
+    if block_height <= HEIGHT_EPSILON {
+        return None;
+    }
+
+    let face_span = visible_face_span(
+        center,
+        neighbors,
+        local,
+        block_def,
+        block_height,
+        BlockFace::PosY,
+        registry,
+    )?;
+    let contour_edges = top_face_contour_edges(
+        center,
+        neighbors,
+        local,
+        block_height,
+        BlockFace::PosY,
+        registry,
+    );
+
+    Some(TopFaceCell {
+        block,
+        face_span,
+        color: block_def.tint_as_linear_rgba(),
+        texture_layer: u32::from(block_def.texture_for_face(BlockFace::PosY).0),
+        material_kind: block_def.material,
+        contour_edges,
+    })
+}
+
+fn top_face_merge_width(
+    cells: &[Option<TopFaceCell>],
+    visited: &[bool],
+    x: u8,
+    z: u8,
+    cell: TopFaceCell,
+) -> u8 {
+    let edge = super::coord::CHUNK_EDGE as u8;
+    let mut width = 0;
+    while x + width < edge {
+        let index = top_face_index(x + width, z);
+        if visited[index] || !same_top_face_merge_cell(cells[index], cell) {
+            break;
+        }
+        width += 1;
+    }
+    width
+}
+
+fn top_face_merge_depth(
+    cells: &[Option<TopFaceCell>],
+    visited: &[bool],
+    x: u8,
+    z: u8,
+    width: u8,
+    cell: TopFaceCell,
+) -> u8 {
+    let edge = super::coord::CHUNK_EDGE as u8;
+    let mut depth = 0;
+    'rows: while z + depth < edge {
+        for dx in 0..width {
+            let index = top_face_index(x + dx, z + depth);
+            if visited[index] || !same_top_face_merge_cell(cells[index], cell) {
+                break 'rows;
+            }
+        }
+        depth += 1;
+    }
+    depth
+}
+
+fn same_top_face_merge_cell(candidate: Option<TopFaceCell>, cell: TopFaceCell) -> bool {
+    candidate.is_some_and(|candidate| candidate.same_merge_key(cell))
+}
+
+fn top_face_index(x: u8, z: u8) -> usize {
+    usize::from(z) * super::coord::CHUNK_EDGE + usize::from(x)
+}
+
 fn neighbor_block(
     center: &ChunkSnapshot,
     neighbors: &NeighborChunks,
@@ -218,6 +415,57 @@ fn neighbor_block(
         }
         _ => neighbors.block_across_face(face, local),
     }
+}
+
+fn append_top_face_rect(
+    mesh: &mut CpuMesh,
+    chunk: ChunkCoord,
+    local: LocalBlockCoord,
+    width: u32,
+    depth: u32,
+    cell: TopFaceCell,
+) {
+    let world = chunk_local_to_world(chunk, local);
+    let min = [world.0 as f32, world.1 as f32, world.2 as f32];
+    let top_y = min[1] + cell.face_span.max_y;
+    let max_x = min[0] + width as f32;
+    let max_z = min[2] + depth as f32;
+    let positions = [
+        [min[0], top_y, min[2]],
+        [max_x, top_y, min[2]],
+        [max_x, top_y, max_z],
+        [min[0], top_y, max_z],
+    ];
+    let uv = [
+        [0.0, depth as f32],
+        [width as f32, depth as f32],
+        [width as f32, 0.0],
+        [0.0, 0.0],
+    ];
+    let base_index = mesh.vertices.len() as u32;
+
+    extend_bounds(&mut mesh.bounds, &positions);
+
+    for (position, uv) in positions.into_iter().zip(uv) {
+        mesh.vertices.push(MeshVertex {
+            position,
+            color: cell.color,
+            normal: [0.0, 1.0, 0.0],
+            uv,
+            texture_layer: cell.texture_layer,
+            material_kind: cell.material_kind,
+            contour_edges: 0,
+        });
+    }
+
+    mesh.indices.extend_from_slice(&[
+        base_index,
+        base_index + 1,
+        base_index + 2,
+        base_index,
+        base_index + 2,
+        base_index + 3,
+    ]);
 }
 
 fn append_face(
@@ -700,6 +948,37 @@ mod tests {
                 max: [CHUNK_EDGE as f32, 1.0, CHUNK_EDGE as f32],
             })
         );
+    }
+
+    #[test]
+    fn flat_top_faces_merge_without_removing_height_edge_contours() {
+        let mut chunk = ChunkData::new_empty(ChunkCoord(0, 0, 0));
+        for x in 0..super::super::coord::CHUNK_EDGE as u8 {
+            for z in 0..super::super::coord::CHUNK_EDGE as u8 {
+                let local = LocalBlockCoord::new(x, 0, z).unwrap();
+                chunk.set_block(local, BlockId::GRASS).unwrap();
+            }
+        }
+
+        let mesh = build_chunk_mesh(
+            &chunk.snapshot(),
+            NeighborChunks::default(),
+            &test_registry(),
+        );
+        let top_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.normal == [0.0, 1.0, 0.0])
+            .collect::<Vec<_>>();
+        let top_face_count = top_vertices.len() / 4;
+
+        assert!(top_face_count < CHUNK_EDGE * CHUNK_EDGE);
+        assert!(
+            top_vertices
+                .iter()
+                .any(|vertex| vertex.uv[0] > 1.0 || vertex.uv[1] > 1.0)
+        );
+        assert!(top_vertices.iter().any(|vertex| vertex.contour_edges != 0));
     }
 
     #[test]

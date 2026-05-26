@@ -25,7 +25,8 @@ impl Default for PixelizeConfig {
 pub enum PixelizedTerrainKind {
     Ocean,
     Lake,
-    River,
+    RiverCore,
+    RiverBed,
     DryBasin,
     Ridge,
     Coast,
@@ -37,7 +38,8 @@ impl From<HeightfieldTerrainKind> for PixelizedTerrainKind {
         match value {
             HeightfieldTerrainKind::Ocean => Self::Ocean,
             HeightfieldTerrainKind::Lake => Self::Lake,
-            HeightfieldTerrainKind::River => Self::River,
+            HeightfieldTerrainKind::RiverCore => Self::RiverCore,
+            HeightfieldTerrainKind::RiverBed => Self::RiverBed,
             HeightfieldTerrainKind::DryBasin => Self::DryBasin,
             HeightfieldTerrainKind::Ridge => Self::Ridge,
             HeightfieldTerrainKind::Coast => Self::Coast,
@@ -83,7 +85,7 @@ pub struct PixelizedChunkAreaStats {
     pub water_column_count: usize,
     pub ocean_column_count: usize,
     pub lake_column_count: usize,
-    pub river_hint_column_count: usize,
+    pub river_core_column_count: usize,
     pub dry_basin_column_count: usize,
     pub ridge_column_count: usize,
 }
@@ -303,7 +305,7 @@ fn pixelized_chunk_area_stats(columns: &[PixelizedColumn]) -> PixelizedChunkArea
     let mut water_column_count = 0usize;
     let mut ocean_column_count = 0usize;
     let mut lake_column_count = 0usize;
-    let mut river_hint_column_count = 0usize;
+    let mut river_core_column_count = 0usize;
     let mut dry_basin_column_count = 0usize;
     let mut ridge_column_count = 0usize;
 
@@ -316,7 +318,8 @@ fn pixelized_chunk_area_stats(columns: &[PixelizedColumn]) -> PixelizedChunkArea
         match column.terrain_kind {
             PixelizedTerrainKind::Ocean => ocean_column_count += 1,
             PixelizedTerrainKind::Lake => lake_column_count += 1,
-            PixelizedTerrainKind::River => river_hint_column_count += 1,
+            PixelizedTerrainKind::RiverCore => river_core_column_count += 1,
+            PixelizedTerrainKind::RiverBed => {}
             PixelizedTerrainKind::DryBasin => dry_basin_column_count += 1,
             PixelizedTerrainKind::Ridge => ridge_column_count += 1,
             PixelizedTerrainKind::Coast | PixelizedTerrainKind::Land => {}
@@ -330,7 +333,7 @@ fn pixelized_chunk_area_stats(columns: &[PixelizedColumn]) -> PixelizedChunkArea
         water_column_count,
         ocean_column_count,
         lake_column_count,
-        river_hint_column_count,
+        river_core_column_count,
         dry_basin_column_count,
         ridge_column_count,
     }
@@ -348,8 +351,8 @@ mod tests {
         graph_region_for_world_block,
     };
     use crate::world::generation::heightfield::{
-        DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS,
-        DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD,
+        DEFAULT_HEIGHTFIELD_MAX_BLOCKS, DEFAULT_HEIGHTFIELD_MIN_BLOCKS, HeightfieldConfig,
+        HeightfieldTerrainKind, heightfield_column_from_sample,
     };
     use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
     use crate::world::generation::macro_field::{
@@ -475,7 +478,7 @@ mod tests {
         assert_eq!(ocean.water_y, Some(0));
         assert_eq!(lake.terrain_kind, PixelizedTerrainKind::Lake);
         assert_eq!(lake.water_y, Some(1));
-        assert_eq!(river.terrain_kind, PixelizedTerrainKind::River);
+        assert_eq!(river.terrain_kind, PixelizedTerrainKind::RiverCore);
         assert!(river.water_y.is_some());
         assert_eq!(land.terrain_kind, PixelizedTerrainKind::Land);
         assert_eq!(land.water_y, None);
@@ -710,8 +713,8 @@ mod tests {
             crosses_water: left.water_y.is_some() != right.water_y.is_some(),
             crosses_ocean: (left.source_ocean_mask > 0.5) != (right.source_ocean_mask > 0.5),
             crosses_lake: (left.source_lake_mask > 0.5) != (right.source_lake_mask > 0.5),
-            crosses_river: matches!(left.terrain_kind, PixelizedTerrainKind::River)
-                != matches!(right.terrain_kind, PixelizedTerrainKind::River),
+            crosses_river: matches!(left.terrain_kind, PixelizedTerrainKind::RiverCore)
+                != matches!(right.terrain_kind, PixelizedTerrainKind::RiverCore),
             crosses_boundary: nearest_sites[left_index] != nearest_sites[right_index],
             crosses_contour: left.surface_y != right.surface_y,
             left: diagnostic_column(left, nearest_sites[left_index], site_kind),
@@ -1202,7 +1205,7 @@ mod tests {
             river_distance_blocks: f32::INFINITY,
             river_flow_hint: 0.0,
             river_longitudinal_blocks: 0.0,
-            river_bed_depth_hint: 0.0,
+            river_core_depth_hint: 0.0,
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,
@@ -1232,10 +1235,119 @@ mod tests {
         river_flow_hint: f32,
     ) -> MacroFieldSample {
         let mut sample = sample(world_x, world_z, combined_macro_height, 0.0, 0.0, 0.0, 0.0);
-        sample.river_core_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
-        sample.river_shoulder_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
-        sample.river_valley_strength = DEFAULT_HEIGHTFIELD_RIVER_WATER_THRESHOLD;
+        sample.macro_elevation = combined_macro_height + 0.01;
+        sample.river_core_strength = 1.0;
+        sample.river_shoulder_strength = 1.0;
+        sample.river_valley_strength = 1.0;
         sample.river_flow_hint = river_flow_hint;
         sample
+    }
+
+    #[test]
+    #[ignore = "diagnostic helper for seed 42 river core/bed classification near chunk (-67,-24)"]
+    fn diagnose_seed42_neg67_neg24_river_core_classification() {
+        let (macro_tile, _area, _macro_map) =
+            seed42_pixelized_macro_tile_area_and_macro_map(-67, -24, 3);
+        let mut rows = macro_tile
+            .samples
+            .iter()
+            .filter_map(|sample| {
+                let column = heightfield_column_from_sample(sample, HeightfieldConfig::default());
+                matches!(
+                    column.terrain_kind,
+                    HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+                )
+                .then_some((sample, column))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|(left_sample, left_column), (right_sample, right_column)| {
+            let left_drop = left_sample.macro_elevation - left_sample.combined_macro_height;
+            let right_drop = right_sample.macro_elevation - right_sample.combined_macro_height;
+            river_kind_rank(right_column.terrain_kind)
+                .cmp(&river_kind_rank(left_column.terrain_kind))
+                .then_with(|| right_drop.total_cmp(&left_drop))
+        });
+
+        let core_count = rows
+            .iter()
+            .filter(|(_, column)| column.terrain_kind == HeightfieldTerrainKind::RiverCore)
+            .count();
+        let bed_count = rows
+            .iter()
+            .filter(|(_, column)| column.terrain_kind == HeightfieldTerrainKind::RiverBed)
+            .count();
+        eprintln!(
+            "seed42 chunk=(-67,-24) r3 river-classified columns: core={} bed={} total={}",
+            core_count,
+            bed_count,
+            rows.len()
+        );
+        for threshold in [0.94, 0.96, 0.98, 0.99, 0.995] {
+            let selected = macro_tile
+                .samples
+                .iter()
+                .filter(|sample| sample.river_flow_hint > 0.0)
+                .filter(|sample| sample.river_core_strength >= threshold)
+                .count();
+            let not_estuary_dominated = macro_tile
+                .samples
+                .iter()
+                .filter(|sample| sample.river_flow_hint > 0.0)
+                .filter(|sample| sample.river_core_strength >= threshold)
+                .filter(|sample| sample.estuary_water_strength <= sample.river_core_strength)
+                .count();
+            let drop_guarded = macro_tile
+                .samples
+                .iter()
+                .filter(|sample| sample.river_flow_hint > 0.0)
+                .filter(|sample| sample.river_core_strength >= threshold)
+                .filter(|sample| {
+                    sample.macro_elevation - sample.combined_macro_height >= 6.0 / 2048.0
+                })
+                .count();
+            let outside_estuary_water = macro_tile
+                .samples
+                .iter()
+                .filter(|sample| sample.river_flow_hint > 0.0)
+                .filter(|sample| sample.river_core_strength >= threshold)
+                .filter(|sample| sample.estuary_water_strength < 0.88)
+                .count();
+            eprintln!(
+                "  threshold={threshold:.3} selected={} not_estuary_dominated={} drop>=6blocks={} estuary_water<0.88={}",
+                selected, not_estuary_dominated, drop_guarded, outside_estuary_water
+            );
+        }
+        for (sample, column) in rows.iter().take(80) {
+            let drop = sample.macro_elevation - sample.combined_macro_height;
+            eprintln!(
+                "world=({:.0},{:.0}) kind={:?} y={} water={:?} macro={:.5} combined={:.5} drop={:.5} core={:.3} shoulder={:.3} valley={:.3} flow={:.3} depth={:.3} estuary={:.3}/{:.3} ocean={:.1} coast={:.3} surface={:?}",
+                sample.position.x,
+                sample.position.z,
+                column.terrain_kind,
+                column.surface_y,
+                column.water_y,
+                sample.macro_elevation,
+                sample.combined_macro_height,
+                drop,
+                sample.river_core_strength,
+                sample.river_shoulder_strength,
+                sample.river_valley_strength,
+                sample.river_flow_hint,
+                sample.river_core_depth_hint,
+                sample.estuary_water_strength,
+                sample.estuary_water_depth_hint,
+                sample.ocean_mask,
+                sample.coast_mask,
+                sample.surface_kind
+            );
+        }
+    }
+
+    fn river_kind_rank(kind: HeightfieldTerrainKind) -> u8 {
+        match kind {
+            HeightfieldTerrainKind::RiverCore => 2,
+            HeightfieldTerrainKind::RiverBed => 1,
+            _ => 0,
+        }
     }
 }

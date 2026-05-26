@@ -669,7 +669,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         water_columns: heightfield.stats.water_column_count,
         ocean_columns: heightfield.stats.ocean_column_count,
         lake_columns: heightfield.stats.lake_column_count,
-        river_columns: heightfield.stats.river_hint_column_count,
+        river_columns: heightfield.stats.river_core_column_count,
         dry_basin_columns: heightfield.stats.dry_basin_column_count,
         ridge_columns: heightfield.stats.ridge_column_count,
         perlin_enabled: heightfield.config.perlin.enabled,
@@ -838,7 +838,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         heightfield.stats.water_column_count,
         heightfield.stats.ocean_column_count,
         heightfield.stats.lake_column_count,
-        heightfield.stats.river_hint_column_count,
+        heightfield.stats.river_core_column_count,
         heightfield.stats.dry_basin_column_count,
         heightfield.stats.ridge_column_count
     );
@@ -1944,7 +1944,8 @@ fn terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
         HeightfieldTerrainKind::Ocean if is_dry_ocean_terrain(column) => combined_terrain_ramp(t),
         HeightfieldTerrainKind::Ocean => rgb8([45, 78, 102]),
         HeightfieldTerrainKind::Lake => rgb8([55, 100, 124]),
-        HeightfieldTerrainKind::River => rgb8([63, 109, 122]),
+        HeightfieldTerrainKind::RiverCore => rgb8([96, 98, 96]),
+        HeightfieldTerrainKind::RiverBed => combined_terrain_ramp(t),
         HeightfieldTerrainKind::DryBasin => rgb8([118, 111, 119]),
         HeightfieldTerrainKind::Ridge => rgb8([190, 190, 181]),
         HeightfieldTerrainKind::Coast => rgb8([138, 148, 118]),
@@ -1962,10 +1963,14 @@ fn river_influence_terrain_color_raw(column: HeightfieldColumn) -> [f32; 4] {
     let core = column.river_core_strength.clamp(0.0, 1.0);
     let shoulder = column.river_shoulder_strength.clamp(0.0, 1.0);
     let valley = column.river_valley_strength.clamp(0.0, 1.0);
-    if core > 0.01 {
-        let bed_depth = (column.river_bed_depth_blocks / 40.0).clamp(0.0, 1.0);
-        let hot_bed = mix_rgb(rgb8([178, 38, 182]), rgb8([255, 86, 42]), bed_depth);
+    if matches!(column.terrain_kind, HeightfieldTerrainKind::RiverCore) {
+        let core_depth = (column.river_core_depth_blocks / 40.0).clamp(0.0, 1.0);
+        let hot_bed = mix_rgb(rgb8([178, 38, 182]), rgb8([255, 86, 42]), core_depth);
         return mix_rgb(base, hot_bed, (0.42 + core * 0.58).clamp(0.0, 1.0));
+    }
+    if matches!(column.terrain_kind, HeightfieldTerrainKind::RiverBed) {
+        let upper_bed = rgb8([68, 150, 164]);
+        return mix_rgb(base, upper_bed, (0.24 + core * 0.40).clamp(0.24, 0.64));
     }
     if shoulder > 0.01 {
         let bank = rgb8([88, 198, 220]);
@@ -3225,11 +3230,15 @@ mod tests {
 
     #[test]
     fn river_influence_color_distinguishes_core_from_shoulder() {
-        let mut core = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::River);
+        let mut core = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::RiverCore);
         core.river_core_strength = 1.0;
         core.river_shoulder_strength = 1.0;
         core.river_valley_strength = 1.0;
-        core.river_bed_depth_blocks = 24.0;
+        core.river_core_depth_blocks = 24.0;
+        let mut upper_bed = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::RiverBed);
+        upper_bed.river_core_strength = 1.0;
+        upper_bed.river_shoulder_strength = 1.0;
+        upper_bed.river_valley_strength = 1.0;
         let mut shoulder = height_column(0.0, 0.0, 8.0, HeightfieldTerrainKind::Land);
         shoulder.river_core_strength = 0.0;
         shoulder.river_shoulder_strength = 0.8;
@@ -3239,6 +3248,11 @@ mod tests {
         assert_ne!(
             f32_color_to_rgba(river_influence_terrain_color_raw(core)),
             f32_color_to_rgba(river_influence_terrain_color_raw(shoulder))
+        );
+        assert_ne!(
+            f32_color_to_rgba(river_influence_terrain_color_raw(core)),
+            f32_color_to_rgba(river_influence_terrain_color_raw(upper_bed)),
+            "upper RiverBed may have strong river_core_strength, but diagnostic color should not mark it as active core"
         );
         assert_eq!(
             f32_color_to_rgba(river_influence_terrain_color_raw(ordinary)),
@@ -3492,6 +3506,54 @@ mod tests {
     }
 
     #[test]
+    fn only_river_core_uses_neutral_gray_bed_color() {
+        let mut ocean = height_column(0.0, 0.0, -8.0, HeightfieldTerrainKind::Ocean);
+        ocean.water_level_blocks = Some(0.0);
+        ocean.water_y = Some(0);
+        let mut lake = height_column(0.0, 0.0, -4.0, HeightfieldTerrainKind::Lake);
+        lake.water_level_blocks = Some(0.0);
+        lake.water_y = Some(0);
+        let mut river = height_column(0.0, 0.0, -2.0, HeightfieldTerrainKind::RiverCore);
+        river.water_level_blocks = Some(0.0);
+        river.water_y = Some(0);
+        let mut upper_bed = height_column(0.0, 0.0, -1.0, HeightfieldTerrainKind::RiverBed);
+        upper_bed.water_level_blocks = None;
+        upper_bed.water_y = None;
+
+        let ocean_bed = terrain_color_rgba(ocean);
+        let lake_bed = terrain_color_rgba(lake);
+        let river_core_bed = terrain_color_rgba(river);
+        let upper_bed_color = terrain_color_rgba(upper_bed);
+        let water = water_color_rgba(river);
+
+        assert!(
+            !is_neutral_gray(ocean_bed),
+            "submerged ocean bed should not use the river-core gray, got {ocean_bed:?}"
+        );
+        assert!(
+            !is_neutral_gray(lake_bed),
+            "lake bed should not use the river-core gray, got {lake_bed:?}"
+        );
+        assert!(
+            is_neutral_gray(river_core_bed),
+            "river core bed should be neutral gray, got {river_core_bed:?}"
+        );
+        assert!(
+            !is_neutral_gray(upper_bed_color),
+            "upper RiverBed should not use the RiverCore gray, got {upper_bed_color:?}"
+        );
+        assert_ne!(
+            river_core_bed, water,
+            "water overlay color should stay visually separate from the gray river core bed"
+        );
+    }
+
+    fn is_neutral_gray(color: [u8; 4]) -> bool {
+        (color[0] as i16 - color[1] as i16).abs() <= 8
+            && (color[1] as i16 - color[2] as i16).abs() <= 8
+    }
+
+    #[test]
     fn quarter_turns_change_visible_side_directions() {
         assert_eq!(
             visible_side_directions(0)
@@ -3596,7 +3658,7 @@ mod tests {
             height_column(0.0, 0.0, -8.0, HeightfieldTerrainKind::Coast),
             height_column(32.0, 0.0, 34.0, HeightfieldTerrainKind::Land),
             height_column(0.0, 32.0, 72.0, HeightfieldTerrainKind::Ridge),
-            height_column(32.0, 32.0, 12.0, HeightfieldTerrainKind::River),
+            height_column(32.0, 32.0, 12.0, HeightfieldTerrainKind::RiverCore),
         ];
         HeightfieldTile {
             width: 2,
@@ -3628,7 +3690,7 @@ mod tests {
                 water_column_count: 0,
                 ocean_column_count: 0,
                 lake_column_count: 0,
-                river_hint_column_count: 1,
+                river_core_column_count: 1,
                 dry_basin_column_count: 0,
                 ridge_column_count: 1,
             },
@@ -3651,7 +3713,7 @@ mod tests {
             surface_y: surface_height_blocks.floor() as i32,
             water_level_blocks: None,
             water_y: None,
-            river_water_height_blocks: None,
+            river_core_water_height_blocks: None,
             terrain_kind,
             macro_elevation: 0.0,
             combined_macro_height: surface_height_blocks / DEFAULT_HEIGHTFIELD_MAX_BLOCKS,
@@ -3665,28 +3727,28 @@ mod tests {
                 0.0
             },
             terrain_ruggedness: 0.0,
-            river_core_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+            river_core_strength: if matches!(terrain_kind, HeightfieldTerrainKind::RiverCore) {
                 1.0
             } else {
                 0.0
             },
-            river_shoulder_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+            river_shoulder_strength: if matches!(terrain_kind, HeightfieldTerrainKind::RiverCore) {
                 1.0
             } else {
                 0.0
             },
-            river_valley_strength: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+            river_valley_strength: if matches!(terrain_kind, HeightfieldTerrainKind::RiverCore) {
                 1.0
             } else {
                 0.0
             },
-            river_distance_blocks: if matches!(terrain_kind, HeightfieldTerrainKind::River) {
+            river_distance_blocks: if matches!(terrain_kind, HeightfieldTerrainKind::RiverCore) {
                 0.0
             } else {
                 f32::INFINITY
             },
             river_flow_hint: 0.0,
-            river_bed_depth_blocks: 0.0,
+            river_core_depth_blocks: 0.0,
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,

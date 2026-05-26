@@ -1369,9 +1369,12 @@ fn hydrology_role(input: &SurfaceColumnInput, config: SurfacePlanConfig) -> Surf
         || input.biome == Some(GraphBiomeKind::Lake)
     {
         SurfaceHydrologyRole::Lake
-    } else if heightfield.terrain_kind == HeightfieldTerrainKind::River
-        || (heightfield.river_valley_strength >= config.river_water_threshold
-            && heightfield.river_flow_hint > 0.0)
+    } else if matches!(
+        heightfield.terrain_kind,
+        HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+    ) || (heightfield.water_y.is_some()
+        && heightfield.river_valley_strength >= config.river_water_threshold
+        && heightfield.river_flow_hint > 0.0)
     {
         SurfaceHydrologyRole::River
     } else if is_wetland(input) {
@@ -1436,7 +1439,7 @@ fn local_river_mouth_sediment(
     variant: u8,
 ) -> Option<&'static str> {
     let selected_mouth_hint = heightfield.river_flow_hint > 0.12
-        && heightfield.river_bed_depth_blocks > 0.0
+        && heightfield.river_core_depth_blocks > 0.0
         && heightfield.river_valley_strength >= config.river_water_threshold * 0.68;
     if !selected_mouth_hint {
         return None;
@@ -1459,7 +1462,7 @@ fn local_dry_river_bank_sediment(
 ) -> Option<&'static str> {
     let selected_bank_hint = heightfield.river_flow_hint > 0.12
         && heightfield.river_valley_strength >= config.river_water_threshold * 0.72
-        && (heightfield.river_bed_depth_blocks > 0.0
+        && (heightfield.river_core_depth_blocks > 0.0
             || heightfield.river_bank_roughness_hint > 0.48
             || heightfield.river_gravel_hint > 0.32
             || heightfield.river_cutbank_hint > 0.38);
@@ -1912,7 +1915,7 @@ mod tests {
                         height.river_core_strength,
                         height.river_valley_strength,
                         height.river_flow_hint,
-                        height.river_bed_depth_blocks,
+                        height.river_core_depth_blocks,
                         height.river_gravel_hint,
                         sample.ocean_mask,
                         sample.lake_mask,
@@ -2869,7 +2872,7 @@ mod tests {
 
     #[test]
     fn surface_resolve_preserves_surface_and_water_height() {
-        let mut heightfield = column(10.0, 20.0, HeightfieldTerrainKind::River);
+        let mut heightfield = column(10.0, 20.0, HeightfieldTerrainKind::RiverCore);
         heightfield.surface_y = 42;
         heightfield.water_y = Some(45);
         let plan = resolve_surface_column(
@@ -2901,7 +2904,7 @@ mod tests {
         );
         let river = resolve_surface_column(
             input(
-                column(2.0, 0.0, HeightfieldTerrainKind::River),
+                column(2.0, 0.0, HeightfieldTerrainKind::RiverCore),
                 Some(GraphBiomeKind::TemperateGrassland),
                 None,
             ),
@@ -2958,10 +2961,10 @@ mod tests {
 
     #[test]
     fn active_river_core_still_resolves_river_sediment() {
-        let mut heightfield = column(8.0, 3.0, HeightfieldTerrainKind::Land);
+        let mut heightfield = column(8.0, 3.0, HeightfieldTerrainKind::RiverCore);
         heightfield.river_valley_strength = SurfacePlanConfig::default().river_water_threshold;
         heightfield.river_flow_hint = 0.72;
-        heightfield.river_bed_depth_blocks = 4.0;
+        heightfield.river_core_depth_blocks = 4.0;
 
         let plan = resolve_surface_column(
             input(heightfield, Some(GraphBiomeKind::TemperateGrassland), None),
@@ -2988,7 +2991,7 @@ mod tests {
             heightfield.coast_mask = config.coast_threshold;
             heightfield.river_valley_strength = config.river_water_threshold * 0.74;
             heightfield.river_flow_hint = 0.44;
-            heightfield.river_bed_depth_blocks = 3.0;
+            heightfield.river_core_depth_blocks = 3.0;
             let plan = resolve_surface_column(
                 input(heightfield, Some(GraphBiomeKind::EstuarineCoast), None),
                 config,
@@ -3211,7 +3214,7 @@ mod tests {
         for z in 0..3 {
             for x in 0..3 {
                 let terrain_kind = if x == 1 && z == 1 {
-                    HeightfieldTerrainKind::River
+                    HeightfieldTerrainKind::RiverCore
                 } else {
                     HeightfieldTerrainKind::Ocean
                 };
@@ -3220,7 +3223,7 @@ mod tests {
                 heightfield.water_y = Some(0);
                 heightfield.river_valley_strength = 1.0;
                 heightfield.river_flow_hint = 0.8;
-                heightfield.river_bed_depth_blocks = 2.0;
+                heightfield.river_core_depth_blocks = 2.0;
                 columns.push(heightfield);
             }
         }
@@ -3878,7 +3881,7 @@ mod tests {
             terrain_kind,
             HeightfieldTerrainKind::Ocean
                 | HeightfieldTerrainKind::Lake
-                | HeightfieldTerrainKind::River
+                | HeightfieldTerrainKind::RiverCore
         )
         .then_some(1);
         HeightfieldColumn {
@@ -3890,8 +3893,11 @@ mod tests {
             surface_y: 0,
             water_level_blocks: water_y.map(|y| y as f32),
             water_y,
-            river_water_height_blocks: (terrain_kind == HeightfieldTerrainKind::River)
-                .then_some(1.0),
+            river_core_water_height_blocks: matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore
+            )
+            .then_some(1.0),
             terrain_kind,
             macro_elevation: 0.0,
             combined_macro_height: 0.0,
@@ -3901,32 +3907,47 @@ mod tests {
             coast_mask: (terrain_kind == HeightfieldTerrainKind::Coast) as u8 as f32,
             ridge_influence: (terrain_kind == HeightfieldTerrainKind::Ridge) as u8 as f32,
             terrain_ruggedness: 0.0,
-            river_core_strength: if terrain_kind == HeightfieldTerrainKind::River {
+            river_core_strength: if matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+            ) {
                 1.0
             } else {
                 0.0
             },
-            river_shoulder_strength: if terrain_kind == HeightfieldTerrainKind::River {
+            river_shoulder_strength: if matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+            ) {
                 1.0
             } else {
                 0.0
             },
-            river_valley_strength: if terrain_kind == HeightfieldTerrainKind::River {
+            river_valley_strength: if matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+            ) {
                 1.0
             } else {
                 0.0
             },
-            river_distance_blocks: if terrain_kind == HeightfieldTerrainKind::River {
+            river_distance_blocks: if matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+            ) {
                 0.0
             } else {
                 f32::INFINITY
             },
-            river_flow_hint: if terrain_kind == HeightfieldTerrainKind::River {
+            river_flow_hint: if matches!(
+                terrain_kind,
+                HeightfieldTerrainKind::RiverCore | HeightfieldTerrainKind::RiverBed
+            ) {
                 0.5
             } else {
                 0.0
             },
-            river_bed_depth_blocks: 0.0,
+            river_core_depth_blocks: 0.0,
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,
@@ -3967,7 +3988,7 @@ mod tests {
             river_distance_blocks: f32::INFINITY,
             river_flow_hint: 0.0,
             river_longitudinal_blocks: 0.0,
-            river_bed_depth_hint: 0.0,
+            river_core_depth_hint: 0.0,
             river_bank_roughness_hint: 0.0,
             river_gravel_hint: 0.0,
             river_cutbank_hint: 0.0,

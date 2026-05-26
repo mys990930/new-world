@@ -34,6 +34,7 @@ Renderer::set_block_textures(
 - Layers must start at `0` and be contiguous
 - The current renderer uploads block textures as `Rgba8UnormSrgb`
 - Sampling uses `nearest` filtering for both min/mag paths
+- Block texture sampling repeats in U/V so merged terrain quads can carry UV spans larger than one block without stretching edge texels
 
 ## Related Modules
 

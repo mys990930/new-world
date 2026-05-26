@@ -1,0 +1,12 @@
+key = "rock_pebble_1x1x1"
+texture = "rock"
+material = "stone"
+tint = [150, 148, 137, 255]
+
+[[cuboids]]
+x = 7
+y = 0
+z = 7
+w = 1
+h = 1
+d = 1

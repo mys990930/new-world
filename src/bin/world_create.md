@@ -1,4 +1,4 @@
-﻿# world_create
+# world_create
 
 ## Role
 

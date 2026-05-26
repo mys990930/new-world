@@ -1,0 +1,12 @@
+key = "rock_flat_2x2x1"
+texture = "rock"
+material = "stone"
+tint = [128, 127, 119, 255]
+
+[[cuboids]]
+x = 7
+y = 0
+z = 7
+w = 2
+h = 1
+d = 2

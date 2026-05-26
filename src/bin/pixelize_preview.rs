@@ -741,7 +741,8 @@ fn color_for_column(column: &PixelizedColumn, stats: ColumnStats) -> [u8; 3] {
     let mut color = match column.terrain_kind {
         PixelizedTerrainKind::Ocean => WATER_COLOR,
         PixelizedTerrainKind::Lake => LAKE_COLOR,
-        PixelizedTerrainKind::River => RIVER_COLOR,
+        PixelizedTerrainKind::RiverCore => RIVER_COLOR,
+        PixelizedTerrainKind::RiverBed => mix_rgb(RIVER_COLOR, LAND_LOW_COLOR, 0.45),
         PixelizedTerrainKind::DryBasin => DRY_COLOR,
         PixelizedTerrainKind::Ridge => RIDGE_COLOR,
         PixelizedTerrainKind::Coast => COAST_COLOR,
@@ -750,7 +751,10 @@ fn color_for_column(column: &PixelizedColumn, stats: ColumnStats) -> [u8; 3] {
 
     if !matches!(
         column.terrain_kind,
-        PixelizedTerrainKind::Ocean | PixelizedTerrainKind::Lake | PixelizedTerrainKind::River
+        PixelizedTerrainKind::Ocean
+            | PixelizedTerrainKind::Lake
+            | PixelizedTerrainKind::RiverCore
+            | PixelizedTerrainKind::RiverBed
     ) {
         let shade = 0.72 + height_t * 0.28;
         color = scale_rgb(color, shade);
@@ -767,7 +771,10 @@ fn color_for_column(column: &PixelizedColumn, stats: ColumnStats) -> [u8; 3] {
 }
 
 fn is_river_column(column: &PixelizedColumn) -> bool {
-    column.terrain_kind == PixelizedTerrainKind::River
+    matches!(
+        column.terrain_kind,
+        PixelizedTerrainKind::RiverCore | PixelizedTerrainKind::RiverBed
+    )
 }
 
 fn draw_chunk_grid(image: &mut RgbImage, window: PreviewWindow, viewport: MapViewport) {

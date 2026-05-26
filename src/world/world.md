@@ -21,6 +21,7 @@
 - block id, block definition, texture tile, material lookup
 - save/load byte codec
 - CPU-side meshing input 제공
+- prop definition, one-block prop placement meaning, and CPU-side prop mesh bake contract
 - topdown column sampling과 진단용 preview 입력 제공
 - `WorldMeta` seed, world version, generator version, save format version 계약
 - deterministic procedural generation result를 `ChunkData`로 표현하는 계약
@@ -64,6 +65,7 @@
 - chunk or cell surface condition state such as wet, snow-covered, and half-thawed snow
 - structured world update records when simulation/apply paths request or apply changes
 - storage, topdown, tree, surface, meshing data shapes
+- prop asset definitions and placement references that preserve world meaning while allowing non-cube render geometry
 
 ### 새 graph-first 생성 데이터
 
@@ -101,6 +103,12 @@ WorldCore::observe_chunk_surface_condition(coord: ChunkCoord) -> SurfaceConditio
 WorldCore::apply_calendar_advance(advance: CalendarAdvance) -> CalendarApplyResult
 WorldCore::apply_edit(edit: WorldEdit) -> EditResult
 ```
+
+Microvoxel prop support is a world-owned compatibility contract while legacy meshing remains the active runtime
+bridge. A prop may occupy one world block cell semantically while its visual geometry is authored in fixed
+micro units and baked into the same world-owned `CpuMesh` payload used by chunk meshing. The renderer consumes
+only the resulting vertex data, texture layers, and material ids; it does not own prop identity, placement rules,
+or prop asset parsing.
 
 새 graph-first scaffold API는 `world::generation` 아래에서 확장한다.
 
@@ -167,6 +175,10 @@ create_graph_first_world_to_directory_with_progress(root, config, block_registry
 10. textmode observer data must be world-readable structured state, not console-only strings.
 11. cell biome labels used by diagnostics must derive from world-owned region/biome classification, not from app-side ad-hoc names.
 12. chunk weather scalar state is world-owned storage; simulation computes updates and renderer/textmode consume the same values.
+13. prop definitions and prop placements are world-owned meaning; microvoxel prop bake may emit non-cube
+    geometry, but renderer-facing output remains regular `CpuMesh` data.
+14. surface feature and vegetation generation should reference world-owned prop definitions for rocks or similar
+    one-cell features instead of constructing renderer-specific objects.
 
 ---
 
@@ -189,6 +201,7 @@ create_graph_first_world_to_directory_with_progress(root, config, block_registry
 - `generation/preview/preview.md`: stage별 topdown preview binary 계약
 - `generation/pipeline/pipeline.md`: graph-first stage order와 column synthesis scaffold
 - `legacy/legacy.md`: 이전 world 구현 보존과 compatibility bridge
+- `legacy/prop.md`: microvoxel prop asset, placement, and CPU mesh bake compatibility contract
 - `legacy/weather.md`: chunk weather scalar state compatibility contract
 - `legacy/surface/condition.md`: textmode/renderer/gameplay consumers가 읽는 surface condition 관찰 계약
 - `../simulation/weather.md`: chunk weather scalar state, biome ranges, seasonal coefficients, thresholds, and renderer contract
@@ -222,8 +235,12 @@ create_graph_first_world_to_directory_with_progress(root, config, block_registry
   `GraphFirstVoxelPlan`으로 변환하고, surface/material policy의 top/subsurface/base/underwater/water
   block을 사용해 `ChunkData`를 채운다.
 - `world_create`와 runtime create-world job은 graph-first plan을 사용해 bounded created-world dump를 저장할 수 있다.
-- 아직 구현되지 않은 것: vegetation placement, runtime generation cache 기반 live fallback replacement,
+- 아직 구현되지 않은 것: tree/grass vegetation placement, runtime generation cache 기반 live fallback replacement,
   최종 cave/void/feature voxel priority.
 - 새 generator entrypoint는 graph construction, field sampling, hydrology routing, heightfield synthesis, voxel fill 검증이 더 안정화된 뒤 legacy runtime generation을 대체한다.
 - planned `new-world-textmode` support should expose a structured per-chunk observer view containing cell biome, chunk weather scalar state, surface condition, ecology events, and world update records while keeping console formatting outside `world`.
 - old atlas `LocalWeatherState` remains a migration bridge until chunk-scoped weather state replaces weather consumers.
+- microvoxel rock props are the first prop vertical slice. `legacy/prop.md` defines file-backed rock prop
+  assets and CPU mesh baking, while `generation/vegetation` can now emit deterministic sparse rock prop placement
+  references for dry beach/coast and dry riverside sediment surfaces. Launch voxel fill does not yet persist or
+  stream those placements into runtime chunks.

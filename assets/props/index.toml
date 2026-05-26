@@ -1,0 +1,10 @@
+# Microvoxel prop asset index
+# - Prop files are resolved relative to this file.
+# - Individual props are authored in 16x16x16 micro units inside one world block cell.
+
+prop_files = [
+  "rocks/pebble_1x1x1.toml",
+  "rocks/flat_2x2x1.toml",
+  "rocks/stacked_2x2x1_plus_1.toml",
+  "rocks/low_cluster_4x3.toml",
+]
