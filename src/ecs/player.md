@@ -57,6 +57,7 @@
 - holding Shift uses sprint speed `11` blocks/s, matching the current target sprint band of `9.6..11.6` blocks/s
 - pressing Space while grounded applies a vertical launch velocity calculated from gravity and `jump_height_blocks`
 - the default jump target is `2` blocks above the takeoff height, using `sqrt(2 * gravity * jump_height_blocks)`
+- default gravity uses a snappier voxel tuning of `48` blocks/s^2 with a `48` blocks/s terminal fall speed, so the `2` block jump has a shorter, heavier arc without changing target height
 - road speed and difficult-terrain slowdown are documented future policies and are not applied yet
 - vertical velocity is preserved across frames so gravity and falling can accumulate
 - inventory-open state blocks movement intent generation and jump launch, and leaves horizontal velocity at zero
@@ -72,6 +73,7 @@
 - `Transform.translation` is interpreted as body-center position
 - `PlayerBody.half_extents` is currently `[1.0, 2.0, 1.0]`, meaning a `2x2x4` block body
 - `PlayerMovementConfig.jump_height_blocks` is currently `2.0`
+- `PlayerMovementConfig.gravity_units_per_second_sq` and `terminal_fall_speed` default to `48.0`
 - `MoveWorldIntent` is the continuous world-space movement channel
 - discrete actions stay in `PlayerCommandBuffer`
 - missing world chunks are treated as blocking in the current collision helper so the player does not walk into unloaded space

@@ -332,13 +332,32 @@ fn push_selection_preview_instances(
     }
 
     if let Some(block) = selection.build_preview_block {
-        let selected_block_color = inventory
+        let selected_block = inventory
             .and_then(|player_inventory| player_inventory.selected_block())
             .and_then(|slot| match slot.item {
-                InventoryItem::Block(block_id) => Some(block_preview_tint(world, block_id)),
+                InventoryItem::Block(block_id) => Some(block_id),
                 InventoryItem::Tool(_) => None,
+            });
+        let (color, face_textures, material_kind) = selected_block
+            .map(|block_id| {
+                let def = world.block_registry().block_or_missing(block_id);
+                let mut color = def.tint_as_linear_rgba();
+                color[3] = 0.46;
+                (
+                    color,
+                    block_face_texture_layers(world.block_registry(), block_id),
+                    render_material_kind_from_world(def.material),
+                )
             })
-            .unwrap_or([1.0, 0.95, 0.35, 0.20]);
+            .unwrap_or((
+                [1.0, 0.95, 0.35, 0.20],
+                [
+                    HIGHLIGHT_TEXTURE_LAYER,
+                    HIGHLIGHT_TEXTURE_LAYER,
+                    HIGHLIGHT_TEXTURE_LAYER,
+                ],
+                RenderMaterialKind::Highlight,
+            ));
         cube_instances.push(RenderCubeInstance {
             center: [
                 block.0 as f32 + 0.5,
@@ -346,11 +365,11 @@ fn push_selection_preview_instances(
                 block.2 as f32 + 0.5,
             ],
             half_extents: [0.485, 0.485, 0.485],
-            color: selected_block_color,
-            top_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
-            bottom_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
-            side_texture_layer: HIGHLIGHT_TEXTURE_LAYER,
-            material_kind: RenderMaterialKind::Highlight,
+            color,
+            top_texture_layer: face_textures[0],
+            bottom_texture_layer: face_textures[1],
+            side_texture_layer: face_textures[2],
+            material_kind,
         });
     }
 }
@@ -421,21 +440,6 @@ fn push_floating_block_drop_instances(
     }
 }
 
-fn block_preview_tint(world: &WorldCore, block_id: BlockId) -> [f32; 4] {
-    let def = world.block_registry().block_or_missing(block_id);
-    let color = match def.material {
-        BlockMaterialKind::Grass => [0.35, 0.78, 0.28],
-        BlockMaterialKind::Soil => [0.58, 0.36, 0.20],
-        BlockMaterialKind::Stone => [0.62, 0.64, 0.68],
-        BlockMaterialKind::Sand => [0.86, 0.74, 0.42],
-        BlockMaterialKind::Foliage => [0.25, 0.72, 0.30],
-        BlockMaterialKind::Water => [0.30, 0.58, 0.94],
-        BlockMaterialKind::Emissive => [0.95, 0.80, 0.30],
-        BlockMaterialKind::GenericOpaque => [0.96, 0.84, 0.36],
-    };
-    [color[0], color[1], color[2], 0.20]
-}
-
 fn block_face_texture_layers(
     registry: &crate::world::BlockRegistry,
     block_id: BlockId,
@@ -501,6 +505,9 @@ fn render_material_kind_from_world(kind: BlockMaterialKind) -> RenderMaterialKin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ecs::{InventorySlot, ManipulationMode, SelectionState};
+    use crate::world::{BlockRegistry, WorldBlockCoord, WorldMeta};
+    use std::sync::Arc;
 
     fn dot3(left: [f32; 3], right: [f32; 3]) -> f32 {
         left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
@@ -666,6 +673,35 @@ mod tests {
         assert!(north[0].abs() < 1e-5);
         assert!((east[0] - 1.0).abs() < 1e-5);
         assert!(east[2].abs() < 1e-5);
+    }
+
+    #[test]
+    fn build_preview_uses_selected_block_texture_and_material() {
+        let registry = Arc::new(BlockRegistry::load_default().expect("default registry"));
+        let world = WorldCore::new(WorldMeta::default(), registry);
+        let mut inventory = PlayerInventory {
+            manipulation_mode: ManipulationMode::Build,
+            selected_block_slot: 0,
+            ..PlayerInventory::default()
+        };
+        inventory.block_quickslots[0] = Some(InventorySlot::block(BlockId::GRASS, 64));
+        let selection = SelectionState {
+            build_preview_block: Some(WorldBlockCoord(1, 2, 3)),
+            ..SelectionState::default()
+        };
+        let mut instances = Vec::new();
+
+        push_selection_preview_instances(&mut instances, &selection, &world, Some(inventory));
+
+        assert_eq!(instances.len(), 1);
+        let preview = instances[0];
+        let expected_layers = block_face_texture_layers(world.block_registry(), BlockId::GRASS);
+        assert_eq!(preview.center, [1.5, 2.5, 3.5]);
+        assert_eq!(preview.top_texture_layer, expected_layers[0]);
+        assert_eq!(preview.bottom_texture_layer, expected_layers[1]);
+        assert_eq!(preview.side_texture_layer, expected_layers[2]);
+        assert_eq!(preview.material_kind, RenderMaterialKind::Grass);
+        assert!(preview.color[3] > 0.3 && preview.color[3] < 0.7);
     }
 
     fn test_visual_state(animation_seconds: f32) -> VoxelPlayerVisualState {

@@ -86,8 +86,8 @@ impl Default for PlayerMovementConfig {
             walk_units_per_second: 7.0,
             sprint_units_per_second: 11.0,
             jump_height_blocks: 2.0,
-            gravity_units_per_second_sq: 28.0,
-            terminal_fall_speed: 32.0,
+            gravity_units_per_second_sq: 48.0,
+            terminal_fall_speed: 48.0,
             max_step_height: 1.0,
         }
     }
@@ -687,5 +687,13 @@ mod tests {
         let expected = (2.0 * movement.gravity_units_per_second_sq * 2.0).sqrt();
 
         assert!((velocity - expected).abs() < 1e-5);
+    }
+
+    #[test]
+    fn default_gravity_uses_snappier_voxel_fall_tuning() {
+        let movement = PlayerMovementConfig::default();
+
+        assert_eq!(movement.gravity_units_per_second_sq, 48.0);
+        assert_eq!(movement.terminal_fall_speed, 48.0);
     }
 }

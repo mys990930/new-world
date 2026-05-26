@@ -130,6 +130,7 @@
   - normal walking currently targets `7` blocks/s
   - holding Shift sprints at `11` blocks/s
   - pressing Space while grounded starts a jump targeting a `2` block rise under the current gravity setting
+  - the default gravity tuning is `48` blocks/s^2 with `48` blocks/s terminal fall speed, making jumps and falls heavier while preserving the configured jump height
   - road speed and difficult-terrain slowdown remain future world/material-aware movement policies
 - local player visual state
   - the collision body remains `PlayerBody`; the visible avatar is a separate voxel-part rig
@@ -162,7 +163,7 @@
   - app provides cursor position and viewport
   - ECS uses quarter-view camera state to build the selection ray
   - interaction mode turns a valid raycast hit into a tool-shaped weak red preview volume, or a default single-block preview if no tool is selected
-  - build mode turns a valid raycast hit into a translucent placement preview on the adjacent face if it is inside reach and empty, even when the active block quickslot is empty
+  - build mode turns a valid raycast hit into a placement preview on the adjacent face if the active block quickslot contains a block, the target cell is inside reach, and the target cell is empty
 
 ### Public Interface
 ```rust

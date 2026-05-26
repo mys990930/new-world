@@ -74,4 +74,4 @@
 
 - Zooming the camera now changes the focus-plane selection footprint automatically because selection reads the ECS-owned current zoom value.
 - interaction preview is now both visual feedback and the prototype tool-damage target set; build preview is the placement target consumed by app-owned command application
-- preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps them to actual selected-block textures
+- preview texture choice is still bridge-owned: ECS emits block coordinates and mode-specific shapes, then `app::bridge` maps build placement previews to actual selected-block textures/materials
