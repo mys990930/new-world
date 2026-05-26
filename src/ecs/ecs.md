@@ -126,7 +126,7 @@
   - the app bridge and selection path both consume the same current zoom size
 - player locomotion
   - horizontal velocity derives from `MoveWorldIntent`
-  - world-aware motion resolves `2x2x4` body collision, one-block step-up, two-block blocking, and falling
+  - world-aware motion resolves `1x1x3` body collision, one-block step-up, two-block blocking, and falling
   - normal walking currently targets `7` blocks/s
   - holding Shift sprints at `11` blocks/s
   - pressing Space while grounded starts a jump targeting a `2` block rise under the current gravity setting
@@ -247,7 +247,7 @@ EcsRuntime::mark_chunks_for_remesh(coords)
 - command.rs: `PlayerCommand`, `MoveWorldIntent`, ECS-side command/request buffers
 - inventory.rs: player inventory/component state, manipulation mode, quickslot selection, and tool definitions
 - tool_interaction.rs: local-player tool cooldown, transient block damage, damaged-block render snapshots, floating block drops, and pickup insertion
-- player.rs: local player components, `2x2x4` body definition, safe spawn, minimal locomotion
+- player.rs: local player components, `1x1x3` body definition, safe spawn, minimal locomotion
 - player_visual.rs: local player render-facing voxel state, animation clock, rig resource data, and pose/facing contract
 - camera.rs: quarter-view camera state, follow/recenter policy, shared basis helpers
 - selection.rs: world-raycast-based hover target state, tool preview, and build preview rules
@@ -262,7 +262,7 @@ EcsRuntime::mark_chunks_for_remesh(coords)
 - continuous locomotion now runs through a world-aware helper after ECS `update` and before ECS `post_update`
 - future moving voxel entities should prefer continuous gameplay motion with render-only 8-direction export, because that keeps gameplay math smooth while preserving quarter-view readability
 - the local-player voxel visual state is separate from `PlayerBody`; app bridge expands it into a six-part animated voxel avatar instead of the old single dummy cube
-- the default voxel avatar rig keeps slimmer prototype visual proportions while `PlayerBody` remains the `2x2x4` collision source of truth
+- the default voxel avatar rig keeps prototype visual proportions while `PlayerBody` remains the `1x1x3` collision source of truth
 - chunk render-readiness is driven by interest-wide meshing requests, so loaded lower/upper created-world chunks do not stay selectable-but-invisible
 - created-world reload may stage the player at the requested spawn x/z before chunks are resident; app clears that pending state after streamed load results allow surface placement
 - chunk lifetime now distinguishes `interest` from a broader `retain` envelope so load/unload hysteresis prevents edge thrash when the player hovers around a boundary

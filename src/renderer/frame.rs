@@ -185,10 +185,16 @@ impl Renderer {
         stats.submitted_chunk_count = submitted_chunk_count;
         stats.draw_call_count = 0;
 
-        let dynamic_shadow_casters = dynamic_shadow_caster_instances(frame.cube_instances);
-        let dynamic_cube_mesh = frame
+        let dynamic_opaque_cubes = opaque_dynamic_cube_instances(frame.cube_instances);
+        let dynamic_translucent_cubes = translucent_dynamic_cube_instances(frame.cube_instances);
+        let dynamic_shadow_casters = dynamic_shadow_caster_instances(&dynamic_opaque_cubes);
+        let dynamic_opaque_cube_mesh = frame
             .draw_scene
-            .then(|| build_cube_mesh(frame.cube_instances))
+            .then(|| build_cube_mesh(&dynamic_opaque_cubes))
+            .flatten();
+        let dynamic_translucent_cube_mesh = frame
+            .draw_scene
+            .then(|| build_cube_mesh(&dynamic_translucent_cubes))
             .flatten();
         let dynamic_shadow_cube_mesh = frame
             .draw_scene
@@ -273,25 +279,50 @@ impl Renderer {
             cast_slice(&[sun_shadow_uniform]),
         );
 
-        let dynamic_cube_buffers = dynamic_cube_mesh.as_ref().map(|(vertices, indices)| {
-            let vertex_buffer =
-                backend
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("renderer_cube_vertex_buffer"),
-                        contents: cast_slice(vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-            let index_buffer =
-                backend
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("renderer_cube_index_buffer"),
-                        contents: cast_slice(indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-            (vertex_buffer, index_buffer, indices.len() as u32)
-        });
+        let dynamic_opaque_cube_buffers =
+            dynamic_opaque_cube_mesh
+                .as_ref()
+                .map(|(vertices, indices)| {
+                    let vertex_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_opaque_cube_vertex_buffer"),
+                                contents: cast_slice(vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                    let index_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_opaque_cube_index_buffer"),
+                                contents: cast_slice(indices),
+                                usage: wgpu::BufferUsages::INDEX,
+                            });
+                    (vertex_buffer, index_buffer, indices.len() as u32)
+                });
+        let dynamic_translucent_cube_buffers =
+            dynamic_translucent_cube_mesh
+                .as_ref()
+                .map(|(vertices, indices)| {
+                    let vertex_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_translucent_cube_vertex_buffer"),
+                                contents: cast_slice(vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                    let index_buffer =
+                        backend
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("renderer_translucent_cube_index_buffer"),
+                                contents: cast_slice(indices),
+                                usage: wgpu::BufferUsages::INDEX,
+                            });
+                    (vertex_buffer, index_buffer, indices.len() as u32)
+                });
         let dynamic_shadow_cube_buffers =
             dynamic_shadow_cube_mesh
                 .as_ref()
@@ -499,7 +530,17 @@ impl Renderer {
                 }
 
                 if let Some((vertex_buffer, index_buffer, index_count)) =
-                    dynamic_cube_buffers.as_ref()
+                    dynamic_opaque_cube_buffers.as_ref()
+                {
+                    render_pass.set_pipeline(&backend.dynamic_opaque_cube_pipeline);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..*index_count, 0, 0..1);
+                    stats.draw_call_count = stats.draw_call_count.saturating_add(1);
+                }
+
+                if let Some((vertex_buffer, index_buffer, index_count)) =
+                    dynamic_translucent_cube_buffers.as_ref()
                 {
                     render_pass.set_pipeline(&backend.dynamic_cube_pipeline);
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -700,8 +741,30 @@ fn dynamic_shadow_caster_instances(
         .collect()
 }
 
+fn opaque_dynamic_cube_instances(cube_instances: &[RenderCubeInstance]) -> Vec<RenderCubeInstance> {
+    cube_instances
+        .iter()
+        .copied()
+        .filter(is_opaque_dynamic_cube)
+        .collect()
+}
+
+fn translucent_dynamic_cube_instances(
+    cube_instances: &[RenderCubeInstance],
+) -> Vec<RenderCubeInstance> {
+    cube_instances
+        .iter()
+        .copied()
+        .filter(|cube| !is_opaque_dynamic_cube(cube))
+        .collect()
+}
+
 fn is_dynamic_shadow_caster(cube: &RenderCubeInstance) -> bool {
     cube.material_kind == RenderMaterialKind::Actor
+}
+
+fn is_opaque_dynamic_cube(cube: &RenderCubeInstance) -> bool {
+    cube.color[3] >= 0.999
 }
 
 fn build_cube_edge_mesh(
@@ -1338,6 +1401,21 @@ mod tests {
 
         assert_eq!(casters.len(), 1);
         assert_eq!(casters[0].material_kind, RenderMaterialKind::Actor);
+    }
+
+    #[test]
+    fn dynamic_cube_alpha_splits_opaque_and_translucent_instances() {
+        let mut opaque = test_cube(RenderMaterialKind::Actor);
+        opaque.color[3] = 1.0;
+        let mut translucent = test_cube(RenderMaterialKind::Grass);
+        translucent.color[3] = 0.46;
+        let cubes = [opaque, translucent];
+
+        let opaque_cubes = opaque_dynamic_cube_instances(&cubes);
+        let translucent_cubes = translucent_dynamic_cube_instances(&cubes);
+
+        assert_eq!(opaque_cubes, vec![opaque]);
+        assert_eq!(translucent_cubes, vec![translucent]);
     }
 
     #[derive(Debug, Default)]

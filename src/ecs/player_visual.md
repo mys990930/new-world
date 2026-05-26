@@ -62,7 +62,7 @@
 - the animation clock advances from ECS frame delta and is exported with the visual state
 - accepted tool uses restart a short `0.5` second swing state so the bridge can move the arms during the same cadence as tool use
 - the default rig is code-authored data, not an external atlas or sprite dependency
-- the default rig is intentionally slimmer than `PlayerBody`; collision remains `2x2x4`, while the visible avatar keeps readable prototype proportions
+- the default rig is intentionally separate from `PlayerBody`; collision remains `1x1x3`, while the visible avatar keeps readable prototype proportions
 - part poses are local to the player root; app bridge is responsible for composing root, facing, animation offset, and renderer DTOs
 
 ## Invariants
@@ -92,7 +92,7 @@
 ## Current Implementation
 
 1. `PlayerBody` remains the physical source of truth; `VoxelPlayerVisualState` is a derived snapshot for app bridge reads.
-2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs with prototype visual proportions separate from the `2x2x4` collision body.
+2. The code-authored six-part rig contains head, torso, left/right arms, and left/right legs with prototype visual proportions separate from the `1x1x3` collision body.
 3. The app bridge expands the rig into multiple dynamic actor cube instances, replacing the old single white player cube; renderer-owned shadow maps handle the ground shadow.
 4. Procedural animation offsets are applied in the app bridge:
    - idle bob

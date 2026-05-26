@@ -154,6 +154,7 @@ pub(crate) struct RendererBackend {
     pub(crate) terrain_pipeline: wgpu::RenderPipeline,
     pub(crate) terrain_fade_pipeline: wgpu::RenderPipeline,
     pub(crate) water_pipeline: wgpu::RenderPipeline,
+    pub(crate) dynamic_opaque_cube_pipeline: wgpu::RenderPipeline,
     pub(crate) dynamic_cube_pipeline: wgpu::RenderPipeline,
     pub(crate) shadow_depth_pipeline: wgpu::RenderPipeline,
     pub(crate) ui_sprite_pipeline: wgpu::RenderPipeline,

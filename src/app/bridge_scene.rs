@@ -187,6 +187,8 @@ fn build_voxel_player_part_instance(
 ) -> RenderCubeInstance {
     let animated_center = animated_voxel_player_local_center(visual, part);
     let facing_center = rotate_player_local_offset(animated_center, visual.facing);
+    let mut color = part.color;
+    color[3] = 1.0;
 
     RenderCubeInstance {
         center: [
@@ -195,7 +197,7 @@ fn build_voxel_player_part_instance(
             visual.root_translation[2] + facing_center[2],
         ],
         half_extents: part.half_extents,
-        color: part.color,
+        color,
         top_texture_layer: PLAYER_TEXTURE_LAYER,
         bottom_texture_layer: PLAYER_TEXTURE_LAYER,
         side_texture_layer: PLAYER_TEXTURE_LAYER,
@@ -653,6 +655,7 @@ mod tests {
                 .iter()
                 .all(|instance| instance.material_kind == RenderMaterialKind::Actor)
         );
+        assert!(instances.iter().all(|instance| instance.color[3] == 1.0));
     }
 
     #[test]

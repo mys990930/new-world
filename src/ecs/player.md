@@ -71,7 +71,7 @@
 ## Invariants
 
 - `Transform.translation` is interpreted as body-center position
-- `PlayerBody.half_extents` is currently `[1.0, 2.0, 1.0]`, meaning a `2x2x4` block body
+- `PlayerBody.half_extents` is currently `[0.5, 1.5, 0.5]`, meaning a `1x1x3` block body whose feet are at `Transform.translation.y - 1.5`
 - `PlayerMovementConfig.jump_height_blocks` is currently `2.0`
 - `PlayerMovementConfig.gravity_units_per_second_sq` and `terminal_fall_speed` default to `48.0`
 - `MoveWorldIntent` is the continuous world-space movement channel
@@ -101,4 +101,4 @@
 - bootstrap and created-world reload now stage a spawn anchor first; app snaps the local player onto a safe loaded surface once jobs have streamed enough nearby chunk data into `WorldCore`
 - the current walking speed is `7.0` world units per second and hold-Shift sprint speed is `11.0` world units per second
 - the current locomotion slice is intentionally minimal: no slope handling beyond one-block step-up and no network prediction yet
-- the visual-player rig consumes locomotion/physics state without changing this collision helper or `PlayerBody` dimensions
+- the visual-player rig consumes locomotion/physics state while remaining separate from collision helper and `PlayerBody` dimensions

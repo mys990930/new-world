@@ -48,7 +48,7 @@ pub struct PlayerBody {
 impl Default for PlayerBody {
     fn default() -> Self {
         Self {
-            half_extents: [1.0, 2.0, 1.0],
+            half_extents: [0.5, 1.5, 0.5],
         }
     }
 }
@@ -573,7 +573,7 @@ mod tests {
         ));
 
         let transform = ecs_world.get::<Transform>(entity).copied().unwrap();
-        assert!((transform.translation[1] - 3.0).abs() < 1e-5);
+        assert!((transform.translation[1] - 2.5).abs() < 1e-5);
     }
 
     #[test]
@@ -594,7 +594,7 @@ mod tests {
             .copied()
             .unwrap();
 
-        assert_eq!(transform.translation, [80.0, 132.0, -48.0]);
+        assert_eq!(transform.translation, [80.0, 131.5, -48.0]);
         assert!(!physics.grounded);
     }
 
@@ -633,12 +633,12 @@ mod tests {
 
         let body = PlayerBody::default();
         let climbed =
-            move_horizontally_with_step_up(&world, [16.0, 3.0, 16.0], [3.0, 0.0], body, 1.0);
+            move_horizontally_with_step_up(&world, [16.0, 2.5, 16.0], [3.0, 0.0], body, 1.0);
         assert!(climbed[0] > 18.0);
-        assert!(climbed[1] > 3.0);
+        assert!(climbed[1] > 2.5);
 
         let blocked =
-            move_horizontally_with_step_up(&world, [20.0, 3.0, 20.5], [4.0, 0.0], body, 1.0);
+            move_horizontally_with_step_up(&world, [20.0, 2.5, 20.5], [4.0, 0.0], body, 1.0);
         assert!(blocked[0] < 23.0);
     }
 
@@ -695,5 +695,10 @@ mod tests {
 
         assert_eq!(movement.gravity_units_per_second_sq, 48.0);
         assert_eq!(movement.terminal_fall_speed, 48.0);
+    }
+
+    #[test]
+    fn default_player_body_is_one_by_one_by_three_blocks() {
+        assert_eq!(PlayerBody::default().half_extents, [0.5, 1.5, 0.5]);
     }
 }

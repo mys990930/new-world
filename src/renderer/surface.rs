@@ -742,6 +742,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::REPLACE),
         true,
+        None,
     );
     let water_pipeline = create_render_pipeline(
         &device,
@@ -753,6 +754,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::ALPHA_BLENDING),
         false,
+        None,
     );
     let terrain_fade_pipeline = create_render_pipeline(
         &device,
@@ -764,6 +766,19 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::ALPHA_BLENDING),
         false,
+        None,
+    );
+    let dynamic_opaque_cube_pipeline = create_render_pipeline(
+        &device,
+        "renderer_dynamic_opaque_cube_pipeline",
+        &main_pipeline_layout,
+        &dynamic_shader,
+        surface_config.format,
+        Some(depth_format),
+        wgpu::PrimitiveTopology::TriangleList,
+        Some(wgpu::BlendState::REPLACE),
+        true,
+        Some(wgpu::Face::Back),
     );
     let dynamic_cube_pipeline = create_render_pipeline(
         &device,
@@ -775,6 +790,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::ALPHA_BLENDING),
         false,
+        Some(wgpu::Face::Back),
     );
     let ui_sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("renderer_ui_sprite_pipeline"),
@@ -858,6 +874,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::LineList,
         Some(wgpu::BlendState::REPLACE),
         false,
+        None,
     );
 
     Ok(RendererBackend {
@@ -891,6 +908,7 @@ async fn create_backend(
         terrain_pipeline,
         terrain_fade_pipeline,
         water_pipeline,
+        dynamic_opaque_cube_pipeline,
         dynamic_cube_pipeline,
         shadow_depth_pipeline,
         ui_sprite_pipeline,
@@ -908,6 +926,7 @@ fn create_render_pipeline(
     topology: wgpu::PrimitiveTopology,
     blend: Option<wgpu::BlendState>,
     depth_write_enabled: bool,
+    cull_mode: Option<wgpu::Face>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
@@ -922,7 +941,7 @@ fn create_render_pipeline(
             topology,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
+            cull_mode,
             unclipped_depth: false,
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,

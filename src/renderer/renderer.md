@@ -132,7 +132,8 @@ NOT:
 - steady-state chunk unload is app-owned, but renderer already exposes `remove_chunk_mesh(...)` / `RemoveChunkMesh` as the render-side destruction path for chunks that leave the retain envelope.
 - Some gameplay previews may intentionally use translucent dynamic cubes; the renderer still only sees render-ready cube instances with material/color/alpha, not gameplay rules.
 - Highlight dynamic cubes sample a solid shader color rather than block texture alpha so selection/damage overlays remain stable when drawn close to terrain faces.
-- The dynamic cube color pipeline alpha-blends with depth testing but does not write scene depth; this keeps translucent helper overlays from masking their own faces or later translucent passes.
+- Dynamic cubes are split by alpha before drawing: opaque actor/drop cubes use depth writes and replace blending, while translucent helper/placement previews alpha-blend without depth writes.
+- Translucent dynamic cubes use back-face culling so placement previews show only the camera-visible outer surfaces instead of revealing the rear faces of the preview cube.
 - Terrain blocks flagged by the app as covering the local player enable a player-centered vignette: matching terrain is cut out of the opaque terrain pass and redrawn in a bounded alpha-blended terrain fade pass after dynamic player cubes, preserving existing chunk meshes while letting the softened terrain still cover the avatar.
 - The default environment is now a fixed sunset quarter-view preset tuned to preserve chunk contrast while keeping only a very light amount of atmospheric fog, and medium/high quality still enable the shadow-map path.
 - The app bridge now resolves the player-focus chunk weather scalar state, combines it with world calendar time-of-day, and writes the result into `RenderEnvironment`; the renderer still only sees presentation-ready values.
