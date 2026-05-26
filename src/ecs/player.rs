@@ -264,19 +264,19 @@ pub(crate) fn place_local_player_on_surface(
     };
 
     let body = *body;
-    let highest_center_y = ((max_chunk.1 + 1) * CHUNK_EDGE_I32) as f32 + body.half_extents[1] + 2.0;
-    let lowest_center_y = (min_chunk.1 * CHUNK_EDGE_I32) as f32 + body.half_extents[1];
+    let highest_foot_y = ((max_chunk.1 + 1) * CHUNK_EDGE_I32) as f32 + 2.0;
+    let lowest_foot_y = (min_chunk.1 * CHUNK_EDGE_I32) as f32;
 
-    let mut center_y = highest_center_y.floor();
-    while center_y >= lowest_center_y {
-        let candidate = [anchor_xz[0], center_y, anchor_xz[1]];
+    let mut foot_y = highest_foot_y.floor();
+    while foot_y >= lowest_foot_y {
+        let candidate = [anchor_xz[0], foot_y + body.half_extents[1], anchor_xz[1]];
         if !body_collides(world, candidate, body) && is_grounded(world, candidate, body) {
             transform.translation = candidate;
             velocity.linear = [0.0, 0.0, 0.0];
             physics.grounded = true;
             return true;
         }
-        center_y -= 1.0;
+        foot_y -= 1.0;
     }
 
     false
@@ -672,7 +672,7 @@ mod tests {
             .copied()
             .unwrap();
 
-        assert!(transform.translation[1] > 3.0);
+        assert!(transform.translation[1] > 2.5);
         assert!(
             (velocity.linear[1] - jump_initial_velocity(PlayerMovementConfig::default())).abs()
                 < 1e-5

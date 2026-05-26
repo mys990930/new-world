@@ -67,6 +67,7 @@
   - two-block obstacle rejection
   - gravity and falling
 - created-world load can temporarily stage the local player at the requested spawn x/z and a safe loading height before enough chunk data exists for surface placement
+- surface placement scans integer foot planes and derives center from `foot_y + PlayerBody.half_extents.y`, so fractional body half-heights still land on block-top surfaces
 
 ## Invariants
 
