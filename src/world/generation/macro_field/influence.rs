@@ -29,10 +29,6 @@ const TERMINAL_MOUTH_VALLEY_WIDTH_BOOST: f32 = 0.36;
 const TERMINAL_MOUTH_DEPTH_BOOST: f32 = 0.18;
 const TERMINAL_MOUTH_FLOW_BOOST: f32 = 0.30;
 const TERMINAL_MOUTH_TAPER_BLEND: f32 = 1.0;
-const TERMINAL_MOUTH_OPEN_THROAT_MIN_SCALE: f32 = 0.48;
-const TERMINAL_MOUTH_OPEN_THROAT_MAX_SCALE: f32 = 0.76;
-const TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK: f32 = 0.34;
-const TERMINAL_MOUTH_OPEN_PENALTY_SCALE: f32 = 2.35;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -1308,14 +1304,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             let subpixel_t = projected_t_on_segment(subpixel, start, end);
             let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
             let effective = effective_river_morphology(source, mouth_progress);
-            let profile_distance = terminal_outlet_open_mouth_distance(
-                source,
-                segment_index,
-                subpixel_t,
-                subpixel_distance,
-                effective,
-                radius_blocks,
-            );
             let roughness_offset = river_boundary_roughness_offset(
                 position,
                 effective.flow_hint,
@@ -1332,14 +1320,14 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             )
             .clamp(0.0, 1.0);
             let core_strength = river_core_strength_for_roughened_distance(
-                profile_distance,
+                subpixel_distance,
                 roughness_offset,
                 effective.flow_hint,
                 effective.water_width_blocks,
                 radius_blocks,
             ) * terminal_taper;
             let shoulder_strength = river_valley_strength_for_roughened_distance(
-                profile_distance,
+                subpixel_distance,
                 roughness_offset,
                 effective.flow_hint,
                 effective.water_width_blocks,
@@ -1445,82 +1433,6 @@ fn terminal_outlet_endpoint_clips_sample(
     }
 
     projected_t_unclamped(sample, start, end) > 1.0
-}
-
-fn terminal_outlet_open_mouth_distance(
-    source: &RiverRasterWorkSource,
-    segment_index: usize,
-    segment_t: f32,
-    distance_blocks: f32,
-    effective: EffectiveRiverMorphology,
-    configured_radius_blocks: f32,
-) -> f32 {
-    if !source.is_terminal_outlet || distance_blocks <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    let mouth_progress = terminal_mouth_progress(source, segment_index, segment_t);
-    let mouth_gate = smoothstep01(((mouth_progress - 0.45) / 0.55).clamp(0.0, 1.0));
-    if mouth_gate <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
-    if total_length <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    let start = source
-        .cumulative_lengths
-        .get(segment_index)
-        .copied()
-        .unwrap_or(0.0);
-    let end = source
-        .cumulative_lengths
-        .get(segment_index + 1)
-        .copied()
-        .unwrap_or(start);
-    let along_source = lerp(start, end, segment_t.clamp(0.0, 1.0));
-    let remaining = (total_length - along_source).max(0.0);
-    let water_radius = river_water_radius_blocks(
-        effective.flow_hint,
-        effective.water_width_blocks,
-        configured_radius_blocks,
-    );
-    let base_water_radius = river_water_radius_blocks(
-        source.flow_hint,
-        source.water_width_blocks,
-        configured_radius_blocks,
-    );
-    let valley_radius = river_shoulder_radius_blocks(
-        effective.flow_hint,
-        effective.valley_width_blocks,
-        configured_radius_blocks,
-    )
-    .max(water_radius + 1.0);
-    let fade_blocks = (valley_radius * 0.72)
-        .max(water_radius * 1.6)
-        .clamp(12.0, configured_radius_blocks * 0.55);
-    let endpoint_gate = 1.0 - smoothstep01((remaining / fade_blocks).clamp(0.0, 1.0));
-    if endpoint_gate <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    let flow_t = smoothstep01(source.flow_hint.clamp(0.0, 1.0));
-    let throat_radius = base_water_radius
-        * lerp(
-            TERMINAL_MOUTH_OPEN_THROAT_MIN_SCALE,
-            TERMINAL_MOUTH_OPEN_THROAT_MAX_SCALE,
-            flow_t,
-        );
-    let allowed_lateral = throat_radius + remaining * TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK;
-    let lateral_excess = (distance_blocks - allowed_lateral).max(0.0);
-    if lateral_excess <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    distance_blocks
-        + lateral_excess * endpoint_gate * mouth_gate * TERMINAL_MOUTH_OPEN_PENALTY_SCALE
 }
 
 fn projected_t_unclamped(
@@ -2921,46 +2833,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_mouth_distance_opens_outer_endpoint_without_extending_downstream() {
-        let source = RiverRasterWorkSource {
-            is_terminal_outlet: true,
-            edge: VoronoiEdgeId(99),
-            points: vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-            cumulative_lengths: vec![0.0, 128.0],
-            longitudinal_start_blocks: 0.0,
-            flow_hint: 0.70,
-            water_width_blocks: 56.0,
-            valley_width_blocks: 180.0,
-            bed_depth_blocks: 14.0,
-            terminal_mouth_factor: 1.0,
-            component_id: 0,
-        };
-        let effective_at_mouth = effective_river_morphology(&source, 1.0);
-        let center =
-            terminal_outlet_open_mouth_distance(&source, 0, 1.0, 0.0, effective_at_mouth, 256.0);
-        let outer_endpoint =
-            terminal_outlet_open_mouth_distance(&source, 0, 1.0, 48.0, effective_at_mouth, 256.0);
-        let outer_upstream =
-            terminal_outlet_open_mouth_distance(&source, 0, 0.20, 48.0, effective_at_mouth, 256.0);
-
-        assert_eq!(
-            center, 0.0,
-            "terminal mouth centerline should remain available for river/estuary handoff"
-        );
-        assert!(
-            outer_endpoint > 48.0,
-            "outer terminal endpoint samples should be pushed outside the boosted round footprint: {outer_endpoint}"
-        );
-        assert!(
-            (outer_upstream - 48.0).abs() <= f32::EPSILON,
-            "upstream river profile should not be altered by terminal endpoint shaping: {outer_upstream}"
-        );
-    }
-
-    #[test]
     fn terminal_mouth_raster_does_not_emit_round_cap_beyond_endpoint() {
         let curve = test_noisy_curve(
             91,
@@ -2990,40 +2862,6 @@ mod tests {
         assert!(
             downstream_cap <= f32::EPSILON,
             "terminal mouth should not rasterize the old circular cap beyond its endpoint: {downstream_cap}"
-        );
-    }
-
-    #[test]
-    fn terminal_mouth_raster_tapers_wide_outer_carve_at_endpoint() {
-        let curve = test_noisy_curve(
-            92,
-            vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-        );
-        let mut terminal = test_river_source(&curve, 0.72);
-        terminal.is_terminal_outlet = true;
-        terminal.water_width_blocks = 56.0;
-        terminal.valley_width_blocks = 180.0;
-        terminal.bed_depth_blocks = 14.0;
-        terminal.terminal_mouth_factor = 1.0;
-
-        let config = MacroFieldTileConfig::new(0.0, -64.0, 11, 9, 16.0);
-        let field = rasterize_curve_anti_aliased_polyline_field(&[terminal], config, 256.0);
-        let width = config.width as usize;
-        let sample_index = |x: usize, z: usize| z * width + x;
-        let upstream_outer = field.river_valley_strength[sample_index(4, 6)];
-        let endpoint_outer = field.river_valley_strength[sample_index(8, 6)];
-        let endpoint_center = field.river_core_strength[sample_index(8, 4)];
-
-        assert!(
-            endpoint_center > 0.35,
-            "terminal mouth centerline should still keep an active handoff channel: {endpoint_center}"
-        );
-        assert!(
-            endpoint_outer < upstream_outer * 0.72,
-            "wide outer carve should taper before the terminal endpoint instead of ending as a round footprint: upstream={upstream_outer} endpoint={endpoint_outer}"
         );
     }
 
@@ -3069,8 +2907,8 @@ mod tests {
             "penultimate mouth edge should begin widening river influence: upstream={upstream_outer} penultimate={penultimate_outer}"
         );
         assert!(
-            terminal_outer > upstream_outer && terminal_outer < penultimate_outer,
-            "terminal endpoint should keep some mouth widening while tapering the outer broad carve before estuary fan takes over: upstream={upstream_outer} penultimate={penultimate_outer} terminal={terminal_outer}"
+            terminal_outer > upstream_outer && terminal_outer >= 0.80,
+            "terminal edge should keep the widened river influence before estuary fan takes over: upstream={upstream_outer} penultimate={penultimate_outer} terminal={terminal_outer}"
         );
     }
 
