@@ -24,11 +24,6 @@ pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
 pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
 const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 1.25;
 const TERMINAL_RIVER_TAPER_WIDTH_SCALE: f32 = 2.50;
-const TERMINAL_MOUTH_WATER_WIDTH_BOOST: f32 = 0.65;
-const TERMINAL_MOUTH_VALLEY_WIDTH_BOOST: f32 = 0.36;
-const TERMINAL_MOUTH_DEPTH_BOOST: f32 = 0.18;
-const TERMINAL_MOUTH_FLOW_BOOST: f32 = 0.30;
-const TERMINAL_MOUTH_TAPER_BLEND: f32 = 1.0;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -170,7 +165,6 @@ pub(super) fn rasterize_influence_fields(
             water_width_blocks: river.water_width_blocks,
             valley_width_blocks: river.valley_width_blocks,
             bed_depth_blocks: river.bed_depth_blocks,
-            terminal_mouth_factor: river.terminal_mouth_factor,
             component_id: 0,
         })
         .collect::<Vec<_>>();
@@ -581,7 +575,6 @@ pub(super) struct RiverRasterSource<'a> {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
-    pub(super) terminal_mouth_factor: f32,
     pub(super) component_id: usize,
 }
 
@@ -596,7 +589,6 @@ pub(super) struct RiverRasterWorkSource {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
-    pub(super) terminal_mouth_factor: f32,
     pub(super) component_id: usize,
 }
 
@@ -624,7 +616,6 @@ pub(super) fn rounded_river_raster_sources(
                 water_width_blocks: source.water_width_blocks,
                 valley_width_blocks: source.valley_width_blocks,
                 bed_depth_blocks: source.bed_depth_blocks,
-                terminal_mouth_factor: source.terminal_mouth_factor,
                 component_id: source.component_id,
             }
         })
@@ -659,78 +650,6 @@ pub(super) fn segment_longitudinal_blocks(
         .copied()
         .unwrap_or(start);
     source.longitudinal_start_blocks + lerp(start, end, t.clamp(0.0, 1.0))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct EffectiveRiverMorphology {
-    flow_hint: f32,
-    water_width_blocks: f32,
-    valley_width_blocks: f32,
-    bed_depth_blocks: f32,
-}
-
-fn terminal_mouth_progress(
-    source: &RiverRasterWorkSource,
-    segment_index: usize,
-    segment_t: f32,
-) -> f32 {
-    let end_factor = source.terminal_mouth_factor.clamp(0.0, 1.0);
-    if end_factor <= f32::EPSILON {
-        return 0.0;
-    }
-
-    let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
-    if total_length <= f32::EPSILON {
-        return end_factor;
-    }
-
-    let start = source
-        .cumulative_lengths
-        .get(segment_index)
-        .copied()
-        .unwrap_or(0.0);
-    let end = source
-        .cumulative_lengths
-        .get(segment_index + 1)
-        .copied()
-        .unwrap_or(start);
-    let along_source = lerp(start, end, segment_t.clamp(0.0, 1.0));
-    let local_t = (along_source / total_length).clamp(0.0, 1.0);
-    let start_factor = (end_factor - 0.55).max(0.0);
-    lerp(start_factor, end_factor, smoothstep01(local_t)).clamp(0.0, 1.0)
-}
-
-fn effective_river_morphology(
-    source: &RiverRasterWorkSource,
-    terminal_mouth_progress: f32,
-) -> EffectiveRiverMorphology {
-    let mouth = terminal_mouth_progress.clamp(0.0, 1.0);
-    EffectiveRiverMorphology {
-        flow_hint: (source.flow_hint
-            + (1.0 - source.flow_hint) * TERMINAL_MOUTH_FLOW_BOOST * mouth)
-            .clamp(0.0, 1.0),
-        water_width_blocks: source.water_width_blocks
-            * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * mouth),
-        valley_width_blocks: source.valley_width_blocks
-            * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * mouth),
-        bed_depth_blocks: source.bed_depth_blocks * (1.0 + TERMINAL_MOUTH_DEPTH_BOOST * mouth),
-    }
-}
-
-fn terminal_mouth_max_water_width_blocks(source: &RiverRasterWorkSource) -> f32 {
-    source.water_width_blocks
-        * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * source.terminal_mouth_factor.clamp(0.0, 1.0))
-}
-
-fn terminal_mouth_max_valley_width_blocks(source: &RiverRasterWorkSource) -> f32 {
-    source.valley_width_blocks
-        * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * source.terminal_mouth_factor.clamp(0.0, 1.0))
-}
-
-fn terminal_mouth_max_flow_hint(source: &RiverRasterWorkSource) -> f32 {
-    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0);
-    (source.flow_hint + (1.0 - source.flow_hint) * TERMINAL_MOUTH_FLOW_BOOST * mouth)
-        .clamp(0.0, 1.0)
 }
 
 fn river_segment_bend_strength(source: &RiverRasterWorkSource, segment_index: usize) -> f32 {
@@ -1237,6 +1156,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
     radius_blocks: f32,
     source: &RiverRasterWorkSource,
 ) {
+    let strength = source.flow_hint;
     let spacing = config.sample_spacing_blocks;
     let aa_margin = spacing * 0.75;
     let active_radius_blocks =
@@ -1291,7 +1211,13 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
         let mut rough_sum = 0.0;
         let mut gravel_sum = 0.0;
         let mut cutbank_sum = 0.0;
-        let mut flow_sum = 0.0;
+        let roughness_offset = river_boundary_roughness_offset(
+            position,
+            source.flow_hint,
+            source.water_width_blocks,
+            radius_blocks,
+            config.boundary_roughness_blocks,
+        );
         for (offset_x, offset_z) in subpixel_offsets {
             let subpixel = WorldPlanePoint::new(
                 position.x + offset_x * spacing,
@@ -1299,44 +1225,26 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             );
             let subpixel_distance = point_segment_distance(subpixel, start, end);
             let subpixel_t = projected_t_on_segment(subpixel, start, end);
-            let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
-            let effective = effective_river_morphology(source, mouth_progress);
-            let roughness_offset = river_boundary_roughness_offset(
-                position,
-                effective.flow_hint,
-                effective.water_width_blocks,
-                radius_blocks,
-                config.boundary_roughness_blocks,
-            );
             let terminal_taper =
                 terminal_outlet_river_taper(source, segment_index, subpixel_t, radius_blocks);
-            let terminal_taper = lerp(
-                terminal_taper,
-                1.0,
-                mouth_progress * TERMINAL_MOUTH_TAPER_BLEND,
-            )
-            .clamp(0.0, 1.0);
             let core_strength = river_core_strength_for_roughened_distance(
                 subpixel_distance,
                 roughness_offset,
-                effective.flow_hint,
-                effective.water_width_blocks,
+                source.flow_hint,
+                source.water_width_blocks,
                 radius_blocks,
             ) * terminal_taper;
             let shoulder_strength = river_valley_strength_for_roughened_distance(
                 subpixel_distance,
                 roughness_offset,
-                effective.flow_hint,
-                effective.water_width_blocks,
-                effective.valley_width_blocks,
+                source.flow_hint,
+                source.water_width_blocks,
+                source.valley_width_blocks,
                 radius_blocks,
             ) * terminal_taper;
             let valley_strength = core_strength.max(shoulder_strength);
-            let hints = river_hints_from_strength(
-                core_strength,
-                effective.flow_hint,
-                effective.bed_depth_blocks,
-            );
+            let hints =
+                river_hints_from_strength(core_strength, source.flow_hint, source.bed_depth_blocks);
             let (gravel_bend, cutbank_bend) = river_bend_bar_hints(
                 subpixel,
                 start,
@@ -1344,7 +1252,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 bend_strength,
                 core_strength,
                 shoulder_strength,
-                effective.flow_hint,
+                source.flow_hint,
             );
             closest_subpixel_distance = closest_subpixel_distance.min(subpixel_distance);
             core_sum += core_strength;
@@ -1354,7 +1262,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             rough_sum += hints.bank_roughness_hint;
             gravel_sum += hints.gravel_hint.max(gravel_bend);
             cutbank_sum += hints.cutbank_hint.max(cutbank_bend);
-            flow_sum += effective.flow_hint;
         }
         let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
         if anti_aliased_strength <= 0.0 {
@@ -1367,7 +1274,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
         let rough_hint = (rough_sum / subpixel_count).clamp(0.0, 1.0);
         let gravel_hint = (gravel_sum / subpixel_count).clamp(0.0, 1.0);
         let cutbank_hint = (cutbank_sum / subpixel_count).clamp(0.0, 1.0);
-        let flow_hint = (flow_sum / subpixel_count).clamp(0.0, 1.0);
         let current_distance = row.distance_blocks[x];
         let same_centerline_band = spacing * 0.35;
         let current_component = river_owner_component[x];
@@ -1390,7 +1296,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 longitudinal_blocks,
                 anti_aliased_strength,
             );
-            row.flow_weighted_sum[x] += flow_hint * anti_aliased_strength;
+            row.flow_weighted_sum[x] += strength * anti_aliased_strength;
             row.flow_weight_sum[x] += anti_aliased_strength;
         } else if closest_subpixel_distance + same_centerline_band < current_distance {
             row.distance_blocks[x] = closest_subpixel_distance;
@@ -1412,7 +1318,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.river_bank_roughness_hint[x] = rough_hint;
             row.river_gravel_hint[x] = gravel_hint;
             row.river_cutbank_hint[x] = cutbank_hint;
-            row.flow_weighted_sum[x] = flow_hint * anti_aliased_strength;
+            row.flow_weighted_sum[x] = strength * anti_aliased_strength;
             row.flow_weight_sum[x] = anti_aliased_strength;
         }
     }
@@ -1502,33 +1408,29 @@ pub(super) trait RiverRasterRadiusSource {
 
 impl RiverRasterRadiusSource for &RiverRasterWorkSource {
     fn flow_hint(&self) -> f32 {
-        terminal_mouth_max_flow_hint(self)
+        self.flow_hint
     }
 
     fn water_width_blocks(&self) -> f32 {
-        terminal_mouth_max_water_width_blocks(self)
+        self.water_width_blocks
     }
 
     fn valley_width_blocks(&self) -> f32 {
-        terminal_mouth_max_valley_width_blocks(self)
+        self.valley_width_blocks
     }
 }
 
 impl RiverRasterRadiusSource for RiverRasterSource<'_> {
     fn flow_hint(&self) -> f32 {
-        let mouth = self.terminal_mouth_factor.clamp(0.0, 1.0);
-        (self.flow_hint + (1.0 - self.flow_hint) * TERMINAL_MOUTH_FLOW_BOOST * mouth)
-            .clamp(0.0, 1.0)
+        self.flow_hint
     }
 
     fn water_width_blocks(&self) -> f32 {
         self.water_width_blocks
-            * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * self.terminal_mouth_factor.clamp(0.0, 1.0))
     }
 
     fn valley_width_blocks(&self) -> f32 {
         self.valley_width_blocks
-            * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * self.terminal_mouth_factor.clamp(0.0, 1.0))
     }
 }
 
@@ -1807,7 +1709,6 @@ mod tests {
             water_width_blocks: 48.0,
             valley_width_blocks: 160.0,
             bed_depth_blocks: 12.0,
-            terminal_mouth_factor: 0.0,
             component_id: 0,
         };
         let bend = river_segment_bend_strength(&source, 0);
@@ -2704,90 +2605,6 @@ mod tests {
         assert!(
             trunk.river_valley_strength[shoulder] > headwater.river_valley_strength[shoulder],
             "downstream thick polyline should keep a wider flat/shoulder bed than headwater"
-        );
-    }
-
-    #[test]
-    fn terminal_mouth_progress_grows_across_last_two_edges() {
-        let source = RiverRasterWorkSource {
-            is_terminal_outlet: true,
-            edge: VoronoiEdgeId(99),
-            points: vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-            cumulative_lengths: vec![0.0, 128.0],
-            longitudinal_start_blocks: 0.0,
-            flow_hint: 0.70,
-            water_width_blocks: 64.0,
-            valley_width_blocks: 180.0,
-            bed_depth_blocks: 14.0,
-            terminal_mouth_factor: 1.0,
-            component_id: 0,
-        };
-
-        let start = terminal_mouth_progress(&source, 0, 0.0);
-        let middle = terminal_mouth_progress(&source, 0, 0.5);
-        let end = terminal_mouth_progress(&source, 0, 1.0);
-        let start_morphology = effective_river_morphology(&source, start);
-        let end_morphology = effective_river_morphology(&source, end);
-
-        assert!(
-            start > 0.40 && middle > start && end > middle,
-            "terminal mouth factor should grow downstream across the outlet edge: start={start} middle={middle} end={end}"
-        );
-        assert!(
-            end_morphology.water_width_blocks > start_morphology.water_width_blocks
-                && end_morphology.valley_width_blocks > start_morphology.valley_width_blocks
-                && end_morphology.bed_depth_blocks > start_morphology.bed_depth_blocks,
-            "terminal morphology should widen/deepen downstream: start={start_morphology:?} end={end_morphology:?}"
-        );
-    }
-
-    #[test]
-    fn terminal_mouth_raster_widens_last_two_edges_without_estuary() {
-        let left = test_noisy_curve(
-            89,
-            vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-        );
-        let right = test_noisy_curve(
-            90,
-            vec![
-                WorldPlanePoint::new(128.0, 0.0),
-                WorldPlanePoint::new(256.0, 0.0),
-            ],
-        );
-        let mut penultimate = test_river_source(&left, 0.72);
-        penultimate.water_width_blocks = 56.0;
-        penultimate.valley_width_blocks = 160.0;
-        penultimate.bed_depth_blocks = 12.0;
-        penultimate.terminal_mouth_factor = 0.45;
-        let mut terminal = test_river_source(&right, 0.72);
-        terminal.is_terminal_outlet = true;
-        terminal.water_width_blocks = 56.0;
-        terminal.valley_width_blocks = 160.0;
-        terminal.bed_depth_blocks = 12.0;
-        terminal.terminal_mouth_factor = 1.0;
-
-        let config = MacroFieldTileConfig::new(0.0, -96.0, 17, 13, 16.0);
-        let field =
-            rasterize_curve_anti_aliased_polyline_field(&[penultimate, terminal], config, 256.0);
-        let width = config.width as usize;
-        let sample_index = |x: usize, z: usize| z * width + x;
-        let upstream_outer = field.river_valley_strength[sample_index(2, 8)];
-        let penultimate_outer = field.river_valley_strength[sample_index(7, 8)];
-        let terminal_outer = field.river_valley_strength[sample_index(14, 8)];
-
-        assert!(
-            penultimate_outer > upstream_outer,
-            "penultimate mouth edge should begin widening river influence: upstream={upstream_outer} penultimate={penultimate_outer}"
-        );
-        assert!(
-            terminal_outer > upstream_outer && terminal_outer >= 0.80,
-            "terminal edge should keep the widened river influence before estuary fan takes over: upstream={upstream_outer} penultimate={penultimate_outer} terminal={terminal_outer}"
         );
     }
 

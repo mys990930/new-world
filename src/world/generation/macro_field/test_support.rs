@@ -370,7 +370,6 @@ pub(in crate::world::generation::macro_field) fn test_river_source<'a>(
         ),
         valley_width_blocks: lerp(4.0, 180.0, flow_hint.clamp(0.0, 1.0)),
         bed_depth_blocks: lerp(1.5, 18.0, flow_hint.clamp(0.0, 1.0)),
-        terminal_mouth_factor: 0.0,
         component_id: 0,
     }
 }

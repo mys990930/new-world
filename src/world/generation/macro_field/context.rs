@@ -109,26 +109,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             .filter(|chain| chain.terminal_kind == Some(GraphDrainageNodeKind::CoastOutlet))
             .map(|chain| (chain.id, chain.segment_ids.last().copied()))
             .collect::<HashMap<_, _>>();
-        let terminal_mouth_factors = river_plan
-            .chains
-            .iter()
-            .filter(|chain| chain.terminal_kind == Some(GraphDrainageNodeKind::CoastOutlet))
-            .flat_map(|chain| {
-                let count = chain.segment_ids.len();
-                chain
-                    .segment_ids
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(index, segment_id)| {
-                        let from_end = count.checked_sub(index + 1)?;
-                        match from_end {
-                            0 => Some((*segment_id, 1.0)),
-                            1 => Some((*segment_id, 0.45)),
-                            _ => None,
-                        }
-                    })
-            })
-            .collect::<HashMap<_, _>>();
         let mut river_curves = river_plan
             .segments
             .iter()
@@ -162,10 +142,6 @@ impl<'a> MacroFieldRasterContext<'a> {
                         water_width_blocks: plan.bed_width_blocks,
                         valley_width_blocks: plan.broad_valley_width_blocks,
                         bed_depth_blocks: plan.bed_depth_blocks,
-                        terminal_mouth_factor: terminal_mouth_factors
-                            .get(&plan.segment_id)
-                            .copied()
-                            .unwrap_or(0.0),
                     })
             })
             .collect::<Vec<_>>();
@@ -522,7 +498,6 @@ pub(super) struct RiverCurveRef {
     pub(super) water_width_blocks: f32,
     pub(super) valley_width_blocks: f32,
     pub(super) bed_depth_blocks: f32,
-    pub(super) terminal_mouth_factor: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
