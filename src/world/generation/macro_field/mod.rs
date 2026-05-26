@@ -2,10 +2,10 @@ use rayon::prelude::*;
 
 mod context;
 mod contour;
+mod geometry;
 mod height;
 mod influence;
 mod ocean;
-mod river;
 #[cfg(test)]
 pub(in crate::world::generation::macro_field) mod test_support;
 mod types;
@@ -18,13 +18,13 @@ use crate::world::generation::boundary::BoundaryCache;
 use crate::world::generation::graph::{VoronoiGraphPatch, WorldPlanePoint};
 use crate::world::generation::macro_map::{GraphMacroMap, MacroSurfaceKind};
 use crate::world::generation::river_plan::RiverPlan;
+use geometry::polyline_distance;
 use height::{
-    combine_macro_height_with_estuary_profile, combine_macro_height_with_river_profile, envelope,
-    is_lake_surface, ridge_envelope, roughened_distance,
+    combine_macro_height_without_river, envelope, is_lake_surface, ridge_envelope,
+    roughened_distance,
 };
 use influence::{MacroFieldInfluenceSample, macro_field_stats, rasterize_influence_fields};
 use ocean::prune_isolated_ocean_fragments;
-use river::polyline_distance;
 
 pub fn generate_macro_field_tile(
     patch: &VoronoiGraphPatch,
@@ -112,31 +112,11 @@ pub fn sample_macro_field_point(
             )
         })
         .fold(0.0, f32::max);
-    let river_influence = context.river_valley(position, config);
-    let river_distance_blocks = river_influence.distance_blocks;
-    let river_flow_hint = river_influence.flow_hint;
-    let river_longitudinal_blocks = 0.0;
-    let river_core_strength = river_influence.core_strength;
-    let river_shoulder_strength = river_influence.shoulder_strength;
-    let river_valley_strength = river_influence.valley_strength;
-    let combined_macro_height = combine_macro_height_with_river_profile(
+    let combined_macro_height = combine_macro_height_without_river(
         macro_elevation,
         ocean_mask,
-        coast_mask,
-        lake_mask,
-        dry_basin_mask,
         owner_sample.lake_lowering_factor,
         ridge_influence,
-        river_shoulder_strength,
-        river_core_strength,
-        river_flow_hint,
-        river_influence.bed_depth_hint,
-        river_influence.bank_roughness_hint,
-        river_influence.gravel_hint,
-        river_influence.cutbank_hint,
-        None,
-        river_longitudinal_blocks,
-        Some(position),
         config,
     );
     MacroFieldSample {
@@ -151,16 +131,16 @@ pub fn sample_macro_field_point(
         lake_mask,
         dry_basin_mask,
         ridge_influence,
-        river_core_strength,
-        river_shoulder_strength,
-        river_valley_strength,
-        river_distance_blocks,
-        river_flow_hint,
-        river_longitudinal_blocks,
-        river_core_depth_hint: river_influence.bed_depth_hint,
-        river_bank_roughness_hint: river_influence.bank_roughness_hint,
-        river_gravel_hint: river_influence.gravel_hint,
-        river_cutbank_hint: river_influence.cutbank_hint,
+        river_core_strength: 0.0,
+        river_shoulder_strength: 0.0,
+        river_valley_strength: 0.0,
+        river_distance_blocks: f32::INFINITY,
+        river_flow_hint: 0.0,
+        river_longitudinal_blocks: 0.0,
+        river_core_depth_hint: 0.0,
+        river_bank_roughness_hint: 0.0,
+        river_gravel_hint: 0.0,
+        river_cutbank_hint: 0.0,
         estuary_water_strength: 0.0,
         estuary_water_depth_hint: 0.0,
         combined_macro_height,
@@ -196,60 +176,13 @@ fn sample_macro_field_point_with_influence(
         .max(site_coastness)
         .clamp(0.0, 1.0);
     let ridge_influence = influence.ridge_influence;
-    let river_distance_blocks = influence.river_distance_blocks;
-    let river_flow_hint = influence.river_flow_hint;
-    let river_longitudinal_blocks = influence.river_longitudinal_blocks;
-    let river_centerline_macro_elevation = influence
-        .river_centerline_position
-        .map(|centerline| context.owner_sample(centerline, config).macro_elevation);
-    let river_core_strength = influence.river_core_strength;
-    let river_shoulder_strength = influence.river_shoulder_strength;
-    let river_valley_strength = influence.river_valley_strength;
-    let combined_macro_height = combine_macro_height_with_estuary_profile(
+    let combined_macro_height = combine_macro_height_without_river(
         macro_elevation,
         ocean_mask,
-        coast_mask,
-        lake_mask,
-        dry_basin_mask,
         owner_sample.lake_lowering_factor,
         ridge_influence,
-        river_shoulder_strength,
-        river_core_strength,
-        river_flow_hint,
-        influence.river_bed_depth_hint,
-        influence.river_bank_roughness_hint,
-        influence.river_gravel_hint,
-        influence.river_cutbank_hint,
-        river_centerline_macro_elevation,
-        river_longitudinal_blocks,
-        Some(position),
-        influence.estuary_strength,
-        influence.estuary_flow_hint,
-        influence.estuary_bed_depth_hint,
-        influence.estuary_along_blocks,
         config,
     );
-    let estuary_water_strength = influence.estuary_water_strength;
-    let estuary_supplies_water = estuary_water_strength > river_core_strength
-        && influence.estuary_flow_hint > 0.0
-        && lake_mask <= 0.5
-        && dry_basin_mask <= 0.5;
-    let sample_river_core_strength = river_core_strength.max(estuary_water_strength);
-    let sample_river_shoulder_strength =
-        river_shoulder_strength.max(influence.estuary_strength * 0.82);
-    let sample_river_valley_strength = river_valley_strength.max(influence.estuary_strength);
-    let sample_river_flow_hint = if estuary_supplies_water {
-        river_flow_hint.max(influence.estuary_flow_hint)
-    } else {
-        river_flow_hint
-    };
-    let sample_river_core_depth_hint = if estuary_supplies_water {
-        influence
-            .river_bed_depth_hint
-            .max(influence.estuary_bed_depth_hint)
-    } else {
-        influence.river_bed_depth_hint
-    };
 
     MacroFieldSample {
         position,
@@ -263,22 +196,18 @@ fn sample_macro_field_point_with_influence(
         lake_mask,
         dry_basin_mask,
         ridge_influence,
-        river_core_strength: sample_river_core_strength,
-        river_shoulder_strength: sample_river_shoulder_strength,
-        river_valley_strength: sample_river_valley_strength,
-        river_distance_blocks,
-        river_flow_hint: sample_river_flow_hint,
-        river_longitudinal_blocks,
-        river_core_depth_hint: sample_river_core_depth_hint,
-        river_bank_roughness_hint: influence.river_bank_roughness_hint,
-        river_gravel_hint: influence.river_gravel_hint,
-        river_cutbank_hint: influence.river_cutbank_hint,
-        estuary_water_strength,
-        estuary_water_depth_hint: if estuary_supplies_water {
-            influence.estuary_water_depth_hint
-        } else {
-            0.0
-        },
+        river_core_strength: 0.0,
+        river_shoulder_strength: 0.0,
+        river_valley_strength: 0.0,
+        river_distance_blocks: f32::INFINITY,
+        river_flow_hint: 0.0,
+        river_longitudinal_blocks: 0.0,
+        river_core_depth_hint: 0.0,
+        river_bank_roughness_hint: 0.0,
+        river_gravel_hint: 0.0,
+        river_cutbank_hint: 0.0,
+        estuary_water_strength: 0.0,
+        estuary_water_depth_hint: 0.0,
         combined_macro_height,
     }
 }

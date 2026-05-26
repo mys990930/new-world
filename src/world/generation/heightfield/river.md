@@ -1,11 +1,15 @@
 # heightfield/river
 
-`river.rs` owns only heightfield post-processing for river columns: river water hint descent/suppression and the narrow same-context river core step guard across a heightfield tile.
+`river.rs` is currently a reset guard, not a river realization module.
 
-River valley shape, shoulder/bank lowering, exposed river bed, river core depth, and deterministic active-channel variation are upstream responsibilities baked into `MacroFieldSample.combined_macro_height` by `macro_field`. Heightfield must not reinterpret `river_shoulder_strength`, `river_core_depth_hint`, or Q as a new terrain carve.
+`apply_river_water_descent` keeps the public post-processing hook in place while macro/heightfield
+river terrain is being redesigned. The pass clears river strengths, flow/depth/roughness diagnostics,
+`river_core_water_height_blocks`, and any accidental `RiverCore` / `RiverBed` terrain kind left by
+legacy callers.
 
-`river_core_strength` gates the selected river corridor, but active `RiverCore` is narrower than the whole lowered corridor. A lowered selected corridor sample becomes exposed `RiverBed` until its river or estuary water profile passes the flow-scaled active-core cutoff; only that lower active channel preserves `river_core_depth_blocks` and receives a river water surface. This keeps the morphology ordered as valley -> shoulder -> bed -> core -> water surface. `river_core_depth_hint` is preserved only for `RiverCore` as the water-depth diagnostic; it does not subtract terrain height in this stage. `estuary_water_depth_hint` is preserved as upstream context and can deepen water on estuary fan center samples that are already active `RiverCore`, but it does not create water on exposed `RiverBed`.
-River water height is derived from the already resolved macro core bed: the water column starts at that integer bed and rises by the river depth hint, with sea level as a lower bound for the surface. It must not be solved from the uncarved macro source height or use heightfield-local terrain downcut.
-Before the descent pass, river water is capped by adjacent local land/coast banks when such a bank is at or above sea level. Same-flow river-core neighbors pool to the same lateral water surface, so high-Q rivers do not form stepped water blocks above their core terrain surface. Once a column is eligible as `RiverCore`, neither local bank clamp nor descent limiting may erase all water solely because a lower neighboring height pulls the display surface below the already-resolved core; the core keeps at least one block of water above its terrain surface when that water is laterally supported. Support means an adjacent same-level water surface, an adjacent block at/above that water height, or a one-block descent into a downstream river/ocean/lake neighbor. `RiverBed` does not get this preserve-one-water-block rule, so upper beds cannot masquerade as lower core when the resolved surface is too high for water.
+This module must not:
 
-After river water descent, active river neighbors with nearly identical core strength, flow hint, and river distance may lower only the higher already-resolved bed so same-context lower-channel cross-section steps stay within one block. If that guard lowers a core bed, the water surface is re-aligned from its previous local depth so it remains attached to the adjusted core instead of floating at the pre-guard height. This is a smoothing guard, not a river morphology pass.
+- solve river water descent,
+- carve river bed/bank/shoulder terrain,
+- reinterpret Q or `river_core_depth_hint`,
+- override ocean/lake water policy.

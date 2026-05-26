@@ -73,10 +73,6 @@ pub fn micro_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinC
     if sample.lake_mask > 0.5 || is_submerged_ocean_source(sample, config) {
         return 0.0;
     }
-    if sample.river_core_strength > 0.5 && sample.river_flow_hint > 0.0 {
-        return river_bed_relief_blocks(sample, config);
-    }
-
     let octaves = config.octaves.max(1);
     let mut frequency = 1.0 / config.base_scale_blocks.max(f32::EPSILON);
     let mut amplitude = 1.0;
@@ -104,43 +100,11 @@ pub fn micro_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinC
     (normalized * config.amplitude_blocks).clamp(-config.max_abs_blocks, config.max_abs_blocks)
 }
 
-fn river_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
-    let core_t =
-        smoothstep01(((sample.river_core_strength.clamp(0.0, 1.0) - 0.5) / 0.5).clamp(0.0, 1.0));
-    if core_t <= f32::EPSILON {
-        return 0.0;
-    }
-    let flow_t = smoothstep01(sample.river_flow_hint.clamp(0.0, 1.0));
-    let rough = sample.river_bank_roughness_hint.clamp(0.0, 1.0);
-    let gravel = sample.river_gravel_hint.clamp(0.0, 1.0);
-    let amplitude = (config.amplitude_blocks
-        * lerp(0.14, 0.34, flow_t)
-        * (0.65 + rough * 0.35 + gravel * 0.25))
-        .min(config.max_abs_blocks * 0.55)
-        .min(5.0)
-        .max(0.0)
-        * core_t;
-    if amplitude <= f32::EPSILON {
-        return 0.0;
-    }
-
-    octave_noise_2d(
-        sample.position.x,
-        sample.position.z,
-        config,
-        lerp(0.48, 0.82, flow_t),
-        0x71,
-    ) * amplitude
-}
-
 pub fn ocean_bed_relief_blocks(sample: &MacroFieldSample, config: HeightfieldPerlinConfig) -> f32 {
     if !config.enabled || config.amplitude_blocks <= 0.0 || config.max_abs_blocks <= 0.0 {
         return 0.0;
     }
     if sample.ocean_mask <= 0.5 || sample.lake_mask > 0.5 {
-        return 0.0;
-    }
-    if sample.river_core_strength > 0.5 && sample.river_flow_hint > 0.0 {
         return 0.0;
     }
 

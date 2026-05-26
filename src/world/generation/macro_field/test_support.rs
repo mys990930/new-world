@@ -1,6 +1,5 @@
 use super::contour::*;
 use super::generate_macro_field_tile;
-use super::height::*;
 use super::influence::*;
 use super::types::*;
 use crate::world::generation::boundary::{
@@ -12,13 +11,11 @@ use crate::world::generation::graph::{
     VoronoiGraphConfig, VoronoiGraphPatchRequest, VoronoiSiteId, WorldPlanePoint,
     generate_voronoi_graph_patch,
 };
-use crate::world::generation::hydrology::{GraphHydrologyGraph, HydrologyConfig, solve_hydrology};
+use crate::world::generation::hydrology::{HydrologyConfig, solve_hydrology};
 use crate::world::generation::macro_map::{
     GraphMacroMap, MacroMapConfig, MacroSite, MacroSurfaceKind, generate_macro_map,
 };
-use crate::world::generation::river_plan::{
-    DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan, RiverPlanConfig, build_river_plan,
-};
+use crate::world::generation::river_plan::{RiverPlan, RiverPlanConfig, build_river_plan};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(in crate::world::generation::macro_field) struct NeighborDeltaSummary {
@@ -245,7 +242,6 @@ pub(in crate::world::generation::macro_field) struct TestInputs {
     pub(in crate::world::generation::macro_field) patch:
         crate::world::generation::graph::VoronoiGraphPatch,
     pub(in crate::world::generation::macro_field) macro_map: GraphMacroMap,
-    pub(in crate::world::generation::macro_field) hydrology: GraphHydrologyGraph,
     pub(in crate::world::generation::macro_field) river_plan: RiverPlan,
     pub(in crate::world::generation::macro_field) boundary: BoundaryCache,
 }
@@ -270,7 +266,6 @@ pub(in crate::world::generation::macro_field) fn test_inputs(seed: u64) -> TestI
     TestInputs {
         patch,
         macro_map,
-        hydrology,
         river_plan,
         boundary,
     }
@@ -278,50 +273,6 @@ pub(in crate::world::generation::macro_field) fn test_inputs(seed: u64) -> TestI
 
 pub(in crate::world::generation::macro_field) fn test_tile_config() -> MacroFieldTileConfig {
     MacroFieldTileConfig::new(-512.0, -512.0, 24, 24, 64.0)
-}
-
-pub(in crate::world::generation::macro_field) fn test_noisy_curve(
-    edge: u32,
-    points: Vec<WorldPlanePoint>,
-) -> NoisyBoundaryCurve {
-    let start = points
-        .first()
-        .copied()
-        .unwrap_or_else(|| WorldPlanePoint::new(0.0, 0.0));
-    let end = points.last().copied().unwrap_or(start);
-    let (mut min_x, mut max_x) = (start.x, start.x);
-    let (mut min_z, mut max_z) = (start.z, start.z);
-    for point in &points {
-        min_x = min_x.min(point.x);
-        max_x = max_x.max(point.x);
-        min_z = min_z.min(point.z);
-        max_z = max_z.max(point.z);
-    }
-    NoisyBoundaryCurve {
-        edge: VoronoiEdgeId(edge as u64),
-        profile: BoundaryProfile::Ordinary,
-        anchors: BoundaryAnchors {
-            corners: [
-                VoronoiCornerId(edge as u64 * 2),
-                VoronoiCornerId(edge as u64 * 2 + 1),
-            ],
-            sites: [
-                VoronoiSiteId(edge as u64 * 2),
-                VoronoiSiteId(edge as u64 * 2 + 1),
-            ],
-            start,
-            end,
-        },
-        points,
-        amplitude: 0.0,
-        seed: edge as u64,
-        guard: BoundaryGuard {
-            min_x: min_x - 64.0,
-            max_x: max_x + 64.0,
-            min_z: min_z - 64.0,
-            max_z: max_z + 64.0,
-        },
-    }
 }
 
 pub(in crate::world::generation::macro_field) fn test_junction_curve(
@@ -353,76 +304,6 @@ pub(in crate::world::generation::macro_field) fn test_junction_curve(
     }
 }
 
-pub(in crate::world::generation::macro_field) fn test_river_source<'a>(
-    curve: &'a NoisyBoundaryCurve,
-    flow_hint: f32,
-) -> RiverRasterSource<'a> {
-    RiverRasterSource {
-        edge: curve.edge,
-        points: &curve.points,
-        longitudinal_start_blocks: 0.0,
-        flow_hint,
-        water_width_blocks: lerp(
-            1.5,
-            DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS,
-            flow_hint.clamp(0.0, 1.0),
-        ),
-        valley_width_blocks: lerp(4.0, 180.0, flow_hint.clamp(0.0, 1.0)),
-        bed_depth_blocks: lerp(1.5, 18.0, flow_hint.clamp(0.0, 1.0)),
-        component_id: 0,
-    }
-}
-
-pub(in crate::world::generation::macro_field) fn test_river_raster_field(
-    width: usize,
-    height: usize,
-) -> RasterDistanceField {
-    let sample_count = width * height;
-    RasterDistanceField {
-        distance_blocks: vec![f32::INFINITY; sample_count],
-        river_core_strength: vec![0.0; sample_count],
-        river_shoulder_strength: vec![0.0; sample_count],
-        river_valley_strength: vec![0.0; sample_count],
-        river_centerline_x: vec![f32::NAN; sample_count],
-        river_centerline_z: vec![f32::NAN; sample_count],
-        river_longitudinal_blocks: vec![f32::NAN; sample_count],
-        flow_hint: vec![0.0; sample_count],
-        river_bed_depth_hint: vec![0.0; sample_count],
-        river_bank_roughness_hint: vec![0.0; sample_count],
-        river_gravel_hint: vec![0.0; sample_count],
-        river_cutbank_hint: vec![0.0; sample_count],
-        source_pixel_count: 0,
-    }
-}
-
-pub(in crate::world::generation::macro_field) fn set_river_raster_strength(
-    field: &mut RasterDistanceField,
-    width: usize,
-    x: usize,
-    z: usize,
-    strength: f32,
-) {
-    let index = z * width + x;
-    field.river_core_strength[index] = strength;
-    field.river_shoulder_strength[index] = strength;
-    field.river_valley_strength[index] = strength;
-    field.flow_hint[index] = 0.72;
-    field.distance_blocks[index] = 1.0;
-    field.river_bed_depth_hint[index] = 0.45;
-    field.river_bank_roughness_hint[index] = 0.35;
-    field.river_gravel_hint[index] = 0.25;
-}
-
-pub(in crate::world::generation::macro_field) fn flow_hint(flow_accumulation: f32) -> f32 {
-    (flow_accumulation.max(0.0).sqrt() / 32.0).clamp(0.0, 1.0)
-}
-
-pub(in crate::world::generation::macro_field) fn centered_test_tile_config(
-    center: WorldPlanePoint,
-) -> MacroFieldTileConfig {
-    MacroFieldTileConfig::new(center.x - 512.0, center.z - 512.0, 24, 24, 64.0)
-}
-
 pub(in crate::world::generation::macro_field) fn test_contour_tile(
     heights_blocks: &[f32],
     width: u32,
@@ -452,7 +333,7 @@ pub(in crate::world::generation::macro_field) fn test_contour_tile(
                 river_distance_blocks: f32::INFINITY,
                 river_flow_hint: 0.0,
                 river_longitudinal_blocks: 0.0,
-                river_bed_depth_hint: 0.0,
+                river_core_depth_hint: 0.0,
                 river_bank_roughness_hint: 0.0,
                 river_gravel_hint: 0.0,
                 river_cutbank_hint: 0.0,

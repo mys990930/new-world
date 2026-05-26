@@ -1,21 +1,17 @@
 use std::collections::HashMap;
 
+use super::geometry::{
+    curve_bucket, curve_bucket_search_radius, nearest_polyline_segment, polyline_distance,
+    signed_side, site_bucket, squared_distance, usable_side,
+};
 use super::height::{
-    boundary_roughness_offset, is_lake_surface, lake_boundary_lowering_factor, lerp, smoothstep01,
+    boundary_roughness_offset, is_lake_surface, lake_boundary_lowering_factor, smoothstep01,
 };
 use super::influence::RIDGE_FIELD_SOURCE_MIN_RIDGENESS;
-use super::river::{
-    RiverInfluenceSample, curve_bucket, curve_bucket_search_radius, flow_hint_from_plan,
-    nearest_polyline_segment, polyline_distance, river_influence_sample, signed_side, site_bucket,
-    squared_distance, usable_side,
-};
 use super::types::MacroFieldTileConfig;
 use crate::world::generation::biome::GraphBiomeCell;
 use crate::world::generation::boundary::{BoundaryCache, BoundaryJunction, NoisyBoundaryCurve};
-use crate::world::generation::graph::{
-    VoronoiEdgeId, VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint,
-};
-use crate::world::generation::hydrology::GraphDrainageNodeKind;
+use crate::world::generation::graph::{VoronoiGraphPatch, VoronoiSiteId, WorldPlanePoint};
 use crate::world::generation::macro_map::{GraphMacroMap, MacroSite};
 use crate::world::generation::river_plan::RiverPlan;
 
@@ -40,16 +36,13 @@ pub struct MacroFieldRasterContext<'a> {
     pub(super) coast_grid: CurveIndexGrid,
     pub(super) ridge_curves: Vec<&'a NoisyBoundaryCurve>,
     pub(super) ridge_grid: CurveIndexGrid,
-    pub(super) river_curves: Vec<RiverCurveRef>,
-    pub(super) river_grid: CurveIndexGrid,
-    pub(super) estuary_fans: Vec<EstuaryFanRef>,
 }
 
 impl<'a> MacroFieldRasterContext<'a> {
     pub fn new(
         _patch: &'a VoronoiGraphPatch,
         macro_map: &'a GraphMacroMap,
-        river_plan: &'a RiverPlan,
+        _river_plan: &'a RiverPlan,
         boundary: &'a BoundaryCache,
     ) -> Self {
         let macro_edges = macro_map
@@ -98,89 +91,6 @@ impl<'a> MacroFieldRasterContext<'a> {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        let mut chain_lengths = HashMap::new();
-        for plan in &river_plan.segments {
-            *chain_lengths.entry(plan.chain_id).or_insert(0.0) +=
-                plan.segment_length_blocks.max(0.0);
-        }
-        let terminal_chain_ids = river_plan
-            .chains
-            .iter()
-            .filter(|chain| chain.terminal_kind == Some(GraphDrainageNodeKind::CoastOutlet))
-            .map(|chain| (chain.id, chain.segment_ids.last().copied()))
-            .collect::<HashMap<_, _>>();
-        let mut river_curves = river_plan
-            .segments
-            .iter()
-            .filter_map(|plan| {
-                let chain_length = chain_lengths.get(&plan.chain_id).copied().unwrap_or(0.0);
-                let longitudinal_start_blocks = (plan.chain_downstream_progress * chain_length
-                    - plan.segment_length_blocks.max(0.0) * 0.5)
-                    .max(0.0);
-                boundary_curves
-                    .get(&plan.edge)
-                    .copied()
-                    .map(|curve| RiverCurveRef {
-                        edge: plan.edge,
-                        points: curve.points.clone(),
-                        longitudinal_start_blocks,
-                        flow_hint: flow_hint_from_plan(plan),
-                        water_width_blocks: plan.bed_width_blocks,
-                        valley_width_blocks: plan.broad_valley_width_blocks,
-                        bed_depth_blocks: plan.bed_depth_blocks,
-                    })
-            })
-            .collect::<Vec<_>>();
-        river_curves.sort_by_key(|river| river.edge.0);
-        let mut estuary_fans = river_plan
-            .segments
-            .iter()
-            .filter_map(|plan| {
-                let terminal_segment = terminal_chain_ids
-                    .get(&plan.chain_id)
-                    .copied()
-                    .flatten()
-                    .is_some_and(|segment_id| segment_id == plan.segment_id);
-                if !terminal_segment {
-                    return None;
-                }
-                let endpoints = river_plan.endpoints(plan.segment_id)?;
-                let dx = endpoints.to_position.x - endpoints.from_position.x;
-                let dz = endpoints.to_position.z - endpoints.from_position.z;
-                let length = (dx * dx + dz * dz).sqrt();
-                if length <= f32::EPSILON {
-                    return None;
-                }
-                let flow_hint = flow_hint_from_plan(plan);
-                let (start_half_width_blocks, end_half_width_blocks) =
-                    estuary_fan_half_widths_blocks(
-                        plan.bed_width_blocks,
-                        plan.broad_valley_width_blocks,
-                        flow_hint,
-                    );
-                let length_blocks = estuary_fan_length_blocks(
-                    plan.bed_width_blocks,
-                    plan.broad_valley_width_blocks,
-                    flow_hint,
-                );
-                Some(EstuaryFanRef {
-                    segment_id: plan.segment_id.0,
-                    origin: endpoints.downstream_position,
-                    direction_x: dx / length,
-                    direction_z: dz / length,
-                    start_half_width_blocks,
-                    end_half_width_blocks,
-                    length_blocks,
-                    flow_hint,
-                    bed_depth_hint: estuary_bed_depth_hint(
-                        plan.bed_depth_blocks,
-                        plan.segment_length_blocks,
-                    ),
-                    water_depth_hint: estuary_water_depth_hint(plan.bed_depth_blocks, flow_hint),
-                })
-            })
-            .collect::<Vec<_>>();
-        estuary_fans.sort_by_key(|fan| fan.segment_id);
         let mut boundary_edges = macro_map
             .edges
             .iter()
@@ -197,7 +107,6 @@ impl<'a> MacroFieldRasterContext<'a> {
         let junction_grid = JunctionIndexGrid::from_junctions(&junctions);
         let coast_grid = CurveIndexGrid::from_curves(&coast_curves);
         let ridge_grid = CurveIndexGrid::from_curves(&ridge_curves);
-        let river_grid = CurveIndexGrid::from_river_curves(&river_curves);
 
         Self {
             sites: &macro_map.sites,
@@ -212,9 +121,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             coast_grid,
             ridge_curves,
             ridge_grid,
-            river_curves,
-            river_grid,
-            estuary_fans,
         }
     }
 
@@ -430,125 +336,6 @@ impl<'a> MacroFieldRasterContext<'a> {
             .map(|curve| polyline_distance(position, &curve.points))
             .min_by(f32::total_cmp)
     }
-
-    pub(super) fn river_valley(
-        &self,
-        position: WorldPlanePoint,
-        config: MacroFieldTileConfig,
-    ) -> RiverInfluenceSample {
-        let Some((sample, _edge)) = self
-            .river_grid
-            .candidate_indices(position, config.river_radius_blocks)
-            .into_iter()
-            .filter_map(|index| self.river_curves.get(index))
-            .map(|river| {
-                Some((
-                    river_influence_sample(
-                        position,
-                        &river.points,
-                        river.flow_hint,
-                        river.water_width_blocks,
-                        river.valley_width_blocks,
-                        river.bed_depth_blocks,
-                        config.river_radius_blocks,
-                        config.boundary_roughness_blocks,
-                    ),
-                    river.edge,
-                ))
-            })
-            .flatten()
-            .min_by(|left, right| {
-                left.0
-                    .distance_blocks
-                    .total_cmp(&right.0.distance_blocks)
-                    .then_with(|| left.1.0.cmp(&right.1.0))
-            })
-        else {
-            return RiverInfluenceSample {
-                distance_blocks: f32::INFINITY,
-                ..RiverInfluenceSample::default()
-            };
-        };
-
-        sample
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct RiverCurveRef {
-    pub(super) edge: VoronoiEdgeId,
-    pub(super) points: Vec<WorldPlanePoint>,
-    pub(super) longitudinal_start_blocks: f32,
-    pub(super) flow_hint: f32,
-    pub(super) water_width_blocks: f32,
-    pub(super) valley_width_blocks: f32,
-    pub(super) bed_depth_blocks: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct EstuaryFanRef {
-    pub(super) segment_id: u64,
-    pub(super) origin: WorldPlanePoint,
-    pub(super) direction_x: f32,
-    pub(super) direction_z: f32,
-    pub(super) start_half_width_blocks: f32,
-    pub(super) end_half_width_blocks: f32,
-    pub(super) length_blocks: f32,
-    pub(super) flow_hint: f32,
-    pub(super) bed_depth_hint: f32,
-    pub(super) water_depth_hint: f32,
-}
-
-pub(super) fn estuary_fan_half_widths_blocks(
-    bed_width_blocks: f32,
-    broad_valley_width_blocks: f32,
-    flow_hint: f32,
-) -> (f32, f32) {
-    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
-    let water_width = bed_width_blocks.max(1.0);
-    let valley_width = broad_valley_width_blocks.max(water_width).max(8.0);
-    let start_half_width_blocks = (water_width * lerp(0.62, 0.80, flow_t))
-        .max(8.0)
-        .min(valley_width * 0.90);
-    let water_spread = water_width * lerp(1.35, 3.60, flow_t);
-    let valley_spread = valley_width * lerp(0.35, 0.68, flow_t);
-    let min_spread = start_half_width_blocks * lerp(2.20, 3.35, flow_t);
-    let end_half_width_blocks = (start_half_width_blocks + water_spread + valley_spread)
-        .max(min_spread)
-        .max(start_half_width_blocks * 2.0);
-
-    (start_half_width_blocks, end_half_width_blocks)
-}
-
-pub(super) fn estuary_fan_length_blocks(
-    bed_width_blocks: f32,
-    broad_valley_width_blocks: f32,
-    flow_hint: f32,
-) -> f32 {
-    let flow_t = smoothstep01(flow_hint.clamp(0.0, 1.0));
-    let low_flow_reach_floor = 144.0 - flow_t * 40.0;
-    let valley_reach = broad_valley_width_blocks.max(8.0) * (1.15 + flow_t * 1.20);
-    let bed_reach = bed_width_blocks.max(1.0) * (4.5 + flow_t * 3.5);
-    valley_reach
-        .max(bed_reach)
-        .max(low_flow_reach_floor)
-        .clamp(96.0, 768.0)
-}
-
-pub(super) fn estuary_bed_depth_hint(
-    bed_depth_blocks: f32,
-    _terminal_segment_length_blocks: f32,
-) -> f32 {
-    (bed_depth_blocks / 40.0).clamp(0.0, 1.0)
-}
-
-pub(super) fn estuary_water_depth_hint(bed_depth_blocks: f32, flow_hint: f32) -> f32 {
-    let flow = flow_hint.clamp(0.0, 1.0);
-    let flow_t = smoothstep01(flow);
-    let planned_depth_blocks = bed_depth_blocks.max(0.0);
-    let minimum_depth_blocks = 1.5 + flow_t * 4.5;
-    let fill_ratio = (0.70 + flow * 0.10).clamp(0.58, 0.82);
-    (planned_depth_blocks.max(minimum_depth_blocks) * fill_ratio / 40.0).clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -714,15 +501,6 @@ impl CurveIndexGrid {
         let mut grid = Self::default();
         for (index, edge) in edges.iter().enumerate() {
             grid.insert_curve(index, &edge.curve.points);
-        }
-        grid.dedup_bucket_entries();
-        grid
-    }
-
-    fn from_river_curves(curves: &[RiverCurveRef]) -> Self {
-        let mut grid = Self::default();
-        for (index, curve) in curves.iter().enumerate() {
-            grid.insert_curve(index, &curve.points);
         }
         grid.dedup_bucket_entries();
         grid
@@ -926,74 +704,6 @@ mod tests {
     use crate::world::generation::river_plan::{
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
-
-    #[test]
-    fn low_flow_estuary_fan_keeps_practical_downstream_reach() {
-        let headwater = estuary_fan_length_blocks(2.0, 14.0, 0.02);
-        let downstream = estuary_fan_length_blocks(96.0, 280.0, 0.85);
-
-        assert!(
-            headwater >= 128.0,
-            "low-Q river mouths still need enough fan reach to meet nearby connected ocean: {headwater}"
-        );
-        assert!(
-            downstream > headwater,
-            "large downstream mouths should still spread farther than the low-Q minimum: headwater={headwater} downstream={downstream}"
-        );
-    }
-
-    #[test]
-    fn estuary_fan_width_tracks_terminal_water_width() {
-        let (small_start, small_end) = estuary_fan_half_widths_blocks(12.0, 36.0, 0.20);
-        let (large_start, large_end) = estuary_fan_half_widths_blocks(120.0, 280.0, 0.85);
-
-        assert!(
-            small_start * 2.0 >= 12.0,
-            "small mouth fan should begin at least as wide as the planned water width: {small_start}"
-        );
-        assert!(
-            large_start * 2.0 >= 120.0 * 1.20,
-            "large mouth fan lip should not pinch narrower than the existing downstream water: {large_start}"
-        );
-        assert!(
-            large_end > small_end * 6.0,
-            "fan spread should scale with terminal water width instead of using a nearly fixed mouth: small={small_end} large={large_end}"
-        );
-        assert!(
-            large_end > large_start * 3.0,
-            "large estuary fans should visibly spread downstream: start={large_start} end={large_end}"
-        );
-    }
-
-    #[test]
-    fn estuary_depth_hint_preserves_terminal_bed_context() {
-        let short = estuary_bed_depth_hint(32.0, 24.0);
-        let long = estuary_bed_depth_hint(32.0, 256.0);
-
-        assert!(
-            (short - long).abs() <= f32::EPSILON,
-            "estuary fan slope is height-profile responsibility; the depth hint should keep terminal river context: short={short} long={long}"
-        );
-        assert!(
-            long > 0.75,
-            "long final segments keep the planned river-mouth bed depth hint: {long}"
-        );
-    }
-
-    #[test]
-    fn estuary_water_depth_hint_keeps_terminal_water_depth_separate_from_bed_carve() {
-        let bed = estuary_bed_depth_hint(32.0, 24.0);
-        let water = estuary_water_depth_hint(32.0, 0.82);
-
-        assert!(
-            water > 0.0 && water < bed,
-            "water continuation should remain a separate filled-surface depth hint above the terminal bed: bed={bed} water={water}"
-        );
-        assert!(
-            water < 1.0,
-            "normalized estuary water depth hint must stay bounded: {water}"
-        );
-    }
 
     #[test]
     fn nearest_site_search_does_not_stop_at_first_nonempty_bucket_ring() {

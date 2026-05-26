@@ -25,18 +25,10 @@ pub(super) fn resolve_contour_band_height(value: f32, contour: HeightfieldContou
 }
 
 pub(super) fn contour_config_for_sample(
-    sample: &MacroFieldSample,
+    _sample: &MacroFieldSample,
     config: HeightfieldConfig,
 ) -> HeightfieldContourConfig {
-    let mut contour = config.contour;
-    if sample.river_core_strength >= config.river_water_threshold * 0.5
-        && sample.river_flow_hint > 0.0
-    {
-        contour.min_gap_blocks = contour
-            .min_gap_blocks
-            .min(contour.river_min_gap_blocks.max(0.0));
-    }
-    contour
+    config.contour
 }
 
 pub(super) fn snap_to_contour_step(value: f32, contour: HeightfieldContourConfig) -> f32 {

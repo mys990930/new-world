@@ -24,7 +24,7 @@ pub struct HeightfieldTileStats {
     pub water_column_count: usize,
     pub ocean_column_count: usize,
     pub lake_column_count: usize,
-    pub river_hint_column_count: usize,
+    pub river_core_column_count: usize,
     pub dry_basin_column_count: usize,
     pub ridge_column_count: usize,
 }
@@ -76,7 +76,6 @@ pub(super) fn heightfield_stats(
     let mut water = 0usize;
     let mut ocean = 0usize;
     let mut lake = 0usize;
-    let mut river = 0usize;
     let mut dry = 0usize;
     let mut ridge = 0usize;
     let mut min_ocean_visible = f32::INFINITY;
@@ -99,7 +98,8 @@ pub(super) fn heightfield_stats(
                 max_ocean_visible = max_ocean_visible.max(visible);
             }
             HeightfieldTerrainKind::Lake => lake += 1,
-            HeightfieldTerrainKind::River => river += 1,
+            HeightfieldTerrainKind::RiverCore => {}
+            HeightfieldTerrainKind::RiverBed => {}
             HeightfieldTerrainKind::DryBasin => dry += 1,
             HeightfieldTerrainKind::Ridge => ridge += 1,
             HeightfieldTerrainKind::Coast | HeightfieldTerrainKind::Land => {}
@@ -139,7 +139,7 @@ pub(super) fn heightfield_stats(
         water_column_count: water,
         ocean_column_count: ocean,
         lake_column_count: lake,
-        river_hint_column_count: river,
+        river_core_column_count: 0,
         dry_basin_column_count: dry,
         ridge_column_count: ridge,
     }
@@ -165,72 +165,12 @@ fn min_land_near_standing_water(columns: &[HeightfieldColumn]) -> f32 {
     min_land.is_finite().then_some(min_land).unwrap_or(0.0)
 }
 
-fn max_river_water_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
-    if columns.len() < 2 {
-        return 0.0;
-    }
-    let width = infer_row_width(columns);
-    let height = columns.len().div_ceil(width);
-    let mut max_delta = 0.0f32;
-    for (index, column) in columns.iter().enumerate() {
-        if !matches!(column.terrain_kind, HeightfieldTerrainKind::River) {
-            continue;
-        }
-        let Some(water) = column.river_water_height_blocks else {
-            continue;
-        };
-        for neighbor in neighbor_indices(index, width, height) {
-            let neighbor_column = columns[neighbor];
-            if matches!(
-                neighbor_column.terrain_kind,
-                HeightfieldTerrainKind::River
-                    | HeightfieldTerrainKind::Ocean
-                    | HeightfieldTerrainKind::Lake
-            ) {
-                if let Some(neighbor_water) = neighbor_column.water_level_blocks {
-                    max_delta = max_delta.max((water - neighbor_water).abs());
-                }
-            }
-        }
-    }
-    max_delta
+fn max_river_water_neighbor_delta(_columns: &[HeightfieldColumn]) -> f32 {
+    0.0
 }
 
-fn river_uphill_flow_neighbor_count(columns: &[HeightfieldColumn]) -> usize {
-    if columns.len() < 2 {
-        return 0;
-    }
-    let width = infer_row_width(columns);
-    let height = columns.len().div_ceil(width);
-    let mut count = 0usize;
-    for (index, column) in columns.iter().enumerate() {
-        if !matches!(column.terrain_kind, HeightfieldTerrainKind::River) {
-            continue;
-        }
-        let Some(water) = column.river_water_height_blocks else {
-            continue;
-        };
-        for neighbor in neighbor_indices(index, width, height).filter(|neighbor| *neighbor > index)
-        {
-            let neighbor_column = columns[neighbor];
-            if !matches!(neighbor_column.terrain_kind, HeightfieldTerrainKind::River) {
-                continue;
-            }
-            let Some(neighbor_water) = neighbor_column.river_water_height_blocks else {
-                continue;
-            };
-            if neighbor_column.river_flow_hint > column.river_flow_hint + 0.01
-                && neighbor_water > water
-            {
-                count += 1;
-            } else if column.river_flow_hint > neighbor_column.river_flow_hint + 0.01
-                && water > neighbor_water
-            {
-                count += 1;
-            }
-        }
-    }
-    count
+fn river_uphill_flow_neighbor_count(_columns: &[HeightfieldColumn]) -> usize {
+    0
 }
 
 fn max_shore_neighbor_delta(columns: &[HeightfieldColumn]) -> f32 {
