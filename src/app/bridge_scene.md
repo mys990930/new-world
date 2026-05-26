@@ -45,7 +45,7 @@
 - bridge_scene must not emit app-authored ground-shadow quads; dynamic actor cubes rely on renderer-owned shadow-map rendering
 - floating block drops use world block face texture layers and material mapping, but they do not mutate or own world block data
 - interaction selection and damaged-block feedback use solid highlight tint rather than block textures, avoiding translucent texture/depth artifacts on faces that overlap terrain
-- build placement previews use the selected block's top/bottom/side texture layers and material mapping, with bridge-owned alpha tint to show the actual block that will be placed
+- build placement previews use the selected block's top/bottom/side texture layers and material mapping, with bridge-owned alpha tint strong enough to preserve the selected block's texture color
 - voxel-player parts are emitted with opaque actor alpha; renderer pass selection, not bridge ordering, is responsible for depth-correct player opacity
 - player-covering terrain fade targets are emitted separately from dynamic cubes so the renderer can handle terrain depth and alpha pass ordering while allowing softened terrain to cover player voxels when desired
 - world-select mode must emit UI-only frames without scene cubes or visible chunks

@@ -344,7 +344,7 @@ fn push_selection_preview_instances(
             .map(|block_id| {
                 let def = world.block_registry().block_or_missing(block_id);
                 let mut color = def.tint_as_linear_rgba();
-                color[3] = 0.46;
+                color[3] = 0.68;
                 (
                     color,
                     block_face_texture_layers(world.block_registry(), block_id),
@@ -704,7 +704,7 @@ mod tests {
         assert_eq!(preview.bottom_texture_layer, expected_layers[1]);
         assert_eq!(preview.side_texture_layer, expected_layers[2]);
         assert_eq!(preview.material_kind, RenderMaterialKind::Grass);
-        assert!(preview.color[3] > 0.3 && preview.color[3] < 0.7);
+        assert!(preview.color[3] > 0.6 && preview.color[3] < 0.8);
     }
 
     fn test_visual_state(animation_seconds: f32) -> VoxelPlayerVisualState {

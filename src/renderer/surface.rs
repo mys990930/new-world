@@ -778,7 +778,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::REPLACE),
         true,
-        Some(wgpu::Face::Back),
+        Some(wgpu::Face::Front),
     );
     let dynamic_cube_pipeline = create_render_pipeline(
         &device,
@@ -790,7 +790,7 @@ async fn create_backend(
         wgpu::PrimitiveTopology::TriangleList,
         Some(wgpu::BlendState::ALPHA_BLENDING),
         false,
-        Some(wgpu::Face::Back),
+        Some(wgpu::Face::Front),
     );
     let ui_sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("renderer_ui_sprite_pipeline"),
