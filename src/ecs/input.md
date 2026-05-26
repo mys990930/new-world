@@ -51,7 +51,7 @@
 - `quickslot_scroll_steps` becomes `CycleQuickslot`
 - `select_quickslot` becomes `SelectQuickslot`
 - `zoom_scroll_delta` is left as frame-local continuous camera input and is consumed by `camera.rs`
-- the app bridge maps plain wheel into quickslot cycling and `Ctrl + wheel` into camera zoom
+- the app bridge maps plain wheel into quickslot cycling and gives `Ctrl + wheel` priority as camera zoom
 - when `active == false` or `focused == false`, gameplay commands are not produced, but the internal tool cooldown still advances
 - inventory-open UI still allows inventory/mode/quickslot commands to be produced, but movement/world interaction should be suppressed by downstream ECS systems
 

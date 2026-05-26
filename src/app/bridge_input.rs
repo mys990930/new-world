@@ -10,6 +10,7 @@ impl GameApp {
         let window = self.platform.window_state();
         let input = self.platform.raw_input_state();
         let lifecycle = self.platform.lifecycle_state();
+        let control_down = input.modifiers.control || control_key_down(&input.pressed_keys);
 
         self.ecs.insert_resource(EcsInputSnapshot {
             move_screen_x: axis(
@@ -23,12 +24,12 @@ impl GameApp {
             sprint_down: input.pressed_keys.contains(&KeyCode::ShiftLeft)
                 || input.pressed_keys.contains(&KeyCode::ShiftRight),
             jump_just_pressed: jump_just_pressed(&input.just_pressed_keys),
-            zoom_scroll_delta: if input.modifiers.control {
+            zoom_scroll_delta: if control_down {
                 input.wheel_delta.1
             } else {
                 0.0
             },
-            quickslot_scroll_steps: if input.modifiers.control {
+            quickslot_scroll_steps: if control_down {
                 0
             } else {
                 wheel_steps(input.wheel_delta.1)
@@ -63,6 +64,10 @@ fn camera_rotation_axis(q_pressed: bool, e_pressed: bool) -> i8 {
 
 fn jump_just_pressed(keys: &HashSet<KeyCode>) -> bool {
     keys.contains(&KeyCode::Space)
+}
+
+fn control_key_down(keys: &HashSet<KeyCode>) -> bool {
+    keys.contains(&KeyCode::ControlLeft) || keys.contains(&KeyCode::ControlRight)
 }
 
 fn wheel_steps(delta_y: f32) -> i8 {
@@ -111,5 +116,12 @@ mod tests {
     #[test]
     fn space_maps_to_jump() {
         assert!(jump_just_pressed(&HashSet::from([KeyCode::Space])));
+    }
+
+    #[test]
+    fn either_control_key_counts_as_control_down() {
+        assert!(control_key_down(&HashSet::from([KeyCode::ControlLeft])));
+        assert!(control_key_down(&HashSet::from([KeyCode::ControlRight])));
+        assert!(!control_key_down(&HashSet::from([KeyCode::ShiftLeft])));
     }
 }
