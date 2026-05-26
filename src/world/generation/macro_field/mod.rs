@@ -157,7 +157,7 @@ pub fn sample_macro_field_point(
         river_distance_blocks,
         river_flow_hint,
         river_longitudinal_blocks,
-        river_bed_depth_hint: river_influence.bed_depth_hint,
+        river_core_depth_hint: river_influence.bed_depth_hint,
         river_bank_roughness_hint: river_influence.bank_roughness_hint,
         river_gravel_hint: river_influence.gravel_hint,
         river_cutbank_hint: river_influence.cutbank_hint,
@@ -243,7 +243,7 @@ fn sample_macro_field_point_with_influence(
     } else {
         river_flow_hint
     };
-    let sample_river_bed_depth_hint = if estuary_supplies_water {
+    let sample_river_core_depth_hint = if estuary_supplies_water {
         influence
             .river_bed_depth_hint
             .max(influence.estuary_bed_depth_hint)
@@ -269,7 +269,7 @@ fn sample_macro_field_point_with_influence(
         river_distance_blocks,
         river_flow_hint: sample_river_flow_hint,
         river_longitudinal_blocks,
-        river_bed_depth_hint: sample_river_bed_depth_hint,
+        river_core_depth_hint: sample_river_core_depth_hint,
         river_bank_roughness_hint: influence.river_bank_roughness_hint,
         river_gravel_hint: influence.river_gravel_hint,
         river_cutbank_hint: influence.river_cutbank_hint,
