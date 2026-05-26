@@ -1297,9 +1297,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
                 position.x + offset_x * spacing,
                 position.z + offset_z * spacing,
             );
-            if terminal_outlet_endpoint_clips_sample(source, segment_index, subpixel, start, end) {
-                continue;
-            }
             let subpixel_distance = point_segment_distance(subpixel, start, end);
             let subpixel_t = projected_t_on_segment(subpixel, start, end);
             let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
@@ -1419,35 +1416,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             row.flow_weight_sum[x] = anti_aliased_strength;
         }
     }
-}
-
-fn terminal_outlet_endpoint_clips_sample(
-    source: &RiverRasterWorkSource,
-    segment_index: usize,
-    sample: WorldPlanePoint,
-    start: WorldPlanePoint,
-    end: WorldPlanePoint,
-) -> bool {
-    if !source.is_terminal_outlet || segment_index + 2 != source.points.len() {
-        return false;
-    }
-
-    projected_t_unclamped(sample, start, end) > 1.0
-}
-
-fn projected_t_unclamped(
-    point: WorldPlanePoint,
-    start: WorldPlanePoint,
-    end: WorldPlanePoint,
-) -> f32 {
-    let dx = end.x - start.x;
-    let dz = end.z - start.z;
-    let len2 = dx * dx + dz * dz;
-    if len2 <= f32::EPSILON {
-        return 0.0;
-    }
-
-    ((point.x - start.x) * dx + (point.z - start.z) * dz) / len2
 }
 
 fn terminal_outlet_river_taper(
@@ -2773,95 +2741,6 @@ mod tests {
                 && end_morphology.valley_width_blocks > start_morphology.valley_width_blocks
                 && end_morphology.bed_depth_blocks > start_morphology.bed_depth_blocks,
             "terminal morphology should widen/deepen downstream: start={start_morphology:?} end={end_morphology:?}"
-        );
-    }
-
-    #[test]
-    fn terminal_outlet_endpoint_clip_only_applies_beyond_final_mouth() {
-        let source = RiverRasterWorkSource {
-            is_terminal_outlet: true,
-            edge: VoronoiEdgeId(99),
-            points: vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-            cumulative_lengths: vec![0.0, 128.0],
-            longitudinal_start_blocks: 0.0,
-            flow_hint: 0.70,
-            water_width_blocks: 64.0,
-            valley_width_blocks: 180.0,
-            bed_depth_blocks: 14.0,
-            terminal_mouth_factor: 1.0,
-            component_id: 0,
-        };
-        let start = source.points[0];
-        let end = source.points[1];
-
-        assert!(
-            terminal_outlet_endpoint_clips_sample(
-                &source,
-                0,
-                WorldPlanePoint::new(144.0, 0.0),
-                start,
-                end,
-            ),
-            "terminal outlet samples downstream of the final endpoint should not keep the circular segment cap"
-        );
-        assert!(
-            !terminal_outlet_endpoint_clips_sample(
-                &source,
-                0,
-                WorldPlanePoint::new(120.0, 48.0),
-                start,
-                end,
-            ),
-            "samples inside the final segment should keep the widened mouth cross-section"
-        );
-
-        let mut inland = source.clone();
-        inland.is_terminal_outlet = false;
-        assert!(
-            !terminal_outlet_endpoint_clips_sample(
-                &inland,
-                0,
-                WorldPlanePoint::new(144.0, 0.0),
-                start,
-                end,
-            ),
-            "ordinary river segments still use the normal rounded stroke endpoint semantics"
-        );
-    }
-
-    #[test]
-    fn terminal_mouth_raster_does_not_emit_round_cap_beyond_endpoint() {
-        let curve = test_noisy_curve(
-            91,
-            vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-        );
-        let mut terminal = test_river_source(&curve, 0.72);
-        terminal.is_terminal_outlet = true;
-        terminal.water_width_blocks = 56.0;
-        terminal.valley_width_blocks = 160.0;
-        terminal.bed_depth_blocks = 12.0;
-        terminal.terminal_mouth_factor = 1.0;
-
-        let config = MacroFieldTileConfig::new(0.0, -64.0, 11, 9, 16.0);
-        let field = rasterize_curve_anti_aliased_polyline_field(&[terminal], config, 256.0);
-        let width = config.width as usize;
-        let sample_index = |x: usize, z: usize| z * width + x;
-        let inside_mouth = field.river_valley_strength[sample_index(7, 4)];
-        let downstream_cap = field.river_valley_strength[sample_index(9, 4)];
-
-        assert!(
-            inside_mouth > 0.0,
-            "terminal mouth should still carve inside the final river segment"
-        );
-        assert!(
-            downstream_cap <= f32::EPSILON,
-            "terminal mouth should not rasterize the old circular cap beyond its endpoint: {downstream_cap}"
         );
     }
 
