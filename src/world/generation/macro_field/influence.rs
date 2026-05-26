@@ -21,11 +21,6 @@ pub(super) const RIVER_CORE_STRENGTH_THRESHOLD: f32 = 0.88;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_STRENGTH_RATIO: f32 = 0.72;
 pub(super) const RIVER_CONCAVE_CUSP_MIN_NEIGHBORS: usize = 5;
 pub(super) const RIVER_CONCAVE_CUSP_MAX_PASSES: usize = 2;
-const RIVER_SHOULDER_CONCAVE_BAY_MIN_SUPPORT: f32 = 0.08;
-const RIVER_SHOULDER_CONCAVE_BAY_PROMOTE_RATIO: f32 = 0.82;
-const RIVER_SHOULDER_CONCAVE_BAY_MAX_PASSES: usize = 2;
-const RIVER_SHOULDER_CONCAVE_BAY_MAX_RADIUS_BLOCKS: f32 = 8.0;
-const RIVER_SHOULDER_CONCAVE_BAY_MAX_RADIUS_SAMPLES: isize = 8;
 pub(super) const ESTUARY_FAN_EDGE_ROUGHNESS_BLOCKS: f32 = 24.0;
 const ESTUARY_FAN_INLET_OVERLAP_WIDTH_SCALE: f32 = 1.25;
 const TERMINAL_RIVER_TAPER_WIDTH_SCALE: f32 = 2.50;
@@ -34,6 +29,10 @@ const TERMINAL_MOUTH_VALLEY_WIDTH_BOOST: f32 = 0.36;
 const TERMINAL_MOUTH_DEPTH_BOOST: f32 = 0.18;
 const TERMINAL_MOUTH_FLOW_BOOST: f32 = 0.30;
 const TERMINAL_MOUTH_TAPER_BLEND: f32 = 1.0;
+const TERMINAL_MOUTH_OPEN_THROAT_MIN_SCALE: f32 = 0.48;
+const TERMINAL_MOUTH_OPEN_THROAT_MAX_SCALE: f32 = 0.76;
+const TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK: f32 = 0.34;
+const TERMINAL_MOUTH_OPEN_PENALTY_SCALE: f32 = 2.35;
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct MacroFieldInfluenceStats {
     pub(super) ridge_source_curve_count: usize,
@@ -305,7 +304,8 @@ pub(super) fn estuary_fan_sample(
     );
     let edge_noise_weight = smoothstep01((lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
     let rough_lateral = (lateral + edge_noise * edge_noise_weight).max(0.0);
-    let carve_half_width = half_width;
+    let inlet_open_t = smoothstep01((progress / 0.24).clamp(0.0, 1.0));
+    let carve_half_width = half_width * lerp(0.58, 1.0, inlet_open_t);
     let carve_cross =
         1.0 - smoothstep01((rough_lateral / carve_half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
     let water_cross =
@@ -322,7 +322,7 @@ pub(super) fn estuary_fan_sample(
     };
     let upstream_overlap = along < 0.0;
     let inlet_blend = if upstream_overlap {
-        inlet_extension_t * 0.58
+        0.0
     } else {
         0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28
     };
@@ -581,215 +581,10 @@ pub(super) fn copy_strongest_neighbor_river_hints(
             river.river_gravel_hint[index].max(river.river_gravel_hint[neighbor]);
         river.river_cutbank_hint[index] =
             river.river_cutbank_hint[index].max(river.river_cutbank_hint[neighbor]);
-        if !river.river_centerline_x[index].is_finite()
-            || !river.river_centerline_z[index].is_finite()
-        {
-            river.river_centerline_x[index] = river.river_centerline_x[neighbor];
-            river.river_centerline_z[index] = river.river_centerline_z[neighbor];
-        }
-        if !river.river_longitudinal_blocks[index].is_finite() {
-            river.river_longitudinal_blocks[index] = river.river_longitudinal_blocks[neighbor];
-        }
+        river.river_centerline_x[index] = river.river_centerline_x[neighbor];
+        river.river_centerline_z[index] = river.river_centerline_z[neighbor];
+        river.river_longitudinal_blocks[index] = river.river_longitudinal_blocks[neighbor];
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ShoulderBayPromotion {
-    index: usize,
-    shoulder_strength: f32,
-    valley_strength: f32,
-}
-
-pub(super) fn close_river_shoulder_concave_bays(
-    river: &mut RasterDistanceField,
-    width: usize,
-    height: usize,
-    sample_spacing_blocks: f32,
-) {
-    let sample_count = width * height;
-    if width == 0 || height == 0 || river.river_shoulder_strength.len() != sample_count {
-        return;
-    }
-
-    let max_radius_samples = ((RIVER_SHOULDER_CONCAVE_BAY_MAX_RADIUS_BLOCKS
-        / sample_spacing_blocks.max(f32::EPSILON))
-    .ceil() as isize)
-        .clamp(1, RIVER_SHOULDER_CONCAVE_BAY_MAX_RADIUS_SAMPLES);
-    for _ in 0..RIVER_SHOULDER_CONCAVE_BAY_MAX_PASSES {
-        let promote = (0..sample_count)
-            .filter_map(|index| {
-                river_shoulder_concave_bay_promotion(
-                    river,
-                    width,
-                    height,
-                    index,
-                    max_radius_samples,
-                )
-            })
-            .collect::<Vec<_>>();
-        if promote.is_empty() {
-            break;
-        }
-
-        for promotion in promote {
-            let index = promotion.index;
-            river.river_shoulder_strength[index] =
-                river.river_shoulder_strength[index].max(promotion.shoulder_strength);
-            river.river_valley_strength[index] =
-                river.river_valley_strength[index].max(promotion.valley_strength);
-            copy_strongest_neighbor_shoulder_hints(river, width, height, index);
-        }
-    }
-}
-
-fn river_shoulder_concave_bay_promotion(
-    river: &RasterDistanceField,
-    width: usize,
-    height: usize,
-    index: usize,
-    max_radius_samples: isize,
-) -> Option<ShoulderBayPromotion> {
-    let current_shoulder = river.river_shoulder_strength[index].clamp(0.0, 1.0);
-    if current_shoulder >= 1.0 - f32::EPSILON {
-        return None;
-    }
-
-    let x = index % width;
-    let z = index / width;
-    let immediate_support = strongest_neighbor_shoulder_strength(river, width, height, x, z);
-    if immediate_support <= RIVER_SHOULDER_CONCAVE_BAY_MIN_SUPPORT
-        || current_shoulder >= immediate_support * RIVER_SHOULDER_CONCAVE_BAY_PROMOTE_RATIO
-    {
-        return None;
-    }
-
-    let mut target_shoulder = current_shoulder;
-    let mut target_valley = river.river_valley_strength[index].clamp(0.0, 1.0);
-    for [(left_dx, left_dz), (right_dx, right_dz)] in [
-        [(-1isize, 0isize), (1isize, 0isize)],
-        [(0isize, -1isize), (0isize, 1isize)],
-        [(-1isize, -1isize), (1isize, 1isize)],
-        [(-1isize, 1isize), (1isize, -1isize)],
-    ] {
-        for radius in 1..=max_radius_samples {
-            let Some(left) = offset_index(width, height, x, z, left_dx * radius, left_dz * radius)
-            else {
-                continue;
-            };
-            let Some(right) =
-                offset_index(width, height, x, z, right_dx * radius, right_dz * radius)
-            else {
-                continue;
-            };
-            let support_shoulder =
-                river.river_shoulder_strength[left].min(river.river_shoulder_strength[right]);
-            if support_shoulder <= RIVER_SHOULDER_CONCAVE_BAY_MIN_SUPPORT {
-                continue;
-            }
-            let promoted_shoulder = support_shoulder * RIVER_SHOULDER_CONCAVE_BAY_PROMOTE_RATIO;
-            if promoted_shoulder <= current_shoulder {
-                continue;
-            }
-
-            let support_valley =
-                river.river_valley_strength[left].min(river.river_valley_strength[right]);
-            target_shoulder = target_shoulder.max(promoted_shoulder);
-            target_valley =
-                target_valley.max(support_valley * RIVER_SHOULDER_CONCAVE_BAY_PROMOTE_RATIO);
-        }
-    }
-
-    (target_shoulder > current_shoulder + f32::EPSILON).then_some(ShoulderBayPromotion {
-        index,
-        shoulder_strength: target_shoulder.clamp(0.0, 1.0),
-        valley_strength: target_valley.clamp(0.0, 1.0),
-    })
-}
-
-fn strongest_neighbor_shoulder_strength(
-    river: &RasterDistanceField,
-    width: usize,
-    height: usize,
-    x: usize,
-    z: usize,
-) -> f32 {
-    let mut strongest: f32 = 0.0;
-    for dz in -1..=1 {
-        for dx in -1..=1 {
-            if dx == 0 && dz == 0 {
-                continue;
-            }
-            if let Some(index) = offset_index(width, height, x, z, dx, dz) {
-                strongest = strongest.max(river.river_shoulder_strength[index]);
-            }
-        }
-    }
-    strongest
-}
-
-fn copy_strongest_neighbor_shoulder_hints(
-    river: &mut RasterDistanceField,
-    width: usize,
-    height: usize,
-    index: usize,
-) {
-    let x = index % width;
-    let z = index / width;
-    let mut best: Option<usize> = None;
-    for dz in -1..=1 {
-        for dx in -1..=1 {
-            if dx == 0 && dz == 0 {
-                continue;
-            }
-            let Some(neighbor) = offset_index(width, height, x, z, dx, dz) else {
-                continue;
-            };
-            if river.river_shoulder_strength[neighbor] > RIVER_SHOULDER_CONCAVE_BAY_MIN_SUPPORT
-                && best.is_none_or(|best_index| {
-                    river.river_shoulder_strength[neighbor]
-                        > river.river_shoulder_strength[best_index]
-                })
-            {
-                best = Some(neighbor);
-            }
-        }
-    }
-
-    if let Some(neighbor) = best {
-        river.distance_blocks[index] =
-            river.distance_blocks[index].min(river.distance_blocks[neighbor]);
-        river.flow_hint[index] = river.flow_hint[index].max(river.flow_hint[neighbor]);
-        river.river_core_depth_hint[index] =
-            river.river_core_depth_hint[index].max(river.river_core_depth_hint[neighbor]);
-        river.river_bank_roughness_hint[index] =
-            river.river_bank_roughness_hint[index].max(river.river_bank_roughness_hint[neighbor]);
-        river.river_gravel_hint[index] =
-            river.river_gravel_hint[index].max(river.river_gravel_hint[neighbor]);
-        river.river_cutbank_hint[index] =
-            river.river_cutbank_hint[index].max(river.river_cutbank_hint[neighbor]);
-        if !river.river_centerline_x[index].is_finite()
-            || !river.river_centerline_z[index].is_finite()
-        {
-            river.river_centerline_x[index] = river.river_centerline_x[neighbor];
-            river.river_centerline_z[index] = river.river_centerline_z[neighbor];
-        }
-        if !river.river_longitudinal_blocks[index].is_finite() {
-            river.river_longitudinal_blocks[index] = river.river_longitudinal_blocks[neighbor];
-        }
-    }
-}
-
-fn offset_index(
-    width: usize,
-    height: usize,
-    x: usize,
-    z: usize,
-    dx: isize,
-    dz: isize,
-) -> Option<usize> {
-    let nx = x.checked_add_signed(dx)?;
-    let nz = z.checked_add_signed(dz)?;
-    (nx < width && nz < height).then_some(nz * width + nx)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -842,7 +637,7 @@ pub(super) fn rounded_river_raster_sources(
                 edge: source.edge,
                 cumulative_lengths: cumulative_polyline_lengths(&points),
                 points,
-                open_start_cap: source.is_terminal_outlet,
+                open_start_cap: false,
                 open_end_cap: false,
                 longitudinal_start_blocks: source.longitudinal_start_blocks,
                 flow_hint: source.flow_hint,
@@ -962,9 +757,7 @@ fn terminal_mouth_width_gate(source: &RiverRasterWorkSource) -> f32 {
     }
 
     let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
-    let width_reference = (source.water_width_blocks.max(1.0) * 3.00)
-        .max(source.valley_width_blocks.max(1.0) * 0.85)
-        .max(1.0);
+    let width_reference = (source.water_width_blocks.max(1.0) * 2.25).max(1.0);
     smoothstep01((total_length / width_reference).clamp(0.0, 1.0))
 }
 
@@ -986,9 +779,12 @@ fn terminal_mouth_base_valley_width_blocks(
     base_water_width_blocks: f32,
 ) -> f32 {
     if source.is_terminal_outlet {
-        let terminal_valley_width =
-            base_water_width_blocks * lerp(1.08, 1.85, smoothstep01(width_gate));
-        terminal_valley_width.max(base_water_width_blocks + 1.0)
+        lerp(
+            base_water_width_blocks * 1.08,
+            source.valley_width_blocks,
+            width_gate,
+        )
+        .max(base_water_width_blocks + 1.0)
     } else {
         source.valley_width_blocks
     }
@@ -1236,8 +1032,8 @@ fn mark_open_caps_for_touching_sources(
     let left_end = sources[left].points.last().copied();
     let right_start = sources[right].points.first().copied();
     let right_end = sources[right].points.last().copied();
-    let threshold_blocks = endpoint_touch_threshold_blocks(&sources[left], &sources[right]);
-    let threshold = threshold_blocks * threshold_blocks;
+    const ENDPOINT_EPSILON_BLOCKS: f32 = 0.01;
+    let threshold = ENDPOINT_EPSILON_BLOCKS * ENDPOINT_EPSILON_BLOCKS;
     let mut touches = false;
 
     if endpoints_touch(left_start, right_start, threshold) {
@@ -1262,13 +1058,6 @@ fn mark_open_caps_for_touching_sources(
     }
 
     touches
-}
-
-fn endpoint_touch_threshold_blocks(
-    left: &RiverRasterWorkSource,
-    right: &RiverRasterWorkSource,
-) -> f32 {
-    (left.water_width_blocks.min(right.water_width_blocks) * 0.20).clamp(0.75, 12.0)
 }
 
 fn endpoints_touch(
@@ -1475,7 +1264,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
             }
         })
         .collect();
-    let mut field = RasterDistanceField {
+    RasterDistanceField {
         distance_blocks,
         river_core_strength,
         river_shoulder_strength,
@@ -1489,9 +1278,7 @@ pub(super) fn rasterize_curve_anti_aliased_polyline_field(
         river_gravel_hint,
         river_cutbank_hint,
         source_pixel_count,
-    };
-    close_river_shoulder_concave_bays(&mut field, width, height, config.sample_spacing_blocks);
-    field
+    }
 }
 
 pub(super) fn rasterize_river_row(
@@ -1630,7 +1417,14 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             };
             let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
             let effective = effective_river_morphology(source, mouth_progress);
-            let profile_distance = subpixel_distance;
+            let profile_distance = terminal_outlet_open_mouth_distance(
+                source,
+                segment_index,
+                subpixel_t,
+                subpixel_distance,
+                effective,
+                radius_blocks,
+            );
             let roughness_offset = river_boundary_roughness_offset(
                 position,
                 effective.flow_hint,
@@ -1806,6 +1600,93 @@ fn distance_to_unclamped_line(
     }
 
     signed_side(point, start, end).abs() / len
+}
+
+fn terminal_outlet_open_mouth_distance(
+    source: &RiverRasterWorkSource,
+    segment_index: usize,
+    segment_t: f32,
+    distance_blocks: f32,
+    effective: EffectiveRiverMorphology,
+    configured_radius_blocks: f32,
+) -> f32 {
+    if !source.is_terminal_outlet || distance_blocks <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
+    if total_length <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let start = source
+        .cumulative_lengths
+        .get(segment_index)
+        .copied()
+        .unwrap_or(0.0);
+    let end = source
+        .cumulative_lengths
+        .get(segment_index + 1)
+        .copied()
+        .unwrap_or(start);
+    let along_source = lerp(start, end, segment_t.clamp(0.0, 1.0));
+    let remaining = (total_length - along_source).max(0.0);
+    let water_radius = river_water_radius_blocks(
+        effective.flow_hint,
+        effective.water_width_blocks,
+        configured_radius_blocks,
+    );
+    let base_water_radius = river_water_radius_blocks(
+        source.flow_hint,
+        source.water_width_blocks,
+        configured_radius_blocks,
+    );
+    let valley_radius = river_shoulder_radius_blocks(
+        effective.flow_hint,
+        effective.valley_width_blocks,
+        configured_radius_blocks,
+    )
+    .max(water_radius + 1.0);
+    let short_reach_t =
+        (1.0 - (total_length / valley_radius.max(1.0)).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    let mouth_progress = terminal_mouth_progress(source, segment_index, segment_t);
+    let mouth_gate_start = lerp(0.45, 0.14, short_reach_t);
+    let mouth_gate = smoothstep01(
+        ((mouth_progress - mouth_gate_start) / (1.0 - mouth_gate_start)).clamp(0.0, 1.0),
+    );
+    if mouth_gate <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let base_fade_blocks = (valley_radius * 0.72)
+        .max(water_radius * 1.6)
+        .clamp(12.0, configured_radius_blocks * 0.55);
+    let fade_blocks = lerp(base_fade_blocks, valley_radius * 1.35, short_reach_t);
+    let endpoint_gate = 1.0 - smoothstep01((remaining / fade_blocks).clamp(0.0, 1.0));
+    if endpoint_gate <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let flow_t = smoothstep01(source.flow_hint.clamp(0.0, 1.0));
+    let throat_radius = base_water_radius
+        * lerp(
+            TERMINAL_MOUTH_OPEN_THROAT_MIN_SCALE,
+            TERMINAL_MOUTH_OPEN_THROAT_MAX_SCALE,
+            flow_t,
+        );
+    let spread_per_block = lerp(
+        TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK,
+        TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK * 0.38,
+        short_reach_t,
+    );
+    let allowed_lateral = throat_radius + remaining * spread_per_block;
+    let lateral_excess = (distance_blocks - allowed_lateral).max(0.0);
+    if lateral_excess <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let penalty_scale = TERMINAL_MOUTH_OPEN_PENALTY_SCALE * lerp(1.0, 2.15, short_reach_t);
+    distance_blocks + lateral_excess * endpoint_gate * mouth_gate * penalty_scale
 }
 
 fn projected_t_unclamped(
@@ -2196,26 +2077,6 @@ mod tests {
         DEFAULT_RIVER_PLAN_DOWNSTREAM_WATER_WIDTH_BLOCKS, RiverPlan,
     };
 
-    fn set_river_shoulder_strength(
-        field: &mut RasterDistanceField,
-        width: usize,
-        x: usize,
-        z: usize,
-        strength: f32,
-    ) {
-        let index = z * width + x;
-        field.river_shoulder_strength[index] = strength;
-        field.river_valley_strength[index] = strength;
-        field.flow_hint[index] = 0.72;
-        field.distance_blocks[index] = 1.0;
-        field.river_core_depth_hint[index] = 0.45;
-        field.river_bank_roughness_hint[index] = 0.35;
-        field.river_gravel_hint[index] = 0.25;
-        field.river_centerline_x[index] = x as f32;
-        field.river_centerline_z[index] = z as f32;
-        field.river_longitudinal_blocks[index] = x as f32 + z as f32;
-    }
-
     #[test]
     fn bend_bar_hints_separate_inside_gravel_from_outside_cutbank() {
         let source = RiverRasterWorkSource {
@@ -2547,54 +2408,6 @@ mod tests {
         assert!(
             field.river_valley_strength[outside * width + outside] < RIVER_CORE_STRENGTH_THRESHOLD,
             "convex outside corners should not be squared off by macro_field cusp cleanup"
-        );
-    }
-
-    #[test]
-    fn macro_field_raster_fills_broad_shoulder_concave_bay_without_promoting_core() {
-        let width = 9;
-        let height = 9;
-        let mut field = test_river_raster_field(width, height);
-        let center = 4usize;
-        set_river_shoulder_strength(&mut field, width, center - 1, center, 0.58);
-        set_river_shoulder_strength(&mut field, width, center + 1, center, 0.55);
-        set_river_shoulder_strength(&mut field, width, center, center - 1, 0.50);
-        set_river_shoulder_strength(&mut field, width, center, center, 0.08);
-
-        close_river_shoulder_concave_bays(&mut field, width, height, 1.0);
-
-        let index = center * width + center;
-        assert!(
-            field.river_shoulder_strength[index] > 0.40,
-            "broad shoulder concave bay should be closed without blurring the whole river edge: {}",
-            field.river_shoulder_strength[index]
-        );
-        assert!(
-            field.river_valley_strength[index] > 0.40,
-            "legacy valley diagnostic should follow the shoulder bay closing"
-        );
-        assert_eq!(
-            field.river_core_strength[index], 0.0,
-            "broad shoulder closing must not promote the water/core channel"
-        );
-    }
-
-    #[test]
-    fn macro_field_raster_keeps_convex_shoulder_bank_rounded() {
-        let width = 9;
-        let height = 9;
-        let mut field = test_river_raster_field(width, height);
-        let outside = 4usize;
-        set_river_shoulder_strength(&mut field, width, outside, outside - 1, 0.58);
-        set_river_shoulder_strength(&mut field, width, outside - 1, outside, 0.55);
-        set_river_shoulder_strength(&mut field, width, outside - 1, outside - 1, 0.50);
-        set_river_shoulder_strength(&mut field, width, outside, outside, 0.08);
-
-        close_river_shoulder_concave_bays(&mut field, width, height, 1.0);
-
-        assert!(
-            field.river_shoulder_strength[outside * width + outside] < 0.20,
-            "convex outside shoulder corners should stay rounded instead of being squared off"
         );
     }
 
@@ -3318,7 +3131,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_mouth_segment_uses_open_cross_section_before_endpoint() {
+    fn terminal_mouth_distance_opens_outer_endpoint_without_extending_downstream() {
         let source = RiverRasterWorkSource {
             is_terminal_outlet: true,
             edge: VoronoiEdgeId(99),
@@ -3337,29 +3150,25 @@ mod tests {
             terminal_mouth_factor: 1.0,
             component_id: 0,
         };
-        let start = source.points[0];
-        let end = source.points[1];
+        let effective_at_mouth = effective_river_morphology(&source, 1.0);
         let center =
-            river_segment_distance_and_t(&source, 0, WorldPlanePoint::new(128.0, 0.0), start, end);
+            terminal_outlet_open_mouth_distance(&source, 0, 1.0, 0.0, effective_at_mouth, 256.0);
         let outer_endpoint =
-            river_segment_distance_and_t(&source, 0, WorldPlanePoint::new(128.0, 48.0), start, end);
-        let downstream_endpoint =
-            river_segment_distance_and_t(&source, 0, WorldPlanePoint::new(144.0, 0.0), start, end);
+            terminal_outlet_open_mouth_distance(&source, 0, 1.0, 48.0, effective_at_mouth, 256.0);
+        let outer_upstream =
+            terminal_outlet_open_mouth_distance(&source, 0, 0.20, 48.0, effective_at_mouth, 256.0);
 
         assert_eq!(
-            center.map(|(distance, _)| distance),
-            Some(0.0),
+            center, 0.0,
             "terminal mouth centerline should remain available for river/estuary handoff"
         );
         assert!(
-            outer_endpoint
-                .map(|(distance, _)| (distance - 48.0).abs() <= f32::EPSILON)
-                .unwrap_or(false),
-            "outer terminal endpoint samples should keep the open final cross-section instead of being pinched inward: {outer_endpoint:?}"
+            outer_endpoint > 48.0,
+            "outer terminal endpoint samples should be pushed outside the boosted round footprint: {outer_endpoint}"
         );
         assert!(
-            downstream_endpoint.is_none(),
-            "terminal mouth should still clip samples downstream of the final endpoint instead of emitting a round cap"
+            (outer_upstream - 48.0).abs() <= f32::EPSILON,
+            "upstream river profile should not be altered by terminal endpoint shaping: {outer_upstream}"
         );
     }
 
@@ -3397,7 +3206,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_mouth_raster_keeps_open_outer_carve_without_downstream_cap() {
+    fn terminal_mouth_raster_tapers_wide_outer_carve_at_endpoint() {
         let curve = test_noisy_curve(
             92,
             vec![
@@ -3418,7 +3227,6 @@ mod tests {
         let sample_index = |x: usize, z: usize| z * width + x;
         let upstream_outer = field.river_valley_strength[sample_index(4, 6)];
         let endpoint_outer = field.river_valley_strength[sample_index(8, 6)];
-        let downstream_outer = field.river_valley_strength[sample_index(9, 6)];
         let endpoint_center = field.river_core_strength[sample_index(8, 4)];
 
         assert!(
@@ -3426,12 +3234,8 @@ mod tests {
             "terminal mouth centerline should still keep an active handoff channel: {endpoint_center}"
         );
         assert!(
-            endpoint_outer >= upstream_outer * 0.72,
-            "terminal mouth outer carve should stay open to the endpoint instead of forming an inward concave bank: upstream={upstream_outer} endpoint={endpoint_outer}"
-        );
-        assert!(
-            downstream_outer <= f32::EPSILON,
-            "open terminal mouth should not restore a round cap downstream of the endpoint: {downstream_outer}"
+            endpoint_outer < upstream_outer * 0.72,
+            "wide outer carve should taper before the terminal endpoint instead of ending as a round footprint: upstream={upstream_outer} endpoint={endpoint_outer}"
         );
     }
 
@@ -3488,36 +3292,6 @@ mod tests {
     }
 
     #[test]
-    fn near_connected_river_sources_open_caps_without_exact_noisy_endpoint_match() {
-        let left = test_noisy_curve(
-            95,
-            vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-        );
-        let right = test_noisy_curve(
-            96,
-            vec![
-                WorldPlanePoint::new(132.0, 3.0),
-                WorldPlanePoint::new(256.0, 0.0),
-            ],
-        );
-        let mut left_source = test_river_source(&left, 0.72);
-        left_source.water_width_blocks = 48.0;
-        let mut right_source = test_river_source(&right, 0.72);
-        right_source.water_width_blocks = 48.0;
-        let mut sources = rounded_river_raster_sources(&[left_source, right_source], 256.0);
-
-        assign_river_raster_components(&mut sources);
-
-        assert!(
-            sources[0].open_end_cap && sources[1].open_start_cap,
-            "near-matching endpoints on the same routed river should open their caps so broad carving does not stamp overlapping round lobes"
-        );
-    }
-
-    #[test]
     fn terminal_mouth_raster_widens_last_two_edges_without_estuary() {
         let left = test_noisy_curve(
             89,
@@ -3559,8 +3333,8 @@ mod tests {
             "penultimate mouth edge should begin widening river influence: upstream={upstream_outer} penultimate={penultimate_outer}"
         );
         assert!(
-            terminal_outer >= penultimate_outer * 0.72,
-            "terminal endpoint should keep the widened open mouth instead of pinching into a concave broad-carve edge: upstream={upstream_outer} penultimate={penultimate_outer} terminal={terminal_outer}"
+            terminal_outer > upstream_outer && terminal_outer < penultimate_outer,
+            "terminal endpoint should keep some mouth widening while tapering the outer broad carve before estuary fan takes over: upstream={upstream_outer} penultimate={penultimate_outer} terminal={terminal_outer}"
         );
     }
 
@@ -3615,7 +3389,7 @@ mod tests {
     }
 
     #[test]
-    fn estuary_fan_inlet_overlap_carves_short_open_throat_not_round_bowl() {
+    fn estuary_fan_inlet_overlap_does_not_cut_round_upstream_bowl() {
         let fan = EstuaryFanRef {
             segment_id: 1,
             origin: WorldPlanePoint::new(0.0, 0.0),
@@ -3631,66 +3405,23 @@ mod tests {
 
         let upstream_center = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 0.0));
         let upstream_edge = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 28.0));
-        let upstream_outside = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 60.0));
-        let far_upstream_center = estuary_fan_sample(fan, WorldPlanePoint::new(-72.0, 0.0));
         let downstream_center = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 0.0));
 
-        assert!(
-            upstream_center.strength > 0.0,
-            "fan inlet overlap should weakly carve into the terminal mouth so the broad outline does not pinch inward"
-        );
-        assert!(
-            upstream_edge.strength > 0.0,
-            "fan inlet overlap should keep the planned mouth-width throat instead of leaving a shoulder notch"
+        assert_eq!(
+            upstream_center.strength, 0.0,
+            "fan inlet overlap should not add broad upstream carve over the terminal river edge"
         );
         assert_eq!(
-            upstream_outside.strength, 0.0,
-            "the upstream throat should not become a rounded bowl outside the mouth width"
-        );
-        assert_eq!(
-            far_upstream_center.strength, 0.0,
-            "the upstream throat should fade out before forming a long artificial fan behind the river endpoint"
+            upstream_edge.strength, 0.0,
+            "fan inlet overlap should not form rounded upstream carve contours at the shoulder"
         );
         assert!(
             upstream_center.water_strength > RIVER_CORE_STRENGTH_THRESHOLD,
             "upstream overlap may still provide local water handoff eligibility"
         );
         assert!(
-            downstream_center.strength > upstream_center.strength,
-            "actual estuary fan body should still become stronger after the terminal endpoint"
-        );
-    }
-
-    #[test]
-    fn estuary_fan_body_starts_at_full_mouth_width_without_concave_throat() {
-        let fan = EstuaryFanRef {
-            segment_id: 1,
-            origin: WorldPlanePoint::new(0.0, 0.0),
-            direction_x: 1.0,
-            direction_z: 0.0,
-            start_half_width_blocks: 48.0,
-            end_half_width_blocks: 144.0,
-            length_blocks: 180.0,
-            flow_hint: 0.82,
-            bed_depth_hint: 0.55,
-            water_depth_hint: 0.42,
-        };
-
-        let near_edge = estuary_fan_sample(fan, WorldPlanePoint::new(8.0, 40.0));
-        let outside_edge = estuary_fan_sample(fan, WorldPlanePoint::new(8.0, 58.0));
-        let upstream_edge = estuary_fan_sample(fan, WorldPlanePoint::new(-8.0, 40.0));
-
-        assert!(
-            near_edge.strength > upstream_edge.strength,
-            "fan body should start at the planned mouth width instead of pinching inward into a concave throat"
-        );
-        assert!(
-            outside_edge.strength <= f32::EPSILON,
-            "fan body still should not stamp a broad round footprint outside the planned mouth"
-        );
-        assert!(
-            upstream_edge.strength > 0.0,
-            "upstream overlap should carry a weak open throat so the river/fan seam does not leave an inward concave border"
+            downstream_center.strength > 0.0,
+            "actual estuary fan carve should begin downstream of the terminal endpoint"
         );
     }
 
