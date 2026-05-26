@@ -6,11 +6,11 @@ use super::height::{
     boundary_roughness_offset, envelope, lerp, ridge_envelope, roughened_distance, smoothstep01,
 };
 use super::river::{
-    nearest_point_on_segment, point_segment_distance, river_boundary_roughness_blocks,
-    river_boundary_roughness_offset, river_core_strength_for_roughened_distance,
-    river_hints_from_strength, river_shoulder_radius_blocks,
-    river_valley_strength_for_roughened_distance, river_water_radius_blocks, signed_side,
-    squared_distance,
+    nearest_point_on_segment, point_segment_distance, projected_t_on_segment,
+    river_boundary_roughness_blocks, river_boundary_roughness_offset,
+    river_core_strength_for_roughened_distance, river_hints_from_strength,
+    river_shoulder_radius_blocks, river_valley_strength_for_roughened_distance,
+    river_water_radius_blocks, signed_side, squared_distance,
 };
 use super::types::{MacroFieldSample, MacroFieldTileConfig, MacroFieldTileStats};
 use crate::world::generation::boundary::NoisyBoundaryCurve;
@@ -304,13 +304,8 @@ pub(super) fn estuary_fan_sample(
     );
     let edge_noise_weight = smoothstep01((lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
     let rough_lateral = (lateral + edge_noise * edge_noise_weight).max(0.0);
-    let inlet_open_t = smoothstep01((progress / 0.24).clamp(0.0, 1.0));
-    let carve_half_width = half_width * lerp(0.58, 1.0, inlet_open_t);
-    let carve_cross =
-        1.0 - smoothstep01((rough_lateral / carve_half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
-    let water_cross =
-        1.0 - smoothstep01((rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
-    if carve_cross <= f32::EPSILON && water_cross <= f32::EPSILON {
+    let cross = 1.0 - smoothstep01((rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0));
+    if cross <= f32::EPSILON {
         return EstuaryFanSample::default();
     }
 
@@ -320,17 +315,13 @@ pub(super) fn estuary_fan_sample(
     } else {
         1.0
     };
-    let upstream_overlap = along < 0.0;
-    let inlet_blend = if upstream_overlap {
-        0.0
-    } else {
-        0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28
-    };
+    let inlet_blend =
+        (0.72 + smoothstep01((progress / 0.20).clamp(0.0, 1.0)) * 0.28) * inlet_extension_t;
     let along_strength = 1.0 - smoothstep01(progress);
     let shelf_tail = 1.0 - smoothstep01((progress - 0.78) / 0.22);
     let tail_floor = 0.48 - flow_t * 0.12;
     let strength =
-        (carve_cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
+        (cross * inlet_blend * along_strength.max(shelf_tail * tail_floor)).clamp(0.0, 1.0);
     let water_edge_t = (rough_lateral / half_width.max(f32::EPSILON)).clamp(0.0, 1.0);
     let water_strength = ((if water_edge_t <= 0.92 {
         let inner_t = smoothstep01((water_edge_t / 0.92).clamp(0.0, 1.0));
@@ -356,10 +347,7 @@ pub(super) fn estuary_fan_half_width_blocks(fan: EstuaryFanRef, progress: f32) -
 }
 
 fn strongest_estuary_sample(left: EstuaryFanSample, right: EstuaryFanSample) -> EstuaryFanSample {
-    if right.strength > left.strength
-        || ((right.strength - left.strength).abs() <= f32::EPSILON
-            && right.water_strength > left.water_strength)
-    {
+    if right.strength > left.strength {
         right
     } else {
         left
@@ -607,8 +595,6 @@ pub(super) struct RiverRasterWorkSource {
     pub(super) edge: VoronoiEdgeId,
     pub(super) points: Vec<WorldPlanePoint>,
     pub(super) cumulative_lengths: Vec<f32>,
-    pub(super) open_start_cap: bool,
-    pub(super) open_end_cap: bool,
     pub(super) longitudinal_start_blocks: f32,
     pub(super) flow_hint: f32,
     pub(super) water_width_blocks: f32,
@@ -637,8 +623,6 @@ pub(super) fn rounded_river_raster_sources(
                 edge: source.edge,
                 cumulative_lengths: cumulative_polyline_lengths(&points),
                 points,
-                open_start_cap: false,
-                open_end_cap: false,
                 longitudinal_start_blocks: source.longitudinal_start_blocks,
                 flow_hint: source.flow_hint,
                 water_width_blocks: source.water_width_blocks,
@@ -724,100 +708,31 @@ fn effective_river_morphology(
     source: &RiverRasterWorkSource,
     terminal_mouth_progress: f32,
 ) -> EffectiveRiverMorphology {
-    let width_gate = terminal_mouth_width_gate(source);
-    let mouth = (terminal_mouth_progress * width_gate).clamp(0.0, 1.0);
-    let base_water_width_blocks = terminal_mouth_base_water_width_blocks(source, width_gate);
-    let base_valley_width_blocks =
-        terminal_mouth_base_valley_width_blocks(source, width_gate, base_water_width_blocks);
-    let water_width_blocks =
-        base_water_width_blocks * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * mouth);
-    let boosted_valley_width_blocks =
-        base_valley_width_blocks * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * mouth);
-    let valley_width_blocks = if source.is_terminal_outlet {
-        let short_throat_width = (base_water_width_blocks * 1.08).max(water_width_blocks + 1.0);
-        lerp(short_throat_width, boosted_valley_width_blocks, width_gate)
-            .max(water_width_blocks + 1.0)
-    } else {
-        boosted_valley_width_blocks
-    };
-
+    let mouth = terminal_mouth_progress.clamp(0.0, 1.0);
     EffectiveRiverMorphology {
         flow_hint: (source.flow_hint
             + (1.0 - source.flow_hint) * TERMINAL_MOUTH_FLOW_BOOST * mouth)
             .clamp(0.0, 1.0),
-        water_width_blocks,
-        valley_width_blocks,
+        water_width_blocks: source.water_width_blocks
+            * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * mouth),
+        valley_width_blocks: source.valley_width_blocks
+            * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * mouth),
         bed_depth_blocks: source.bed_depth_blocks * (1.0 + TERMINAL_MOUTH_DEPTH_BOOST * mouth),
     }
 }
 
-fn terminal_mouth_width_gate(source: &RiverRasterWorkSource) -> f32 {
-    if !source.is_terminal_outlet {
-        return 1.0;
-    }
-
-    let total_length = source.cumulative_lengths.last().copied().unwrap_or(0.0);
-    let width_reference = (source.water_width_blocks.max(1.0) * 2.25).max(1.0);
-    smoothstep01((total_length / width_reference).clamp(0.0, 1.0))
-}
-
-fn terminal_mouth_base_water_width_blocks(source: &RiverRasterWorkSource, width_gate: f32) -> f32 {
-    if source.is_terminal_outlet {
-        lerp(
-            source.water_width_blocks * 0.48,
-            source.water_width_blocks,
-            width_gate,
-        )
-    } else {
-        source.water_width_blocks
-    }
-}
-
-fn terminal_mouth_base_valley_width_blocks(
-    source: &RiverRasterWorkSource,
-    width_gate: f32,
-    base_water_width_blocks: f32,
-) -> f32 {
-    if source.is_terminal_outlet {
-        lerp(
-            base_water_width_blocks * 1.08,
-            source.valley_width_blocks,
-            width_gate,
-        )
-        .max(base_water_width_blocks + 1.0)
-    } else {
-        source.valley_width_blocks
-    }
-}
-
 fn terminal_mouth_max_water_width_blocks(source: &RiverRasterWorkSource) -> f32 {
-    let width_gate = terminal_mouth_width_gate(source);
-    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0) * width_gate;
-    terminal_mouth_base_water_width_blocks(source, width_gate)
-        * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * mouth)
+    source.water_width_blocks
+        * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * source.terminal_mouth_factor.clamp(0.0, 1.0))
 }
 
 fn terminal_mouth_max_valley_width_blocks(source: &RiverRasterWorkSource) -> f32 {
-    let width_gate = terminal_mouth_width_gate(source);
-    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0) * width_gate;
-    let base_water_width_blocks = terminal_mouth_base_water_width_blocks(source, width_gate);
-    let water_width_blocks =
-        base_water_width_blocks * (1.0 + TERMINAL_MOUTH_WATER_WIDTH_BOOST * mouth);
-    let base_valley_width_blocks =
-        terminal_mouth_base_valley_width_blocks(source, width_gate, base_water_width_blocks);
-    let boosted_valley_width_blocks =
-        base_valley_width_blocks * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * mouth);
-    if source.is_terminal_outlet {
-        let short_throat_width = (base_water_width_blocks * 1.08).max(water_width_blocks + 1.0);
-        lerp(short_throat_width, boosted_valley_width_blocks, width_gate)
-            .max(water_width_blocks + 1.0)
-    } else {
-        boosted_valley_width_blocks
-    }
+    source.valley_width_blocks
+        * (1.0 + TERMINAL_MOUTH_VALLEY_WIDTH_BOOST * source.terminal_mouth_factor.clamp(0.0, 1.0))
 }
 
 fn terminal_mouth_max_flow_hint(source: &RiverRasterWorkSource) -> f32 {
-    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0) * terminal_mouth_width_gate(source);
+    let mouth = source.terminal_mouth_factor.clamp(0.0, 1.0);
     (source.flow_hint + (1.0 - source.flow_hint) * TERMINAL_MOUTH_FLOW_BOOST * mouth)
         .clamp(0.0, 1.0)
 }
@@ -1004,7 +919,7 @@ pub(super) fn assign_river_raster_components(sources: &mut [RiverRasterWorkSourc
     let mut parent = (0..sources.len()).collect::<Vec<_>>();
     for left in 0..sources.len() {
         for right in left + 1..sources.len() {
-            if mark_open_caps_for_touching_sources(sources, left, right) {
+            if river_sources_touch(&sources[left], &sources[right]) {
                 union_component(&mut parent, left, right);
             }
         }
@@ -1023,52 +938,32 @@ pub(super) fn assign_river_raster_components(sources: &mut [RiverRasterWorkSourc
     }
 }
 
-fn mark_open_caps_for_touching_sources(
-    sources: &mut [RiverRasterWorkSource],
-    left: usize,
-    right: usize,
+pub(super) fn river_sources_touch(
+    left: &RiverRasterWorkSource,
+    right: &RiverRasterWorkSource,
 ) -> bool {
-    let left_start = sources[left].points.first().copied();
-    let left_end = sources[left].points.last().copied();
-    let right_start = sources[right].points.first().copied();
-    let right_end = sources[right].points.last().copied();
+    let Some(left_start) = left.points.first() else {
+        return false;
+    };
+    let Some(left_end) = left.points.last() else {
+        return false;
+    };
+    let Some(right_start) = right.points.first() else {
+        return false;
+    };
+    let Some(right_end) = right.points.last() else {
+        return false;
+    };
     const ENDPOINT_EPSILON_BLOCKS: f32 = 0.01;
     let threshold = ENDPOINT_EPSILON_BLOCKS * ENDPOINT_EPSILON_BLOCKS;
-    let mut touches = false;
-
-    if endpoints_touch(left_start, right_start, threshold) {
-        sources[left].open_start_cap = true;
-        sources[right].open_start_cap = true;
-        touches = true;
-    }
-    if endpoints_touch(left_start, right_end, threshold) {
-        sources[left].open_start_cap = true;
-        sources[right].open_end_cap = true;
-        touches = true;
-    }
-    if endpoints_touch(left_end, right_start, threshold) {
-        sources[left].open_end_cap = true;
-        sources[right].open_start_cap = true;
-        touches = true;
-    }
-    if endpoints_touch(left_end, right_end, threshold) {
-        sources[left].open_end_cap = true;
-        sources[right].open_end_cap = true;
-        touches = true;
-    }
-
-    touches
-}
-
-fn endpoints_touch(
-    left: Option<WorldPlanePoint>,
-    right: Option<WorldPlanePoint>,
-    threshold_squared: f32,
-) -> bool {
-    match (left, right) {
-        (Some(left), Some(right)) => squared_distance(left, right) <= threshold_squared,
-        _ => false,
-    }
+    [
+        (*left_start, *right_start),
+        (*left_start, *right_end),
+        (*left_end, *right_start),
+        (*left_end, *right_end),
+    ]
+    .into_iter()
+    .any(|(a, b)| squared_distance(a, b) <= threshold)
 }
 
 pub(super) fn union_component(parent: &mut [usize], left: usize, right: usize) {
@@ -1384,15 +1279,12 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
     for x in min_x..=max_x {
         let global_index = z * width + x;
         let position = config.sample_position(global_index);
-        let Some((distance, centerline_t)) =
-            river_segment_distance_and_t(source, segment_index, position, start, end)
-        else {
-            continue;
-        };
+        let distance = point_segment_distance(position, start, end);
         if distance > active_radius_blocks + aa_margin {
             continue;
         }
         let centerline_position = nearest_point_on_segment(position, start, end);
+        let centerline_t = projected_t_on_segment(position, start, end);
         let longitudinal_blocks = segment_longitudinal_blocks(source, segment_index, centerline_t);
         let bend_strength = river_segment_bend_strength(source, segment_index);
         let mut profile_sum = 0.0;
@@ -1404,17 +1296,16 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
         let mut gravel_sum = 0.0;
         let mut cutbank_sum = 0.0;
         let mut flow_sum = 0.0;
-        let mut flow_sample_count = 0.0;
         for (offset_x, offset_z) in subpixel_offsets {
             let subpixel = WorldPlanePoint::new(
                 position.x + offset_x * spacing,
                 position.z + offset_z * spacing,
             );
-            let Some((subpixel_distance, subpixel_t)) =
-                river_segment_distance_and_t(source, segment_index, subpixel, start, end)
-            else {
+            if terminal_outlet_endpoint_clips_sample(source, segment_index, subpixel, start, end) {
                 continue;
-            };
+            }
+            let subpixel_distance = point_segment_distance(subpixel, start, end);
+            let subpixel_t = projected_t_on_segment(subpixel, start, end);
             let mouth_progress = terminal_mouth_progress(source, segment_index, subpixel_t);
             let effective = effective_river_morphology(source, mouth_progress);
             let profile_distance = terminal_outlet_open_mouth_distance(
@@ -1479,7 +1370,6 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
             gravel_sum += hints.gravel_hint.max(gravel_bend);
             cutbank_sum += hints.cutbank_hint.max(cutbank_bend);
             flow_sum += effective.flow_hint;
-            flow_sample_count += 1.0;
         }
         let anti_aliased_strength = (profile_sum / subpixel_count).clamp(0.0, 1.0);
         if anti_aliased_strength <= 0.0 {
@@ -1492,11 +1382,7 @@ pub(super) fn rasterize_segment_anti_aliased_stroke_row(
         let rough_hint = (rough_sum / subpixel_count).clamp(0.0, 1.0);
         let gravel_hint = (gravel_sum / subpixel_count).clamp(0.0, 1.0);
         let cutbank_hint = (cutbank_sum / subpixel_count).clamp(0.0, 1.0);
-        let flow_hint = if flow_sample_count > f32::EPSILON {
-            (flow_sum / flow_sample_count).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
+        let flow_hint = (flow_sum / subpixel_count).clamp(0.0, 1.0);
         let current_distance = row.distance_blocks[x];
         let same_centerline_band = spacing * 0.35;
         let current_component = river_owner_component[x];
@@ -1561,47 +1447,6 @@ fn terminal_outlet_endpoint_clips_sample(
     projected_t_unclamped(sample, start, end) > 1.0
 }
 
-fn river_segment_distance_and_t(
-    source: &RiverRasterWorkSource,
-    segment_index: usize,
-    sample: WorldPlanePoint,
-    start: WorldPlanePoint,
-    end: WorldPlanePoint,
-) -> Option<(f32, f32)> {
-    let raw_t = projected_t_unclamped(sample, start, end);
-    let open_start = segment_index == 0 && source.open_start_cap;
-    let open_end = segment_index + 2 == source.points.len() && source.open_end_cap;
-    if (raw_t < 0.0 && open_start)
-        || (raw_t > 1.0 && open_end)
-        || terminal_outlet_endpoint_clips_sample(source, segment_index, sample, start, end)
-    {
-        return None;
-    }
-
-    let clamped_t = raw_t.clamp(0.0, 1.0);
-    let distance = if (0.0..=1.0).contains(&raw_t) {
-        distance_to_unclamped_line(sample, start, end)
-    } else {
-        point_segment_distance(sample, start, end)
-    };
-    Some((distance, clamped_t))
-}
-
-fn distance_to_unclamped_line(
-    point: WorldPlanePoint,
-    start: WorldPlanePoint,
-    end: WorldPlanePoint,
-) -> f32 {
-    let dx = end.x - start.x;
-    let dz = end.z - start.z;
-    let len = (dx * dx + dz * dz).sqrt();
-    if len <= f32::EPSILON {
-        return ((point.x - start.x).powi(2) + (point.z - start.z).powi(2)).sqrt();
-    }
-
-    signed_side(point, start, end).abs() / len
-}
-
 fn terminal_outlet_open_mouth_distance(
     source: &RiverRasterWorkSource,
     segment_index: usize,
@@ -1611,6 +1456,12 @@ fn terminal_outlet_open_mouth_distance(
     configured_radius_blocks: f32,
 ) -> f32 {
     if !source.is_terminal_outlet || distance_blocks <= f32::EPSILON {
+        return distance_blocks;
+    }
+
+    let mouth_progress = terminal_mouth_progress(source, segment_index, segment_t);
+    let mouth_gate = smoothstep01(((mouth_progress - 0.45) / 0.55).clamp(0.0, 1.0));
+    if mouth_gate <= f32::EPSILON {
         return distance_blocks;
     }
 
@@ -1647,21 +1498,9 @@ fn terminal_outlet_open_mouth_distance(
         configured_radius_blocks,
     )
     .max(water_radius + 1.0);
-    let short_reach_t =
-        (1.0 - (total_length / valley_radius.max(1.0)).clamp(0.0, 1.0)).clamp(0.0, 1.0);
-    let mouth_progress = terminal_mouth_progress(source, segment_index, segment_t);
-    let mouth_gate_start = lerp(0.45, 0.14, short_reach_t);
-    let mouth_gate = smoothstep01(
-        ((mouth_progress - mouth_gate_start) / (1.0 - mouth_gate_start)).clamp(0.0, 1.0),
-    );
-    if mouth_gate <= f32::EPSILON {
-        return distance_blocks;
-    }
-
-    let base_fade_blocks = (valley_radius * 0.72)
+    let fade_blocks = (valley_radius * 0.72)
         .max(water_radius * 1.6)
         .clamp(12.0, configured_radius_blocks * 0.55);
-    let fade_blocks = lerp(base_fade_blocks, valley_radius * 1.35, short_reach_t);
     let endpoint_gate = 1.0 - smoothstep01((remaining / fade_blocks).clamp(0.0, 1.0));
     if endpoint_gate <= f32::EPSILON {
         return distance_blocks;
@@ -1674,19 +1513,14 @@ fn terminal_outlet_open_mouth_distance(
             TERMINAL_MOUTH_OPEN_THROAT_MAX_SCALE,
             flow_t,
         );
-    let spread_per_block = lerp(
-        TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK,
-        TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK * 0.38,
-        short_reach_t,
-    );
-    let allowed_lateral = throat_radius + remaining * spread_per_block;
+    let allowed_lateral = throat_radius + remaining * TERMINAL_MOUTH_OPEN_SPREAD_PER_BLOCK;
     let lateral_excess = (distance_blocks - allowed_lateral).max(0.0);
     if lateral_excess <= f32::EPSILON {
         return distance_blocks;
     }
 
-    let penalty_scale = TERMINAL_MOUTH_OPEN_PENALTY_SCALE * lerp(1.0, 2.15, short_reach_t);
-    distance_blocks + lateral_excess * endpoint_gate * mouth_gate * penalty_scale
+    distance_blocks
+        + lateral_excess * endpoint_gate * mouth_gate * TERMINAL_MOUTH_OPEN_PENALTY_SCALE
 }
 
 fn projected_t_unclamped(
@@ -2088,8 +1922,6 @@ mod tests {
                 WorldPlanePoint::new(64.0, 64.0),
             ],
             cumulative_lengths: vec![0.0, 64.0, 128.0],
-            open_start_cap: false,
-            open_end_cap: false,
             longitudinal_start_blocks: 0.0,
             flow_hint: 0.72,
             water_width_blocks: 48.0,
@@ -3005,8 +2837,6 @@ mod tests {
                 WorldPlanePoint::new(128.0, 0.0),
             ],
             cumulative_lengths: vec![0.0, 128.0],
-            open_start_cap: false,
-            open_end_cap: false,
             longitudinal_start_blocks: 0.0,
             flow_hint: 0.70,
             water_width_blocks: 64.0,
@@ -3035,44 +2865,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_mouth_width_gate_limits_short_outlet_capsule_width() {
-        let mut short = RiverRasterWorkSource {
-            is_terminal_outlet: true,
-            edge: VoronoiEdgeId(98),
-            points: vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(48.0, 0.0),
-            ],
-            cumulative_lengths: vec![0.0, 48.0],
-            open_start_cap: true,
-            open_end_cap: false,
-            longitudinal_start_blocks: 0.0,
-            flow_hint: 0.67,
-            water_width_blocks: 72.0,
-            valley_width_blocks: 118.0,
-            bed_depth_blocks: 12.0,
-            terminal_mouth_factor: 1.0,
-            component_id: 0,
-        };
-        let short_water = terminal_mouth_max_water_width_blocks(&short);
-        let short_valley = terminal_mouth_max_valley_width_blocks(&short);
-
-        short.points[1] = WorldPlanePoint::new(240.0, 0.0);
-        short.cumulative_lengths[1] = 240.0;
-        let long_water = terminal_mouth_max_water_width_blocks(&short);
-        let long_valley = terminal_mouth_max_valley_width_blocks(&short);
-
-        assert!(
-            short_water < 56.0 && short_valley < 72.0,
-            "short terminal outlet should shrink to a throat instead of stamping a broad round capsule: water={short_water} valley={short_valley}"
-        );
-        assert!(
-            long_water > short_water * 1.8 && long_valley > short_valley * 2.0,
-            "long terminal outlets may still use the planned widening: short=({short_water},{short_valley}) long=({long_water},{long_valley})"
-        );
-    }
-
-    #[test]
     fn terminal_outlet_endpoint_clip_only_applies_beyond_final_mouth() {
         let source = RiverRasterWorkSource {
             is_terminal_outlet: true,
@@ -3082,8 +2874,6 @@ mod tests {
                 WorldPlanePoint::new(128.0, 0.0),
             ],
             cumulative_lengths: vec![0.0, 128.0],
-            open_start_cap: false,
-            open_end_cap: false,
             longitudinal_start_blocks: 0.0,
             flow_hint: 0.70,
             water_width_blocks: 64.0,
@@ -3140,8 +2930,6 @@ mod tests {
                 WorldPlanePoint::new(128.0, 0.0),
             ],
             cumulative_lengths: vec![0.0, 128.0],
-            open_start_cap: false,
-            open_end_cap: false,
             longitudinal_start_blocks: 0.0,
             flow_hint: 0.70,
             water_width_blocks: 56.0,
@@ -3240,58 +3028,6 @@ mod tests {
     }
 
     #[test]
-    fn connected_river_sources_open_shared_endpoint_caps() {
-        let left = test_noisy_curve(
-            93,
-            vec![
-                WorldPlanePoint::new(0.0, 0.0),
-                WorldPlanePoint::new(128.0, 0.0),
-            ],
-        );
-        let right = test_noisy_curve(
-            94,
-            vec![
-                WorldPlanePoint::new(128.0, 0.0),
-                WorldPlanePoint::new(256.0, 0.0),
-            ],
-        );
-        let mut sources = rounded_river_raster_sources(
-            &[
-                test_river_source(&left, 0.72),
-                test_river_source(&right, 0.72),
-            ],
-            256.0,
-        );
-
-        assign_river_raster_components(&mut sources);
-
-        assert!(sources[0].open_end_cap);
-        assert!(sources[1].open_start_cap);
-        assert!(
-            river_segment_distance_and_t(
-                &sources[0],
-                sources[0].points.len() - 2,
-                WorldPlanePoint::new(144.0, 0.0),
-                sources[0].points[sources[0].points.len() - 2],
-                *sources[0].points.last().unwrap(),
-            )
-            .is_none(),
-            "shared downstream endpoint should not emit a round cap into the next river edge"
-        );
-        assert!(
-            river_segment_distance_and_t(
-                &sources[1],
-                0,
-                WorldPlanePoint::new(112.0, 0.0),
-                sources[1].points[0],
-                sources[1].points[1],
-            )
-            .is_none(),
-            "shared upstream endpoint should not emit a round cap into the previous river edge"
-        );
-    }
-
-    #[test]
     fn terminal_mouth_raster_widens_last_two_edges_without_estuary() {
         let left = test_noisy_curve(
             89,
@@ -3385,61 +3121,6 @@ mod tests {
             downstream_wide_edge.water_strength >= RIVER_CORE_STRENGTH_THRESHOLD,
             "wide downstream fan should still carry water eligibility instead of only height carve: {}",
             downstream_wide_edge.water_strength
-        );
-    }
-
-    #[test]
-    fn estuary_fan_inlet_overlap_does_not_cut_round_upstream_bowl() {
-        let fan = EstuaryFanRef {
-            segment_id: 1,
-            origin: WorldPlanePoint::new(0.0, 0.0),
-            direction_x: 1.0,
-            direction_z: 0.0,
-            start_half_width_blocks: 48.0,
-            end_half_width_blocks: 144.0,
-            length_blocks: 180.0,
-            flow_hint: 0.82,
-            bed_depth_hint: 0.55,
-            water_depth_hint: 0.42,
-        };
-
-        let upstream_center = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 0.0));
-        let upstream_edge = estuary_fan_sample(fan, WorldPlanePoint::new(-12.0, 28.0));
-        let downstream_center = estuary_fan_sample(fan, WorldPlanePoint::new(12.0, 0.0));
-
-        assert_eq!(
-            upstream_center.strength, 0.0,
-            "fan inlet overlap should not add broad upstream carve over the terminal river edge"
-        );
-        assert_eq!(
-            upstream_edge.strength, 0.0,
-            "fan inlet overlap should not form rounded upstream carve contours at the shoulder"
-        );
-        assert!(
-            upstream_center.water_strength > RIVER_CORE_STRENGTH_THRESHOLD,
-            "upstream overlap may still provide local water handoff eligibility"
-        );
-        assert!(
-            downstream_center.strength > 0.0,
-            "actual estuary fan carve should begin downstream of the terminal endpoint"
-        );
-    }
-
-    #[test]
-    fn strongest_estuary_sample_preserves_water_only_handoff() {
-        let water_only = EstuaryFanSample {
-            strength: 0.0,
-            water_strength: 0.92,
-            flow_hint: 0.7,
-            bed_depth_hint: 0.4,
-            water_depth_hint: 0.3,
-            along_blocks: -8.0,
-        };
-
-        assert_eq!(
-            strongest_estuary_sample(EstuaryFanSample::default(), water_only),
-            water_only,
-            "water-only inlet handoff samples should not be dropped just because they no longer carve"
         );
     }
 

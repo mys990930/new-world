@@ -218,10 +218,9 @@ tile 생성은 먼저 빈 sample grid와 feature influence raster를 만든 뒤,
    - river anti-aliased bake는 selected river segment의 canonical curve 선분들을 굽고, endpoint를
      공유하는 river source들을 하나의 connected raster component로 묶는다. 같은 component 안에서도
      overlap strength를 additive하게 키우지 않고 component-local max/nearest ownership으로 합성해
-     bend/joint 주변의 pointed cusp를 줄이되 원형 blob처럼 부풀지 않게 한다. connected source 공유
-     endpoint는 round cap을 찍지 않는 open join으로 취급한다. edge handoff가 원형 footprint로
-     valley/core를 넓히면 regression이다. 서로 endpoint를 공유하지 않는 가까운 river component끼리는
-     nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은 corridor로 합쳐지지 않게 한다.
+     bend/joint 주변의 pointed cusp를 줄이되 원형 blob처럼 부풀지 않게 한다. 서로 endpoint를 공유하지
+     않는 가까운 river component끼리는 nearest local ownership을 유지해 독립적인 평행 하천이 하나의 넓은
+     corridor로 합쳐지지 않게 한다.
    - river raster pass 뒤에는 bounded concave-cusp cleanup을 같은 macro field cache 안에서 수행한다.
      near-threshold sample은 이미 dense river neighbors와 orthogonal support를 가진 경우에만 river
      water/core threshold까지 승격한다. 이 후처리는 raster strength만 보정하며 selected hydrology,
@@ -682,10 +681,7 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   distance, blended flow hint, 단순 bed/roughness/gravel diagnostic hint를 저장한다. river water/core
   threshold는 같은 raster pass에서 bounded deterministic
   world-space roughness를 적용해 지나치게 매끈한 수면 경계를 피하지만, selected edge path와 broad
-  valley guide는 그대로 유지한다. 서로 endpoint를 공유하는 connected river edges는 공유 endpoint cap을
-  열어 둔다. 인접 edge가 이어받아야 할 곳에 각 edge의 capsule end cap이 원형 broad carve를 찍으면
-  confluence/terminal mouth 주변에서 circular blob과 pointed cusp가 생기므로 회귀다. 같은 connected
-  river component 안의 overlapping broad strokes는
+  valley guide는 그대로 유지한다. 같은 connected river component 안의 overlapping broad strokes는
   component-local max/nearest ownership으로 strength/hint를 합성하며, 다른 component가 이미 더 가까운
   sample은 덮어쓰지 않는다. 이 제한은 confluence/joint cusp를 줄이면서 가까운 독립 하천을 하나의 blob
   corridor로 병합하지 않기 위한 launch-scope guard다. raster pass 이후 bounded concave-cusp cleanup은
@@ -702,18 +698,11 @@ texture 기반 top-down heightfield render와 simple lighting으로 검증한다
   influence 자체의 유효 water width, valley width, flow/depth hint를 점진적으로 키운다. 마지막 segment는
   mouth progress로 하구 직전까지 먼저 넓게 열리되, endpoint 뒤쪽 subpixel은 raster에서 제외하고
   endpoint 근처의 outer boosted profile에는 lateral penalty를 적용해 segment-distance의 둥근 terminal
-  cap이나 원형 wide-carve footprint가 fan 앞에 끊겨 남지 않아야 한다.
-  마지막 terminal segment의 source 길이가 planned water/valley width보다 짧으면 그 segment 자체는
-  full-width capsule을 찍지 않고 throat 폭으로 제한한다. 넓은 확산은 terminal edge가 아니라 downstream fan
-  body가 맡는다. 그 뒤 macro_field raster pass 안에서
+  cap이나 원형 wide-carve footprint가 fan 앞에 끊겨 남지 않아야 한다. 그 뒤 macro_field raster pass 안에서
   hydrology downstream으로 정렬된 terminal endpoint 이후 fan/estuary guide를 내부 influence channel로
-  굽는다. fan은 water handoff용 upstream overlap을 둘 수 있지만, 이 overlap은 broad height carve
-  strength를 만들면 안 된다. 마지막 river edge 안쪽은 terminal river raster가 맡고, 실제 fan carve는
-  endpoint 이후 downstream body에서 시작해야 하므로 하구 직전 broad bed가 endpoint 중심 원형 bowl처럼
-  닫히면 회귀다. 이 guide는 시작부에서
-  water handoff width는 기존 terminal river bed/flow width와 이어 주되, height carve strength는 더 좁은
-  inlet throat에서 시작해 진행할수록 lateral half-width가 열려야 한다. 따라서 fan 시작점이 원형 bowl처럼
-  넓게 잘려 들어가지 않고 coast/ocean source 안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산 반폭은 terminal segment의 planned
+  굽는다. fan은 시작 반폭만큼 upstream overlap을 둔 뒤 smooth inlet fade로 이어진다. 이 guide는 시작부에서
+  기존 terminal river bed/flow width와 이어지고, 진행할수록 lateral half-width가 넓어져 coast/ocean source
+  안에서 얕은 shelf 형태로 퍼진다. fan의 시작 반폭과 최종 확산 반폭은 terminal segment의 planned
   water/bed width를 1차 기준으로 삼아, 큰 하류 강의 하구가 기존 수면 폭보다 좁게 pinching되지 않아야
   한다. broad valley width는 보조 확산 context로만 더해진다. low-Q
   mouth는 fan tail과 최소 downstream reach를 보존해 작은 강도 coast/ocean source 쪽으로 끊기지 않게
